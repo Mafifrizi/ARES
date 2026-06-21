@@ -203,7 +203,7 @@ jobs:
           echo "$NOTES"     >> $GITHUB_OUTPUT
           echo "EOF"        >> $GITHUB_OUTPUT
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.1.0
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v2.1.0
         with:
           tag_name: ${{ github.ref_name }}
           name: ARES ${{ github.ref_name }}
