@@ -70,7 +70,7 @@ jobs:
         run: pytest tests/unit/ --cov=ares --cov-report=xml --cov-fail-under=85  # threshold: 80→82→85→90 — next target: 90 -v
       - name: Upload coverage to Codecov
         if: ${{ env.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@1e68e06f1dbfde0e4cefc87efeba9e4643565303  # v4.6.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v4.6.0
         with:
           token: ${{ env.CODECOV_TOKEN }}
           fail_ci_if_error: false
