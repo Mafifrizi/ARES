@@ -737,17 +737,41 @@ class TestSubprocessWorkerCapabilities:
 
     def test_apply_capability_limits_no_crash(self):
         """apply_capability_limits should not raise on valid inputs."""
-        from ares.worker._subprocess_worker import apply_capability_limits
-        # Should silently succeed (or silently fail on unsupported platforms)
-        apply_capability_limits(
-            {"cap_net", "cap_db"},
-            {"cpu_time_s": 30, "memory_mb": 256, "max_procs": 1, "max_files": 32}
+        from contextlib import nullcontext
+
+        from ares.worker import _subprocess_worker as worker
+
+        limiter = (
+            patch.object(worker._resource, "setrlimit")
+            if worker._HAS_RESOURCE
+            else nullcontext()
         )
+
+        # Should silently succeed (or silently fail on unsupported platforms)
+        with limiter as setrlimit:
+            worker.apply_capability_limits(
+                {"cap_net", "cap_db"},
+                {"cpu_time_s": 30, "memory_mb": 256, "max_procs": 1, "max_files": 32}
+            )
+        if worker._HAS_RESOURCE:
+            assert setrlimit.called
 
     def test_apply_capability_limits_empty_caps(self):
         """Empty caps should apply conservative defaults."""
-        from ares.worker._subprocess_worker import apply_capability_limits
-        apply_capability_limits(set(), {})
+        from contextlib import nullcontext
+
+        from ares.worker import _subprocess_worker as worker
+
+        limiter = (
+            patch.object(worker._resource, "setrlimit")
+            if worker._HAS_RESOURCE
+            else nullcontext()
+        )
+
+        with limiter as setrlimit:
+            worker.apply_capability_limits(set(), {})
+        if worker._HAS_RESOURCE:
+            assert setrlimit.called
 
     def test_capability_boundary_no_violation(self):
         """Boundary check should pass when caps are respected."""
