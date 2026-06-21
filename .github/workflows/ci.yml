@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "3.11" }
       - run: pip install -e ".[dev]"
       - run: ruff check .
@@ -59,7 +59,7 @@ jobs:
       CODECOV_TOKEN:                ${{ secrets.CODECOV_TOKEN }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "${{ matrix.python-version }}" }
       - run: pip install -e ".[dev]"
       - name: Compile Python sources
@@ -85,7 +85,7 @@ jobs:
       ARES_DEFAULT_ADMIN_PASSWORD:  "CiAdmin1!-placeholder-secret99"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "3.11" }
       - run: pip install -e ".[dev]"
       - name: Integration tests (dry-run mode — no real network)
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "3.11" }
       - run: pip install bandit pip-audit
       - name: Static security analysis (high/medium severity)
@@ -157,7 +157,7 @@ jobs:
       ARES_DEFAULT_ADMIN_PASSWORD:  "CiAdmin1!-placeholder-secret99"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "3.11" }
       - name: Generate pinned lock file with pip freeze
         run: |
@@ -183,7 +183,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with: { python-version: "3.11" }
       - name: Build Docker image
         run: |
