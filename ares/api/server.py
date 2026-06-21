@@ -1625,6 +1625,8 @@ def _ensure_report_filename_belongs(
         not decoded
         or decoded in {".", ".."}
         or "\x00" in decoded
+        or "/" in decoded
+        or "\\" in decoded
         or decoded != Path(decoded).name
         or Path(decoded).is_absolute()
     ):
