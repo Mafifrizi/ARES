@@ -20,32 +20,32 @@ ares.db
 ares_redteam.egg-info/
 
 # Shadow module dirs — real code lives in ares/ package only
-api/
+/api/
 !frontend/src/api/
 !frontend/src/api/**
-artifact_intel/
-checkpoint/
-cli/
-collab/
-core/
-credential/
-execution/
-fingerprint/
-goal/
-graph/
-knowledge/
-marketplace/
-modules/
-network/
-normalize/
-pivot/
-replay/
-security/
-service_intel/
-state/
-technique/
-telemetry/
-worker/
+/artifact_intel/
+/checkpoint/
+/cli/
+/collab/
+/core/
+/credential/
+/execution/
+/fingerprint/
+/goal/
+/graph/
+/knowledge/
+/marketplace/
+/modules/
+/network/
+/normalize/
+/pivot/
+/replay/
+/security/
+/service_intel/
+/state/
+/technique/
+/telemetry/
+/worker/
 
 # Backup files
 *.bak
