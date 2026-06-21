@@ -52,7 +52,6 @@ from ares.api.rbac import (
     require_operator,
     require_team_lead,
 )
-from ares.api.routes.health import router as health_router
 from ares.core.campaign import Campaign
 from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
@@ -238,7 +237,18 @@ app = FastAPI(
     docs_url="/docs" if _debug else None,
     redoc_url="/redoc" if _debug else None,
 )
-app.include_router(health_router)
+
+
+@app.get("/health", tags=["health"])
+async def health(request: Request) -> dict[str, Any]:
+    db_ok = getattr(request.app.state, "db", None) is not None
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "version": _ares_version,
+        "db": "connected" if db_ok else "unavailable",
+    }
+
+
 _mount_dashboard(app)
 
 
