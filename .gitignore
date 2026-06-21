@@ -21,6 +21,8 @@ ares_redteam.egg-info/
 
 # Shadow module dirs — real code lives in ares/ package only
 api/
+!frontend/src/api/
+!frontend/src/api/**
 artifact_intel/
 checkpoint/
 cli/

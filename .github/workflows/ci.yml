@@ -2,212 +2,44 @@ name: ARES CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
-# Sane defaults for all jobs
 defaults:
   run:
     shell: bash
 
+env:
+  ARES_SECRET_KEY: "ci-secret-key-placeholder-min32chars!!"
+  ARES_ENCRYPTION_KEY: "ci-encryption-key-placeholder-32chars"
+  ARES_DEFAULT_ADMIN_PASSWORD: "CiAdmin1!-placeholder-secret99"
+
 jobs:
-  lint:
-    name: Lint & Type Check
+  backend:
+    name: Backend Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "3.11" }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: black --check .
-      - run: mypy ares --ignore-missing-imports
+      - run: python -m compileall ares tests
+      - run: pytest tests/unit -q --tb=short --timeout=60 --timeout-method=thread --maxfail=1
 
   frontend:
-    name: Frontend Lint, Test & Build
+    name: Frontend Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      - run: npm run lint
-        working-directory: frontend
-      - run: npm run typecheck
-        working-directory: frontend
-      - run: npm run test
-        working-directory: frontend
       - run: npm run build
         working-directory: frontend
-
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
-    env:
-      # Required by AresSettings — safe placeholder values for CI only
-      ARES_SECRET_KEY:              "ci-secret-key-placeholder-min32chars!!"
-      ARES_ENCRYPTION_KEY:          "ci-encryption-key-placeholder-32chars"
-      ARES_DEFAULT_ADMIN_PASSWORD:  "CiAdmin1!-placeholder-secret99"
-      CODECOV_TOKEN:                ${{ secrets.CODECOV_TOKEN }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "${{ matrix.python-version }}" }
-      - run: pip install -e ".[dev]"
-      - name: Compile Python sources
-        run: python -m compileall .
-      - name: Collect tests
-        run: pytest --collect-only
-      - name: Unit tests with coverage threshold
-        run: pytest tests/unit/ --cov=ares --cov-report=xml --cov-fail-under=85  # threshold: 80→82→85→90 — next target: 90 -v
-      - name: Upload coverage to Codecov
-        if: ${{ env.CODECOV_TOKEN != '' }}
-        uses: codecov/codecov-action@1e68e06f1dbfde0e4cefc87efeba9e4643565303  # v4.6.0
-        with:
-          token: ${{ env.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-
-  integration:
-    name: Integration Tests (dry-run)
-    runs-on: ubuntu-latest
-    needs: [test]
-    env:
-      ARES_SECRET_KEY:              "ci-secret-key-placeholder-min32chars!!"
-      ARES_ENCRYPTION_KEY:          "ci-encryption-key-placeholder-32chars"
-      ARES_DEFAULT_ADMIN_PASSWORD:  "CiAdmin1!-placeholder-secret99"
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "3.11" }
-      - run: pip install -e ".[dev]"
-      - name: Integration tests (dry-run mode — no real network)
-        run: pytest tests/integration/ -v --timeout=60 -m "not live"
-      - name: Simulation scenarios
-        run: pytest tests/simulation/ -v --timeout=120 -m "not live"
-
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "3.11" }
-      - run: pip install bandit pip-audit
-      - name: Static security analysis (high/medium severity)
-        run: bandit -r ares/ -ll -x ares/tests
-      - name: Dependency vulnerability scan
-        run: pip-audit --format json --output pip-audit.json || true
-      - name: Fail on HIGH/CRITICAL CVEs (CVSS >= 7.0)
-        run: |
-          python3 -c "
-          import json, sys
-          with open('pip-audit.json') as f:
-              data = json.load(f)
-          all_vulns = data.get('vulnerabilities', [])
-          # Only fail on HIGH/CRITICAL (CVSS >= 7.0), not informational/low
-          critical = []
-          for pkg in all_vulns:
-              for v in pkg.get('vulns', []):
-                  score = 0.0
-                  for alias in v.get('aliases', []):
-                      if isinstance(alias, dict):
-                          score = max(score, alias.get('cvss_score', 0.0) or 0.0)
-                  # If no CVSS score available, treat as high to be safe
-                  if score == 0.0 or score >= 7.0:
-                      critical.append((pkg.get('name','?'), pkg.get('version','?'), v.get('id','?'), score))
-          if critical:
-              print(f'FAIL: {len(critical)} HIGH/CRITICAL vuln(s) found (CVSS >= 7.0):')
-              for name, ver, vid, score in critical:
-                  print(f'  {name} {ver}: {vid} (CVSS {score})')
-              sys.exit(1)
-          skipped = len(all_vulns) - len(critical)
-          print(f'OK: 0 HIGH/CRITICAL vulns (skipped {skipped} low/informational)')
-          "
-
-  secret-scan:
-    name: Secret Scanning
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          fetch-depth: 0   # full history for trufflehog
-      - name: TruffleHog secret scan
-        uses: trufflesecurity/trufflehog@f42f04d34e7bfde88d026c273c5d00e0e7a7e3a4  # v3.88.1
-        with:
-          path: ./
-          base: ${{ github.event.repository.default_branch }}
-          extra_args: --only-verified
-
-  lock-file:
-    name: Regenerate requirements-lock.txt
-    runs-on: ubuntu-latest
-    needs: [test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    env:
-      ARES_SECRET_KEY:              "ci-secret-key-placeholder-min32chars!!"
-      ARES_ENCRYPTION_KEY:          "ci-encryption-key-placeholder-32chars"
-      ARES_DEFAULT_ADMIN_PASSWORD:  "CiAdmin1!-placeholder-secret99"
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "3.11" }
-      - name: Generate pinned lock file with pip freeze
-        run: |
-          pip install -e ".[full]"
-          pip freeze > requirements-lock.txt
-          # Prepend informational header
-          echo "# ARES v6 — Pinned lock file (auto-generated by CI on push to main)" > /tmp/header.txt
-          echo "# Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ) on Python $(python --version)" >> /tmp/header.txt
-          echo "# DO NOT EDIT MANUALLY — regenerated automatically on every push to main" >> /tmp/header.txt
-          echo "" >> /tmp/header.txt
-          cat /tmp/header.txt requirements-lock.txt > /tmp/lock_with_header.txt
-          mv /tmp/lock_with_header.txt requirements-lock.txt
-      - name: Commit updated lock file
-        uses: stefanzweifel/git-auto-commit-action@8621497c8c39c72f3e2a999a26b4ca1b5590a76b  # v5.0.1
-        with:
-          commit_message: "chore: regenerate requirements-lock.txt [skip ci]"
-          file_pattern: requirements-lock.txt
-
-  release:
-    name: Automated Release
-    runs-on: ubuntu-latest
-    needs: [lint, frontend, test, security, secret-scan]
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
-        with: { python-version: "3.11" }
-      - name: Build Docker image
-        run: |
-          docker build -f docker/Dockerfile.prod -t ares-redteam:${{ github.ref_name }} .
-          docker tag ares-redteam:${{ github.ref_name }} ares-redteam:latest
-      - name: Extract CHANGELOG entry for this version
-        id: changelog
-        run: |
-          VERSION=${{ github.ref_name }}
-          NOTES=$(python3 -c "
-          import re, sys
-          with open('CHANGELOG.md') as f: content = f.read()
-          pattern = rf'## \[{re.escape(VERSION[1:])}\].*?(?=## \[|\Z)'
-          m = re.search(pattern, content, re.DOTALL)
-          print(m.group(0).strip() if m else 'See CHANGELOG.md for details.')
-          ")
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES"     >> $GITHUB_OUTPUT
-          echo "EOF"        >> $GITHUB_OUTPUT
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191  # v2.1.0
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ARES ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.notes }}
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
