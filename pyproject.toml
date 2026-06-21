@@ -1,0 +1,157 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ares-redteam"
+version = "6.0.0"
+description = "ARES — Automated Red team Engagement System"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    # Core
+    "click>=8.1",
+    "rich>=13.7",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "anyio>=4.3",
+
+    # Structured logging
+    "structlog>=24.1",
+
+    # API + Auth
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "PyJWT[crypto]>=2.8",
+    "bcrypt>=4.0",
+    "python-multipart>=0.0.9",
+    "websockets>=12.0",
+
+    # HTTP client
+    "httpx>=0.27",
+
+    # Security / Crypto
+    "cryptography>=42.0",
+
+    # SSH lateral movement
+    "paramiko>=3.4",
+
+    # Attack graph
+    "networkx>=3.3",
+
+    # Reporting
+    "jinja2>=3.1",
+    "markdown>=3.5",
+
+    # Database (async + sync SQLite + migrations)
+    "aiosqlite>=0.20",
+    "sqlalchemy>=2.0",
+    "aiofiles>=23.2",
+    "alembic>=1.13",       # DB migrations — required for revoked_access_tokens table
+
+    # CLI
+    "typer[all]>=0.12",
+
+    # Network
+    "dnspython>=2.6",
+    "netaddr>=1.2",
+]
+
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.29",
+]
+ad = [
+    "impacket>=0.11",
+    "ldap3>=2.9",
+    "pywinrm>=0.4",
+    "asyncssh>=2.14",
+    "httpx-ntlm>=1.4",  # ADCS ESC1 HTTP enrollment (ad.adcs exploit_esc1)
+]
+cloud = [
+    "boto3>=1.34",
+    "botocore>=1.34",
+    "azure-identity>=1.15",
+    "azure-mgmt-resource>=23.0",
+    "azure-mgmt-compute>=30.0",
+    "azure-mgmt-network>=25.0",
+    "google-cloud-resource-manager>=1.12",
+    "google-cloud-iam>=2.13",
+    "msal>=1.28",      # Azure AD identity attacks (cloud.azure_ad)
+]
+container = [
+    "docker>=7.0",
+    "kubernetes>=29.0",
+]
+windows = [
+    "pypykatz>=0.6",   # LSASS minidump parsing (windows.lsass_dump)
+]
+pdf = [
+    "weasyprint>=62.0",
+]
+full = [
+    "ares-redteam[ad,cloud,container,pdf,windows]",
+]
+all = [
+    "ares-redteam[full]",
+]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",  # property-based testing
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.14",
+    "pytest-timeout>=2.3",
+    "respx>=0.21",
+    "black>=24.0",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "bandit>=1.7",
+    "safety>=3.0",
+    "types-pyyaml",
+    "types-PyJWT",
+]
+
+[project.urls]
+Homepage  = "https://github.com/ares-framework/ares"
+Issues    = "https://github.com/ares-framework/ares/issues"
+
+[project.scripts]
+ares       = "ares.cli.main:cli"
+ares-api   = "ares.api.server:start"
+ares-setup = "ares.cli.typer_main:setup_entrypoint"
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["ares*"]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py310"
+select  = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "PT"]
+ignore  = ["S101", "S104", "S108"]
+# Removed S603/S607 — subprocess shell injection must be audited, not silenced.
+# If a module intentionally calls subprocess, add inline: # noqa: S603
+
+[tool.mypy]
+python_version         = "3.10"
+strict                 = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+timeout      = 15
+testpaths    = ["tests"]
+addopts      = "-v --tb=short"
+markers = [
+    "live: marks tests that require real network access (deselect with '-m not live')",
+    "slow: marks tests that are slow (deselect with '-m not slow')",
+]
+# Coverage: pytest --cov=ares --cov-report=term-missing
+
+[tool.coverage.run]
+omit = ["tests/*", "*/migrations/*"]

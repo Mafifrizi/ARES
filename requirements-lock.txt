@@ -1,0 +1,108 @@
+# ARES v6.0.0 — Minimum-version dependency reference
+# Generated from: pyproject.toml declared dependencies (core + full extras)
+#
+# WARNING: This file uses >= ranges, NOT pinned == versions.
+# It does NOT guarantee reproducible installs — two installs at different
+# times may get different versions of transitive dependencies.
+#
+# For a true reproducible lock file, run in a clean environment:
+#
+#   python -m venv venv
+#   source venv/bin/activate        # Windows: venv\Scripts\activate
+#   pip install -e ".[full]"
+#   pip freeze > requirements-lock.txt   # produces exact == versions
+#   deactivate
+#
+# This file is useful as a quick install reference.
+# For production deployments, always regenerate with pip freeze.
+#
+# Install from this file:
+#   pip install -r requirements-lock.txt
+#
+# ── Core ──────────────────────────────────────────────────────────────────────
+click>=8.1
+rich>=13.7
+pydantic>=2.6
+pydantic-settings>=2.2
+pyyaml>=6.0
+python-dotenv>=1.0
+anyio>=4.3
+structlog>=24.1
+
+# ── API + Auth ─────────────────────────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.27
+PyJWT[crypto]>=2.8
+bcrypt>=4.0
+python-multipart>=0.0.9
+websockets>=12.0
+
+# ── HTTP client ────────────────────────────────────────────────────────────────
+httpx>=0.27
+
+# ── Crypto ────────────────────────────────────────────────────────────────────
+cryptography>=42.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+aiosqlite>=0.20
+sqlalchemy>=2.0
+aiofiles>=23.2
+
+# ── Graph ─────────────────────────────────────────────────────────────────────
+networkx>=3.3
+
+# ── Reporting ─────────────────────────────────────────────────────────────────
+jinja2>=3.1
+markdown>=3.5
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+typer[all]>=0.12
+
+# ── Network / DNS ─────────────────────────────────────────────────────────────
+dnspython>=2.6
+netaddr>=1.2
+
+# ── SSH lateral movement ──────────────────────────────────────────────────────
+paramiko>=3.4
+
+# ── [ad] extra — Active Directory + SMB ──────────────────────────────────────
+impacket>=0.11
+ldap3>=2.9
+pywinrm>=0.4
+asyncssh>=2.14
+
+# ── [cloud] extra ─────────────────────────────────────────────────────────────
+boto3>=1.34
+botocore>=1.34
+azure-identity>=1.15
+azure-mgmt-resource>=23.0
+azure-mgmt-compute>=30.0
+azure-mgmt-network>=25.0
+google-cloud-resource-manager>=1.12
+google-cloud-iam>=2.13
+
+# ── [container] extra ─────────────────────────────────────────────────────────
+docker>=7.0
+kubernetes>=29.0
+
+# ── [pdf] extra ───────────────────────────────────────────────────────────────
+weasyprint>=62.0
+
+# ── [postgres] extra (optional) ───────────────────────────────────────────────
+# Uncomment if using PostgreSQL backend:
+# asyncpg>=0.29
+
+# ── [dev] extra — not needed in production ────────────────────────────────────
+# pytest>=8.0
+# pytest-asyncio>=0.23
+# pytest-cov>=5.0
+# pytest-mock>=3.14
+# pytest-timeout>=2.3
+# respx>=0.21
+# black>=24.0
+# ruff>=0.4
+# mypy>=1.9
+# bandit>=1.7
+# safety>=3.0
+# types-pyyaml
+# types-PyJWT

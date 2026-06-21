@@ -1,0 +1,61 @@
+version: "3.9"
+
+# Production compose — uses multi-stage Dockerfile.prod
+# Start: docker compose -f docker/docker-compose.prod.yml up -d
+
+services:
+  ares-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    # Do NOT expose port directly — nginx terminates TLS
+    expose:
+      - "8080"
+    env_file:
+      - ../.env
+    volumes:
+      - ares-data:/data
+      - ares-logs:/var/log/ares
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
+        reservations:
+          memory: 128m
+          cpus: "0.25"
+    security_opt:
+      - no-new-privileges:true
+    read_only: false        # ares writes to /data and /var/log/ares
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    # ares-api has no service dependencies — it starts independently
+
+  nginx:
+    image: nginx:1.25-alpine@sha256:a59278fd22a9d411121e190b8cec8aa57b306aa3332459197777583beb728f59  # pinned 2024-03
+    ports:
+      - "127.0.0.1:443:443"   # HTTPS only, localhost-bound
+      - "127.0.0.1:80:80"     # HTTP → redirect to HTTPS
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/ares.conf:ro
+      - ./certs:/etc/nginx/certs:ro      # Mount TLS certs here
+      - ares-logs:/var/log/nginx
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: "0.25"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - ares-api
+
+volumes:
+  ares-data:
+  ares-logs:

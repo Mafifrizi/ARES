@@ -1,0 +1,67 @@
+# ARES pre-commit hooks
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# SECURITY: Hook tags are pinned to version tags. For full supply-chain security,
+# freeze to SHA commits by running: pre-commit autoupdate --freeze
+# This replaces version tags like v0.4.4 with immutable commit SHAs.
+#
+# Hooks run on every git commit — catches issues before CI.
+# To skip once: git commit --no-verify (use sparingly)
+
+repos:
+  # ── Formatting & linting ──────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Type checking ─────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.9.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports]
+        additional_dependencies: [pydantic, types-pyyaml]
+        files: ^ares/
+
+  # ── Security ──────────────────────────────────────────────────────────
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: bandit
+        args: [-ll, -x, tests/]
+        files: ^ares/
+
+  # ── Secret detection ──────────────────────────────────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: (\.env\.example|requirements-lock\.txt|CHANGELOG\.md)
+
+  # ── General file hygiene ──────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: debug-statements
+      - id: detect-private-key
+
+  # ── Commit message convention (Conventional Commits) ──────────────────
+  # feat: / fix: / docs: / security: / refactor: / test: / chore:
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.2.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, docs, security, refactor, test, chore, ci, perf]

@@ -1,0 +1,60 @@
+version: "3.9"
+
+# Development compose — single-stage Dockerfile.dev, source mounted for hot-reload.
+# One-liner start (no setup required):
+#   docker compose -f docker/docker-compose.dev.yml up
+
+services:
+  ares-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # ⚠️  DEV-ONLY FALLBACK SECRETS — FOR LOCAL DEVELOPMENT USE ONLY
+      # These weak defaults apply ONLY when the variable is not set in the environment.
+      # NEVER deploy to staging or production without setting real values:
+      #   cp .env.example .env && edit .env && set all ARES_* vars
+      # To verify no defaults are in use: docker compose config | grep dev-
+      ARES_SECRET_KEY:             "${ARES_SECRET_KEY:-dev-secret-key-docker-compose-only-32c}"
+      ARES_ENCRYPTION_KEY:         "${ARES_ENCRYPTION_KEY:-dev-enc-key-docker-compose-only-32c!}"
+      ARES_DEFAULT_ADMIN_PASSWORD: "${ARES_DEFAULT_ADMIN_PASSWORD:-DevAdmin123!}"  # WARNING: ganti sebelum staging/prod
+      ARES_LOG_LEVEL:              "${ARES_LOG_LEVEL:-DEBUG}"
+      ARES_DATABASE_URL:           "${ARES_DATABASE_URL:-sqlite+aiosqlite:////home/ares/.ares/ares.db}"
+      ARES_API_HOST:               "0.0.0.0"
+      ARES_API_PORT:               "8080"
+    env_file:
+      - path: ../.env
+        required: false   # Don't fail if .env doesn't exist — env block above provides defaults
+    volumes:
+      - ares-data:/home/ares/.ares
+      - ares-logs:/app/logs
+      - ..:/app             # Mount source for hot-reload
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
+
+  ares-frontend:
+    image: node:22-bookworm-slim
+    working_dir: /app/frontend
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "127.0.0.1:5173:5173"
+    volumes:
+      - ..:/app
+      - frontend-node-modules:/app/frontend/node_modules
+    environment:
+      VITE_API_ORIGIN: "http://ares-api:8080"
+    depends_on:
+      - ares-api
+    restart: "no"
+
+volumes:
+  ares-data:
+  ares-logs:
+  frontend-node-modules:

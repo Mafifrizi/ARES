@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    open-pull-requests-limit: 10
+    reviewers:
+      - ares-framework/maintainers
+    labels:
+      - dependencies
+      - security
+    # Group non-security updates to reduce PR noise
+    groups:
+      core-deps:
+        patterns:
+          - "fastapi"
+          - "pydantic*"
+          - "uvicorn"
+          - "structlog"
+          - "cryptography"
+          - "PyJWT"
+      ad-deps:
+        patterns:
+          - "impacket"
+          - "ldap3"
+      cloud-deps:
+        patterns:
+          - "boto3"
+          - "botocore"
+          - "azure-*"
+          - "google-cloud-*"
+          - "msal"
+    # Security updates always open immediately regardless of groups
+    ignore:
+      # Skip major version bumps — review manually
+      - dependency-name: "impacket"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydantic"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - ci

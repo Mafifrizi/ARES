@@ -1,0 +1,71 @@
+# ── Stage 1: Frontend builder ─────────────────────────────────────────────────
+FROM node:22-bookworm-slim AS frontend-builder
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: Python wheel builder ─────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+COPY pyproject.toml README.md ./
+COPY ares/ ./ares/
+COPY migrations/ ./migrations/
+# Build wheel for reproducible installs
+RUN pip install --no-cache-dir build \
+    && python -m build --wheel \
+    && ls dist/
+
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+# Security: non-root user
+RUN groupadd --system ares && useradd --system --gid ares --no-create-home ares
+
+# OS deps for weasyprint PDF generation only — curl removed (use Python healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 \
+    libffi-dev libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install built wheel.
+# Base wheel includes all core dependencies.
+# Add [pdf] for PDF report generation (weasyprint).
+# Add [ad] for Active Directory modules (impacket, ldap3).
+# Add [cloud] for AWS/Azure/GCP modules (boto3, azure-identity, google-cloud).
+# Add [postgres] for PostgreSQL backend (asyncpg).
+# Adjust extras to match your deployment requirements.
+COPY --from=builder /build/dist/*.whl .
+RUN pip install --no-cache-dir "$(ls *.whl)[pdf]" && rm *.whl
+
+# Note: config is embedded in the wheel. No external config/ directory needed.
+
+# Dashboard static assets built by the Node stage.
+COPY --from=frontend-builder /frontend/dist /app/frontend/dist
+
+# Runtime directories
+RUN mkdir -p /data/campaigns /data/reports /var/log/ares \
+    && chown -R ares:ares /app /data /var/log/ares
+
+USER ares
+
+# Environment defaults (override in docker-compose or k8s secrets)
+ENV ARES_API_HOST=0.0.0.0 \
+    ARES_API_PORT=8080 \
+    ARES_DATABASE_URL=sqlite:////data/ares.db \
+    ARES_DASHBOARD_DIST=/app/frontend/dist \
+    ARES_LOG_FILE=/var/log/ares/ares.log \
+    ARES_LOG_LEVEL=INFO
+
+EXPOSE 8080
+
+# Python-based healthcheck — no curl needed in runtime image
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+
+CMD ["python", "-c", "from ares.api.server import start; start()"]

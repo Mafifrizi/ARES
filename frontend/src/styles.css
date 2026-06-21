@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #111827;
+  background: #eef2f6;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(238, 242, 246, 0.7)),
+    #eef2f6;
+}
+
+.sidebar {
+  background: #101828;
+  color: #f8fafc;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+}
+
+.stat {
+  background: #ffffff;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  min-height: 92px;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.55rem 0.7rem;
+}
+
+.field:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.btn {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  padding: 0.45rem 0.75rem;
+  color: #111827;
+  font-weight: 650;
+}
+
+.btn:hover {
+  background: #f8fafc;
+}
+
+.btn-primary {
+  border-color: #991b1b;
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.btn-primary:hover {
+  background: #991b1b;
+}
+
+.btn-danger {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.badge-high {
+  border-color: #b91c1c;
+  color: #991b1b;
+  background: #fff1f2;
+}
+
+.badge-medium {
+  border-color: #d97706;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.badge-low {
+  border-color: #059669;
+  color: #065f46;
+  background: #ecfdf5;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0.65rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.table th {
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.json-box {
+  max-height: 340px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #0f172a;
+  color: #dbeafe;
+  padding: 0.8rem;
+  font-size: 0.78rem;
+}
+
+.nav-link {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  color: #cbd5e1;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  background: #1f2937;
+  color: #ffffff;
+}
