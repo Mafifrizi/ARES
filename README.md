@@ -166,24 +166,44 @@ See [docs/validation-lab.md](docs/validation-lab.md).
 
 ### 1. Configure Required Secrets
 
+ARES does not ship deployment secrets. The operator or organization deploying
+ARES must generate these values and provide them through environment variables
+or a private `.env` file.
+
+The required values are:
+
+| Variable | Who creates it? | Purpose |
+| --- | --- | --- |
+| `ARES_SECRET_KEY` | The deployer/client | Signs JWT/session security data. Generate a random high-entropy string. |
+| `ARES_ENCRYPTION_KEY` | The deployer/client | Encrypts sensitive stored data such as vault/checkpoint material. Generate a Fernet key and keep it stable. |
+| `ARES_DEFAULT_ADMIN_PASSWORD` | The deployer/client | Bootstrap password for the first `admin` account. Change it after first login. |
+
 PowerShell:
 
 ```powershell
-$env:ARES_SECRET_KEY="local-dev-secret-key-32-chars-minimum!!"
-$env:ARES_ENCRYPTION_KEY="local-dev-encryption-key-32-chars!!"
-$env:ARES_DEFAULT_ADMIN_PASSWORD="ChangeMe123!Secure"
+$bytes = [byte[]]::new(32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$env:ARES_SECRET_KEY = -join ($bytes | ForEach-Object { $_.ToString("x2") })
+
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 ```
 
 Bash:
 
 ```bash
-export ARES_SECRET_KEY="local-dev-secret-key-32-chars-minimum!!"
-export ARES_ENCRYPTION_KEY="local-dev-encryption-key-32-chars!!"
-export ARES_DEFAULT_ADMIN_PASSWORD="ChangeMe123!Secure"
+export ARES_SECRET_KEY="$(openssl rand -hex 32)"
+export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
 ```
 
-For production, use generated high-entropy values and rotate the bootstrap
-admin password immediately after first login.
+Do not commit these values. Do not reuse the example password. Keep
+`ARES_ENCRYPTION_KEY` backed up securely; changing it after data has been
+encrypted can make existing encrypted records unreadable.
+
+Dashboard API keys are separate from these startup secrets. Create API keys
+from the Security page only after login when you need scripts, integrations, or
+automation to call the API with `X-API-Key` instead of an interactive session.
 
 ### 2. Start the API and Dashboard
 
@@ -230,7 +250,7 @@ ok     6.0.0   connected
 ### 4. Run the Local Validation Lab
 
 ```powershell
-$env:ARES_LAB_PASSWORD="ChangeMe123!Secure"
+$env:ARES_LAB_PASSWORD="replace-with-your-current-admin-password"
 .\scripts\run_validation_lab.ps1
 ```
 

@@ -148,6 +148,10 @@ Use it for:
 
 API key behavior:
 
+- API keys are created after login; they are not the same thing as
+  `ARES_SECRET_KEY` or `ARES_ENCRYPTION_KEY`.
+- Use API keys for scripts, CI jobs, integrations, or validation labs that need
+  to call ARES with `X-API-Key` instead of a browser login.
 - The full key is shown only once at creation time.
 - After delete, revoked keys disappear from the list.
 - Deleted keys cannot authenticate.
@@ -194,4 +198,3 @@ Use it for:
 | `429 Global rate limit exceeded` | Too many rapid requests. | Wait a moment and retry. |
 | Campaign remains after delete | Browser cache or old server process. | Restart ARES and press `Ctrl+F5`. |
 | Report PDF returns HTML | PDF dependency is not installed. | Install optional PDF extra in a controlled environment. |
-

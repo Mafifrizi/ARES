@@ -19,16 +19,18 @@ It does not attack external systems. By default it only talks to `localhost:8080
 Start ARES first:
 
 ```powershell
-$env:ARES_SECRET_KEY="local-dev-secret-key-32-chars-minimum!!"
-$env:ARES_ENCRYPTION_KEY="local-dev-encryption-key-32-chars!!"
-$env:ARES_DEFAULT_ADMIN_PASSWORD="ChangeMe123!Secure"
+$bytes = [byte[]]::new(32)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$env:ARES_SECRET_KEY = -join ($bytes | ForEach-Object { $_.ToString("x2") })
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 .\.venv\Scripts\ares-api.exe
 ```
 
 In another PowerShell:
 
 ```powershell
-$env:ARES_LAB_PASSWORD="ChangeMe123!Secure"
+$env:ARES_LAB_PASSWORD="replace-with-your-own-strong-admin-password"
 .\scripts\run_validation_lab.ps1
 ```
 

@@ -33,18 +33,25 @@ ARES is an offensive framework. This document explains how ARES protects the **o
 
 | Data | Algorithm | Key Source |
 |------|-----------|------------|
-| Credential vault | Fernet (AES-128-CBC + HMAC-SHA256) | `secret_key` in settings (SHA-256 derived) |
+| Credential vault | Fernet (AES-128-CBC + HMAC-SHA256) | `ARES_ENCRYPTION_KEY` |
 | Campaign checkpoints | Fernet | Same key |
 | Evidence files | Fernet | Same key |
 | API tokens | bcrypt (cost=12) | N/A (one-way hash) |
 
-**Key management:** The `secret_key` is loaded from environment variable `ARES_SECRET_KEY`. Never store it in version control. Rotate it by re-encrypting all vault entries.
+**Key management:** ARES uses two separate deployment secrets. The deployer or
+client generates both; ARES does not ship a shared production key.
 
 ```bash
-# Generate a strong key
-python3 -c "import secrets; print(secrets.token_hex(32))"
-export ARES_SECRET_KEY=<output>
+# Token/session signing key
+export ARES_SECRET_KEY="$(openssl rand -hex 32)"
+
+# Encryption key for vault, checkpoint, and stored sensitive material
+export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
 ```
+
+Never store these values in version control. Keep `ARES_ENCRYPTION_KEY` stable
+and backed up securely; rotating it requires re-encrypting existing vault and
+stored sensitive records.
 
 ### In Transit
 
@@ -99,6 +106,13 @@ or:
 ```http
 X-API-Key: ares_...
 ```
+
+API keys are created after login from the Security page or
+`POST /auth/api-keys`. They are not startup secrets. Use them for scripts,
+CI jobs, internal integrations, or repeatable local validation where an
+interactive browser session is not practical. The raw API key is shown only
+once at creation time, is stored hashed, and can be revoked from the Security
+page.
 
 **Unauthenticated endpoints** (by design):
 - `POST /auth/token` — login (takes credentials, returns token)
