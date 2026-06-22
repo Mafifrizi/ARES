@@ -14,7 +14,7 @@ and professional report generation.
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/Unit%20Suite-1075%20passing-22C55E?style=for-the-badge)](tests/)
+[![Status](https://img.shields.io/badge/Unit%20Suite-1078%20passing-22C55E?style=for-the-badge)](tests/)
 
 **Built for labs, internal security teams, and authorized engagements only.**
 
@@ -99,6 +99,41 @@ Dashboard areas:
 | Security | Change password, manage API keys, review audit and users. |
 | EDR/OPSEC | Record bypass outcomes and review EDR/OPSEC telemetry. |
 | Live | Watch campaign WebSocket events. |
+
+Recommended dashboard workflow:
+
+1. Start in `Campaigns` and create a campaign with a name, client, targets,
+   and scope CIDRs.
+2. Use `Modules` to search for a module, pick the campaign, fill the generated
+   parameters, and run it in dry-run mode first.
+3. Use `Graph` only after a campaign exists. To ingest BloodHound or
+   SharpHound data, enter a JSON file or directory path that is local to the
+   machine running the ARES API, then click `Ingest`.
+4. Use `Templates` when you want a repeatable plan. Select a built-in template,
+   optionally provide JSON parameters, and click `Generate Plan`. This creates
+   a structured execution plan for review; it does not silently execute modules.
+5. Use `Strategy` for goal-based planning. Select a campaign, choose a goal
+   such as `domain_admin`, provide explicit authorization notes, and click
+   `Engage`. RBAC and backend authorization checks still apply.
+6. Use `Reports` to generate HTML, PDF, Markdown, or JSON output for a campaign.
+   PDF generation writes the PDF artifact directly; HTML is generated only when
+   you choose the HTML format.
+7. Use `Security` for account administration. API keys are for scripts and
+   integrations; the Security Audit panel reports dependency-audit status for
+   the ARES environment, not findings from a target network.
+8. Use `EDR/OPSEC` to record controlled bypass outcomes and review historical
+   telemetry. This page stores defensive-validation data; it does not generate
+   payloads or bypass logic.
+
+Common page inputs and outputs:
+
+| Area | What you provide | What ARES returns | Use it when |
+| --- | --- | --- | --- |
+| Templates | Template name plus optional JSON parameters. | A reviewable execution plan with stages and module IDs. | You want a consistent plan for a common engagement type. |
+| Strategy | Campaign, goal, and authorization notes. | Active engagement state and strategy events. | You want ARES to plan toward an authorized objective while preserving RBAC checks. |
+| Security Audit | No target input; team-lead access only. | Dependency-audit snapshot, scanner status, and environment warnings. | You want to verify the ARES runtime dependencies and security posture. |
+| EDR/OPSEC | Technique ID, EDR vendor, version, outcome, campaign, and notes. | Historical success-rate telemetry and outcome records. | You want to track defensive visibility and tune OPSEC decisions from controlled tests. |
+| Graph Ingest | Campaign plus local BloodHound/SharpHound JSON path. | Campaign graph nodes, links, and attack-path candidates. | You already collected BloodHound-style data and want it mapped into ARES. |
 
 See [docs/dashboard-guide.md](docs/dashboard-guide.md).
 
@@ -366,7 +401,7 @@ See [docs/architecture.md](docs/architecture.md) and
 Current local verification:
 
 ```text
-1075 unit tests passed
+1078 unit tests passed
 npm run build passed
 validation lab passed
 ```

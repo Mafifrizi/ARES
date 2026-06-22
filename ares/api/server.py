@@ -844,6 +844,41 @@ class CampaignCreate(BaseModel):
             cleaned.append(sanitized)
         return cleaned
 
+    @field_validator("scope_cidrs", mode="before")
+    @classmethod
+    def validate_scope_cidrs(cls, v: list) -> list[str]:
+        """
+        Validate campaign scope before endpoint logic constructs ScopeEntry.
+        This keeps invalid operator input on the normal HTTP 422 path instead
+        of surfacing as an unhandled server exception.
+        """
+        from netaddr import AddrFormatError, IPNetwork
+
+        if not isinstance(v, list):
+            raise ValueError("scope_cidrs must be a list")
+        if len(v) > 256:
+            raise ValueError("scope_cidrs: maximum 256 entries allowed")
+        cleaned: list[str] = []
+        for i, entry in enumerate(v):
+            if entry is None:
+                raise ValueError(f"scope_cidrs[{i}]: null values not allowed")
+            if not isinstance(entry, str):
+                raise ValueError(
+                    f"scope_cidrs[{i}]: must be a string, not {type(entry).__name__}"
+                )
+            entry = entry.strip()
+            if not entry:
+                continue
+            try:
+                IPNetwork(entry)
+            except (AddrFormatError, ValueError) as exc:
+                raise ValueError(
+                    f"scope_cidrs[{i}]: {entry!r} is not a valid CIDR or IP range. "
+                    "Examples: '10.0.0.0/24', '192.168.1.10/32'"
+                ) from exc
+            cleaned.append(entry)
+        return cleaned
+
 
 @app.post("/campaigns", tags=["campaigns"])
 async def create_campaign(
@@ -923,10 +958,11 @@ async def delete_campaign(
     if not deleted:
         raise HTTPException(404, "Campaign not found")
 
+    deleted_reports = _delete_report_artifacts_for_campaign(campaign_id)
     await db.audit(
         actor.username,
         "campaign_deleted",
-        f"id={campaign_id} name={c.get('name', '')}",
+        f"id={campaign_id} name={c.get('name', '')} reports_deleted={deleted_reports}",
         None,
     )
     return {"status": "deleted", "campaign_id": campaign_id}
@@ -1663,6 +1699,30 @@ def _safe_report_file_path(
     return candidate
 
 
+def _delete_report_artifacts_for_campaign(campaign_id: str) -> int:
+    root = _report_root()
+    if not root.exists():
+        return 0
+    prefix = f"{_report_slug(campaign_id)}_"
+    deleted = 0
+    for path in root.iterdir():
+        if not path.is_file():
+            continue
+        if not path.name.startswith(prefix):
+            continue
+        if path.suffix.lstrip(".").lower() not in _REPORT_EXTENSIONS:
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning(
+                "report_artifact_delete_failed", path=str(path), error=str(exc)
+            )
+            continue
+        deleted += 1
+    return deleted
+
+
 @app.post("/reports/{campaign_id}", tags=["reports"])
 async def generate_report(
     campaign_id: str,
@@ -1671,7 +1731,7 @@ async def generate_report(
     _rate: None = Depends(rate_limit("report")),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
-    from ares.modules.reporting.report_gen import ReportGenerator
+    from ares.modules.reporting.report_gen import ReportDependencyError, ReportGenerator
 
     campaign = await db.get_campaign(campaign_id)
     if not campaign:
@@ -1687,7 +1747,10 @@ async def generate_report(
             status_code=422,
             detail=f"Unknown format '{fmt}'. Choose: {sorted(valid_fmts)}",
         )
-    path = gen.generate(c_obj, fmt=fmt)
+    try:
+        path = gen.generate(c_obj, fmt=fmt)
+    except ReportDependencyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     await db.audit(actor.username, "report_generated", f"format={fmt}", campaign_id)
     # Issue 19: return filename only, not full server filesystem path
     return {

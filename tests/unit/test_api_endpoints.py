@@ -320,6 +320,27 @@ class TestRBACEnforcement:
             ), f"Role {role!r} should access /campaigns, got {r.status_code}"
 
     @pytest.mark.asyncio
+    async def test_create_campaign_invalid_scope_returns_422(self, aclient):
+        c, db, _ = aclient
+        db.is_access_token_revoked.return_value = False
+        db.save_campaign.reset_mock()
+
+        r = await c.post(
+            "/campaigns",
+            json={
+                "name": "Invalid Scope",
+                "client": "Internal",
+                "targets": ["127.0.0.1"],
+                "scope_cidrs": ["123"],
+            },
+            headers=_auth("op_user", "operator"),
+        )
+
+        assert r.status_code == 422
+        assert "scope_cidrs" in r.text
+        db.save_campaign.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_delete_campaign_requires_team_lead(self, aclient):
         c, db, _ = aclient
         db.is_access_token_revoked.return_value = False
@@ -338,8 +359,10 @@ class TestRBACEnforcement:
         db.delete_campaign.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_delete_campaign_team_lead_deletes(self, aclient):
+    async def test_delete_campaign_team_lead_deletes(self, aclient, tmp_path, monkeypatch):
         c, db, _ = aclient
+        import ares.api.server as server
+
         db.is_access_token_revoked.return_value = False
         db.get_campaign.return_value = {
             "id": "camp-delete",
@@ -347,12 +370,22 @@ class TestRBACEnforcement:
             "operator": "operator1",
         }
         db.delete_campaign.return_value = True
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+        owned_report = tmp_path / "camp-delete_Delete_Me_20260622_1745.pdf"
+        owned_html_source = tmp_path / "camp-delete_Delete_Me_20260622_1745.html"
+        other_report = tmp_path / "other-campaign_Delete_Me_20260622_1745.pdf"
+        owned_report.write_text("owned pdf", encoding="utf-8")
+        owned_html_source.write_text("owned html", encoding="utf-8")
+        other_report.write_text("other pdf", encoding="utf-8")
 
         r = await c.delete("/campaigns/camp-delete", headers=_auth("admin", "team_lead"))
 
         assert r.status_code == 200
         assert r.json()["status"] == "deleted"
         db.delete_campaign.assert_awaited_once_with("camp-delete")
+        assert not owned_report.exists()
+        assert not owned_html_source.exists()
+        assert other_report.exists()
 
 
 # ── Pagination ────────────────────────────────────────────────────────────────

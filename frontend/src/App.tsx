@@ -17,6 +17,7 @@ import {
   Workflow
 } from "lucide-react";
 import {
+  ChangeEvent,
   createContext,
   FormEvent,
   ReactNode,
@@ -53,6 +54,18 @@ function useAuth(): AuthState {
     throw new Error("AuthContext missing");
   }
   return value;
+}
+
+const REQUIRED_FIELD_MESSAGE = "This field is required.";
+
+type ValidatableElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+
+function setRequiredMessage<T extends ValidatableElement>(event: FormEvent<T>) {
+  event.currentTarget.setCustomValidity(REQUIRED_FIELD_MESSAGE);
+}
+
+function clearValidationMessage<T extends ValidatableElement>(event: ChangeEvent<T>) {
+  event.currentTarget.setCustomValidity("");
 }
 
 function AuthProvider({ children }: { children: ReactNode }) {
@@ -283,6 +296,7 @@ function CampaignsPage() {
   const [client, setClient] = useState("Internal");
   const [targets, setTargets] = useState("");
   const [scope, setScope] = useState("");
+  const [createWarning, setCreateWarning] = useState("");
   const [otherId, setOtherId] = useState("");
   const detail = useQuery({
     queryKey: ["campaign", selected],
@@ -307,13 +321,17 @@ function CampaignsPage() {
   const create = useMutation({
     mutationFn: () =>
       api.createCampaign({
-        name,
-        client,
+        name: name.trim(),
+        client: client.trim(),
         targets: splitLines(targets),
         scope_cidrs: splitLines(scope)
       }),
     onSuccess: (campaign) => {
       setSelected(campaign.id);
+      setName("");
+      setTargets("");
+      setScope("");
+      setCreateWarning("");
       void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     }
   });
@@ -340,15 +358,27 @@ function CampaignsPage() {
       <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
         <section className="panel p-4">
           <h2 className="mb-3 text-base font-bold">Create Campaign</h2>
-          <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-            <input className="field" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-            <input className="field" placeholder="Client" value={client} onChange={(e) => setClient(e.target.value)} />
-            <textarea className="field min-h-24" placeholder="Targets" value={targets} onChange={(e) => setTargets(e.target.value)} />
-            <textarea className="field min-h-24" placeholder="Scope CIDRs" value={scope} onChange={(e) => setScope(e.target.value)} />
-            <button className="btn btn-primary" type="submit">
+          <form className="grid gap-3" onSubmit={(e) => {
+            e.preventDefault();
+            if (!e.currentTarget.reportValidity()) return;
+            const invalidScopeEntries = findInvalidScopeEntries(scope);
+            if (invalidScopeEntries.length > 0) {
+              setCreateWarning(`Scope CIDRs must be valid IPv4 CIDR/IP entries. Invalid: ${invalidScopeEntries.slice(0, 3).join(", ")}. Example: 10.0.0.0/24`);
+              return;
+            }
+            setCreateWarning("");
+            create.mutate();
+          }}>
+            <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
+            <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
+            <textarea className="field min-h-24" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
+            <textarea className="field min-h-24" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
+            {createWarning && <p className="text-sm font-semibold text-red-700">{createWarning}</p>}
+            <button className="btn btn-primary" disabled={create.isPending} type="submit">
               <ListChecks size={16} /> Create
             </button>
           </form>
+          <DataPanel title="Create Error" data={create.error} />
         </section>
         <section className="grid gap-4">
           <CampaignPicker campaigns={campaigns.data ?? []} value={selected} onChange={setSelected} />
@@ -372,7 +402,7 @@ function CampaignsPage() {
             </button>
             <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
           </div>
-          <DataPanel title="Delete Result" data={remove.data ?? remove.error} />
+          <DataPanel title="Delete Error" data={remove.error} />
           <DataPanel title="Campaign Detail" data={detail.data} />
           <DataPanel title="CVSS Summary" data={cvss.data} />
           <DataPanel title="Diff" data={diff.data} />
@@ -487,6 +517,7 @@ function ReportsPage() {
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const [campaignId, setCampaignId] = useState("");
   const [format, setFormat] = useState("html");
+  const [warning, setWarning] = useState("");
   const queryClient = useQueryClient();
   const reports = useQuery({
     queryKey: ["reports", campaignId],
@@ -513,15 +544,24 @@ function ReportsPage() {
   return (
     <Page title="Reports">
       <div className="panel p-4">
-        <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
+        <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
         <div className="mt-3 flex flex-wrap gap-2">
           <select className="field max-w-40" value={format} onChange={(e) => setFormat(e.target.value)}>
             {["html", "pdf", "markdown", "json"].map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <button className="btn btn-primary" disabled={!campaignId} onClick={() => generate.mutate()}>
+          <button className="btn btn-primary" disabled={generate.isPending} onClick={() => {
+            if (!campaignId) {
+              setWarning("Campaign is required.");
+              return;
+            }
+            setWarning("");
+            generate.mutate();
+          }}>
             <FileText size={16} /> Generate
           </button>
         </div>
+        {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
+        <DataPanel title="Generate Result" data={generate.error ?? generate.data} />
       </div>
       <section className="panel mt-4 overflow-auto p-4">
         <table className="table">
@@ -549,6 +589,7 @@ function GraphPage() {
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const [campaignId, setCampaignId] = useState("");
   const [jsonPath, setJsonPath] = useState("");
+  const [warning, setWarning] = useState("");
   const graph = useQuery({ queryKey: ["graph", campaignId], queryFn: () => api.graph(campaignId), enabled: Boolean(campaignId) });
   const paths = useQuery({ queryKey: ["attack-paths", campaignId], queryFn: () => api.attackPaths(campaignId), enabled: Boolean(campaignId) });
   const ingest = useMutation({ mutationFn: () => api.ingestBloodhound(campaignId, jsonPath) });
@@ -556,7 +597,7 @@ function GraphPage() {
   const links = Array.isArray(graph.data?.links) ? graph.data.links : [];
   return (
     <Page title="Graph">
-      <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
+      <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
       <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_360px]">
         <section className="panel min-h-[360px] p-4">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -570,12 +611,25 @@ function GraphPage() {
           <div className="mt-4 text-sm text-slate-600">{nodes.length} nodes · {links.length} links</div>
         </section>
         <section className="panel p-4">
-          <form className="grid gap-2" onSubmit={(e) => { e.preventDefault(); ingest.mutate(); }}>
-            <input className="field" placeholder="BloodHound JSON path" value={jsonPath} onChange={(e) => setJsonPath(e.target.value)} />
-            <button className="btn" disabled={!campaignId || !jsonPath} type="submit">
+          <form className="grid gap-2" onSubmit={(e) => {
+            e.preventDefault();
+            if (!campaignId) {
+              setWarning("Campaign is required.");
+              return;
+            }
+            if (!jsonPath.trim()) {
+              setWarning("BloodHound JSON path is required.");
+              return;
+            }
+            setWarning("");
+            ingest.mutate();
+          }}>
+            <input className="field" required placeholder="BloodHound JSON path" value={jsonPath} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setJsonPath(e.target.value); setWarning(""); }} />
+            <button className="btn" disabled={ingest.isPending} type="submit">
               <GitGraph size={16} /> Ingest
             </button>
           </form>
+          {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
           <DataPanel title="Attack Paths" data={paths.data} />
           <DataPanel title="Ingest Result" data={ingest.data ?? ingest.error} />
         </section>
@@ -928,7 +982,10 @@ function ParamInput({
       value={String(value ?? "")}
       min={field.min}
       max={field.max}
+      required={field.required}
+      onInvalid={setRequiredMessage}
       onChange={(event) => {
+        clearValidationMessage(event);
         if (type === "number") {
           onChange(event.target.value === "" ? "" : Number(event.target.value));
           return;
@@ -959,6 +1016,39 @@ function splitLines(value: string): string[] {
     .split(/\r?\n|,/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function findInvalidScopeEntries(value: string): string[] {
+  return splitLines(value).filter((entry) => !looksLikeScopeEntry(entry));
+}
+
+function looksLikeScopeEntry(entry: string): boolean {
+  if (entry.includes(":")) {
+    return true;
+  }
+  const [address, prefix] = entry.split("/");
+  if (!isIpv4Address(address)) {
+    return false;
+  }
+  if (prefix === undefined) {
+    return true;
+  }
+  if (!/^\d{1,2}$/.test(prefix)) {
+    return false;
+  }
+  const value = Number(prefix);
+  return value >= 0 && value <= 32;
+}
+
+function isIpv4Address(value: string): boolean {
+  const parts = value.split(".");
+  return parts.length === 4 && parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part)) {
+      return false;
+    }
+    const number = Number(part);
+    return number >= 0 && number <= 255;
+  });
 }
 
 function unique(values: string[]): string[] {

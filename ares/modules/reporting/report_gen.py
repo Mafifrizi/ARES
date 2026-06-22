@@ -15,6 +15,10 @@ Professional pentest report with:
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -682,6 +686,248 @@ footer{margin-top:3rem;color:var(--muted);font-size:.82rem;border-top:1px solid 
 # ── Report Generator ──────────────────────────────────────────────────────────
 
 
+_PDF_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ARES Report - {{ campaign.name }}</title>
+<style>
+@page { size: A4; margin: 16mm 14mm 20mm; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #111827;
+  font-family: Arial, "Segoe UI", sans-serif;
+  font-size: 10.5px;
+  line-height: 1.45;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid #c1121f;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { width: 86px; height: auto; object-fit: contain; }
+.brand-name { font-size: 22px; font-weight: 900; letter-spacing: .04em; }
+.brand-name span { color: #c1121f; }
+.meta { text-align: right; color: #475569; font-size: 9.5px; }
+h1 { margin: 18px 0 4px; font-size: 26px; line-height: 1.1; }
+h2 {
+  margin: 18px 0 8px;
+  padding-left: 8px;
+  border-left: 4px solid #c1121f;
+  font-size: 15px;
+}
+h3 { margin: 0 0 5px; font-size: 12px; }
+.subtitle { color: #475569; font-size: 11px; }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0;
+}
+.card {
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  padding: 9px;
+  background: #f8fafc;
+}
+.label { display: block; color: #64748b; font-size: 8.5px; text-transform: uppercase; letter-spacing: .05em; }
+.value { display: block; margin-top: 2px; font-size: 13px; font-weight: 800; }
+.risk-card {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff7ed;
+}
+.risk-score { color: #c1121f; font-size: 38px; font-weight: 900; text-align: center; }
+.exec {
+  border-left: 4px solid #c1121f;
+  background: #f8fafc;
+  border-radius: 0 6px 6px 0;
+  padding: 10px 12px;
+}
+.severity-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+.severity {
+  border-radius: 5px;
+  padding: 5px 7px;
+  text-align: center;
+  font-weight: 800;
+  border: 1px solid #d7dee8;
+}
+.critical { color: #991b1b; background: #fee2e2; }
+.high { color: #9a3412; background: #ffedd5; }
+.medium { color: #854d0e; background: #fef3c7; }
+.low { color: #166534; background: #dcfce7; }
+.info { color: #1e40af; background: #dbeafe; }
+table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+th, td { border-bottom: 1px solid #e2e8f0; padding: 6px 5px; vertical-align: top; text-align: left; }
+th { background: #f1f5f9; color: #334155; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+.badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: Consolas, monospace;
+  font-size: 9px;
+}
+.finding {
+  break-inside: avoid;
+  margin-top: 10px;
+  border: 1px solid #d7dee8;
+  border-left: 4px solid #c1121f;
+  border-radius: 7px;
+  padding: 10px;
+}
+.finding-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.evidence {
+  margin-top: 6px;
+  padding: 7px;
+  border-radius: 5px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, monospace;
+  font-size: 8.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.remediation {
+  margin-top: 6px;
+  padding: 7px;
+  border-left: 3px solid #16a34a;
+  border-radius: 0 5px 5px 0;
+  background: #f0fdf4;
+}
+.small { color: #64748b; font-size: 9px; }
+.footer {
+  position: fixed;
+  right: 14mm;
+  bottom: 7mm;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 8px;
+}
+.footer img { width: 82px; height: auto; object-fit: contain; }
+</style>
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <div class="brand">
+      {% if brand_logo_path %}<img src="{{ brand_logo_path }}" alt="ARES">{% endif %}
+      <div class="brand-name"><span>A</span>RES</div>
+    </div>
+    <div class="meta">
+      <strong>Authorized Security Report</strong><br>
+      Generated {{ generated_at }}
+    </div>
+  </header>
+
+  <h1>{{ campaign.name }}</h1>
+  <div class="subtitle">{{ campaign.client }} - {{ campaign.operator }} - {{ campaign.noise_profile.value|upper }}</div>
+
+  <section class="summary-grid">
+    <div class="card"><span class="label">Campaign</span><span class="value">{{ campaign.name }}</span></div>
+    <div class="card"><span class="label">Client</span><span class="value">{{ campaign.client }}</span></div>
+    <div class="card"><span class="label">Findings</span><span class="value">{{ total_findings }}</span></div>
+    <div class="card"><span class="label">Filtered FP</span><span class="value">{{ fp_filtered }}</span></div>
+  </section>
+
+  <section class="risk-card">
+    <div class="risk-score">{{ "%.1f"|format(risk_score) }}</div>
+    <div>
+      <h3>Overall Risk Score</h3>
+      <p class="small">Composite score based on confirmed findings, CVSS enrichment, severity, and campaign context.</p>
+    </div>
+  </section>
+
+  <h2>Executive Summary</h2>
+  <div class="exec">{{ exec_summary }}</div>
+
+  <h2>Severity Breakdown</h2>
+  <div class="severity-row">
+    {% for sev, count in summary.items() %}
+    <div class="severity {{ sev }}">{{ sev.upper() }}<br><span style="font-size:18px">{{ count }}</span></div>
+    {% endfor %}
+  </div>
+
+  <h2>MITRE ATT&CK Coverage</h2>
+  <table>
+    <thead><tr><th>Tactic</th><th>Techniques Demonstrated</th></tr></thead>
+    <tbody>
+      {% for tactic, techs in mitre_map.items() %}
+      <tr>
+        <td><strong>{{ tactic }}</strong></td>
+        <td>{% for t in techs %}<span class="badge">{{ t.technique }}</span> {% endfor %}</td>
+      </tr>
+      {% endfor %}
+      {% if not mitre_map %}<tr><td colspan="2" class="small">No MITRE-mapped findings yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Attack Timeline</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Severity</th><th>Finding</th><th>Module</th></tr></thead>
+    <tbody>
+      {% for f in timeline %}
+      <tr>
+        <td>{{ f.discovered_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
+        <td><span class="severity {{ f.severity.value }}">{{ f.severity.value.upper() }}</span></td>
+        <td>{{ f.title }}</td>
+        <td>{{ f.module_id }}</td>
+      </tr>
+      {% endfor %}
+      {% if not timeline %}<tr><td colspan="4" class="small">No confirmed findings yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Detailed Findings</h2>
+  {% for f in findings %}
+  <article class="finding">
+    <div class="finding-head">
+      <div>
+        <h3>{{ f.title }}</h3>
+        <div class="small">
+          Module: {{ f.module_id }} - Host: {{ f.host or 'N/A' }}
+          {% if f.mitre_technique %} - MITRE: <span class="badge">{{ f.mitre_technique }}</span>{% endif %}
+        </div>
+      </div>
+      <span class="severity {{ f.severity.value }}">{{ f.severity.value.upper() }}</span>
+    </div>
+    <p>{{ f.description }}</p>
+    {% if f.evidence %}<div class="evidence">{{ f.evidence|tojson }}</div>{% endif %}
+    {% if f.remediation %}<div class="remediation"><strong>Remediation:</strong> {{ f.remediation }}</div>{% endif %}
+    <div class="small">SLA: {{ sla[f.severity.value] }} days - Confidence: {{ "%.0f"|format(f.confidence*100) }}%</div>
+  </article>
+  {% endfor %}
+  {% if not findings %}<p class="small">No detailed findings available for this report.</p>{% endif %}
+
+  <div class="footer">
+    <span>Confidential - Authorized use only</span>
+    {% if brand_logo_path %}<img src="{{ brand_logo_path }}" alt="ARES">{% endif %}
+  </div>
+</main>
+</body>
+</html>"""
+
+
+class ReportDependencyError(RuntimeError):
+    """Raised when an optional report backend is unavailable."""
+
+
 class ReportGenerator:
     FORMATS = ("json", "html", "markdown", "pdf")
     _FMT_ALIASES = {"md": "markdown"}
@@ -790,12 +1036,20 @@ class ReportGenerator:
 
     # ── HTML ──────────────────────────────────────────────────────────────
 
-    def _gen_html(self, campaign: Campaign, graph_json: dict[str, Any] | None) -> Path:
+    def _render_html(
+        self,
+        campaign: Campaign,
+        graph_json: dict[str, Any] | None,
+        template: str,
+    ) -> str:
         env = Environment(loader=BaseLoader(), autoescape=True)
         env.filters["tojson"] = lambda v: json.dumps(v, indent=2, default=str)
-        html = env.from_string(_HTML_TEMPLATE).render(
+        return env.from_string(template).render(
             **build_report_context(campaign, graph_json)
         )
+
+    def _gen_html(self, campaign: Campaign, graph_json: dict[str, Any] | None) -> Path:
+        html = self._render_html(campaign, graph_json, _HTML_TEMPLATE)
         out = self._out(campaign, "html")
         out.write_text(html, encoding="utf-8")
         logger.info("report_generated", fmt="html", path=str(out))
@@ -869,19 +1123,120 @@ class ReportGenerator:
     # ── PDF ───────────────────────────────────────────────────────────────
 
     def _gen_pdf(self, campaign: Campaign, graph_json: dict[str, Any] | None) -> Path:
-        html_path = self._gen_html(campaign, graph_json)
-        pdf_path = html_path.with_suffix(".pdf")
+        html = self._render_html(campaign, graph_json, _PDF_TEMPLATE)
+        pdf_path = self._out(campaign, "pdf")
         try:
             from weasyprint import HTML as WP
 
-            WP(filename=str(html_path)).write_pdf(str(pdf_path))
-        except ImportError:
-            logger.warning("weasyprint_not_installed", fallback="returning html path")
-            return html_path
+            WP(string=html, base_url=str(self.output_dir.resolve())).write_pdf(
+                str(pdf_path)
+            )
+        except (ImportError, OSError) as exc:
+            logger.warning("pdf_backend_unavailable", error=str(exc))
+            if self._write_pdf_with_browser(html, pdf_path):
+                logger.info("report_generated", fmt="pdf", path=str(pdf_path))
+                return pdf_path
+            raise ReportDependencyError(
+                "PDF generation requires the optional WeasyPrint backend or a "
+                "local Chromium-compatible browser. Install the PDF extra/native "
+                "runtime, set ARES_PDF_BROWSER, or generate HTML, JSON, or "
+                "Markdown instead."
+            ) from exc
         logger.info("report_generated", fmt="pdf", path=str(pdf_path))
         return pdf_path
 
     # ── Helpers ───────────────────────────────────────────────────────────
+
+    def _write_pdf_with_browser(self, html: str, pdf_path: Path) -> bool:
+        """Use a local Chromium-compatible browser when WeasyPrint is unavailable."""
+        for browser in self._pdf_browser_candidates():
+            with tempfile.TemporaryDirectory(prefix="ares-pdf-browser-") as work_dir:
+                work_path = Path(work_dir)
+                html_path = work_path / "report.html"
+                profile_dir = work_path / "profile"
+                html_path.write_text(html, encoding="utf-8")
+                cmd = [
+                    str(browser),
+                    "--headless",
+                    "--disable-gpu",
+                    "--disable-extensions",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--print-to-pdf-no-header",
+                    f"--user-data-dir={profile_dir}",
+                    f"--print-to-pdf={str(pdf_path.resolve())}",
+                    html_path.resolve().as_uri(),
+                ]
+                try:
+                    completed = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        check=False,
+                        text=True,
+                        timeout=60,
+                    )
+                except (OSError, subprocess.SubprocessError) as exc:
+                    logger.warning(
+                        "pdf_browser_failed", browser=str(browser), error=str(exc)
+                    )
+                    continue
+                if (
+                    completed.returncode == 0
+                    and pdf_path.exists()
+                    and pdf_path.stat().st_size > 0
+                ):
+                    logger.info("pdf_browser_fallback_used", browser=str(browser))
+                    return True
+                logger.warning(
+                    "pdf_browser_failed",
+                    browser=str(browser),
+                    returncode=completed.returncode,
+                    stderr=completed.stderr[-500:],
+                )
+        return False
+
+    @staticmethod
+    def _pdf_browser_candidates() -> list[Path]:
+        configured = os.environ.get("ARES_PDF_BROWSER")
+        raw: list[Path] = []
+        if configured:
+            raw.append(Path(configured))
+        for name in (
+            "msedge",
+            "chrome",
+            "chromium",
+            "google-chrome",
+            "chromium-browser",
+        ):
+            found = shutil.which(name)
+            if found:
+                raw.append(Path(found))
+        if os.name == "nt":
+            raw.extend(
+                [
+                    Path(
+                        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+                    ),
+                    Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(
+                        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+                    ),
+                ]
+            )
+
+        candidates: list[Path] = []
+        seen: set[str] = set()
+        for path in raw:
+            try:
+                resolved = path.resolve()
+            except OSError:
+                continue
+            key = str(resolved).lower()
+            if key not in seen and resolved.is_file():
+                seen.add(key)
+                candidates.append(resolved)
+        return candidates
 
     def _out(self, campaign: Campaign, ext: str) -> Path:
         import re as _re

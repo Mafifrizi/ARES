@@ -191,6 +191,62 @@ class TestReportGenerator:
                 assert fmt in paths
                 assert paths[fmt].exists()
 
+    def test_generate_pdf_requires_pdf_backend(self, monkeypatch):
+        import builtins
+
+        from ares.modules.reporting.report_gen import (
+            ReportDependencyError,
+            ReportGenerator,
+        )
+
+        real_import = builtins.__import__
+
+        def fail_weasyprint_import(name, *args, **kwargs):
+            if name == "weasyprint":
+                raise ImportError("missing test pdf backend")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fail_weasyprint_import)
+        monkeypatch.setattr(
+            ReportGenerator,
+            "_write_pdf_with_browser",
+            lambda self, html, pdf_path: False,
+        )
+        campaign = _make_campaign(n_findings=1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = ReportGenerator(output_dir=tmpdir)
+            with pytest.raises(ReportDependencyError, match="PDF generation requires"):
+                gen.generate(campaign, fmt="pdf")
+            assert not list(Path(tmpdir).glob("*.pdf"))
+            assert not list(Path(tmpdir).glob("*.html"))
+
+    def test_generate_pdf_uses_browser_fallback(self, monkeypatch):
+        import builtins
+
+        from ares.modules.reporting.report_gen import ReportGenerator
+
+        real_import = builtins.__import__
+
+        def fail_weasyprint_import(name, *args, **kwargs):
+            if name == "weasyprint":
+                raise OSError("missing native test pdf backend")
+            return real_import(name, *args, **kwargs)
+
+        def fake_browser_pdf(self, html, pdf_path):
+            assert "<!DOCTYPE html>" in html
+            pdf_path.write_bytes(b"%PDF-1.4\n% test pdf\n")
+            return True
+
+        monkeypatch.setattr(builtins, "__import__", fail_weasyprint_import)
+        monkeypatch.setattr(ReportGenerator, "_write_pdf_with_browser", fake_browser_pdf)
+        campaign = _make_campaign(n_findings=1)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = ReportGenerator(output_dir=tmpdir)
+            path = gen.generate(campaign, fmt="pdf")
+            assert path.suffix == ".pdf"
+            assert path.exists()
+            assert not list(Path(tmpdir).glob("*.html"))
+
     def test_generate_unknown_format_raises(self):
         from ares.modules.reporting.report_gen import ReportGenerator
         campaign = _make_campaign()
