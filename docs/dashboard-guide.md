@@ -121,6 +121,19 @@ Use it for:
 - Generating a plan from template parameters.
 - Keeping campaign execution consistent.
 
+Templates are deterministic. They do not call an LLM and they do not execute
+modules automatically. Use them when you want a predictable checklist-style
+plan for a common engagement type, then review the returned stages before
+running anything against a campaign.
+
+Typical flow:
+
+1. Select a built-in template such as `internal_pentest`.
+2. Optionally provide JSON parameters such as domain, DC, or usernames.
+3. Click `Generate Plan`.
+4. Review the returned stages and module IDs.
+5. Run the plan manually through campaign execution only after authorization.
+
 ### Strategy
 
 Purpose: start or monitor goal-based engagement planning.
@@ -133,6 +146,58 @@ Use it for:
 
 Backend RBAC still controls whether a user can start or execute sensitive
 flows.
+
+Strategy starts a background engagement loop for an existing campaign. It is
+not the same as the Templates page. The backend default LLM backend is Claude,
+so set `ANTHROPIC_API_KEY` before using the default Strategy path, or call the
+API directly with another `llm_backend`.
+
+Strategy emits progress events to the campaign WebSocket. Use the `Live` page
+to watch those events while the engagement is running.
+
+Safe usage:
+
+1. Create a scoped campaign first.
+2. Confirm the campaign has the context needed for planning.
+3. Set the required LLM provider key in the ARES server environment.
+4. Select a goal such as `domain_admin`.
+5. Add authorization notes for sensitive actions.
+6. Click `Engage` and monitor `Live`.
+
+### AI Planner Module
+
+Purpose: generate an LLM-backed execution plan from campaign context.
+
+Use it from:
+
+- `Modules` page.
+- Module ID: `ai.autonomous_planner`.
+
+Inputs:
+
+- `goal`: `domain_admin`, `enterprise_admin`, `cloud_admin`, `data_exfil`,
+  `persistence`, or `full_compromise`.
+- `llm_backend`: `claude`, `openai`, or `local`.
+- `llm_model`: optional model override.
+- `auto_approve`: keep this disabled unless you have an explicit review process.
+
+Provider setup:
+
+- `llm_backend=claude` requires `ANTHROPIC_API_KEY`.
+- `llm_backend=openai` requires `OPENAI_API_KEY`.
+- `llm_backend=local` expects Ollama at `http://localhost:11434`.
+
+Output:
+
+- Proposed execution stages.
+- AI reasoning.
+- Confidence score.
+- OPSEC warnings.
+- Alternative plan data when available.
+
+The AI planner module performs a local planning/LLM call only. It does not
+contact the target network by itself. Review its plan before running any
+generated modules.
 
 ### Security
 

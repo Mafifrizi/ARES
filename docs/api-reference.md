@@ -362,6 +362,36 @@ List active autonomous engagements.
 Start an autonomous engagement. Backend RBAC still enforces restricted module
 authorization.
 
+Request body:
+
+```json
+{
+  "campaign_id": "CAMPAIGN_ID",
+  "goal": "domain_admin",
+  "max_rounds": 5,
+  "llm_backend": "claude",
+  "secondary_backend": "",
+  "authorizations": [],
+  "forbidden_modules": [],
+  "allow_persistence": false
+}
+```
+
+Notes:
+
+- `goal` can be `domain_admin`, `enterprise_admin`, `cloud_admin`,
+  `data_exfil`, `persistence`, or `full_compromise`.
+- `llm_backend` can be `claude`, `openai`, or `local`.
+- The dashboard Strategy page uses the backend defaults. By default that means
+  Claude-backed planning, so `ANTHROPIC_API_KEY` must be present in the ARES
+  server environment.
+- `llm_backend=openai` requires `OPENAI_API_KEY`.
+- `llm_backend=local` expects Ollama at `http://localhost:11434`.
+- ARES dashboard API keys authenticate callers to ARES. They are not LLM
+  provider keys.
+- The endpoint returns immediately. Monitor progress through campaign events
+  or the dashboard `Live` page.
+
 ---
 
 ## EDR/OPSEC
@@ -386,6 +416,12 @@ List campaign templates.
 ### `POST /templates/{template_name}/plan`
 
 Generate an execution plan from a template.
+
+Template plans are deterministic and do not call an LLM. They return a plan for
+operator review and do not execute modules automatically.
+
+For LLM-backed planning, run module `ai.autonomous_planner` through the
+`/modules/{module_id}/run` endpoint or the dashboard Modules page.
 
 ---
 

@@ -135,6 +135,19 @@ Common page inputs and outputs:
 | EDR/OPSEC | Technique ID, EDR vendor, version, outcome, campaign, and notes. | Historical success-rate telemetry and outcome records. | You want to track defensive visibility and tune OPSEC decisions from controlled tests. |
 | Graph Ingest | Campaign plus local BloodHound/SharpHound JSON path. | Campaign graph nodes, links, and attack-path candidates. | You already collected BloodHound-style data and want it mapped into ARES. |
 
+Planning modes:
+
+| Mode | Where to use it | Requires LLM key? | What it does |
+| --- | --- | --- | --- |
+| Template plan | `Templates` page | No | Builds a deterministic plan from a named template such as `internal_pentest`. It is for review and does not execute modules by itself. |
+| AI planner module | `Modules` page, module `ai.autonomous_planner` | Yes, unless using local Ollama | Reads campaign context and asks Claude, OpenAI, or a local Ollama model to produce a proposed execution plan with reasoning, confidence, and OPSEC warnings. |
+| Strategy engagement | `Strategy` page | Usually yes | Starts a background goal-based strategy loop for an existing campaign. It uses AI planning and OPSEC checks, then sends progress events to the `Live` page. |
+| Internal scorer | CLI / engine internals | No | Ranks possible next modules from local campaign/session state. This is AI-style scoring, not an external LLM call. |
+
+The ARES API key created in the `Security` page is not an OpenAI, Anthropic,
+or Ollama key. It authenticates scripts and integrations to the ARES API.
+LLM provider keys are configured separately in the ARES server environment.
+
 See [docs/dashboard-guide.md](docs/dashboard-guide.md).
 
 ### Campaign System
@@ -239,6 +252,26 @@ encrypted can make existing encrypted records unreadable.
 Dashboard API keys are separate from these startup secrets. Create API keys
 from the Security page only after login when you need scripts, integrations, or
 automation to call the API with `X-API-Key` instead of an interactive session.
+
+Optional AI planner provider keys:
+
+| Variable | Used by | Notes |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | `ai.autonomous_planner` with `llm_backend=claude`; Strategy default path. | Required when using Claude-backed planning. |
+| `OPENAI_API_KEY` | `ai.autonomous_planner` with `llm_backend=openai`. | Required when using OpenAI-backed planning. |
+| Local Ollama at `http://localhost:11434` | `ai.autonomous_planner` with `llm_backend=local`. | No cloud key required, but Ollama and the selected model must already be running. |
+
+Example:
+
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+
+or:
+
+```powershell
+$env:ANTHROPIC_API_KEY="sk-ant-..."
+```
 
 ### 2. Start the API and Dashboard
 

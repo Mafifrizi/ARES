@@ -191,6 +191,44 @@ optional dependencies such as AD, cloud, container, Windows, and PDF extras.
 | `opsec.coverage_predictor` | Predict detection probability and recommended wait windows. |
 | `ai.autonomous_planner` | Plan an engagement chain from campaign state and goals. |
 
+### AI Planner Module
+
+`ai.autonomous_planner` is the LLM-backed planning module. It is different from
+template planning and from the internal module scorer:
+
+| Planner surface | LLM required? | Primary use |
+| --- | --- | --- |
+| `Templates` dashboard page | No | Produce predictable template-based plans for review. |
+| `ai.autonomous_planner` module | Yes, unless using local Ollama | Ask Claude, OpenAI, or Ollama to propose a plan from campaign context. |
+| `Strategy` dashboard page | Usually yes | Start a background goal-based engagement loop with strategy events. |
+| Internal `AttackPlanner` scorer | No | Rank possible next modules using local state and scoring weights. |
+
+Parameters:
+
+| Parameter | Values | Meaning |
+| --- | --- | --- |
+| `goal` | `domain_admin`, `enterprise_admin`, `cloud_admin`, `data_exfil`, `persistence`, `full_compromise` | The desired high-level outcome for the proposed plan. |
+| `llm_backend` | `claude`, `openai`, `local` | Which planner backend to use. |
+| `llm_model` | Optional string | Overrides the backend default model. |
+| `auto_approve` | `false` recommended | When `false`, ARES returns a proposed plan for operator review. |
+
+Provider setup:
+
+- `llm_backend=claude` requires `ANTHROPIC_API_KEY`.
+- `llm_backend=openai` requires `OPENAI_API_KEY`.
+- `llm_backend=local` expects Ollama at `http://localhost:11434`.
+
+Expected output:
+
+- `execution_plan`: proposed stages and module IDs.
+- `ai_reasoning`: why the planner selected the path.
+- `confidence_score`: confidence from the planner response.
+- `warnings`: OPSEC or safety notes to review before execution.
+
+The module is OPSEC `LOCAL`: the planning call goes to the selected LLM backend
+and does not contact the target network by itself. Treat the result as a plan
+proposal, not as automatic authorization to execute it.
+
 ## Recommended Workflows
 
 ### Local Validation
@@ -229,4 +267,3 @@ temporary campaign when done.
 2. Use `edr.bypass_adaptive` to understand defensive product assumptions.
 3. Use `opsec.coverage_predictor` before noisy chains.
 4. Prefer low-noise enumeration when uncertainty is high.
-
