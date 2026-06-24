@@ -116,8 +116,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage  = "https://github.com/ares-framework/ares"
-Issues    = "https://github.com/ares-framework/ares/issues"
+Homepage = "https://github.com/Mafifrizi/ARES"
+Issues = "https://github.com/Mafifrizi/ARES/issues"
 
 [project.scripts]
 ares       = "ares.cli.main:cli"
