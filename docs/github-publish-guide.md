@@ -50,7 +50,7 @@ Keep these files visible:
 If this folder is not a git repo yet:
 
 ```powershell
-cd C:\Users\ASUS\Downloads\ARES_v6_beta_checkpoint_frontend_stabilized_cleaned
+cd C:\Users\ASUS\ARES
 git init
 git branch -M main
 git status
@@ -84,7 +84,7 @@ you already committed locally.
 Then:
 
 ```powershell
-git remote add origin https://github.com/YOUR_USERNAME/ares.git
+git remote add origin https://github.com/Mafifrizi/ARES.git
 git push -u origin main
 ```
 
@@ -92,7 +92,7 @@ If `origin` already exists:
 
 ```powershell
 git remote -v
-git remote set-url origin https://github.com/YOUR_USERNAME/ares.git
+git remote set-url origin https://github.com/Mafifrizi/ARES.git
 git push -u origin main
 ```
 
