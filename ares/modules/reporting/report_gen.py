@@ -130,6 +130,11 @@ def build_report_context(
         "mitre_tactics": MITRE_TACTIC_ORDER,
         "attack_path": attack_path,
         "exec_summary": exec_summary,
+        "risk_label": _risk_label(campaign.risk_score()),
+        "report_scope": _build_scope_summary(campaign),
+        "methodology": _DEFAULT_METHODOLOGY,
+        "key_findings": sorted_finds[:5],
+        "remediation_roadmap": _build_remediation_roadmap(sorted_finds),
         "summary": campaign.summary(),
         "risk_score": campaign.risk_score(),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -219,6 +224,267 @@ def _build_exec_summary(campaign: Campaign, findings: list[Any]) -> str:
 
 
 # ── HTML Template ─────────────────────────────────────────────────────────────
+
+_DEFAULT_METHODOLOGY = [
+    "Confirm authorization, campaign scope, and operational noise profile.",
+    "Validate module parameters and dry-run behavior before execution.",
+    "Execute approved modules against declared targets only.",
+    "Collect evidence, enrich confirmed findings, and filter false positives.",
+    "Map observations to MITRE ATT&CK and assign remediation priority.",
+    "Prepare executive, technical, and retest-ready reporting outputs.",
+]
+
+
+def _risk_label(score: float) -> str:
+    if score > 20:
+        return "Critical"
+    if score > 10:
+        return "High"
+    if score > 5:
+        return "Medium"
+    return "Low"
+
+
+def _build_scope_summary(campaign: Campaign) -> dict[str, Any]:
+    return {
+        "targets": campaign.targets,
+        "scope_entries": [s.cidr for s in campaign.scope],
+        "target_count": len(campaign.targets),
+        "scope_count": len(campaign.scope),
+        "authorization_note": (
+            "All testing activity in this report is intended for authorized "
+            "security validation inside the declared campaign scope."
+        ),
+    }
+
+
+def _build_remediation_roadmap(findings: list[Any]) -> list[dict[str, Any]]:
+    severities = ("critical", "high", "medium", "low", "info")
+    roadmap: list[dict[str, Any]] = []
+    for severity in severities:
+        items = [f for f in findings if f.severity.value == severity]
+        if not items:
+            continue
+        roadmap.append(
+            {
+                "severity": severity,
+                "count": len(items),
+                "sla_days": REMEDIATION_SLA.get(severity, 365),
+                "titles": [f.title for f in items[:5]],
+            }
+        )
+    return roadmap
+
+
+def _build_mitre_map(findings: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    """Group findings by MITRE tactic and demonstrated technique."""
+    tactic_map: dict[str, list[dict[str, Any]]] = {t: [] for t in MITRE_TACTIC_ORDER}
+    tactic_map["Unknown"] = []
+
+    for finding in findings:
+        tactic = finding.mitre_tactic or "Unknown"
+        if tactic not in tactic_map:
+            tactic_map[tactic] = []
+        tactic_map[tactic].append(
+            {
+                "technique": finding.mitre_technique or "N/A",
+                "title": finding.title,
+                "severity": finding.severity.value,
+            }
+        )
+
+    return {k: v for k, v in tactic_map.items() if v}
+
+
+def _build_attack_path_narrative(graph_json: dict[str, Any]) -> list[str]:
+    """Convert graph paths to a human-readable attack narrative."""
+    nodes = {n["id"]: n for n in graph_json.get("nodes", [])}
+    links = graph_json.get("links", [])
+    steps: list[str] = []
+
+    targets = [n for n in graph_json.get("nodes", []) if n.get("is_target")]
+    for target in targets[:3]:
+        steps.append(f"Target: **{target['label']}** ({target['type']})")
+
+    for link in sorted(links, key=lambda l: l.get("weight", 1.0))[:10]:
+        src = nodes.get(link["source"], {})
+        tgt = nodes.get(link["target"], {})
+        if src and tgt:
+            steps.append(f"  {src['label']} -> [{link['label']}] -> {tgt['label']}")
+
+    return steps
+
+
+def _build_exec_summary(campaign: Campaign, findings: list[Any]) -> str:
+    """Auto-generate a concise executive summary paragraph."""
+    sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    for finding in findings:
+        sev_counts[finding.severity.value] = (
+            sev_counts.get(finding.severity.value, 0) + 1
+        )
+
+    crit = sev_counts["critical"]
+    high = sev_counts["high"]
+    risk = campaign.risk_score()
+    level = _risk_label(risk)
+
+    urgent = (
+        " Critical findings should be remediated within 7 days and validated "
+        "through focused retesting."
+        if crit > 0
+        else ""
+    )
+    return (
+        f"ARES assessed {campaign.client} under the {campaign.name} campaign and "
+        f"identified a {level.upper()} overall risk posture with a composite risk "
+        f"score of {risk:.1f}. The engagement produced {len(findings)} confirmed "
+        f"security findings, including {crit} critical and {high} high severity "
+        f"issues.{urgent} The campaign used a {campaign.noise_profile.value} "
+        "noise profile to keep testing aligned with the declared authorization "
+        "and operational limits."
+    )
+
+
+def _render_markdown_report(campaign: Campaign, ctx: dict[str, Any]) -> list[str]:
+    lines: list[str] = [
+        f"# ARES Report - {campaign.name}",
+        "",
+        f"**Client:** {campaign.client}",
+        f"**Operator:** {campaign.operator}",
+        f"**Generated:** {ctx['generated_at']}",
+        f"**Risk:** {ctx['risk_label']} ({ctx['risk_score']:.1f})",
+        f"**Confirmed Findings:** {ctx['total_findings']}",
+        "",
+        "## Executive Summary",
+        "",
+        ctx["exec_summary"],
+        "",
+        "## Engagement Overview",
+        "",
+        f"- Noise profile: `{campaign.noise_profile.value}`",
+        f"- Targets declared: {ctx['report_scope']['target_count']}",
+        f"- Scope entries declared: {ctx['report_scope']['scope_count']}",
+        f"- False positives filtered: {ctx['fp_filtered']}",
+        "",
+        "## Scope and Authorization",
+        "",
+        ctx["report_scope"]["authorization_note"],
+        "",
+        "### Targets",
+    ]
+    if ctx["report_scope"]["targets"]:
+        lines.extend(f"- `{target}`" for target in ctx["report_scope"]["targets"])
+    else:
+        lines.append("- No explicit targets were declared.")
+
+    lines += ["", "### Scope CIDRs"]
+    if ctx["report_scope"]["scope_entries"]:
+        lines.extend(f"- `{scope}`" for scope in ctx["report_scope"]["scope_entries"])
+    else:
+        lines.append("- No CIDR scope entries were declared.")
+
+    lines += ["", "## Methodology", ""]
+    lines.extend(f"{index}. {step}" for index, step in enumerate(ctx["methodology"], 1))
+
+    lines += [
+        "",
+        "## Key Findings",
+        "",
+        "| Severity | Finding | Module | MITRE |",
+        "|----------|---------|--------|-------|",
+    ]
+    if ctx["key_findings"]:
+        for finding in ctx["key_findings"]:
+            lines.append(
+                "| "
+                f"{finding.severity.value.upper()} | {finding.title} | "
+                f"`{finding.module_id}` | `{finding.mitre_technique or 'N/A'}` |"
+            )
+    else:
+        lines.append("| INFO | No confirmed findings | N/A | N/A |")
+
+    lines += [
+        "",
+        "## Severity Summary",
+        "",
+        "| Severity | Count | SLA (days) |",
+        "|----------|-------|------------|",
+    ]
+    for sev, count in ctx["summary"].items():
+        lines.append(f"| {sev.upper()} | {count} | {REMEDIATION_SLA.get(sev, 365)} |")
+
+    lines += [
+        "",
+        "## MITRE ATT&CK Coverage",
+        "",
+        "| Tactic | Techniques |",
+        "|--------|------------|",
+    ]
+    if ctx["mitre_map"]:
+        for tactic, techs in ctx["mitre_map"].items():
+            techs_str = ", ".join(f'`{t["technique"]}`' for t in techs)
+            lines.append(f"| {tactic} | {techs_str} |")
+    else:
+        lines.append("| N/A | No MITRE-mapped findings |")
+
+    lines += ["", "## Attack Narrative", ""]
+    if ctx["attack_path"]:
+        lines.extend(ctx["attack_path"])
+    else:
+        lines.append("No graph-derived attack path was supplied for this report.")
+
+    lines += ["", "## Attack Timeline", ""]
+    if ctx["timeline"]:
+        for finding in ctx["timeline"]:
+            ts = finding.discovered_at.strftime("%Y-%m-%d %H:%M")
+            lines.append(
+                f"- `{ts}` [{finding.severity.value.upper()}] "
+                f"{finding.title} (`{finding.module_id}`)"
+            )
+    else:
+        lines.append("- No confirmed findings yet.")
+
+    lines += ["", "## Findings", ""]
+    for finding in ctx["findings"]:
+        lines += [
+            f"### [{finding.severity.value.upper()}] {finding.title}",
+            "",
+            f"**Module:** `{finding.module_id}`",
+            f"**Confidence:** `{finding.confidence * 100:.0f}%`",
+            f"**MITRE:** `{finding.mitre_technique or 'N/A'}`",
+            f"**Host:** `{finding.host or 'N/A'}`",
+            "",
+            finding.description,
+            "",
+        ]
+        if finding.evidence:
+            lines += ["**Evidence:**", "", "```json", json.dumps(finding.evidence, indent=2, default=str), "```", ""]
+        if finding.remediation:
+            lines += [
+                f"**Remediation (SLA: {REMEDIATION_SLA.get(finding.severity.value, 365)} days):**",
+                "",
+                finding.remediation,
+                "",
+            ]
+
+    lines += ["## Remediation Roadmap", ""]
+    if ctx["remediation_roadmap"]:
+        for item in ctx["remediation_roadmap"]:
+            lines.append(
+                f"- {item['severity'].upper()}: {item['count']} finding(s), "
+                f"SLA {item['sla_days']} days."
+            )
+    else:
+        lines.append("- No remediation items were generated.")
+
+    lines += [
+        "",
+        "## Appendix",
+        "",
+        "This report is intended for authorized security testing, lab use, and defensive validation only.",
+    ]
+    return lines
+
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -924,6 +1190,352 @@ th { background: #f1f5f9; color: #334155; font-size: 9px; text-transform: upperc
 </html>"""
 
 
+_PROFESSIONAL_REPORT_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ARES Report - {{ campaign.name }}</title>
+<style>
+@page { size: A4; margin: 16mm 14mm 22mm; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #111827;
+  font-family: Arial, "Segoe UI", sans-serif;
+  font-size: 10.5px;
+  line-height: 1.5;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid #b91c1c;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand img { width: 86px; height: auto; object-fit: contain; }
+.brand-title { font-size: 23px; font-weight: 900; letter-spacing: .03em; }
+.brand-title span { color: #b91c1c; }
+.meta { text-align: right; color: #475569; font-size: 9.5px; }
+h1 { margin: 18px 0 3px; font-size: 27px; line-height: 1.1; }
+h2 {
+  margin: 18px 0 8px;
+  padding-left: 8px;
+  border-left: 4px solid #b91c1c;
+  font-size: 15px;
+}
+h3 { margin: 0 0 5px; font-size: 12px; }
+p { margin: 6px 0; }
+.subtitle { color: #475569; font-size: 11px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0;
+}
+.card {
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  padding: 9px;
+  background: #f8fafc;
+}
+.label {
+  display: block;
+  color: #64748b;
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.value { display: block; margin-top: 2px; font-size: 13px; font-weight: 800; }
+.risk-band {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #f1c7c7;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff7f7;
+}
+.risk-score { color: #b91c1c; font-size: 38px; font-weight: 900; text-align: center; }
+.risk-label { color: #7f1d1d; font-weight: 900; text-transform: uppercase; }
+.exec {
+  border-left: 4px solid #b91c1c;
+  background: #f8fafc;
+  border-radius: 0 6px 6px 0;
+  padding: 10px 12px;
+}
+table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+th, td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 5px;
+  vertical-align: top;
+  text-align: left;
+}
+th {
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.pill {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-family: Consolas, monospace;
+  font-size: 9px;
+}
+.sev {
+  display: inline-block;
+  min-width: 54px;
+  border-radius: 4px;
+  padding: 2px 5px;
+  text-align: center;
+  font-size: 8.5px;
+  font-weight: 800;
+  border: 1px solid #d7dee8;
+}
+.critical { color: #991b1b; background: #fee2e2; }
+.high { color: #9a3412; background: #ffedd5; }
+.medium { color: #854d0e; background: #fef3c7; }
+.low { color: #166534; background: #dcfce7; }
+.info { color: #1e40af; background: #dbeafe; }
+.finding {
+  break-inside: avoid;
+  margin-top: 10px;
+  border: 1px solid #d7dee8;
+  border-left: 4px solid #b91c1c;
+  border-radius: 7px;
+  padding: 10px;
+}
+.finding-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+.evidence {
+  margin-top: 6px;
+  padding: 7px;
+  border-radius: 5px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, monospace;
+  font-size: 8.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.remediation {
+  margin-top: 6px;
+  padding: 7px;
+  border-left: 3px solid #16a34a;
+  border-radius: 0 5px 5px 0;
+  background: #f0fdf4;
+}
+.small { color: #64748b; font-size: 9px; }
+.steps { margin: 6px 0 0 16px; padding: 0; }
+.steps li { margin-bottom: 3px; }
+.footer {
+  position: fixed;
+  right: 14mm;
+  bottom: 7mm;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 8px;
+}
+.footer img { width: 82px; height: auto; object-fit: contain; }
+</style>
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <div class="brand">
+      {% if brand_logo_path %}<img src="{{ brand_logo_path }}" alt="ARES">{% endif %}
+      <div class="brand-title"><span>A</span>RES</div>
+    </div>
+    <div class="meta">
+      <strong>Authorized Red-Team Report</strong><br>
+      Generated {{ generated_at }}<br>
+      Confidential - Authorized use only
+    </div>
+  </header>
+
+  <h1>{{ campaign.name }}</h1>
+  <div class="subtitle">{{ campaign.client }} - {{ campaign.operator }} - {{ campaign.noise_profile.value|upper }}</div>
+
+  <section class="grid">
+    <div class="card"><span class="label">Campaign</span><span class="value">{{ campaign.name }}</span></div>
+    <div class="card"><span class="label">Client</span><span class="value">{{ campaign.client }}</span></div>
+    <div class="card"><span class="label">Confirmed</span><span class="value">{{ total_findings }}</span></div>
+    <div class="card"><span class="label">Filtered FP</span><span class="value">{{ fp_filtered }}</span></div>
+  </section>
+
+  <section class="risk-band">
+    <div class="risk-score">{{ "%.1f"|format(risk_score) }}</div>
+    <div>
+      <h3>Overall Risk Posture: <span class="risk-label">{{ risk_label }}</span></h3>
+      <p class="small">Composite score derived from confirmed findings, CVSS enrichment, severity, and campaign context.</p>
+    </div>
+  </section>
+
+  <h2>Executive Summary</h2>
+  <div class="exec">{{ exec_summary }}</div>
+
+  <h2>Engagement Overview</h2>
+  <table>
+    <tbody>
+      <tr><th>Noise Profile</th><td>{{ campaign.noise_profile.value }}</td></tr>
+      <tr><th>Targets Declared</th><td>{{ report_scope.target_count }}</td></tr>
+      <tr><th>Scope Entries</th><td>{{ report_scope.scope_count }}</td></tr>
+      <tr><th>Authorization</th><td>{{ report_scope.authorization_note }}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Scope and Authorization</h2>
+  <table>
+    <thead><tr><th>Targets</th><th>Scope CIDRs</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>{% if report_scope.targets %}{{ report_scope.targets|join(', ') }}{% else %}No explicit targets declared{% endif %}</td>
+        <td>{% if report_scope.scope_entries %}{{ report_scope.scope_entries|join(', ') }}{% else %}No CIDR scope entries declared{% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Methodology</h2>
+  <ol class="steps">
+    {% for step in methodology %}<li>{{ step }}</li>{% endfor %}
+  </ol>
+
+  <h2>Key Findings</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Finding</th><th>Module</th><th>MITRE</th></tr></thead>
+    <tbody>
+      {% for f in key_findings %}
+      <tr>
+        <td><span class="sev {{ f.severity.value }}">{{ f.severity.value.upper() }}</span></td>
+        <td>{{ f.title }}</td>
+        <td>{{ f.module_id }}</td>
+        <td>{% if f.mitre_technique %}<span class="pill">{{ f.mitre_technique }}</span>{% else %}N/A{% endif %}</td>
+      </tr>
+      {% endfor %}
+      {% if not key_findings %}<tr><td colspan="4" class="small">No confirmed findings were recorded.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Severity Breakdown</h2>
+  <table>
+    <thead><tr><th>Severity</th><th>Count</th><th>Remediation SLA</th></tr></thead>
+    <tbody>
+      {% for sev, count in summary.items() %}
+      <tr><td><span class="sev {{ sev }}">{{ sev.upper() }}</span></td><td>{{ count }}</td><td>{{ sla[sev] }} days</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>MITRE ATT&CK Coverage</h2>
+  <table>
+    <thead><tr><th>Tactic</th><th>Techniques Demonstrated</th></tr></thead>
+    <tbody>
+      {% for tactic, techs in mitre_map.items() %}
+      <tr>
+        <td><strong>{{ tactic }}</strong></td>
+        <td>{% for t in techs %}<span class="pill">{{ t.technique }}</span> {% endfor %}</td>
+      </tr>
+      {% endfor %}
+      {% if not mitre_map %}<tr><td colspan="2" class="small">No MITRE-mapped findings yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Attack Narrative</h2>
+  {% if attack_path %}
+  <ol class="steps">{% for step in attack_path %}<li>{{ step }}</li>{% endfor %}</ol>
+  {% else %}
+  <p class="small">No graph-derived attack path was supplied for this report.</p>
+  {% endif %}
+
+  <h2>Attack Timeline</h2>
+  <table>
+    <thead><tr><th>Time</th><th>Severity</th><th>Finding</th><th>Module</th></tr></thead>
+    <tbody>
+      {% for f in timeline %}
+      <tr>
+        <td>{{ f.discovered_at.strftime('%Y-%m-%d %H:%M UTC') }}</td>
+        <td><span class="sev {{ f.severity.value }}">{{ f.severity.value.upper() }}</span></td>
+        <td>{{ f.title }}</td>
+        <td>{{ f.module_id }}</td>
+      </tr>
+      {% endfor %}
+      {% if not timeline %}<tr><td colspan="4" class="small">No confirmed findings yet.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Detailed Observations</h2>
+  {% for f in findings %}
+  <article class="finding">
+    <div class="finding-head">
+      <div>
+        <h3>{{ f.title }}</h3>
+        <div class="small">
+          Module: {{ f.module_id }} - Host: {{ f.host or 'N/A' }}
+          {% if f.mitre_technique %} - MITRE: <span class="pill">{{ f.mitre_technique }}</span>{% endif %}
+        </div>
+      </div>
+      <span class="sev {{ f.severity.value }}">{{ f.severity.value.upper() }}</span>
+    </div>
+    <p>{{ f.description }}</p>
+    {% if f.evidence %}<div class="evidence">{{ f.evidence|tojson }}</div>{% endif %}
+    {% if f.remediation %}<div class="remediation"><strong>Remediation:</strong> {{ f.remediation }}</div>{% endif %}
+    <div class="small">SLA: {{ sla[f.severity.value] }} days - Confidence: {{ "%.0f"|format(f.confidence*100) }}%</div>
+  </article>
+  {% endfor %}
+  {% if not findings %}<p class="small">No detailed findings are available for this report.</p>{% endif %}
+
+  <h2>Remediation Roadmap</h2>
+  <table>
+    <thead><tr><th>Priority</th><th>Count</th><th>SLA</th><th>Examples</th></tr></thead>
+    <tbody>
+      {% for item in remediation_roadmap %}
+      <tr>
+        <td><span class="sev {{ item.severity }}">{{ item.severity.upper() }}</span></td>
+        <td>{{ item.count }}</td>
+        <td>{{ item.sla_days }} days</td>
+        <td>{{ item.titles|join(', ') }}</td>
+      </tr>
+      {% endfor %}
+      {% if not remediation_roadmap %}<tr><td colspan="4" class="small">No remediation items were generated.</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  <h2>Appendix</h2>
+  <table>
+    <tbody>
+      <tr><th>Report Engine</th><td>ARES reporting module</td></tr>
+      <tr><th>Compliance Mapping</th><td>{% if compliance %}{{ compliance.keys()|list|join(', ') }}{% else %}No compliance mappings generated{% endif %}</td></tr>
+      <tr><th>Usage Notice</th><td>This report is intended for authorized security testing, lab use, and defensive validation only.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Confidential - Authorized use only</span>
+    {% if brand_logo_path %}<img src="{{ brand_logo_path }}" alt="ARES">{% endif %}
+  </div>
+</main>
+</body>
+</html>"""
+
+_HTML_TEMPLATE = _PROFESSIONAL_REPORT_TEMPLATE
+_PDF_TEMPLATE = _PROFESSIONAL_REPORT_TEMPLATE
+
+
 class ReportDependencyError(RuntimeError):
     """Raised when an optional report backend is unavailable."""
 
@@ -996,6 +1608,19 @@ class ReportGenerator:
                 "remediation_sla": REMEDIATION_SLA,
             },
             "executive_summary": ctx["exec_summary"],
+            "engagement_overview": ctx["report_scope"],
+            "methodology": ctx["methodology"],
+            "key_findings": [
+                {
+                    "id": f.id,
+                    "title": f.title,
+                    "severity": f.severity.value,
+                    "module_id": f.module_id,
+                    "mitre_technique": f.mitre_technique,
+                }
+                for f in ctx["key_findings"]
+            ],
+            "remediation_roadmap": ctx["remediation_roadmap"],
             "mitre_coverage": ctx["mitre_map"],
             "attack_timeline": [
                 {
@@ -1061,6 +1686,12 @@ class ReportGenerator:
         self, campaign: Campaign, graph_json: dict[str, Any] | None
     ) -> Path:
         ctx = build_report_context(campaign, graph_json)
+        lines = _render_markdown_report(campaign, ctx)
+        out = self._out(campaign, "md")
+        out.write_text("\n".join(lines), encoding="utf-8")
+        logger.info("report_generated", fmt="markdown", path=str(out))
+        return out
+
         lines: list[str] = [
             f"# ARES Report — {campaign.name}\n",
             f"> **Client:** {campaign.client} · **Operator:** {campaign.operator} · **Generated:** {ctx['generated_at']}",
@@ -1163,6 +1794,7 @@ class ReportGenerator:
                     "--no-first-run",
                     "--no-default-browser-check",
                     "--print-to-pdf-no-header",
+                    "--no-pdf-header-footer",
                     f"--user-data-dir={profile_dir}",
                     f"--print-to-pdf={str(pdf_path.resolve())}",
                     html_path.resolve().as_uri(),
