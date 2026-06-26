@@ -19,10 +19,62 @@ Roles:
 
 | Role | Meaning |
 | --- | --- |
-| `Team Lead` | Admin/operator lead. Can manage users, API keys, high-risk actions, and campaign deletion. |
-| `Operator` | Runs normal modules and campaign workflows. |
-| `Recon` | Lower-risk read and recon workflows. |
-| `Reporter` | Read-only reporting and review. |
+| `Team Lead` | Admin/operator lead. Full API access, user registration, security audit, campaign deletion, high-noise authorization, and normal operator work. |
+| `Operator` | Day-to-day operator. Can run normal campaign/module/report workflows but cannot register users. |
+| `Recon` | Read-heavy recon identity. The backend module permission matrix marks enumeration, fingerprint, and network modules as recon-safe; main dashboard execution paths are still operator-gated. |
+| `Reporter` | Read-only reporting and review. No module execution or user administration. |
+
+Role names in API requests must use lowercase values: `team_lead`,
+`operator`, `recon`, or `reporter`.
+
+### Creating Users And Assigning Roles
+
+The first account is created automatically:
+
+- Username: `admin`.
+- Role: `team_lead`.
+- Password source: `ARES_DEFAULT_ADMIN_PASSWORD`.
+
+Change the bootstrap password from the `Security` page after first login.
+
+Additional users are created by a `team_lead` through `POST /auth/register`.
+The dashboard currently shows users in the `Security` page, but it does not
+include a role editor. In the current release, the role is assigned when the
+account is created.
+
+PowerShell example:
+
+```powershell
+$token = (Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/token `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
+
+$headers = @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/register `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body (@{
+    username = "bob"
+    password = "StrongPass1!"
+    role = "operator"
+  } | ConvertTo-Json)
+```
+
+Password rules:
+
+- Minimum 12 characters.
+- At least one uppercase letter.
+- At least one lowercase letter.
+- At least one digit.
+- At least one special character.
+
+To review users, open `Security` as a `team_lead` or call
+`GET /security/users` with a team-lead token.
 
 ## Pages
 
@@ -210,6 +262,14 @@ Use it for:
 - Delete API keys.
 - Review security audit output.
 - Review users.
+
+User management notes:
+
+- Only `team_lead` can create users.
+- The Security page lists users for review.
+- Assign a role by passing `role` to `POST /auth/register`.
+- The current release does not expose dashboard role editing for existing
+  users.
 
 API key behavior:
 

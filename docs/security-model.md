@@ -126,12 +126,42 @@ Tokens are issued by `POST /auth/token` with valid operator credentials (bcrypt-
 
 ### Authorization
 
-| Role | Endpoints |
-|------|-----------|
-| `team_lead` | All endpoints |
-| `operator` | `/campaign`, `/module`, `/artifacts`, `/report` |
-| `recon` | Read-only + enumeration module endpoints |
-| `reporter` | Read-only: `/campaign/{id}`, `/report` |
+ARES uses four account roles. Role values are lowercase in API requests:
+`team_lead`, `operator`, `recon`, and `reporter`.
+
+| Role | Intended use | Access model |
+|------|--------------|--------------|
+| `team_lead` | Engagement lead or local administrator. | Full API access, user registration, security audit, campaign deletion, restricted authorization, and normal operator work. |
+| `operator` | Day-to-day operator. | Campaign workflows, module execution, reports, graph, artifacts, and standard validation flows. Cannot register users. |
+| `recon` | Low-risk review/recon identity. | Read-heavy access. The module permission matrix marks enumeration, fingerprint, and network modules as recon-safe, but the main dashboard execution endpoints are still operator-gated in this release. |
+| `reporter` | Reviewer or stakeholder. | Read-only campaign/report/graph-style access. No module execution and no user administration. |
+
+The first account is bootstrapped as:
+
+| Username | Role | Password source |
+|----------|------|-----------------|
+| `admin` | `team_lead` | `ARES_DEFAULT_ADMIN_PASSWORD` |
+
+Additional accounts are created by a `team_lead` through `POST /auth/register`.
+The role is assigned at creation time:
+
+```http
+POST /auth/register
+Authorization: Bearer <team-lead-token>
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "StrongPass1!",
+  "role": "operator"
+}
+```
+
+Valid role values are `team_lead`, `operator`, `recon`, and `reporter`.
+Passwords must be at least 12 characters and include uppercase, lowercase,
+numeric, and special-character content. The Security dashboard can list users,
+but the current release does not expose a dashboard role editor for changing
+an existing account's role.
 
 ### Rate limiting
 

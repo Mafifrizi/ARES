@@ -183,6 +183,51 @@ See [docs/modules.md](docs/modules.md).
 
 See [docs/security-model.md](docs/security-model.md).
 
+### User Roles And Accounts
+
+ARES creates the first `admin` account automatically when the user table is
+empty. That bootstrap account is assigned the `team_lead` role and uses the
+password provided in `ARES_DEFAULT_ADMIN_PASSWORD`. Change that password after
+the first login.
+
+Roles are assigned when a `team_lead` creates a user:
+
+| Role | Intended use | Practical access |
+| --- | --- | --- |
+| `team_lead` | Engagement lead or local administrator. | Full API access, user registration, security audit, campaign deletion, high-noise authorization, and normal operator work. |
+| `operator` | Day-to-day operator account. | Campaign workflows, module execution, reports, graph, artifacts, and standard validation flows. Cannot register users. |
+| `recon` | Low-risk review/recon identity. | Read-heavy access. The internal module permission matrix marks enumeration, fingerprint, and network modules as recon-safe, but the main dashboard execution endpoints are still operator-gated. |
+| `reporter` | Report reviewer or stakeholder account. | Read-only access to campaign/report/graph-style data. No module execution and no user administration. |
+
+Create additional users through the API while logged in as `team_lead`:
+
+```powershell
+$token = (Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/token `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
+
+$headers = @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/register `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body (@{
+    username = "alice"
+    password = "StrongPass1!"
+    role = "operator"
+  } | ConvertTo-Json)
+```
+
+Valid role values are exactly `team_lead`, `operator`, `recon`, and `reporter`.
+Passwords must be at least 12 characters and include uppercase, lowercase,
+number, and special-character content. The current dashboard lists users in the
+Security page, but role assignment is done at account creation time through
+`POST /auth/register`.
+
 ### Reporting
 
 - HTML, Markdown, and JSON report output.

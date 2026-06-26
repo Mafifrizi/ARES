@@ -64,6 +64,45 @@ Create a new user. Requires `team_lead` role.
 { "username": "bob", "password": "StrongPass1!", "role": "operator" }
 ```
 
+Valid roles:
+
+| Role | Intended use |
+| --- | --- |
+| `team_lead` | Engagement lead/admin. Full API access, user registration, security audit, restricted authorization, campaign deletion, and normal operator work. |
+| `operator` | Day-to-day operator. Campaign/module/report workflows. Cannot register users. |
+| `recon` | Read-heavy recon identity. Internal module permissions mark enumeration, fingerprint, and network modules as recon-safe; main dashboard execution remains operator-gated. |
+| `reporter` | Read-only reporting/review account. No module execution or user administration. |
+
+Password requirements: minimum 12 characters with uppercase, lowercase, digit,
+and special-character content.
+
+PowerShell example:
+
+```powershell
+$token = (Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/token `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
+
+$headers = @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8080/auth/register `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body (@{
+    username = "bob"
+    password = "StrongPass1!"
+    role = "operator"
+  } | ConvertTo-Json)
+```
+
+The current dashboard lists users on the Security page, but user role
+assignment is done through this registration endpoint when the account is
+created.
+
 ---
 
 ### `POST /auth/change-password`
