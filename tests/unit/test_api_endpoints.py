@@ -631,6 +631,99 @@ class TestModuleRunEndpoint:
         assert [entry.cidr for entry in campaign.scope] == ["127.0.0.1/32"]
         assert campaign.targets == ["127.0.0.1"]
 
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_module_run_updates_telemetry_snapshot(
+        self, aclient: Any, monkeypatch: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+        import ares.telemetry.collector as telemetry
+
+        telemetry._global_collector = telemetry.TelemetryCollector()
+
+        class FakeRegistry:
+            def get(self, module_id: str) -> Any:
+                return object
+
+        class FakeFinding:
+            false_positive = False
+            severity = "low"
+            cvss_score = 0.0
+            cvss_vector = ""
+            trace_id = ""
+
+        class FakeResult:
+            findings: list[Any] = [FakeFinding()]
+            status = "done"
+            duration_ms = 42.5
+
+            def model_dump(self) -> dict[str, Any]:
+                return {
+                    "module_id": "demo.telemetry",
+                    "status": "done",
+                    "findings": [],
+                    "validation_results": [],
+                    "raw_output": {},
+                    "error": "",
+                    "duration_ms": self.duration_ms,
+                }
+
+        class FakeEngine:
+            registry = FakeRegistry()
+
+            async def run_module(
+                self,
+                module_id: str,
+                campaign: Any,
+                params: dict[str, Any],
+                actor_role: str = "",
+            ) -> FakeResult:
+                return FakeResult()
+
+        db.is_access_token_revoked.return_value = False
+        db.save_finding = AsyncMock()
+        db.get_campaign.return_value = {
+            "id": "camp-telemetry",
+            "name": "Telemetry",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "stealth",
+            "status": "created",
+            "scope_json": '[{"cidr": "127.0.0.1/32", "description": ""}]',
+            "targets_json": '["127.0.0.1"]',
+            "notes": "",
+            "created_at": "2026-06-27 02:15:19",
+            "updated_at": "2026-06-27 02:15:19",
+        }
+        monkeypatch.setattr(
+            "ares.api.server.enrich_finding_with_cvss",
+            lambda finding: finding,
+            raising=False,
+        )
+        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        try:
+            r = await c.post(
+                "/modules/demo.telemetry/run",
+                json={
+                    "campaign_id": "camp-telemetry",
+                    "params": {"target": "127.0.0.1"},
+                    "dry_run": False,
+                },
+                headers=_auth("admin", "team_lead"),
+            )
+            t = await c.get("/telemetry", headers=_auth("admin", "team_lead"))
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+            telemetry._global_collector = None
+
+        assert r.status_code == 200
+        assert t.status_code == 200
+        snapshot = t.json()
+        assert snapshot["modules"]["total"] == 1
+        assert snapshot["modules"]["success"] == 1
+        assert snapshot["findings"] == 1
+        assert snapshot["latency_ms"]["p50"] == 42.5
+
 
 class TestReportEndpoints:
     def setup_method(self) -> None:

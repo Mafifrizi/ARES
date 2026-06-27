@@ -61,6 +61,20 @@ function useAuth(): AuthState {
 const REQUIRED_FIELD_MESSAGE = "This field is required.";
 
 type ValidatableElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type TelemetryMetricMap = Record<string, number | string | undefined>;
+interface TelemetrySnapshot {
+  modules?: TelemetryMetricMap;
+  queue?: TelemetryMetricMap;
+  workers?: TelemetryMetricMap;
+  latency_ms?: TelemetryMetricMap;
+  throughput?: TelemetryMetricMap;
+  findings?: number;
+  credentials?: number;
+  hosts?: TelemetryMetricMap;
+  campaign_id?: string;
+  timestamp?: number;
+  [key: string]: unknown;
+}
 
 function setRequiredMessage<T extends ValidatableElement>(event: FormEvent<T>) {
   event.currentTarget.setCustomValidity(REQUIRED_FIELD_MESSAGE);
@@ -277,6 +291,7 @@ function OverviewPage() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+  const snapshot = telemetry.data as TelemetrySnapshot | undefined;
   return (
     <Page title="Overview">
       <div className="grid gap-4 md:grid-cols-3">
@@ -284,7 +299,7 @@ function OverviewPage() {
         <Stat title="Campaigns" value={String(campaigns.data?.length ?? 0)} icon={<ListChecks size={18} />} />
         <Stat title="Telemetry" value={telemetry.isSuccess ? "online" : "pending"} icon={<BarChart3 size={18} />} />
       </div>
-      <DataPanel title="Telemetry Snapshot" data={telemetry.data} />
+      <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
       <CampaignTable campaigns={campaigns.data ?? []} />
     </Page>
   );
@@ -879,6 +894,118 @@ function Stat({ title, value, icon }: { title: string; value: string; icon: Reac
         <div className="mt-1 text-2xl font-bold">{value}</div>
       </div>
       <div className="text-red-700">{icon}</div>
+    </div>
+  );
+}
+
+function metricNumber(map: TelemetryMetricMap | undefined, key: string): number {
+  const value = map?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function formatMetric(value: number, suffix = ""): string {
+  if (!Number.isFinite(value)) return `0${suffix}`;
+  if (Number.isInteger(value)) return `${value}${suffix}`;
+  return `${value.toFixed(1)}${suffix}`;
+}
+
+function formatTimestamp(value: number | undefined): string {
+  if (!value) return "No runtime sample yet";
+  return new Date(value * 1000).toLocaleString();
+}
+
+function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; loading: boolean }) {
+  const total = metricNumber(snapshot?.modules, "total");
+  const success = metricNumber(snapshot?.modules, "success");
+  const failed = metricNumber(snapshot?.modules, "failed");
+  const findings = typeof snapshot?.findings === "number" ? snapshot.findings : 0;
+  const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
+  const errorRate = metricNumber(snapshot?.modules, "error_rate");
+  const p95 = metricNumber(snapshot?.latency_ms, "p95");
+  const queueDepth = metricNumber(snapshot?.queue, "depth");
+  const activeWorkers = metricNumber(snapshot?.workers, "active");
+  const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
+  const hostsDiscovered = metricNumber(snapshot?.hosts, "discovered");
+  const hostsOwned = metricNumber(snapshot?.hosts, "owned");
+  const tasksPerMin = metricNumber(snapshot?.throughput, "tasks_per_min");
+
+  return (
+    <section className="panel p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800">Telemetry Snapshot</h3>
+          <p className="text-sm text-slate-500">
+            {loading ? "Waiting for runtime metrics" : `Last sample: ${formatTimestamp(snapshot?.timestamp)}`}
+          </p>
+        </div>
+        <span className="badge badge-low">{snapshot ? "online" : "pending"}</span>
+      </div>
+
+      <div className="telemetry-grid">
+        <TelemetryMetric label="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} />
+        <TelemetryMetric label="Findings" value={formatMetric(findings)} detail="confirmed runtime observations" />
+        <TelemetryMetric label="Queue depth" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} />
+        <TelemetryMetric label="Hosts" value={`${hostsDiscovered} / ${hostsOwned}`} detail="discovered / owned" />
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <TelemetryBar label="Success rate" value={successRate} />
+        <TelemetryBar label="Error rate" value={Math.min(100, Math.round(errorRate * 100))} tone="danger" />
+        <div className="telemetry-strip">
+          <span>P95 latency</span>
+          <strong>{formatMetric(p95, " ms")}</strong>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="telemetry-strip">
+          <span>Throughput</span>
+          <strong>{formatMetric(tasksPerMin)} tasks/min</strong>
+        </div>
+        <div className="telemetry-strip">
+          <span>Worker health</span>
+          <strong>{unhealthyWorkers === 0 ? "healthy" : `${unhealthyWorkers} unhealthy`}</strong>
+        </div>
+        <div className="telemetry-strip">
+          <span>Scope</span>
+          <strong>{snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</strong>
+        </div>
+      </div>
+
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-600">Raw telemetry data</summary>
+        <pre className="json-box mt-2">{JSON.stringify(snapshot ?? {}, null, 2)}</pre>
+      </details>
+    </section>
+  );
+}
+
+function TelemetryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="telemetry-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: number; tone?: "ok" | "danger" }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div className="telemetry-bar">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <strong>{clamped}%</strong>
+      </div>
+      <div className="telemetry-bar-track">
+        <div className={tone === "danger" ? "telemetry-bar-fill danger" : "telemetry-bar-fill"} style={{ width: `${clamped}%` }} />
+      </div>
     </div>
   );
 }

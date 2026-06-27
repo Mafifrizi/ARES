@@ -316,6 +316,13 @@ Generate a campaign report.
 
 Supported formats: `html` | `pdf` | `json` | `markdown`
 
+PDF generation uses the report renderer internally and returns a PDF artifact
+for `format: "pdf"`. The server uses WeasyPrint when available and can fall
+back to a local Chromium-compatible browser in local environments where
+WeasyPrint native libraries are not installed. HTML and PDF reports render
+finding evidence as readable tables and key-value rows where possible. Use
+`json` output when you need raw machine-readable report data.
+
 **Response:** `200 OK`
 ```json
 { "filename": "campaign-id_Corp_20260609_1200.html", "format": "html" }
@@ -339,12 +346,22 @@ traversal, and symlink escapes are rejected.
 
 Get current operational telemetry snapshot.
 
+Telemetry is an in-memory runtime view of the current API process. It records
+API-triggered module runs, success/failure counts, latency, throughput, queue
+depth, worker health, findings, hosts, and other operator metrics. It is useful
+for live monitoring and demos, but it is not durable campaign history and
+resets when the API process restarts. Use the database-backed campaign,
+findings, and report endpoints for permanent records.
+
 ```json
 {
-  "modules":    { "total": 42, "success": 38, "failed": 4 },
+  "modules":    { "total": 42, "success": 38, "failed": 4, "error_rate": 0.095 },
+  "queue":      { "depth": 0 },
+  "workers":    { "active": 0, "unhealthy": 0 },
   "findings":   17,
   "hosts":      { "discovered": 12, "owned": 3 },
-  "latency_ms": { "p50": 1200.0, "p95": 8400.0, "p99": 15000.0 }
+  "latency_ms": { "p50": 1200.0, "p95": 8400.0, "p99": 15000.0 },
+  "throughput": { "tasks_per_min": 3.0, "bytes_sent": 0, "bytes_recv": 0 }
 }
 ```
 

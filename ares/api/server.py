@@ -1196,6 +1196,23 @@ async def run_module(
         actor.username, "module_run", f"module={module_id}", body.campaign_id, module_id
     )
 
+    # Keep the operational telemetry panel in sync with API-triggered executions.
+    try:
+        from ares.telemetry.collector import get_collector
+
+        status = str(getattr(result, "status", "")).lower()
+        success = status in {"modulestatus.done", "done", "success", "partial"}
+        get_collector().record_execution(
+            module_id,
+            float(getattr(result, "duration_ms", 0.0) or 0.0),
+            success=success,
+            campaign_id=body.campaign_id,
+        )
+        if result.findings:
+            get_collector().record_finding(len(result.findings))
+    except Exception as exc:
+        logger.debug("telemetry_record_failed", module_id=module_id, error=str(exc))
+
     # Enrich findings with CVSS scores and trace ID before persisting
     from ares.core.cvss import enrich_finding_with_cvss
     from ares.core.tracing import get_current_trace_id

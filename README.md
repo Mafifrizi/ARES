@@ -14,7 +14,7 @@ and professional report generation.
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/Unit%20Suite-1078%20passing-22C55E?style=for-the-badge)](tests/)
+[![Status](https://img.shields.io/badge/Unit%20Suite-1095%20passing-22C55E?style=for-the-badge)](tests/)
 
 **Built for labs, internal security teams, and authorized engagements only.**
 
@@ -89,10 +89,10 @@ Dashboard areas:
 
 | Page | Purpose |
 | --- | --- |
-| Overview | Health, telemetry, and campaign summary. |
+| Overview | Health, operator telemetry metrics, and campaign summary. |
 | Campaigns | Create, inspect, compare, restore, dry-run, and delete campaigns. |
 | Modules | Browse the module catalog and run backend-generated parameter forms. |
-| Reports | Generate, list, and download authenticated campaign reports. |
+| Reports | Generate, list, and download authenticated campaign reports with readable evidence tables. |
 | Graph | Review graph data, attack paths, and BloodHound ingest. |
 | Templates | Generate repeatable execution plans. |
 | Strategy | Start or review authorized goal-based planning. |
@@ -105,7 +105,9 @@ Recommended dashboard workflow:
 1. Start in `Campaigns` and create a campaign with a name, client, targets,
    and scope CIDRs.
 2. Use `Modules` to search for a module, pick the campaign, fill the generated
-   parameters, and run it in dry-run mode first.
+   parameters, and run it in dry-run mode first. The page shows a running state
+   while execution is in progress and surfaces scope or validation errors in the
+   result panel.
 3. Use `Graph` only after a campaign exists. To ingest BloodHound or
    SharpHound data, enter a JSON file or directory path that is local to the
    machine running the ARES API, then click `Ingest`.
@@ -117,7 +119,8 @@ Recommended dashboard workflow:
    `Engage`. RBAC and backend authorization checks still apply.
 6. Use `Reports` to generate HTML, PDF, Markdown, or JSON output for a campaign.
    PDF generation writes the PDF artifact directly; HTML is generated only when
-   you choose the HTML format.
+   you choose the HTML format. Report evidence is rendered as readable tables
+   and key-value rows where possible instead of raw JSON blobs.
 7. Use `Security` for account administration. API keys are for scripts and
    integrations; the Security Audit panel reports dependency-audit status for
    the ARES environment, not findings from a target network.
@@ -134,6 +137,15 @@ Common page inputs and outputs:
 | Security Audit | No target input; team-lead access only. | Dependency-audit snapshot, scanner status, and environment warnings. | You want to verify the ARES runtime dependencies and security posture. |
 | EDR/OPSEC | Technique ID, EDR vendor, version, outcome, campaign, and notes. | Historical success-rate telemetry and outcome records. | You want to track defensive visibility and tune OPSEC decisions from controlled tests. |
 | Graph Ingest | Campaign plus local BloodHound/SharpHound JSON path. | Campaign graph nodes, links, and attack-path candidates. | You already collected BloodHound-style data and want it mapped into ARES. |
+
+Telemetry note:
+
+The Overview telemetry panel is an in-memory operational snapshot for the
+currently running ARES API process. It shows module run totals, success/failure
+counts, latency, throughput, findings, hosts, queue depth, and worker health. It
+is useful while operating or recording a demo, but it is not the durable
+campaign database and resets when the API process restarts. Use Campaigns,
+Findings, and Reports for permanent engagement history.
 
 Planning modes:
 
@@ -231,9 +243,12 @@ Security page, but role assignment is done at account creation time through
 ### Reporting
 
 - HTML, Markdown, and JSON report output.
-- PDF output when optional PDF dependencies are installed.
-- ARES branding in generated reports.
-- Findings, evidence, severity, timeline, and remediation-oriented sections.
+- PDF output through WeasyPrint when available, with a Chromium-compatible
+  browser fallback for local environments that do not have WeasyPrint native
+  libraries installed.
+- ARES branding in generated reports with footer-safe page spacing.
+- Findings, readable evidence tables, severity, timeline, MITRE, and
+  remediation-oriented sections.
 - Authenticated report download through the dashboard.
 
 ### Validation Lab
@@ -479,9 +494,10 @@ See [docs/architecture.md](docs/architecture.md) and
 Current local verification:
 
 ```text
-1078 unit tests passed
+1095 unit tests passed
 npm run build passed
 validation lab passed
+PDF report visual QA passed through browser fallback and Poppler render checks
 ```
 
 Runtime features confirmed locally:
@@ -490,6 +506,8 @@ Runtime features confirmed locally:
 - Health endpoint returns connected DB.
 - Login, password change, API key lifecycle, and campaign cleanup work.
 - Report generation and authenticated download work.
+- PDF report layout, footer branding, and evidence rendering work.
+- Overview telemetry records API-triggered module runs in the current process.
 - Campaign delete removes stored child data and updates the UI immediately.
 
 ---

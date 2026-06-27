@@ -276,6 +276,43 @@ def _build_remediation_roadmap(findings: list[Any]) -> list[dict[str, Any]]:
     return roadmap
 
 
+def _evidence_rows(evidence: Any) -> list[dict[str, str]]:
+    """Normalize finding evidence into report-friendly key/value rows."""
+    if isinstance(evidence, dict):
+        items = evidence.items()
+    elif isinstance(evidence, list):
+        items = ((f"item_{index + 1}", value) for index, value in enumerate(evidence))
+    else:
+        items = (("evidence", evidence),)
+
+    rows: list[dict[str, str]] = []
+    for key, value in items:
+        rendered = _format_evidence_value(value)
+        rows.append({"key": str(key).replace("_", " ").title(), "value": rendered})
+    return rows
+
+
+def _format_evidence_value(value: Any) -> str:
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            label = str(key).replace("_", " ").upper()
+            if isinstance(item, dict):
+                nested = "; ".join(
+                    f"{str(nested_key).replace('_', ' ')}: {_format_evidence_value(nested_value)}"
+                    for nested_key, nested_value in item.items()
+                )
+                lines.append(f"{label}: {nested}")
+            elif isinstance(item, (list, tuple, set)):
+                lines.append(f"{label}: {', '.join(str(part) for part in item)}")
+            else:
+                lines.append(f"{label}: {item}")
+        return "\n".join(lines)
+    if isinstance(value, (list, tuple, set)):
+        return "\n".join(str(item) for item in value)
+    return str(value)
+
+
 def _build_mitre_map(findings: list[Any]) -> dict[str, list[dict[str, Any]]]:
     """Group findings by MITRE tactic and demonstrated technique."""
     tactic_map: dict[str, list[dict[str, Any]]] = {t: [] for t in MITRE_TACTIC_ORDER}
@@ -970,6 +1007,7 @@ body {
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
+main { padding-bottom: 18mm; }
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -1208,6 +1246,7 @@ body {
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
+main { padding-bottom: 18mm; }
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -1269,6 +1308,8 @@ p { margin: 6px 0; }
   padding: 10px 12px;
 }
 table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
 th, td {
   border-bottom: 1px solid #e2e8f0;
   padding: 6px 5px;
@@ -1331,6 +1372,25 @@ th {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.evidence-table {
+  margin-top: 6px;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.evidence-table th {
+  width: 30%;
+  background: #f8fafc;
+  color: #334155;
+  font-family: Consolas, monospace;
+  font-size: 8.5px;
+}
+.evidence-table td {
+  font-family: Consolas, monospace;
+  font-size: 8.5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .remediation {
   margin-top: 6px;
   padding: 7px;
@@ -1344,14 +1404,16 @@ th {
 .footer {
   position: fixed;
   right: 14mm;
-  bottom: 7mm;
+  bottom: 5mm;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #64748b;
   font-size: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 2px 0 0 6px;
 }
-.footer img { width: 82px; height: auto; object-fit: contain; }
+.footer img { width: 54px; height: auto; object-fit: contain; }
 </style>
 </head>
 <body>
@@ -1492,7 +1554,15 @@ th {
       <span class="sev {{ f.severity.value }}">{{ f.severity.value.upper() }}</span>
     </div>
     <p>{{ f.description }}</p>
-    {% if f.evidence %}<div class="evidence">{{ f.evidence|tojson }}</div>{% endif %}
+    {% if f.evidence %}
+    <table class="evidence-table">
+      <tbody>
+        {% for row in f.evidence|evidence_rows %}
+        <tr><th>{{ row.key }}</th><td>{{ row.value }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
     {% if f.remediation %}<div class="remediation"><strong>Remediation:</strong> {{ f.remediation }}</div>{% endif %}
     <div class="small">SLA: {{ sla[f.severity.value] }} days - Confidence: {{ "%.0f"|format(f.confidence*100) }}%</div>
   </article>
@@ -1669,6 +1739,7 @@ class ReportGenerator:
     ) -> str:
         env = Environment(loader=BaseLoader(), autoescape=True)
         env.filters["tojson"] = lambda v: json.dumps(v, indent=2, default=str)
+        env.filters["evidence_rows"] = _evidence_rows
         return env.from_string(template).render(
             **build_report_context(campaign, graph_json)
         )

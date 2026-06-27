@@ -172,6 +172,71 @@ textarea {
   font-size: 0.78rem;
 }
 
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #e2e8f0;
+}
+
+.telemetry-metric,
+.telemetry-strip,
+.telemetry-bar {
+  background: #ffffff;
+  padding: 0.75rem;
+}
+
+.telemetry-metric span,
+.telemetry-strip span,
+.telemetry-bar span {
+  display: block;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.telemetry-metric strong,
+.telemetry-strip strong,
+.telemetry-bar strong {
+  display: block;
+  margin-top: 0.15rem;
+  color: #0f172a;
+  font-size: 1.15rem;
+}
+
+.telemetry-metric small {
+  display: block;
+  margin-top: 0.1rem;
+  color: #64748b;
+  font-size: 0.76rem;
+}
+
+.telemetry-strip,
+.telemetry-bar {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+
+.telemetry-bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.telemetry-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #059669;
+}
+
+.telemetry-bar-fill.danger {
+  background: #b91c1c;
+}
+
 .nav-link {
   display: flex;
   min-height: 38px;

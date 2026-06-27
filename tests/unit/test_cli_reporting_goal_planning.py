@@ -158,6 +158,38 @@ class TestReportGenerator:
             assert "<!DOCTYPE html" in html or "<html" in html
             assert campaign.name in html or campaign.client in html
 
+    def test_generate_html_report_uses_readable_evidence_table(self):
+        from ares.modules.reporting.report_gen import ReportGenerator
+
+        campaign = _make_campaign(n_findings=1)
+        campaign.findings[0].evidence = {
+            "host": "10.0.0.1",
+            "port": 8888,
+            "tech": "Apache",
+            "version": "2.4.49",
+            "compliance_mapping": {"PCI-DSS": ["8.2.3", "8.3.6"]},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = ReportGenerator(output_dir=tmpdir)
+            path = gen.generate(campaign, fmt="html")
+            html = path.read_text()
+            assert 'class="evidence-table"' in html
+            assert "<th>Host</th><td>10.0.0.1</td>" in html
+            assert "<th>Compliance Mapping</th><td>PCI-DSS:" in html
+            assert '"host": "10.0.0.1"' not in html
+            assert '"PCI-DSS":' not in html
+
+    def test_report_footer_reserves_print_safe_space(self):
+        from ares.modules.reporting.report_gen import ReportGenerator
+
+        campaign = _make_campaign(n_findings=0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = ReportGenerator(output_dir=tmpdir)
+            path = gen.generate(campaign, fmt="html")
+            html = path.read_text()
+            assert "padding-bottom: 18mm" in html
+            assert "width: 54px" in html
+
     def test_generate_markdown_report(self):
         from ares.modules.reporting.report_gen import ReportGenerator
         campaign = _make_campaign(n_findings=2)
