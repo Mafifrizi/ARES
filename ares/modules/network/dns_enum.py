@@ -87,7 +87,10 @@ class DnsEnumModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
         target = getattr(ctx, "target", ctx.params.get("target", ""))
         domain = ctx.params.get("domain") or target
-        findings, raw = await self.run(target=target, domain=domain, **ctx.params)
+        params = dict(ctx.params)
+        params.pop("target", None)
+        params.pop("domain", None)
+        findings, raw = await self.run(target=target, domain=domain, **params)
         return ModuleResult(
             status="success" if (findings or raw.get("dns_records")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

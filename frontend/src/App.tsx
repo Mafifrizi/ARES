@@ -7,6 +7,7 @@ import {
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  Loader2,
   LogOut,
   Play,
   Radio,
@@ -29,6 +30,7 @@ import {
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ApiError,
   api,
   buildModuleRunPayload,
   campaignEventsPath,
@@ -429,6 +431,8 @@ function ModulesPage() {
   });
   const list = modules.data ?? [];
   const selected = list.find((item) => item.id === selectedId);
+  const selectedCampaign = (campaigns.data ?? []).find((item) => item.id === campaignId);
+  const scopeWarning = moduleScopeWarning(selected, selectedCampaign, params, dryRun);
   const categories = unique(list.map((item) => item.category || ""));
   const visible = list.filter((item) => {
     const haystack = `${item.id} ${item.name ?? ""} ${item.description ?? ""} ${item.mitre ?? ""}`.toLowerCase();
@@ -439,7 +443,8 @@ function ModulesPage() {
     );
   });
   const sensitive = isSensitiveModule(selected);
-  const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed);
+  const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending;
+  const runBlocked = !canRun || Boolean(scopeWarning);
 
   useEffect(() => {
     setParams({});
@@ -487,8 +492,23 @@ function ModulesPage() {
           <h2 className="mb-3 text-base font-bold">Run Module</h2>
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
           {selected ? (
-            <form className="mt-4 grid gap-3" onSubmit={(e) => { e.preventDefault(); run.mutate(); }}>
+            <form
+              aria-busy={run.isPending}
+              className="mt-4 grid gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (runBlocked) {
+                  return;
+                }
+                run.mutate();
+              }}
+            >
               <ParamForm schema={selected.param_schema} values={params} onChange={setParams} />
+              {scopeWarning && (
+                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+                  {scopeWarning}
+                </p>
+              )}
               <label className="flex items-center gap-2 text-sm font-semibold">
                 <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
                 Dry run
@@ -499,9 +519,23 @@ function ModulesPage() {
                   Confirm authorized high-noise or sensitive execution
                 </label>
               )}
-              <button className="btn btn-primary" type="submit" disabled={!canRun}>
-                <Play size={16} /> Run
+              <button className="btn btn-primary" type="submit" disabled={runBlocked}>
+                {run.isPending ? (
+                  <>
+                    <Loader2 className="spin" size={16} /> Running...
+                  </>
+                ) : (
+                  <>
+                    <Play size={16} /> Run
+                  </>
+                )}
               </button>
+              {run.isPending && (
+                <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900" role="status" aria-live="polite">
+                  <Loader2 className="spin shrink-0" size={18} />
+                  Module execution in progress. Keep this page open while ARES validates the target and collects results.
+                </div>
+              )}
             </form>
           ) : (
             <EmptyState text="Select a module" />
@@ -946,7 +980,15 @@ function ParamForm({
           <ParamInput
             field={field}
             value={values[name]}
-            onChange={(value) => onChange({ ...values, [name]: value })}
+            onChange={(value) => {
+              const next = { ...values };
+              if (!field.required && isEmptyParamValue(value)) {
+                delete next[name];
+              } else {
+                next[name] = value;
+              }
+              onChange(next);
+            }}
           />
           {field.description && <span className="mt-1 block text-xs text-slate-600">{field.description}</span>}
         </label>
@@ -974,6 +1016,20 @@ function ParamInput({
       />
     );
   }
+  if (field.type === "array") {
+    return (
+      <textarea
+        className="field mt-1 min-h-20"
+        value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
+        required={field.required}
+        onInvalid={setRequiredMessage}
+        onChange={(event) => {
+          clearValidationMessage(event);
+          onChange(parseArrayParam(event.target.value, field));
+        }}
+      />
+    );
+  }
   const type = field.secret ? "password" : field.type === "integer" || field.type === "number" ? "number" : "text";
   return (
     <input
@@ -987,10 +1043,10 @@ function ParamInput({
       onChange={(event) => {
         clearValidationMessage(event);
         if (type === "number") {
-          onChange(event.target.value === "" ? "" : Number(event.target.value));
+          onChange(event.target.value === "" ? undefined : Number(event.target.value));
           return;
         }
-        onChange(event.target.value);
+        onChange(event.target.value === "" ? undefined : event.target.value);
       }}
     />
   );
@@ -1038,6 +1094,104 @@ function looksLikeScopeEntry(entry: string): boolean {
   }
   const value = Number(prefix);
   return value >= 0 && value <= 32;
+}
+
+function parseArrayParam(value: string, field: ParamField): unknown[] | undefined {
+  const entries = splitLines(value);
+  if (entries.length === 0) {
+    return undefined;
+  }
+  const itemType = field.items?.type ?? "string";
+  if (itemType === "integer" || itemType === "number") {
+    const numericEntries = entries.map((entry) => Number(entry));
+    return numericEntries.every((entry) => Number.isFinite(entry)) ? numericEntries : entries;
+  }
+  return entries;
+}
+
+function isEmptyParamValue(value: unknown): boolean {
+  return value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+function moduleScopeWarning(
+  module: ModuleMeta | undefined,
+  campaign: Campaign | undefined,
+  values: Record<string, unknown>,
+  dryRun: boolean
+): string {
+  if (!module || !campaign || dryRun || !("target" in (module.param_schema ?? {}))) {
+    return "";
+  }
+  const target = typeof values.target === "string" ? values.target.trim() : "";
+  if (!target) {
+    return "";
+  }
+  const scope = campaignScopeEntries(campaign);
+  if (scope.length === 0) {
+    return "Selected campaign has no scope CIDRs. Add a scoped campaign such as 127.0.0.1/32 before running target modules.";
+  }
+  if (isIpv4Address(target) && scope.every(looksLikeScopeEntry) && !scope.some((entry) => ipv4InScope(target, entry))) {
+    return `Target ${target} is outside the selected campaign scope (${scope.join(", ")}).`;
+  }
+  return "";
+}
+
+function campaignScopeEntries(campaign: Campaign): string[] {
+  if (Array.isArray(campaign.scope_cidrs)) {
+    return campaign.scope_cidrs.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+  }
+  const rawScope = campaign.scope;
+  if (Array.isArray(rawScope)) {
+    return rawScope
+      .map((entry) => {
+        if (typeof entry === "string") {
+          return entry;
+        }
+        if (entry && typeof entry === "object" && "cidr" in entry && typeof entry.cidr === "string") {
+          return entry.cidr;
+        }
+        return "";
+      })
+      .filter(Boolean);
+  }
+  if (typeof campaign.scope_json === "string" && campaign.scope_json.trim()) {
+    try {
+      const parsed = JSON.parse(campaign.scope_json) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry) => {
+            if (typeof entry === "string") {
+              return entry;
+            }
+            if (entry && typeof entry === "object" && "cidr" in entry && typeof entry.cidr === "string") {
+              return entry.cidr;
+            }
+            return "";
+          })
+          .filter(Boolean);
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function ipv4InScope(ip: string, cidr: string): boolean {
+  const [network, prefixText = "32"] = cidr.split("/");
+  if (!isIpv4Address(network) || !/^\d{1,2}$/.test(prefixText)) {
+    return false;
+  }
+  const prefix = Number(prefixText);
+  if (prefix < 0 || prefix > 32) {
+    return false;
+  }
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (ipv4ToNumber(ip) & mask) === (ipv4ToNumber(network) & mask);
+}
+
+function ipv4ToNumber(ip: string): number {
+  return ip.split(".").reduce((acc, part) => ((acc << 8) + Number(part)) >>> 0, 0);
 }
 
 function isIpv4Address(value: string): boolean {
@@ -1088,6 +1242,9 @@ function opsecBadge(level?: string): string {
 }
 
 function serializeError(value: unknown): unknown {
+  if (value instanceof ApiError) {
+    return { name: value.name, status: value.status, detail: value.detail };
+  }
   if (value instanceof Error) {
     return { name: value.name, message: value.message };
   }

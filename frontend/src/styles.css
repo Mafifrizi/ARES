@@ -77,6 +77,12 @@ textarea {
   background: #f8fafc;
 }
 
+.btn:disabled,
+.btn:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
 .btn-primary {
   border-color: #991b1b;
   background: #b91c1c;
@@ -87,9 +93,26 @@ textarea {
   background: #991b1b;
 }
 
+.btn-primary:disabled,
+.btn-primary:disabled:hover {
+  border-color: #991b1b;
+  background: #991b1b;
+  color: #ffffff;
+}
+
 .btn-danger {
   border-color: #b91c1c;
   color: #b91c1c;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .badge {

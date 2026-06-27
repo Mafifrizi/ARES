@@ -103,7 +103,9 @@ class HttpFingerprintModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
         target = getattr(ctx, "target", ctx.params.get("target", ""))
-        findings, raw = await self.run(target=target, **ctx.params)
+        params = dict(ctx.params)
+        params.pop("target", None)
+        findings, raw = await self.run(target=target, **params)
         return ModuleResult(
             status="success" if (findings or raw.get("web_fingerprint")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
@@ -113,7 +115,7 @@ class HttpFingerprintModule(BaseModule):
     @trace_module("network.http_fingerprint")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
         target    = kwargs.get("target", "")
-        ports     = kwargs.get("http_ports") or [80, 443, 8080, 8443, 8888]
+        ports     = kwargs.get("ports") or kwargs.get("http_ports") or [80, 443, 8080, 8443, 8888]
         dry_run   = kwargs.get("dry_run", False)
 
         if not target:

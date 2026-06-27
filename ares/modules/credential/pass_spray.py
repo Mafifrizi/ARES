@@ -268,8 +268,11 @@ class PassSprayModule(BaseModule):
         domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
         users    = ctx.params.get("users", [])
         passwords = ctx.params.get("passwords", DEFAULT_SPRAY_PASSWORDS[:1])
+        params = dict(ctx.params)
+        for key in ("target", "domain", "users", "passwords"):
+            params.pop(key, None)
         findings, raw = await self.run(
-            target=target, domain=domain, users=users, passwords=passwords, **ctx.params
+            target=target, domain=domain, users=users, passwords=passwords, **params
         )
         return ModuleResult(
             status="success" if findings else "partial",

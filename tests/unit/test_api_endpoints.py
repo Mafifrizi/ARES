@@ -551,6 +551,87 @@ class TestModuleSchemaEndpoint:
 # ── Reports safety ───────────────────────────────────────────────────────────
 
 
+class TestModuleRunEndpoint:
+    def setup_method(self) -> None:
+        _reset_rate_limiter()
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_module_run_uses_persisted_campaign_scope_json(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        captured: dict[str, Any] = {}
+
+        class FakeRegistry:
+            def get(self, module_id: str) -> Any:
+                return object
+
+        class FakeResult:
+            findings: list[Any] = []
+            status = "success"
+
+            def model_dump(self) -> dict[str, Any]:
+                return {
+                    "module_id": "demo.scope_capture",
+                    "status": "success",
+                    "findings": [],
+                    "validation_results": [],
+                    "raw_output": {},
+                    "error": "",
+                    "duration_ms": 0,
+                }
+
+        class FakeEngine:
+            registry = FakeRegistry()
+
+            async def run_module(
+                self,
+                module_id: str,
+                campaign: Any,
+                params: dict[str, Any],
+                actor_role: str = "",
+            ) -> FakeResult:
+                captured["campaign"] = campaign
+                captured["params"] = params
+                captured["actor_role"] = actor_role
+                return FakeResult()
+
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": "camp-scope-json",
+            "name": "Scope JSON",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "stealth",
+            "status": "created",
+            "scope_json": '[{"cidr": "127.0.0.1/32", "description": ""}]',
+            "targets_json": '["127.0.0.1"]',
+            "notes": "",
+            "created_at": "2026-06-27 02:15:19",
+            "updated_at": "2026-06-27 02:15:19",
+        }
+        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        try:
+            r = await c.post(
+                "/modules/demo.scope_capture/run",
+                json={
+                    "campaign_id": "camp-scope-json",
+                    "params": {"target": "127.0.0.1"},
+                    "dry_run": False,
+                },
+                headers=_auth("admin", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert r.status_code == 200
+        campaign = captured["campaign"]
+        assert [entry.cidr for entry in campaign.scope] == ["127.0.0.1/32"]
+        assert campaign.targets == ["127.0.0.1"]
+
+
 class TestReportEndpoints:
     def setup_method(self) -> None:
         _reset_rate_limiter()

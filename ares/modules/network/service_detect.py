@@ -133,7 +133,10 @@ class ServiceDetectModule(BaseModule):
                                 raw={"dry_run": True})
         target = getattr(ctx, "target", ctx.params.get("target", ""))
         ports  = ctx.params.get("ports", [])
-        findings, raw = await self.run(target=target, ports=ports, **ctx.params)
+        params = dict(ctx.params)
+        params.pop("target", None)
+        params.pop("ports", None)
+        findings, raw = await self.run(target=target, ports=ports, **params)
         return ModuleResult(
             status="success" if (findings or raw.get("service_versions")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

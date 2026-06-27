@@ -76,8 +76,11 @@ class KernelSuggesterModule(BaseModule):
         username = ctx.params.get("username", "")
         password = ctx.params.get("password", "") or ctx.params.get("secret", "")
         key_path = ctx.params.get("key_path", "")
+        params = dict(ctx.params)
+        for key in ("target", "username", "password", "key_path"):
+            params.pop(key, None)
         findings, raw = await self.run(target=target, username=username, password=password,
-                                        key_path=key_path, **ctx.params)
+                                        key_path=key_path, **params)
         return ModuleResult(status="success" if findings else "partial",
                             findings=findings, raw=raw, module_id=self.MODULE_ID,
                             execution_id=getattr(ctx, "execution_id", ""))

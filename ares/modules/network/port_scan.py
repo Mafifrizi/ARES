@@ -123,8 +123,12 @@ class PortScanModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True, "target": getattr(ctx, "target", "")})
-        findings, raw = await self.run(**ctx.params,
-                                        target=getattr(ctx, "target", ctx.params.get("target", "")))
+        params = dict(ctx.params)
+        params.pop("target", None)
+        findings, raw = await self.run(
+            **params,
+            target=getattr(ctx, "target", ctx.params.get("target", "")),
+        )
         return ModuleResult(
             status="success" if (findings or raw.get("open_ports")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

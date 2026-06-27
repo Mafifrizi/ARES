@@ -63,6 +63,29 @@ from ares.db.database import AresDatabase
 logger = get_logger("ares.api.server")
 
 
+def _campaign_from_db_row(row: dict[str, Any]) -> Campaign:
+    data = {k: v for k, v in row.items() if k in Campaign.model_fields}
+    if "scope" not in data and row.get("scope_json"):
+        import json as _json
+
+        try:
+            scope = _json.loads(str(row["scope_json"]))
+            if isinstance(scope, list):
+                data["scope"] = scope
+        except (TypeError, ValueError):
+            data["scope"] = []
+    if "targets" not in data and row.get("targets_json"):
+        import json as _json
+
+        try:
+            targets = _json.loads(str(row["targets_json"]))
+            if isinstance(targets, list):
+                data["targets"] = targets
+        except (TypeError, ValueError):
+            data["targets"] = []
+    return Campaign(**data)
+
+
 def _setup_otel(app: FastAPI, settings: Any) -> None:
     """Initialize OpenTelemetry tracing if endpoint is configured."""
     if not settings.ares_otel_endpoint:
@@ -1143,12 +1166,8 @@ async def run_module(
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(campaign, actor)
 
-    # Reconstruct Campaign object from DB row
-    from ares.core.campaign import Campaign as CampaignModel
-
-    c_obj = CampaignModel(
-        **{k: v for k, v in campaign.items() if k in CampaignModel.model_fields}
-    )
+    # Reconstruct Campaign object from DB row.
+    c_obj = _campaign_from_db_row(campaign)
 
     # Unwrap SecretStr objects → plain strings before handing to modules.
     # Pydantic wraps secret fields after validation; libraries like impacket / ldap3
@@ -1380,10 +1399,10 @@ async def start_autonomous_engagement(
         )
     # Enforce campaign ownership — same as all other campaign endpoints
     await _require_campaign_access(campaign_data, actor)
-    from ares.core.campaign import Campaign
-
     campaign = (
-        Campaign(**campaign_data) if isinstance(campaign_data, dict) else campaign_data
+        _campaign_from_db_row(campaign_data)
+        if isinstance(campaign_data, dict)
+        else campaign_data
     )
 
     async def _run() -> None:
@@ -2009,11 +2028,7 @@ async def run_campaign_plan(
     if body.dry_run:
         return engine.dry_run_plan(plan, body.global_params)
 
-    from ares.core.campaign import Campaign as CampaignModel
-
-    c_obj = CampaignModel(
-        **{k: v for k, v in campaign.items() if k in CampaignModel.model_fields}
-    )
+    c_obj = _campaign_from_db_row(campaign)
     results = await engine.run_plan(plan, c_obj, body.global_params)
     return {
         "campaign_id": campaign_id,

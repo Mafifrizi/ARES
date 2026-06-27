@@ -67,8 +67,11 @@ class CredentialReuseModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
         # Pass vault from ctx — it lives on ctx, NOT in ctx.params
+        params = dict(ctx.params)
+        params.pop("target", None)
+        params.pop("vault", None)
         findings, raw = await self.run(
-            **ctx.params,
+            **params,
             vault=getattr(ctx, "vault", None),
             target=getattr(ctx, "target", ctx.params.get("target", "")),
         )

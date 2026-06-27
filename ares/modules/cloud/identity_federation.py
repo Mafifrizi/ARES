@@ -90,6 +90,12 @@ class CloudIdentityFederationModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "mode": ctx.params.get("mode", "enumerate")},
             )
+        params = dict(ctx.params)
+        for key in (
+            "tenant_id", "client_id", "client_secret", "access_key", "secret_key",
+            "adfs_url", "krbtgt_hash", "domain", "mode",
+        ):
+            params.pop(key, None)
         findings, raw = await self.run(
             tenant_id=ctx.params.get("tenant_id", ""),
             client_id=ctx.params.get("client_id", ""),
@@ -100,7 +106,7 @@ class CloudIdentityFederationModule(BaseModule):
             krbtgt_hash=ctx.params.get("krbtgt_hash", ""),
             domain=ctx.params.get("domain", ""),
             mode=ctx.params.get("mode", "enumerate"),
-            **ctx.params,
+            **params,
         )
         return ModuleResult(
             status="success" if findings else "partial",

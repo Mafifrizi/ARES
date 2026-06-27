@@ -147,9 +147,12 @@ class BaseLateralModule(BaseModule):
         target   = getattr(ctx, "target", "") or ctx.params.get("target", "")
         command  = ctx.params.get("command", "whoami /all")
 
+        params = dict(ctx.params)
+        for key in ("target", "username", "domain", "secret", "command"):
+            params.pop(key, None)
         findings, raw = await self.run(
             target=target, username=username, domain=domain,
-            secret=secret, command=command, **ctx.params,
+            secret=secret, command=command, **params,
         )
         return ModuleResult(
             status="success" if findings else "partial",
@@ -168,7 +171,10 @@ class BaseLateralModule(BaseModule):
         self._bind_log_context(target=target)
         await self.before_request(target, "default")
 
-        result = await self.move(target, username, domain, secret, command, **kwargs)
+        move_kwargs = dict(kwargs)
+        for key in ("target", "username", "domain", "secret", "command"):
+            move_kwargs.pop(key, None)
+        result = await self.move(target, username, domain, secret, command, **move_kwargs)
         findings: list[Finding] = []
 
         if result.success:

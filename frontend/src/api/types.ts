@@ -20,6 +20,7 @@ export interface Campaign {
   operator?: string;
   targets?: string[];
   scope_cidrs?: string[];
+  scope_json?: string;
   status?: string;
   created_at?: string;
   [key: string]: unknown;
@@ -41,6 +42,9 @@ export interface ParamField {
   description: string;
   required: boolean;
   secret: boolean;
+  items?: {
+    type?: string;
+  };
   min?: number;
   max?: number;
   min_len?: number;

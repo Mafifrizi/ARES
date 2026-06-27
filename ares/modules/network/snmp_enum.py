@@ -171,7 +171,9 @@ class SnmpEnumModule(BaseModule):
                                 raw={"dry_run": True,
                                      "target": getattr(ctx, "target", "")})
         target = getattr(ctx, "target", ctx.params.get("target", ""))
-        findings, raw = await self.run(target=target, **ctx.params)
+        params = dict(ctx.params)
+        params.pop("target", None)
+        findings, raw = await self.run(target=target, **params)
         return ModuleResult(
             status="success" if (findings or raw.get("valid_communities")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
@@ -181,7 +183,7 @@ class SnmpEnumModule(BaseModule):
     @trace_module("network.snmp_enum")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
         target      = kwargs.get("target", "")
-        port        = int(kwargs.get("snmp_port", 161))
+        port        = int(kwargs.get("port") or kwargs.get("snmp_port", 161))
         dry_run     = kwargs.get("dry_run", False)
         communities = kwargs.get("communities") or _COMMUNITY_STRINGS
         do_walk     = kwargs.get("walk", True)    # Walk tables for deeper enum

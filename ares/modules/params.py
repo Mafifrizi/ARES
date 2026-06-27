@@ -139,6 +139,8 @@ class ModuleParams(BaseModel):
                 result[name]["max_len"] = field_schema["maxLength"]
             if "pattern" in field_schema:
                 result[name]["pattern"] = field_schema["pattern"]
+            if "items" in field_schema:
+                result[name]["items"] = field_schema["items"]
         return result
 
     def safe_dict(self) -> dict[str, Any]:

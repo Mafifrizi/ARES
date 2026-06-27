@@ -76,8 +76,11 @@ class LSASecretsModule(BaseModule):
         username = ctx.params.get("username", "")
         password = ctx.params.get("password", "") or ctx.params.get("secret", "")
         domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
+        params = dict(ctx.params)
+        for key in ("target", "username", "password", "domain"):
+            params.pop(key, None)
         findings, raw = await self.run(
-            target=target, username=username, password=password, domain=domain, **ctx.params
+            target=target, username=username, password=password, domain=domain, **params
         )
         return ModuleResult(
             status="success" if findings else "partial",
