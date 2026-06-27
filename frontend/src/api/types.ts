@@ -42,6 +42,7 @@ export interface ParamField {
   description: string;
   required: boolean;
   secret: boolean;
+  default?: unknown;
   items?: {
     type?: string;
   };

@@ -85,6 +85,10 @@ The React dashboard is served at:
 http://localhost:8080/dashboard
 ```
 
+Dashboard preview:
+
+![ARES dashboard overview](docs/assets/screenshots/dashboard-overview.png)
+
 Dashboard areas:
 
 | Page | Purpose |

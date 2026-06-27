@@ -441,12 +441,17 @@ function ModulesPage() {
   const [dryRun, setDryRun] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
   const [params, setParams] = useState<Record<string, unknown>>({});
+  const campaignDetail = useQuery({
+    queryKey: ["campaign", campaignId],
+    queryFn: () => api.campaign(campaignId),
+    enabled: Boolean(campaignId)
+  });
   const run = useMutation({
     mutationFn: () => api.runModule(selectedId, buildModuleRunPayload(campaignId, params, dryRun))
   });
   const list = modules.data ?? [];
   const selected = list.find((item) => item.id === selectedId);
-  const selectedCampaign = (campaigns.data ?? []).find((item) => item.id === campaignId);
+  const selectedCampaign = campaignDetail.data ?? (campaigns.data ?? []).find((item) => item.id === campaignId);
   const scopeWarning = moduleScopeWarning(selected, selectedCampaign, params, dryRun);
   const categories = unique(list.map((item) => item.category || ""));
   const visible = list.filter((item) => {
@@ -460,6 +465,7 @@ function ModulesPage() {
   const sensitive = isSensitiveModule(selected);
   const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending;
   const runBlocked = !canRun || Boolean(scopeWarning);
+  const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
 
   useEffect(() => {
     setParams({});
@@ -506,6 +512,11 @@ function ModulesPage() {
         <section className="panel p-4">
           <h2 className="mb-3 text-base font-bold">Run Module</h2>
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
+          {campaignId && campaignDetail.isFetching && (
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+              <Loader2 className="spin" size={16} /> Loading campaign scope...
+            </div>
+          )}
           {selected ? (
             <form
               aria-busy={run.isPending}
@@ -519,6 +530,11 @@ function ModulesPage() {
               }}
             >
               <ParamForm schema={selected.param_schema} values={params} onChange={setParams} />
+              {runHint && (
+                <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+                  {runHint}
+                </p>
+              )}
               {scopeWarning && (
                 <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
                   {scopeWarning}
@@ -728,12 +744,14 @@ function StrategyPage() {
   const active = useQuery({ queryKey: ["strategy-active"], queryFn: api.activeStrategy });
   const [campaignId, setCampaignId] = useState("");
   const [goal, setGoal] = useState("domain_admin");
+  const [llmBackend, setLlmBackend] = useState("claude");
   const [authorizations, setAuthorizations] = useState("");
   const engage = useMutation({
     mutationFn: () =>
       api.engageStrategy({
         campaign_id: campaignId,
         goal,
+        llm_backend: llmBackend,
         max_rounds: 5,
         authorizations: splitLines(authorizations)
       })
@@ -747,9 +765,40 @@ function StrategyPage() {
           <select className="field mt-3" value={goal} onChange={(e) => setGoal(e.target.value)}>
             {["domain_admin", "enterprise_admin", "cloud_admin", "data_exfil", "persistence", "full_compromise"].map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <textarea className="field mt-3 min-h-28" placeholder="Authorizations" value={authorizations} onChange={(e) => setAuthorizations(e.target.value)} />
-          <button className="btn btn-primary mt-3" disabled={!allowed || !campaignId} onClick={() => engage.mutate()}>
-            <ShieldCheck size={16} /> Engage
+          <select className="field mt-3" value={llmBackend} onChange={(e) => setLlmBackend(e.target.value)}>
+            <option value="claude">Claude / ANTHROPIC_API_KEY</option>
+            <option value="openai">OpenAI / OPENAI_API_KEY</option>
+            <option value="local">Local Ollama</option>
+          </select>
+          <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            {strategyBackendHint(llmBackend)}
+          </p>
+          <textarea
+            className="field mt-3 min-h-28"
+            placeholder="Authorization notes, one per line"
+            value={authorizations}
+            onChange={(e) => setAuthorizations(e.target.value)}
+          />
+          {!allowed && (
+            <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+              Strategy engagement requires operator or team lead role.
+            </p>
+          )}
+          {!campaignId && (
+            <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+              Select a scoped campaign before starting Strategy.
+            </p>
+          )}
+          <button className="btn btn-primary mt-3" disabled={!allowed || !campaignId || engage.isPending} onClick={() => engage.mutate()}>
+            {engage.isPending ? (
+              <>
+                <Loader2 className="spin" size={16} /> Engaging...
+              </>
+            ) : (
+              <>
+                <ShieldCheck size={16} /> Engage
+              </>
+            )}
           </button>
         </section>
         <section>
@@ -1102,9 +1151,15 @@ function ParamForm({
     <div className="grid gap-3">
       {entries.map(([name, field]) => (
         <label className="block text-sm font-semibold" key={name}>
-          {name}
-          {field.required && <span className="text-red-700"> *</span>}
+          <span className="flex items-center gap-2">
+            <span>
+              {name}
+              {field.required && <span className="text-red-700"> *</span>}
+            </span>
+            {!field.required && <span className="badge">optional</span>}
+          </span>
           <ParamInput
+            name={name}
             field={field}
             value={values[name]}
             onChange={(value) => {
@@ -1118,6 +1173,9 @@ function ParamForm({
             }}
           />
           {field.description && <span className="mt-1 block text-xs text-slate-600">{field.description}</span>}
+          {fieldDefaultHint(field) && (
+            <span className="mt-1 block text-xs font-medium text-slate-500">{fieldDefaultHint(field)}</span>
+          )}
         </label>
       ))}
     </div>
@@ -1125,10 +1183,12 @@ function ParamForm({
 }
 
 function ParamInput({
+  name,
   field,
   value,
   onChange
 }: {
+  name: string;
   field: ParamField;
   value: unknown;
   onChange: (value: unknown) => void;
@@ -1148,6 +1208,7 @@ function ParamInput({
       <textarea
         className="field mt-1 min-h-20"
         value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
+        placeholder={paramPlaceholder(name, field)}
         required={field.required}
         onInvalid={setRequiredMessage}
         onChange={(event) => {
@@ -1165,6 +1226,7 @@ function ParamInput({
       value={String(value ?? "")}
       min={field.min}
       max={field.max}
+      placeholder={paramPlaceholder(name, field)}
       required={field.required}
       onInvalid={setRequiredMessage}
       onChange={(event) => {
@@ -1177,6 +1239,50 @@ function ParamInput({
       }}
     />
   );
+}
+
+function fieldDefaultHint(field: ParamField): string {
+  if (field.secret || field.default === undefined) {
+    return "";
+  }
+  const value = formatDefaultValue(field.default);
+  return value ? `Default: ${value}` : "";
+}
+
+function paramPlaceholder(name: string, field: ParamField): string {
+  if (!field.secret) {
+    const value = formatDefaultValue(field.default);
+    if (value) {
+      return value;
+    }
+  }
+  const lower = name.toLowerCase();
+  if (lower.includes("target")) {
+    return "127.0.0.1";
+  }
+  if (lower.includes("port")) {
+    return "80, 443, 8080, 8443, 8888";
+  }
+  if (lower.includes("domain")) {
+    return "corp.local";
+  }
+  return field.required ? "" : "Leave blank to use the module default";
+}
+
+function formatDefaultValue(value: unknown): string {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 function ScreenMessage({ title, body }: { title: string; body: string }) {
@@ -1192,6 +1298,42 @@ function ScreenMessage({ title, body }: { title: string; body: string }) {
 
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-600">{text}</div>;
+}
+
+function strategyBackendHint(backend: string): string {
+  if (backend === "openai") {
+    return "OpenAI planning requires OPENAI_API_KEY in the ARES server environment. Security-page API keys do not count as LLM provider keys.";
+  }
+  if (backend === "local") {
+    return "Local planning uses Ollama from the ARES server host, usually http://localhost:11434. No cloud LLM key is required.";
+  }
+  return "Claude planning requires ANTHROPIC_API_KEY in the ARES server environment. Security-page API keys only authenticate callers to ARES.";
+}
+
+function moduleRunHint(
+  campaignId: string,
+  module: ModuleMeta | undefined,
+  campaign: Campaign | undefined,
+  sensitive: boolean,
+  confirmed: boolean,
+  dryRun: boolean
+): string {
+  if (!campaignId) {
+    return "Select a campaign before running a module.";
+  }
+  if (!module) {
+    return "Select a module from the catalog.";
+  }
+  if (!campaign) {
+    return "Campaign details are still loading.";
+  }
+  if (sensitive && !confirmed) {
+    return "Confirm authorization before running high-noise or sensitive modules.";
+  }
+  if (!dryRun && "target" in (module.param_schema ?? {}) && campaignScopeEntries(campaign).length === 0) {
+    return "Live target modules require campaign scope CIDRs. Add a scope such as 127.0.0.1/32 before running.";
+  }
+  return "";
 }
 
 function splitLines(value: string): string[] {

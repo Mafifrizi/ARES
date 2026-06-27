@@ -1349,6 +1349,22 @@ class AutonomousEngagementRequest(BaseModel):
     allow_persistence: bool = Field(default=False)
 
 
+def _strategy_llm_configuration_error(backend: str) -> str:
+    if backend == "claude" and not os.environ.get("ANTHROPIC_API_KEY"):
+        return (
+            "Strategy with llm_backend=claude requires ANTHROPIC_API_KEY in the "
+            "ARES server environment. Set it before starting Strategy, or choose "
+            "llm_backend=openai/local."
+        )
+    if backend == "openai" and not os.environ.get("OPENAI_API_KEY"):
+        return (
+            "Strategy with llm_backend=openai requires OPENAI_API_KEY in the "
+            "ARES server environment. Set it before starting Strategy, or choose "
+            "llm_backend=claude/local."
+        )
+    return ""
+
+
 @app.post("/strategy/engage", tags=["strategy"], status_code=202)
 async def start_autonomous_engagement(
     body: AutonomousEngagementRequest,
@@ -1376,6 +1392,12 @@ async def start_autonomous_engagement(
                 "Contact your team lead to run this engagement."
             ),
         )
+
+    for backend in (body.llm_backend, body.secondary_backend):
+        if backend:
+            config_error = _strategy_llm_configuration_error(backend)
+            if config_error:
+                raise HTTPException(status_code=422, detail=config_error)
 
     # FIX 2: Concurrent engagement limit — atomic via asyncio.Lock (Issue 14)
     _max = int(os.environ.get("ARES_MAX_ENGAGEMENTS", _MAX_CONCURRENT_ENGAGEMENTS))
