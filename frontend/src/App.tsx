@@ -20,11 +20,14 @@ import {
 import {
   ChangeEvent,
   createContext,
+  Dispatch,
   FormEvent,
   ReactNode,
+  SetStateAction,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
@@ -56,6 +59,66 @@ function useAuth(): AuthState {
     throw new Error("AuthContext missing");
   }
   return value;
+}
+
+interface DashboardUiState {
+  selectedCampaignId: string;
+  setSelectedCampaignId: Dispatch<SetStateAction<string>>;
+  liveCampaignId: string;
+  setLiveCampaignId: Dispatch<SetStateAction<string>>;
+  liveConnected: boolean;
+  setLiveConnected: Dispatch<SetStateAction<boolean>>;
+  liveEvents: unknown[];
+  clearLiveEvents: () => void;
+}
+
+interface ModuleRunRecord {
+  moduleId: string;
+  payload: unknown;
+  isError?: boolean;
+}
+
+interface PersistedResult {
+  payload: unknown;
+  isError?: boolean;
+}
+
+const DashboardUiContext = createContext<DashboardUiState | null>(null);
+
+function useDashboardUi(): DashboardUiState {
+  const value = useContext(DashboardUiContext);
+  if (!value) {
+    throw new Error("DashboardUiContext missing");
+  }
+  return value;
+}
+
+function readSessionState<T>(key: string, initialValue: T): T {
+  try {
+    const stored = window.sessionStorage.getItem(key);
+    return stored ? JSON.parse(stored) as T : initialValue;
+  } catch {
+    return initialValue;
+  }
+}
+
+function useSessionState<T>(key: string, initialValue: T): readonly [T, Dispatch<SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => readSessionState(key, initialValue));
+
+  useEffect(() => {
+    try {
+      const serialized = JSON.stringify(value);
+      if (serialized === undefined) {
+        window.sessionStorage.removeItem(key);
+      } else {
+        window.sessionStorage.setItem(key, serialized);
+      }
+    } catch {
+      // Session persistence is a UX aid; storage failures should never block the dashboard.
+    }
+  }, [key, value]);
+
+  return [value, setValue] as const;
 }
 
 const REQUIRED_FIELD_MESSAGE = "This field is required.";
@@ -196,6 +259,71 @@ function App() {
 
 function ProtectedShell() {
   const { user, loading, logout } = useAuth();
+  const [selectedCampaignId, setSelectedCampaignId] = useSessionState("ares.dashboard.selectedCampaignId", "");
+  const [liveCampaignId, setLiveCampaignId] = useSessionState("ares.dashboard.live.campaignId", "");
+  const [liveEvents, setLiveEvents] = useSessionState<unknown[]>("ares.dashboard.live.events", []);
+  const [liveConnected, setLiveConnected] = useState(false);
+  const liveSocketRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const accessToken = getAccessToken();
+    if (!liveConnected || !liveCampaignId || !accessToken) {
+      if (liveSocketRef.current) {
+        liveSocketRef.current.close();
+        liveSocketRef.current = null;
+      }
+      return;
+    }
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(`${protocol}//${window.location.host}${campaignEventsPath(liveCampaignId, accessToken)}`);
+    liveSocketRef.current = socket;
+    socket.onmessage = (event) => {
+      try {
+        setLiveEvents((items) => [JSON.parse(event.data), ...items].slice(0, 100));
+      } catch {
+        setLiveEvents((items) => [event.data, ...items].slice(0, 100));
+      }
+    };
+    socket.onclose = () => {
+      if (liveSocketRef.current === socket) {
+        liveSocketRef.current = null;
+        setLiveConnected(false);
+      }
+    };
+
+    return () => {
+      socket.onclose = null;
+      socket.close();
+      if (liveSocketRef.current === socket) {
+        liveSocketRef.current = null;
+      }
+    };
+  }, [liveCampaignId, liveConnected, setLiveEvents]);
+
+  const dashboardUi = useMemo<DashboardUiState>(
+    () => ({
+      selectedCampaignId,
+      setSelectedCampaignId,
+      liveCampaignId,
+      setLiveCampaignId,
+      liveConnected,
+      setLiveConnected,
+      liveEvents,
+      clearLiveEvents: () => setLiveEvents([])
+    }),
+    [
+      liveCampaignId,
+      liveConnected,
+      liveEvents,
+      selectedCampaignId,
+      setLiveCampaignId,
+      setLiveConnected,
+      setLiveEvents,
+      setSelectedCampaignId
+    ]
+  );
+
   if (loading) {
     return <ScreenMessage title="ARES" body="Loading session" />;
   }
@@ -203,51 +331,53 @@ function ProtectedShell() {
     return <Navigate to="/login" replace />;
   }
   return (
-    <div className="app-shell grid min-h-screen grid-cols-1 lg:grid-cols-[240px_1fr]">
-      <aside className="sidebar p-4">
-        <div className="mb-6 flex items-center gap-3">
-          <img className="h-11 w-11 shrink-0 object-contain" src={brandMarkPath} alt="" aria-hidden="true" />
-          <div>
-            <div className="text-base font-bold">ARES</div>
-            <div className="text-xs text-slate-300">{user.username} &middot; {formatRole(user.role)}</div>
+    <DashboardUiContext.Provider value={dashboardUi}>
+      <div className="app-shell grid min-h-screen grid-cols-1 lg:grid-cols-[240px_1fr]">
+        <aside className="sidebar p-4">
+          <div className="mb-6 flex items-center gap-3">
+            <img className="h-11 w-11 shrink-0 object-contain" src={brandMarkPath} alt="" aria-hidden="true" />
+            <div>
+              <div className="text-base font-bold">ARES</div>
+              <div className="text-xs text-slate-300">{user.username} &middot; {formatRole(user.role)}</div>
+            </div>
           </div>
-        </div>
-        <nav className="grid gap-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link">
-                <Icon size={17} />
-                <span>{item.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
-      </aside>
-      <main className="min-w-0 p-4 lg:p-6">
-        <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-950">Operator Dashboard</h1>
-            <p className="text-sm text-slate-600">{user.username}</p>
-          </div>
-          <button className="btn" onClick={() => void logout()}>
-            <LogOut size={16} /> Logout
-          </button>
-        </header>
-        <Routes>
-          <Route path="/" element={<OverviewPage />} />
-          <Route path="/campaigns" element={<CampaignsPage />} />
-          <Route path="/modules" element={<ModulesPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/graph" element={<GraphPage />} />
-          <Route path="/templates" element={<TemplatesPage />} />
-          <Route path="/strategy" element={<StrategyPage />} />
-          <Route path="/security" element={<SecurityPage />} />
-          <Route path="/edr" element={<EdrPage />} />
-          <Route path="/live" element={<LivePage />} />
-        </Routes>
-      </main>
-    </div>
+          <nav className="grid gap-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link">
+                  <Icon size={17} />
+                  <span>{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
+        </aside>
+        <main className="min-w-0 p-4 lg:p-6">
+          <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-950">Operator Dashboard</h1>
+              <p className="text-sm text-slate-600">{user.username}</p>
+            </div>
+            <button className="btn" onClick={() => void logout()}>
+              <LogOut size={16} /> Logout
+            </button>
+          </header>
+          <Routes>
+            <Route path="/" element={<OverviewPage />} />
+            <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/modules" element={<ModulesPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/graph" element={<GraphPage />} />
+            <Route path="/templates" element={<TemplatesPage />} />
+            <Route path="/strategy" element={<StrategyPage />} />
+            <Route path="/security" element={<SecurityPage />} />
+            <Route path="/edr" element={<EdrPage />} />
+            <Route path="/live" element={<LivePage />} />
+          </Routes>
+        </main>
+      </div>
+    </DashboardUiContext.Provider>
   );
 }
 
@@ -323,14 +453,14 @@ function OverviewPage() {
 
 function CampaignsPage() {
   const queryClient = useQueryClient();
+  const { selectedCampaignId: selected, setSelectedCampaignId: setSelected } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
-  const [selected, setSelected] = useState("");
-  const [name, setName] = useState("");
-  const [client, setClient] = useState("Internal");
-  const [targets, setTargets] = useState("");
-  const [scope, setScope] = useState("");
+  const [name, setName] = useSessionState("ares.dashboard.campaigns.create.name", "");
+  const [client, setClient] = useSessionState("ares.dashboard.campaigns.create.client", "Internal");
+  const [targets, setTargets] = useSessionState("ares.dashboard.campaigns.create.targets", "");
+  const [scope, setScope] = useSessionState("ares.dashboard.campaigns.create.scope", "");
   const [createWarning, setCreateWarning] = useState("");
-  const [otherId, setOtherId] = useState("");
+  const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
   const detail = useQuery({
     queryKey: ["campaign", selected],
     queryFn: () => api.campaign(selected),
@@ -448,23 +578,27 @@ function CampaignsPage() {
 }
 
 function ModulesPage() {
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
-  const [campaignId, setCampaignId] = useState("");
-  const [selectedId, setSelectedId] = useState("");
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("");
-  const [opsec, setOpsec] = useState("");
-  const [dryRun, setDryRun] = useState(true);
-  const [confirmed, setConfirmed] = useState(false);
-  const [params, setParams] = useState<Record<string, unknown>>({});
+  const [selectedId, setSelectedId] = useSessionState("ares.dashboard.modules.selectedId", "");
+  const [search, setSearch] = useSessionState("ares.dashboard.modules.search", "");
+  const [category, setCategory] = useSessionState("ares.dashboard.modules.category", "");
+  const [opsec, setOpsec] = useSessionState("ares.dashboard.modules.opsec", "");
+  const [dryRun, setDryRun] = useSessionState("ares.dashboard.modules.dryRun", true);
+  const [confirmed, setConfirmed] = useSessionState("ares.dashboard.modules.confirmed", false);
+  const [params, setParams] = useSessionState<Record<string, unknown>>("ares.dashboard.modules.params", {});
+  const [lastRunRecord, setLastRunRecord] = useSessionState<ModuleRunRecord | null>("ares.dashboard.modules.lastRun", null);
+  const previousSelectedId = useRef(selectedId);
   const campaignDetail = useQuery({
     queryKey: ["campaign", campaignId],
     queryFn: () => api.campaign(campaignId),
     enabled: Boolean(campaignId)
   });
   const run = useMutation({
-    mutationFn: () => api.runModule(selectedId, buildModuleRunPayload(campaignId, params, dryRun))
+    mutationFn: () => api.runModule(selectedId, buildModuleRunPayload(campaignId, params, dryRun)),
+    onSuccess: (payload) => setLastRunRecord({ moduleId: selectedId, payload }),
+    onError: (error) => setLastRunRecord({ moduleId: selectedId, payload: serializeError(error), isError: true })
   });
   const list = modules.data ?? [];
   const selected = list.find((item) => item.id === selectedId);
@@ -483,12 +617,19 @@ function ModulesPage() {
   const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending;
   const runBlocked = !canRun || Boolean(scopeWarning);
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
+  const persistedRun = lastRunRecord?.moduleId === selectedId ? lastRunRecord : null;
+  const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
+  const runError = run.error ?? (persistedRun?.isError ? persistedRun.payload : undefined);
 
   useEffect(() => {
+    if (previousSelectedId.current === selectedId) {
+      return;
+    }
+    previousSelectedId.current = selectedId;
     setParams({});
     setConfirmed(false);
     setDryRun(true);
-  }, [selectedId]);
+  }, [selectedId, setConfirmed, setDryRun, setParams]);
 
   return (
     <Page title="Modules">
@@ -591,8 +732,8 @@ function ModulesPage() {
           ) : (
             <EmptyState text="Select a module" />
           )}
-          <ModuleRunSummary result={run.data} error={run.error} />
-          <DataPanel title={run.error ? "Run Error" : "Raw Run Result"} data={run.error ?? run.data} />
+          <ModuleRunSummary result={runResult} error={runError} />
+          <DataPanel title={runError ? "Run Error" : "Raw Run Result"} data={runError ?? runResult} />
         </section>
       </div>
     </Page>
@@ -600,10 +741,11 @@ function ModulesPage() {
 }
 
 function ReportsPage() {
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
-  const [campaignId, setCampaignId] = useState("");
-  const [format, setFormat] = useState("html");
+  const [format, setFormat] = useSessionState("ares.dashboard.reports.format", "html");
   const [warning, setWarning] = useState("");
+  const [lastGenerateResult, setLastGenerateResult] = useSessionState<PersistedResult | null>("ares.dashboard.reports.lastGenerate", null);
   const queryClient = useQueryClient();
   const reports = useQuery({
     queryKey: ["reports", campaignId],
@@ -612,7 +754,11 @@ function ReportsPage() {
   });
   const generate = useMutation({
     mutationFn: () => api.generateReport(campaignId, format),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["reports", campaignId] })
+    onSuccess: (payload) => {
+      setLastGenerateResult({ payload });
+      void queryClient.invalidateQueries({ queryKey: ["reports", campaignId] });
+    },
+    onError: (error) => setLastGenerateResult({ payload: serializeError(error), isError: true })
   });
   const download = useMutation({
     mutationFn: async (item: ReportItem) => {
@@ -659,7 +805,10 @@ function ReportsPage() {
           </button>
         </div>
         {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
-        <DataPanel title="Generate Result" data={generate.error ?? generate.data} />
+        <DataPanel
+          title={(generate.error ?? (lastGenerateResult?.isError ? lastGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
+          data={generate.error ?? generate.data ?? lastGenerateResult?.payload}
+        />
       </div>
       <section className="panel mt-4 overflow-auto p-4">
         <table className="table">
@@ -688,13 +837,18 @@ function ReportsPage() {
 }
 
 function GraphPage() {
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
-  const [campaignId, setCampaignId] = useState("");
-  const [jsonPath, setJsonPath] = useState("");
+  const [jsonPath, setJsonPath] = useSessionState("ares.dashboard.graph.jsonPath", "");
   const [warning, setWarning] = useState("");
+  const [lastIngestResult, setLastIngestResult] = useSessionState<PersistedResult | null>("ares.dashboard.graph.lastIngest", null);
   const graph = useQuery({ queryKey: ["graph", campaignId], queryFn: () => api.graph(campaignId), enabled: Boolean(campaignId) });
   const paths = useQuery({ queryKey: ["attack-paths", campaignId], queryFn: () => api.attackPaths(campaignId), enabled: Boolean(campaignId) });
-  const ingest = useMutation({ mutationFn: () => api.ingestBloodhound(campaignId, jsonPath) });
+  const ingest = useMutation({
+    mutationFn: () => api.ingestBloodhound(campaignId, jsonPath),
+    onSuccess: (payload) => setLastIngestResult({ payload }),
+    onError: (error) => setLastIngestResult({ payload: serializeError(error), isError: true })
+  });
   const nodes = Array.isArray(graph.data?.nodes) ? graph.data.nodes : [];
   const links = Array.isArray(graph.data?.links) ? graph.data.links : [];
   return (
@@ -758,7 +912,10 @@ function GraphPage() {
           </form>
           {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
           <DataPanel title="Attack Paths" data={paths.data} />
-          <DataPanel title="Ingest Result" data={ingest.data ?? ingest.error} />
+          <DataPanel
+            title={(ingest.error ?? (lastIngestResult?.isError ? lastIngestResult.payload : undefined)) ? "Ingest Error" : "Ingest Result"}
+            data={ingest.data ?? ingest.error ?? lastIngestResult?.payload}
+          />
         </section>
       </div>
     </Page>
@@ -767,14 +924,17 @@ function GraphPage() {
 
 function TemplatesPage() {
   const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates });
-  const [name, setName] = useState("");
-  const [params, setParams] = useState("{}");
+  const [name, setName] = useSessionState("ares.dashboard.templates.name", "");
+  const [params, setParams] = useSessionState("ares.dashboard.templates.params", "{}");
   const [warning, setWarning] = useState("");
+  const [lastPlanResult, setLastPlanResult] = useSessionState<PersistedResult | null>("ares.dashboard.templates.lastPlan", null);
   const plan = useMutation({
-    mutationFn: () => api.templatePlan(name, safeJson(params))
+    mutationFn: () => api.templatePlan(name, safeJson(params)),
+    onSuccess: (payload) => setLastPlanResult({ payload }),
+    onError: (error) => setLastPlanResult({ payload: serializeError(error), isError: true })
   });
   const selected = (templates.data ?? []).find((item) => item.name === name);
-  const generated = plan.data as TemplatePlanResponse | undefined;
+  const generated = (plan.data ?? (!lastPlanResult?.isError ? lastPlanResult?.payload : undefined)) as TemplatePlanResponse | undefined;
   const paramsValid = isJsonObject(params);
   return (
     <Page title="Templates">
@@ -794,6 +954,7 @@ function TemplatesPage() {
                   onClick={() => {
                     setName(templateName);
                     setWarning("");
+                    setLastPlanResult(null);
                     plan.reset();
                   }}
                 >
@@ -813,6 +974,7 @@ function TemplatesPage() {
           <input className="field" placeholder="Template name" value={name} onChange={(e) => {
             setName(e.target.value);
             setWarning("");
+            setLastPlanResult(null);
           }} />
           {selected ? (
             <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
@@ -873,7 +1035,10 @@ function TemplatesPage() {
             )}
           </button>
           <TemplatePlanSummary plan={generated} />
-          <DataPanel title="Plan Details" data={plan.error ?? plan.data} />
+          <DataPanel
+            title={(plan.error ?? (lastPlanResult?.isError ? lastPlanResult.payload : undefined)) ? "Plan Error" : "Plan Details"}
+            data={plan.error ?? plan.data ?? lastPlanResult?.payload}
+          />
         </section>
       </div>
     </Page>
@@ -882,12 +1047,13 @@ function TemplatesPage() {
 
 function StrategyPage() {
   const { user } = useAuth();
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const active = useQuery({ queryKey: ["strategy-active"], queryFn: api.activeStrategy });
-  const [campaignId, setCampaignId] = useState("");
-  const [goal, setGoal] = useState("domain_admin");
-  const [llmBackend, setLlmBackend] = useState("claude");
-  const [authorizations, setAuthorizations] = useState("");
+  const [goal, setGoal] = useSessionState("ares.dashboard.strategy.goal", "domain_admin");
+  const [llmBackend, setLlmBackend] = useSessionState("ares.dashboard.strategy.llmBackend", "claude");
+  const [authorizations, setAuthorizations] = useSessionState("ares.dashboard.strategy.authorizations", "");
+  const [lastEngageResult, setLastEngageResult] = useSessionState<PersistedResult | null>("ares.dashboard.strategy.lastEngage", null);
   const engage = useMutation({
     mutationFn: () =>
       api.engageStrategy({
@@ -896,7 +1062,9 @@ function StrategyPage() {
         llm_backend: llmBackend,
         max_rounds: 5,
         authorizations: splitLines(authorizations)
-      })
+      }),
+    onSuccess: (payload) => setLastEngageResult({ payload }),
+    onError: (error) => setLastEngageResult({ payload: serializeError(error), isError: true })
   });
   const allowed = user?.role === "team_lead" || user?.role === "operator";
   return (
@@ -945,7 +1113,10 @@ function StrategyPage() {
         </section>
         <section>
           <DataPanel title="Active" data={active.data} />
-          <DataPanel title="Engagement Result" data={engage.data ?? engage.error} />
+          <DataPanel
+            title={(engage.error ?? (lastEngageResult?.isError ? lastEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
+            data={engage.data ?? engage.error ?? lastEngageResult?.payload}
+          />
         </section>
       </div>
     </Page>
@@ -1043,11 +1214,12 @@ function SecurityPage() {
 
 function EdrPage() {
   const stats = useQuery({ queryKey: ["edr-stats"], queryFn: api.edrStats });
-  const [techniqueId, setTechniqueId] = useState("");
-  const [vendor, setVendor] = useState("");
-  const [version, setVersion] = useState("");
-  const [success, setSuccess] = useState(false);
-  const [notes, setNotes] = useState("");
+  const [techniqueId, setTechniqueId] = useSessionState("ares.dashboard.edr.techniqueId", "");
+  const [vendor, setVendor] = useSessionState("ares.dashboard.edr.vendor", "");
+  const [version, setVersion] = useSessionState("ares.dashboard.edr.version", "");
+  const [success, setSuccess] = useSessionState("ares.dashboard.edr.success", false);
+  const [notes, setNotes] = useSessionState("ares.dashboard.edr.notes", "");
+  const [lastReportResult, setLastReportResult] = useSessionState<PersistedResult | null>("ares.dashboard.edr.lastReport", null);
   const report = useMutation({
     mutationFn: () =>
       api.reportBypass({
@@ -1056,7 +1228,9 @@ function EdrPage() {
         edr_version: version.trim(),
         success,
         notes: notes.trim()
-      })
+      }),
+    onSuccess: (payload) => setLastReportResult({ payload }),
+    onError: (error) => setLastReportResult({ payload: serializeError(error), isError: true })
   });
   return (
     <Page title="EDR/OPSEC">
@@ -1126,34 +1300,28 @@ function EdrPage() {
           </button>
         </form>
       </section>
-      <DataPanel title="Outcome Result" data={report.data ?? report.error} />
+      <DataPanel
+        title={(report.error ?? (lastReportResult?.isError ? lastReportResult.payload : undefined)) ? "Outcome Error" : "Outcome Result"}
+        data={report.data ?? report.error ?? lastReportResult?.payload}
+      />
       <DataPanel title="Raw Stats" data={stats.data} />
     </Page>
   );
 }
 
 function LivePage() {
+  const {
+    selectedCampaignId,
+    setSelectedCampaignId,
+    liveCampaignId,
+    setLiveCampaignId,
+    liveConnected,
+    setLiveConnected,
+    liveEvents,
+    clearLiveEvents
+  } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
-  const [campaignId, setCampaignId] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [events, setEvents] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (!connected || !campaignId || !getAccessToken()) {
-      return;
-    }
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}${campaignEventsPath(campaignId, getAccessToken()!)}`);
-    socket.onmessage = (event) => {
-      try {
-        setEvents((items) => [JSON.parse(event.data), ...items].slice(0, 100));
-      } catch {
-        setEvents((items) => [event.data, ...items].slice(0, 100));
-      }
-    };
-    socket.onclose = () => setConnected(false);
-    return () => socket.close();
-  }, [campaignId, connected]);
+  const campaignId = liveCampaignId || selectedCampaignId;
 
   return (
     <Page title="Live Events">
@@ -1162,29 +1330,46 @@ function LivePage() {
         <p className="mb-3 text-sm text-slate-600">
           Connect to a campaign to watch module runs, findings, and audit events as they are emitted.
         </p>
-        <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
+        <CampaignPicker
+          campaigns={campaigns.data ?? []}
+          value={campaignId}
+          onChange={(id) => {
+            setLiveCampaignId(id);
+            setSelectedCampaignId(id);
+          }}
+        />
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button className="btn btn-primary" disabled={!campaignId || connected} onClick={() => setConnected(true)}>
-            <Radio size={16} /> {connected ? "Connected" : "Connect"}
+          <button className="btn btn-primary" disabled={!campaignId || liveConnected} onClick={() => {
+            if (!liveCampaignId && campaignId) {
+              setLiveCampaignId(campaignId);
+            }
+            setLiveConnected(true);
+          }}>
+            <Radio size={16} /> {liveConnected ? "Connected" : "Connect"}
           </button>
-          {connected && (
-            <button className="btn" onClick={() => setConnected(false)}>
+          {liveConnected && (
+            <button className="btn" onClick={() => setLiveConnected(false)}>
               Disconnect
             </button>
           )}
-          <span className={connected ? "badge badge-low" : "badge"}>{connected ? "listening" : "offline"}</span>
+          {liveEvents.length > 0 && (
+            <button className="btn" onClick={clearLiveEvents}>
+              Clear Events
+            </button>
+          )}
+          <span className={liveConnected ? "badge badge-low" : "badge"}>{liveConnected ? "listening" : "offline"}</span>
         </div>
       </div>
       <section className="panel p-4">
         <h3 className="mb-2 font-bold">Event Stream</h3>
-        {events.length > 0 ? (
+        {liveEvents.length > 0 ? (
           <div className="grid gap-2">
-            {events.map((event, index) => (
+            {liveEvents.map((event, index) => (
               <pre className="json-box max-h-48" key={index}>{JSON.stringify(event, null, 2)}</pre>
             ))}
           </div>
         ) : (
-          <EmptyState text={connected ? "Connected. Waiting for campaign events." : "Select a campaign and connect to start listening."} />
+          <EmptyState text={liveConnected ? "Connected. Waiting for campaign events." : "Select a campaign and connect to start listening."} />
         )}
       </section>
     </Page>
