@@ -77,6 +77,8 @@ export interface ReportItem {
 export interface TemplateMeta {
   name?: string;
   description?: string;
+  stages?: number;
+  modules?: number;
   [key: string]: unknown;
 }
 

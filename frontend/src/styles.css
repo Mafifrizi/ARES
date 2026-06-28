@@ -252,3 +252,30 @@ textarea {
   background: #1f2937;
   color: #ffffff;
 }
+
+.template-card {
+  display: grid;
+  gap: 0.25rem;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 0.75rem;
+  color: #111827;
+  text-align: left;
+}
+
+.template-card:hover {
+  background: #f8fafc;
+}
+
+.template-card.active {
+  border-color: #b91c1c;
+  box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.18);
+}
+
+.template-card small {
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}

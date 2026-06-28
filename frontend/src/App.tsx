@@ -39,7 +39,7 @@ import {
   login as loginRequest,
   logout as logoutRequest
 } from "./api/client";
-import type { Campaign, ModuleMeta, ParamField, ReportItem, UserProfile } from "./api/types";
+import type { Campaign, Finding, ModuleMeta, ParamField, ReportItem, UserProfile } from "./api/types";
 
 interface AuthState {
   user: UserProfile | null;
@@ -74,6 +74,22 @@ interface TelemetrySnapshot {
   campaign_id?: string;
   timestamp?: number;
   [key: string]: unknown;
+}
+
+interface TemplatePlanStage {
+  name?: string;
+  modules?: string[];
+  params?: Record<string, unknown>;
+}
+
+interface TemplatePlanResponse {
+  template?: string;
+  description?: string;
+  plan?: {
+    stages?: TemplatePlanStage[];
+  };
+  global_params?: Record<string, unknown>;
+  note?: string;
 }
 
 function setRequiredMessage<T extends ValidatableElement>(event: FormEvent<T>) {
@@ -193,7 +209,7 @@ function ProtectedShell() {
           <img className="h-11 w-11 shrink-0 object-contain" src={brandMarkPath} alt="" aria-hidden="true" />
           <div>
             <div className="text-base font-bold">ARES</div>
-            <div className="text-xs text-slate-300">{user.username} · {formatRole(user.role)}</div>
+            <div className="text-xs text-slate-300">{user.username} &middot; {formatRole(user.role)}</div>
           </div>
         </div>
         <nav className="grid gap-1">
@@ -399,6 +415,7 @@ function CampaignsPage() {
         </section>
         <section className="grid gap-4">
           <CampaignPicker campaigns={campaigns.data ?? []} value={selected} onChange={setSelected} />
+          <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
           <div className="flex flex-wrap gap-2">
             <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
               <ShieldCheck size={16} /> Restore Vault
@@ -507,6 +524,9 @@ function ModulesPage() {
                 </div>
               </button>
             ))}
+            {visible.length === 0 && (
+              <EmptyState text="No modules match the current search and filters." />
+            )}
           </div>
         </section>
         <section className="panel p-4">
@@ -571,7 +591,8 @@ function ModulesPage() {
           ) : (
             <EmptyState text="Select a module" />
           )}
-          <DataPanel title="Run Result" data={run.data ?? run.error} />
+          <ModuleRunSummary result={run.data} error={run.error} />
+          <DataPanel title={run.error ? "Run Error" : "Raw Run Result"} data={run.error ?? run.data} />
         </section>
       </div>
     </Page>
@@ -609,6 +630,10 @@ function ReportsPage() {
   return (
     <Page title="Reports">
       <div className="panel p-4">
+        <h2 className="mb-2 text-base font-bold">Generate Report</h2>
+        <p className="mb-3 text-sm text-slate-600">
+          Choose a campaign and export the current findings, scope, and remediation notes. PDF is for sharing, HTML is for browser review, JSON/Markdown are for downstream workflows.
+        </p>
         <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
         <div className="mt-3 flex flex-wrap gap-2">
           <select className="field max-w-40" value={format} onChange={(e) => setFormat(e.target.value)}>
@@ -622,7 +647,15 @@ function ReportsPage() {
             setWarning("");
             generate.mutate();
           }}>
-            <FileText size={16} /> Generate
+            {generate.isPending ? (
+              <>
+                <Loader2 className="spin" size={16} /> Generating...
+              </>
+            ) : (
+              <>
+                <FileText size={16} /> Generate
+              </>
+            )}
           </button>
         </div>
         {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
@@ -644,6 +677,10 @@ function ReportsPage() {
             ))}
           </tbody>
         </table>
+        {campaignId && (reports.data?.reports ?? []).length === 0 && (
+          <EmptyState text="No reports generated for this campaign yet." />
+        )}
+        {!campaignId && <EmptyState text="Select a campaign to list generated reports." />}
         <DataPanel title="Download Result" data={download.error} />
       </section>
     </Page>
@@ -665,17 +702,34 @@ function GraphPage() {
       <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
       <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_360px]">
         <section className="panel min-h-[360px] p-4">
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {nodes.slice(0, 24).map((node: any, index) => (
-              <div className="rounded-md border border-slate-300 bg-slate-50 p-3" key={node.id ?? index}>
-                <div className="font-bold">{node.label ?? node.id ?? `Node ${index + 1}`}</div>
-                <div className="text-sm text-slate-600">{node.type ?? "artifact"}</div>
-              </div>
-            ))}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold">Attack Graph</h2>
+              <p className="text-sm text-slate-600">Hosts, identities, and BloodHound relationships linked to the selected campaign.</p>
+            </div>
+            <div className="flex gap-2">
+              <span className="badge">{nodes.length} nodes</span>
+              <span className="badge">{links.length} links</span>
+            </div>
           </div>
-          <div className="mt-4 text-sm text-slate-600">{nodes.length} nodes · {links.length} links</div>
+          {nodes.length > 0 ? (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {nodes.slice(0, 24).map((node: any, index) => (
+                <div className="rounded-md border border-slate-300 bg-slate-50 p-3" key={node.id ?? index}>
+                  <div className="font-bold">{node.label ?? node.id ?? `Node ${index + 1}`}</div>
+                  <div className="text-sm text-slate-600">{node.type ?? "artifact"}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState text={campaignId ? "No graph nodes yet. Run modules that discover hosts or ingest BloodHound JSON." : "Select a campaign to load graph data."} />
+          )}
         </section>
         <section className="panel p-4">
+          <h2 className="mb-2 text-base font-bold">BloodHound Ingest</h2>
+          <p className="mb-3 text-sm text-slate-600">
+            Paste a server-local JSON file or directory path produced by BloodHound/SharpHound. ARES imports it into the selected campaign graph.
+          </p>
           <form className="grid gap-2" onSubmit={(e) => {
             e.preventDefault();
             if (!campaignId) {
@@ -689,9 +743,17 @@ function GraphPage() {
             setWarning("");
             ingest.mutate();
           }}>
-            <input className="field" required placeholder="BloodHound JSON path" value={jsonPath} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setJsonPath(e.target.value); setWarning(""); }} />
+            <input className="field" required placeholder="C:\\labs\\bloodhound\\results.json" value={jsonPath} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setJsonPath(e.target.value); setWarning(""); }} />
             <button className="btn" disabled={ingest.isPending} type="submit">
-              <GitGraph size={16} /> Ingest
+              {ingest.isPending ? (
+                <>
+                  <Loader2 className="spin" size={16} /> Ingesting...
+                </>
+              ) : (
+                <>
+                  <GitGraph size={16} /> Ingest
+                </>
+              )}
             </button>
           </form>
           {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
@@ -707,31 +769,111 @@ function TemplatesPage() {
   const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates });
   const [name, setName] = useState("");
   const [params, setParams] = useState("{}");
+  const [warning, setWarning] = useState("");
   const plan = useMutation({
     mutationFn: () => api.templatePlan(name, safeJson(params))
   });
+  const selected = (templates.data ?? []).find((item) => item.name === name);
+  const generated = plan.data as TemplatePlanResponse | undefined;
+  const paramsValid = isJsonObject(params);
   return (
     <Page title="Templates">
       <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
         <section className="panel p-4">
+          <h2 className="mb-2 text-base font-bold">Campaign Templates</h2>
+          <p className="mb-3 text-sm text-slate-600">
+            Pick a built-in engagement shape, add optional global values, then generate a run plan for a campaign dry-run.
+          </p>
           <div className="grid gap-2">
             {(templates.data ?? []).map((item, index) => {
               const templateName = String(item.name ?? item.id ?? index);
               return (
-                <button className="btn justify-start" key={templateName} onClick={() => setName(templateName)}>
-                  {templateName}
+                <button
+                  className={`template-card ${name === templateName ? "active" : ""}`}
+                  key={templateName}
+                  onClick={() => {
+                    setName(templateName);
+                    setWarning("");
+                    plan.reset();
+                  }}
+                >
+                  <span className="font-bold">{templateName}</span>
+                  <small>{item.description ?? "Campaign execution template"}</small>
+                  <span className="mt-2 flex flex-wrap gap-2">
+                    <span className="badge">{item.stages ?? 0} stages</span>
+                    <span className="badge">{item.modules ?? 0} modules</span>
+                  </span>
                 </button>
               );
             })}
           </div>
         </section>
         <section className="panel p-4">
-          <input className="field" placeholder="Template name" value={name} onChange={(e) => setName(e.target.value)} />
-          <textarea className="field mt-3 min-h-40" value={params} onChange={(e) => setParams(e.target.value)} />
-          <button className="btn btn-primary mt-3" disabled={!name} onClick={() => plan.mutate()}>
-            <Workflow size={16} /> Generate Plan
+          <h2 className="mb-2 text-base font-bold">Plan Builder</h2>
+          <input className="field" placeholder="Template name" value={name} onChange={(e) => {
+            setName(e.target.value);
+            setWarning("");
+          }} />
+          {selected ? (
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="font-bold">{selected.name}</div>
+              <p className="mt-1 text-sm text-slate-600">{selected.description}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="badge">{selected.stages ?? 0} stages</span>
+                <span className="badge">{selected.modules ?? 0} modules</span>
+              </div>
+            </div>
+          ) : (
+            <EmptyState text="Select a template from the left panel." />
+          )}
+          <label className="mt-3 block text-sm font-semibold">
+            Global parameters
+            <textarea
+              className="field mt-1 min-h-32"
+              value={params}
+              placeholder={'{"target":"127.0.0.1","domain":"corp.local","dc":"10.0.0.5"}'}
+              onChange={(e) => {
+                setParams(e.target.value);
+                setWarning("");
+              }}
+            />
+          </label>
+          <p className="mt-1 text-xs text-slate-600">
+            Optional JSON object. Leave as {"{}"} when the template should use module defaults or campaign-level values.
+          </p>
+          {(warning || !paramsValid) && (
+            <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+              {warning || "Global parameters must be a valid JSON object."}
+            </p>
+          )}
+          <button
+            className="btn btn-primary mt-3"
+            disabled={!name || plan.isPending || !paramsValid}
+            onClick={() => {
+              if (!name.trim()) {
+                setWarning("Template name is required.");
+                return;
+              }
+              if (!paramsValid) {
+                setWarning("Global parameters must be a valid JSON object.");
+                return;
+              }
+              setWarning("");
+              plan.mutate();
+            }}
+          >
+            {plan.isPending ? (
+              <>
+                <Loader2 className="spin" size={16} /> Generating...
+              </>
+            ) : (
+              <>
+                <Workflow size={16} /> Generate Plan
+              </>
+            )}
           </button>
-          <DataPanel title="Plan" data={plan.data ?? plan.error} />
+          <TemplatePlanSummary plan={generated} />
+          <DataPanel title="Plan Details" data={plan.error ?? plan.data} />
         </section>
       </div>
     </Page>
@@ -820,7 +962,13 @@ function SecurityPage() {
   const [newPassword, setNewPassword] = useState("");
   const [keyName, setKeyName] = useState("");
   const [scopes, setScopes] = useState("read");
-  const change = useMutation({ mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }) });
+  const change = useMutation({
+    mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }),
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+    }
+  });
   const create = useMutation({
     mutationFn: () => api.createApiKey({ name: keyName, scopes }),
     onSuccess: () => {
@@ -840,30 +988,51 @@ function SecurityPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="panel p-4">
           <h2 className="mb-3 font-bold">Account</h2>
-          <div className="mb-3 text-sm">{user?.username} · {formatRole(user?.role)}</div>
-          <input className="field mb-2" type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
-          <input className="field mb-2" type="password" placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-          <button className="btn" onClick={() => change.mutate()}><KeyRound size={16} /> Change Password</button>
+          <div className="mb-3 text-sm">{user?.username} &middot; {formatRole(user?.role)}</div>
+          <form className="grid gap-2" onSubmit={(event) => {
+            event.preventDefault();
+            if (!event.currentTarget.reportValidity()) return;
+            change.mutate();
+          }}>
+            <input className="field" required type="password" placeholder="Current password" value={currentPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCurrentPassword(e.target.value); }} />
+            <input className="field" required minLength={12} type="password" placeholder="New password" value={newPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setNewPassword(e.target.value); }} />
+            <button className="btn" disabled={change.isPending} type="submit">
+              {change.isPending ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
+              Change Password
+            </button>
+          </form>
           <DataPanel title="Password Result" data={change.data ?? change.error} />
         </section>
         <section className="panel p-4">
           <h2 className="mb-3 font-bold">API Keys</h2>
-          <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_120px_auto]">
-            <input className="field" placeholder="Name" value={keyName} onChange={(e) => setKeyName(e.target.value)} />
+          <p className="mb-3 text-sm text-slate-600">
+            Use ARES API keys for scripts, integrations, or CI jobs that call ARES. They are not LLM provider keys for Strategy.
+          </p>
+          <form className="mb-3 grid gap-2 sm:grid-cols-[1fr_120px_auto]" onSubmit={(event) => {
+            event.preventDefault();
+            if (!event.currentTarget.reportValidity()) return;
+            create.mutate();
+          }}>
+            <input className="field" required placeholder="Name" value={keyName} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setKeyName(e.target.value); }} />
             <select className="field" value={scopes} onChange={(e) => setScopes(e.target.value)}>
               <option value="read">read</option>
               <option value="write">write</option>
               <option value="admin">admin</option>
             </select>
-            <button className="btn" onClick={() => create.mutate()}><KeyRound size={16} /> Create</button>
-          </div>
+            <button className="btn" disabled={create.isPending} type="submit">
+              {create.isPending ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
+              Create
+            </button>
+          </form>
           {(keys.data ?? []).map((key) => (
             <div className="mb-2 flex items-center justify-between rounded-md border border-slate-200 p-2" key={key.id}>
               <span>{key.name ?? key.prefix ?? key.id}</span>
-              <button className="btn btn-danger" onClick={() => remove.mutate(key.id)}>Delete</button>
+              <button className="btn btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(key.id)}>Delete</button>
             </div>
           ))}
+          {(keys.data ?? []).length === 0 && <EmptyState text="No API keys have been created yet." />}
           <DataPanel title="New Key" data={create.data} />
+          <DataPanel title="API Key Error" data={create.error ?? remove.error} />
         </section>
       </div>
       <DataPanel title="Security Audit" data={audit.data} />
@@ -874,18 +1043,91 @@ function SecurityPage() {
 
 function EdrPage() {
   const stats = useQuery({ queryKey: ["edr-stats"], queryFn: api.edrStats });
-  const [body, setBody] = useState('{"technique_id":"","edr_vendor":"","success":false}');
-  const report = useMutation({ mutationFn: () => api.reportBypass(safeJson(body)) });
+  const [techniqueId, setTechniqueId] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [version, setVersion] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [notes, setNotes] = useState("");
+  const report = useMutation({
+    mutationFn: () =>
+      api.reportBypass({
+        technique_id: techniqueId.trim(),
+        edr_vendor: vendor.trim(),
+        edr_version: version.trim(),
+        success,
+        notes: notes.trim()
+      })
+  });
   return (
     <Page title="EDR/OPSEC">
-      <DataPanel title="Stats" data={stats.data} />
       <section className="panel p-4">
-        <textarea className="field min-h-40" value={body} onChange={(e) => setBody(e.target.value)} />
-        <button className="btn btn-primary mt-3" onClick={() => report.mutate()}>
-          <ShieldAlert size={16} /> Report Outcome
-        </button>
+        <h2 className="mb-2 text-base font-bold">Bypass Knowledge Base</h2>
+        <p className="text-sm text-slate-600">
+          Record whether an approved technique was blocked or successful so future Strategy runs can avoid weak options.
+        </p>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          <div className="telemetry-strip">
+            <span>Technique</span>
+            <strong>{String(stats.data?.technique_id ?? "all")}</strong>
+          </div>
+          <div className="telemetry-strip">
+            <span>Vendor</span>
+            <strong>{String(stats.data?.edr_vendor ?? "all")}</strong>
+          </div>
+          <div className="telemetry-strip">
+            <span>Current rate</span>
+            <strong>{formatRate(stats.data?.success_rate)}</strong>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-slate-600">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
+      </section>
+      <section className="panel p-4">
+        <h2 className="mb-3 text-base font-bold">Report Outcome</h2>
+        <form className="grid gap-3" onSubmit={(event) => {
+          event.preventDefault();
+          if (!event.currentTarget.reportValidity()) return;
+          report.mutate();
+        }}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block text-sm font-semibold">
+              Technique ID <span className="text-red-700">*</span>
+              <input className="field mt-1" required placeholder="edr.bypass_adaptive / amsi-patch-reflection" value={techniqueId} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setTechniqueId(e.target.value); }} />
+            </label>
+            <label className="block text-sm font-semibold">
+              EDR vendor <span className="text-red-700">*</span>
+              <input className="field mt-1" required placeholder="crowdstrike, defender_atp, sentinelone" value={vendor} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setVendor(e.target.value); }} />
+            </label>
+            <label className="block text-sm font-semibold">
+              EDR version
+              <input className="field mt-1" placeholder="optional" value={version} onChange={(e) => setVersion(e.target.value)} />
+            </label>
+            <label className="block text-sm font-semibold">
+              Outcome
+              <select className="field mt-1" value={success ? "success" : "blocked"} onChange={(e) => setSuccess(e.target.value === "success")}>
+                <option value="blocked">Blocked / detected</option>
+                <option value="success">Successful</option>
+              </select>
+            </label>
+          </div>
+          <label className="block text-sm font-semibold">
+            Notes
+            <textarea className="field mt-1 min-h-24" placeholder="Signal observed, lab context, or detection notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
+          <button className="btn btn-primary" disabled={report.isPending} type="submit">
+            {report.isPending ? (
+              <>
+                <Loader2 className="spin" size={16} /> Saving...
+              </>
+            ) : (
+              <>
+                <ShieldAlert size={16} /> Report Outcome
+              </>
+            )}
+          </button>
+        </form>
       </section>
       <DataPanel title="Outcome Result" data={report.data ?? report.error} />
+      <DataPanel title="Raw Stats" data={stats.data} />
     </Page>
   );
 }
@@ -916,12 +1158,35 @@ function LivePage() {
   return (
     <Page title="Live Events">
       <div className="panel p-4">
+        <h2 className="mb-2 text-base font-bold">Campaign Event Stream</h2>
+        <p className="mb-3 text-sm text-slate-600">
+          Connect to a campaign to watch module runs, findings, and audit events as they are emitted.
+        </p>
         <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
-        <button className="btn btn-primary mt-3" disabled={!campaignId} onClick={() => setConnected(true)}>
-          <Radio size={16} /> Connect
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button className="btn btn-primary" disabled={!campaignId || connected} onClick={() => setConnected(true)}>
+            <Radio size={16} /> {connected ? "Connected" : "Connect"}
+          </button>
+          {connected && (
+            <button className="btn" onClick={() => setConnected(false)}>
+              Disconnect
+            </button>
+          )}
+          <span className={connected ? "badge badge-low" : "badge"}>{connected ? "listening" : "offline"}</span>
+        </div>
       </div>
-      <DataPanel title="Event Stream" data={events} />
+      <section className="panel p-4">
+        <h3 className="mb-2 font-bold">Event Stream</h3>
+        {events.length > 0 ? (
+          <div className="grid gap-2">
+            {events.map((event, index) => (
+              <pre className="json-box max-h-48" key={index}>{JSON.stringify(event, null, 2)}</pre>
+            ))}
+          </div>
+        ) : (
+          <EmptyState text={connected ? "Connected. Waiting for campaign events." : "Select a campaign and connect to start listening."} />
+        )}
+      </section>
     </Page>
   );
 }
@@ -961,6 +1226,14 @@ function formatMetric(value: number, suffix = ""): string {
   if (!Number.isFinite(value)) return `0${suffix}`;
   if (Number.isInteger(value)) return `${value}${suffix}`;
   return `${value.toFixed(1)}${suffix}`;
+}
+
+function formatRate(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "not enough data";
+  }
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
 }
 
 function formatTimestamp(value: number | undefined): string {
@@ -1063,10 +1336,159 @@ function DataPanel({ title, data }: { title: string; data: unknown }) {
   if (!data) {
     return null;
   }
+  const shouldOpen = data instanceof Error || data instanceof ApiError;
   return (
     <section className="panel p-4">
-      <h3 className="mb-2 text-sm font-bold text-slate-700">{title}</h3>
-      <pre className="json-box">{JSON.stringify(serializeError(data), null, 2)}</pre>
+      <details open={shouldOpen}>
+        <summary className="cursor-pointer text-sm font-bold text-slate-700">{title}</summary>
+        <pre className="json-box mt-2">{JSON.stringify(serializeError(data), null, 2)}</pre>
+      </details>
+    </section>
+  );
+}
+
+function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>; error?: unknown }) {
+  if (!result && !error) {
+    return null;
+  }
+  if (error) {
+    return (
+      <section className="panel mt-4 p-4">
+        <h3 className="mb-2 text-base font-bold">Execution Summary</h3>
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+          {error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}
+        </p>
+      </section>
+    );
+  }
+
+  const findings = Array.isArray(result?.findings) ? result.findings as Finding[] : [];
+  const validationCount = Array.isArray(result?.validation_results) ? result.validation_results.length : 0;
+  const duration = typeof result?.duration_ms === "number" ? formatMetric(result.duration_ms, " ms") : "n/a";
+  const status = String(result?.status ?? "unknown");
+  const moduleId = String(result?.module_id ?? "module");
+  const runError = typeof result?.error === "string" ? result.error : "";
+
+  return (
+    <section className="panel mt-4 p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold">Execution Summary</h3>
+          <p className="text-sm text-slate-600">{moduleId}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className={status === "done" ? "badge badge-low" : "badge badge-medium"}>{status}</span>
+          <span className="badge">{duration}</span>
+        </div>
+      </div>
+      {runError && (
+        <p className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+          {runError}
+        </p>
+      )}
+      <div className="telemetry-grid mb-3">
+        <TelemetryMetric label="Findings" value={String(findings.length)} detail="confirmed observations returned by the module" />
+        <TelemetryMetric label="Validation results" value={String(validationCount)} detail="post-run checks linked to findings" />
+        <TelemetryMetric label="Duration" value={duration} detail="server-side execution time" />
+      </div>
+      {findings.length > 0 ? (
+        <div className="grid gap-2">
+          {findings.map((finding, index) => (
+            <div className="rounded-md border border-slate-200 p-3" key={finding.id ?? index}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-bold">{finding.title ?? `Finding ${index + 1}`}</div>
+                  <div className="mt-1 text-sm text-slate-600">{String(finding.description ?? "")}</div>
+                </div>
+                <span className={opsecBadge(finding.severity)}>{finding.severity ?? "info"}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {finding.host && <span className="badge">Host: {finding.host}</span>}
+                {finding.mitre_technique && <span className="badge">{finding.mitre_technique}</span>}
+                {typeof finding.confidence === "number" && <span className="badge">Confidence: {formatRate(finding.confidence)}</span>}
+              </div>
+              {finding.remediation ? (
+                <p className="mt-2 text-sm text-slate-700">
+                  <strong>Remediation:</strong> {String(finding.remediation)}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text={runError ? "No findings were recorded because the module stopped before producing observations." : "No findings returned for this run."} />
+      )}
+    </section>
+  );
+}
+
+function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
+  const stages = plan?.plan?.stages ?? [];
+  if (!plan || stages.length === 0) {
+    return null;
+  }
+  const moduleCount = stages.reduce((total, stage) => total + (stage.modules?.length ?? 0), 0);
+  return (
+    <section className="panel mt-4 p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold">{plan.template}</h3>
+          <p className="text-sm text-slate-600">{plan.description}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="badge">{stages.length} stages</span>
+          <span className="badge">{moduleCount} modules</span>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        {stages.map((stage, index) => (
+          <div className="rounded-md border border-slate-200 p-3" key={`${stage.name ?? "stage"}-${index}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-bold">{index + 1}. {stage.name ?? "stage"}</span>
+              <span className="text-xs font-semibold text-slate-500">{stage.modules?.length ?? 0} modules</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {(stage.modules ?? []).map((moduleId) => <span className="badge" key={moduleId}>{moduleId}</span>)}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-sm text-slate-600">
+        This generated plan is ready for campaign execution APIs and can be used as the structure for a campaign dry-run.
+      </p>
+    </section>
+  );
+}
+
+function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; loading?: boolean }) {
+  if (loading) {
+    return (
+      <section className="panel p-4">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <Loader2 className="spin" size={16} /> Loading campaign...
+        </div>
+      </section>
+    );
+  }
+  if (!campaign) {
+    return <EmptyState text="Select a campaign to review its targets, scope, and stored findings." />;
+  }
+  const targets = campaignTargets(campaign);
+  const scope = campaignScopeEntries(campaign);
+  return (
+    <section className="panel p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold">{campaign.name}</h3>
+          <p className="text-sm text-slate-600">{campaign.client ?? "No client"} &middot; {campaign.status ?? "created"}</p>
+        </div>
+        <span className="badge">{campaign.operator ?? "operator"}</span>
+      </div>
+      <div className="telemetry-grid">
+        <TelemetryMetric label="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
+        <TelemetryMetric label="Scope CIDRs" value={String(scope.length)} detail={scope.slice(0, 3).join(", ") || "none declared"} />
+        <TelemetryMetric label="Campaign ID" value={campaign.id.slice(0, 8)} detail="used by API and reports" />
+      </div>
     </section>
   );
 }
@@ -1095,19 +1517,23 @@ function CampaignPicker({
 function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
   return (
     <section className="panel overflow-auto p-4">
-      <table className="table">
-        <thead><tr><th>Name</th><th>Client</th><th>Status</th><th>Operator</th></tr></thead>
-        <tbody>
-          {campaigns.map((campaign) => (
-            <tr key={campaign.id}>
-              <td>{campaign.name}</td>
-              <td>{campaign.client}</td>
-              <td>{campaign.status}</td>
-              <td>{campaign.operator}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {campaigns.length > 0 ? (
+        <table className="table">
+          <thead><tr><th>Name</th><th>Client</th><th>Status</th><th>Operator</th></tr></thead>
+          <tbody>
+            {campaigns.map((campaign) => (
+              <tr key={campaign.id}>
+                <td>{campaign.name}</td>
+                <td>{campaign.client}</td>
+                <td>{campaign.status}</td>
+                <td>{campaign.operator}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState text="No campaigns yet. Create one from the Campaigns page to unlock modules, reports, and graph views." />
+      )}
     </section>
   );
 }
@@ -1116,20 +1542,24 @@ function FindingsTable({ findings }: { findings: any[] }) {
   return (
     <section className="panel overflow-auto p-4">
       <h3 className="mb-2 font-bold">Findings</h3>
-      <table className="table">
-        <thead><tr><th>Severity</th><th>Title</th><th>Module</th><th>MITRE</th><th>Host</th></tr></thead>
-        <tbody>
-          {findings.map((finding, index) => (
-            <tr key={finding.id ?? index}>
-              <td>{finding.severity}</td>
-              <td>{finding.title}</td>
-              <td>{finding.module_id}</td>
-              <td>{finding.mitre_technique}</td>
-              <td>{finding.host}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {findings.length > 0 ? (
+        <table className="table">
+          <thead><tr><th>Severity</th><th>Title</th><th>Module</th><th>MITRE</th><th>Host</th></tr></thead>
+          <tbody>
+            {findings.map((finding, index) => (
+              <tr key={finding.id ?? index}>
+                <td>{finding.severity}</td>
+                <td>{finding.title}</td>
+                <td>{finding.module_id}</td>
+                <td>{finding.mitre_technique}</td>
+                <td>{finding.host}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState text="No findings recorded for the selected campaign yet." />
+      )}
     </section>
   );
 }
@@ -1446,6 +1876,23 @@ function campaignScopeEntries(campaign: Campaign): string[] {
   return [];
 }
 
+function campaignTargets(campaign: Campaign): string[] {
+  if (Array.isArray(campaign.targets)) {
+    return campaign.targets.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+  }
+  if (typeof campaign.targets_json === "string" && campaign.targets_json.trim()) {
+    try {
+      const parsed = JSON.parse(campaign.targets_json) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 function ipv4InScope(ip: string, cidr: string): boolean {
   const [network, prefixText = "32"] = cidr.split("/");
   if (!isIpv4Address(network) || !/^\d{1,2}$/.test(prefixText)) {
@@ -1480,9 +1927,19 @@ function unique(values: string[]): string[] {
 
 function safeJson(value: string): Record<string, unknown> {
   try {
-    return JSON.parse(value) as Record<string, unknown>;
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
   } catch {
     return {};
+  }
+}
+
+function isJsonObject(value: string): boolean {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Boolean(parsed && typeof parsed === "object" && !Array.isArray(parsed));
+  } catch {
+    return false;
   }
 }
 
