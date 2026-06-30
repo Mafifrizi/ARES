@@ -14,7 +14,7 @@ and professional report generation.
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/Unit%20Suite-1095%20passing-22C55E?style=for-the-badge)](tests/)
+[![Status](https://img.shields.io/badge/Unit%20Suite-1098%20passing-22C55E?style=for-the-badge)](tests/)
 
 **Built for labs, internal security teams, and authorized engagements only.**
 
@@ -392,6 +392,36 @@ Expected ending:
 Validation lab passed.
 ```
 
+### 5. Check Prerequisites With Doctor
+
+`ares doctor` checks the runtime you are about to operate: Python, required
+packages, optional module dependencies, common service sockets, environment
+configuration, settings loading, and database connectivity.
+
+```bash
+ares doctor
+```
+
+A green check means the dependency is available. A yellow warning usually means
+an optional module family or external OS tool is not installed. It does not
+block the base dashboard, API, validation lab, or unit suite. A red failure
+means a required runtime check should be fixed before running that workflow.
+
+Optional module families can be installed only when you need them:
+
+```bash
+pip install -e ".[ad]"
+pip install -e ".[cloud]"
+pip install -e ".[container]"
+pip install -e ".[windows]"
+pip install -e ".[pdf]"
+pip install -e ".[full]"
+```
+
+External tools such as `hashcat` and `john` are operating-system packages, not
+Python extras. Install them with your platform package manager if you want the
+related modules to use them.
+
 ---
 
 ## Developer Setup
@@ -422,6 +452,15 @@ npm run build
 Production build assets are served by FastAPI from `frontend/dist` at
 `/dashboard`.
 
+Platform notes:
+
+- Windows: use PowerShell and `.\.venv\Scripts\python.exe`.
+- Linux, Kali, and macOS: use `source .venv/bin/activate`.
+- The package targets Python 3.10+. Keep one project virtual environment per
+  OS instead of copying `.venv` directories between machines.
+- Optional AD, cloud, container, Windows, and PDF dependencies are not required
+  for the core dashboard to start.
+
 ---
 
 ## Module Ecosystem
@@ -442,6 +481,27 @@ ARES modules are grouped by operational purpose:
 
 High-noise modules require careful authorization and should be tested first in
 dry-run mode.
+
+---
+
+## ARES SDK Surface
+
+ARES exposes SDK-style contracts for module authors and dashboard integrations,
+but this release does not claim a separate stable public client SDK package.
+
+Current SDK surface:
+
+- Module contracts: `BaseModule`, module metadata, generated parameter schemas,
+  `ExecutionContext`, findings, validation results, dry-run behavior, OPSEC
+  metadata, and report-ready outputs.
+- Frontend API client: typed dashboard calls under `frontend/src/api` for auth,
+  campaigns, modules, reports, graph, security, EDR/OPSEC, and live workflows.
+- Documentation: [docs/module-development.md](docs/module-development.md) and
+  [docs/module_sdk.md](docs/module_sdk.md) describe how to build and test ARES
+  modules without bypassing scope validation, RBAC, or audit controls.
+
+This keeps the public claim precise: ARES has module SDK contracts today. This
+README does not advertise a separate product SDK as a release feature.
 
 ---
 
@@ -498,9 +558,10 @@ See [docs/architecture.md](docs/architecture.md) and
 Current local verification:
 
 ```text
-1095 unit tests passed
-npm run build passed
+1098 unit tests passed
+frontend build passed
 validation lab passed
+ares doctor dependency display and local-env isolation covered by tests
 PDF report visual QA passed through browser fallback and Poppler render checks
 ```
 
