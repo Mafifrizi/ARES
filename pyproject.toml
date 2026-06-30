@@ -53,7 +53,7 @@ dependencies = [
     "alembic>=1.13",       # DB migrations — required for revoked_access_tokens table
 
     # CLI
-    "typer[all]>=0.12",
+    "typer>=0.12",
 
     # Network
     "dnspython>=2.6",
