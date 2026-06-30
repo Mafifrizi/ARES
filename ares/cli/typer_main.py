@@ -31,6 +31,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.markup import escape
 from rich import print as rprint
 
 app     = typer.Typer(
@@ -1058,7 +1059,8 @@ def _display_result(module_id: str, result: dict) -> None:
 @app.command("doctor")
 def doctor() -> None:
     """Check all prerequisites and configuration. Run this first."""
-    import importlib, shutil, os
+    import importlib, shutil, os, re
+    from importlib import metadata as importlib_metadata
     from pathlib import Path
 
     console.print("\n[bold]ARES Doctor[/bold] — prerequisite check\n")
@@ -1067,14 +1069,15 @@ def doctor() -> None:
 
     def check(label: str, status: str, detail: str = "") -> None:
         nonlocal ok, warn, fail
+        suffix = f"  [dim]{escape(str(detail))}[/dim]" if detail else ""
         if status == "ok":
-            console.print(f"  [green]✅[/green]  {label}" + (f"  [dim]{detail}[/dim]" if detail else ""))
+            console.print(f"  [green]✅[/green]  {label}" + suffix)
             ok += 1
         elif status == "warn":
-            console.print(f"  [yellow]⚠️ [/yellow]  {label}" + (f"  [dim]{detail}[/dim]" if detail else ""))
+            console.print(f"  [yellow]⚠️ [/yellow]  {label}" + suffix)
             warn += 1
         else:
-            console.print(f"  [red]❌[/red]  {label}" + (f"  [dim]{detail}[/dim]" if detail else ""))
+            console.print(f"  [red]❌[/red]  {label}" + suffix)
             fail += 1
 
     # Python version
@@ -1110,13 +1113,20 @@ def doctor() -> None:
     # ── impacket version ──────────────────────────────────────────────────────
     try:
         import impacket
-        ver_str = getattr(impacket, "__version__", "0.0.0")
-        parts = [int(x) for x in ver_str.split(".")[:2]]
-        if parts >= [0, 11]:
+        try:
+            ver_str = importlib_metadata.version("impacket")
+        except importlib_metadata.PackageNotFoundError:
+            ver_str = getattr(impacket, "__version__", "")
+
+        version_match = re.search(r"(\d+)\.(\d+)", ver_str)
+        if version_match and [int(version_match.group(1)), int(version_match.group(2))] >= [0, 11]:
             check(f"impacket {ver_str}", "ok", ">= 0.11 required")
-        else:
+        elif version_match:
             check(f"impacket {ver_str}", "fail",
                   f"too old ({ver_str}) — upgrade: pip install --upgrade impacket")
+        else:
+            check("impacket", "warn",
+                  "installed, but version could not be detected — expected >= 0.11")
     except ImportError:
         check("impacket", "fail", "pip install ares-redteam[ad]")
 
