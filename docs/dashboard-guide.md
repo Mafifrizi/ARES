@@ -102,6 +102,8 @@ records.
 
 Purpose: create and manage engagement containers.
 
+![Campaign creation workflow](assets/screenshots/dashboard-campaigns.png)
+
 Use it for:
 
 - Create a campaign.
@@ -123,6 +125,8 @@ Delete behavior:
 ### Modules
 
 Purpose: run individual modules safely.
+
+![Module catalog and run workflow](assets/screenshots/dashboard-modules-catalog.png)
 
 Use it for:
 
@@ -156,6 +160,8 @@ Scope behavior:
 ### Reports
 
 Purpose: generate and download campaign reports.
+
+![Report generation workflow](assets/screenshots/dashboard-reports.png)
 
 Formats:
 
