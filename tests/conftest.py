@@ -30,10 +30,16 @@ if str(_REPO_ROOT) not in sys.path:
 @pytest.fixture(autouse=True, scope="session")
 def set_test_env():
     """Set required env vars for the entire test session."""
+    original_webhook_url = os.environ.get("ARES_WEBHOOK_URL")
     os.environ.setdefault("ARES_SECRET_KEY",             "test-secret-key-min-32-chars-placeholder!!")
     os.environ.setdefault("ARES_ENCRYPTION_KEY",         "test-enc-key-min-32-chars-placeholder-32!!")
     os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestPassword1!")
+    os.environ["ARES_WEBHOOK_URL"] = ""
     yield
+    if original_webhook_url is not None:
+        os.environ["ARES_WEBHOOK_URL"] = original_webhook_url
+    else:
+        os.environ.pop("ARES_WEBHOOK_URL", None)
 
 
 # ── Temporary directories ─────────────────────────────────────────────────────
