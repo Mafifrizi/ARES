@@ -287,7 +287,7 @@ def build_notifier_from_settings(settings: Any) -> WebhookNotifier | None:
     Build a WebhookNotifier from AresSettings.
     Returns None if ARES_WEBHOOK_URL is not configured.
     """
-    url = getattr(settings, "ares_webhook_url", "") or ""
+    url = (getattr(settings, "ares_webhook_url", "") or "").strip()
     if not url:
         return None
     sev_str = getattr(settings, "ares_webhook_on_severity", "critical,high") or "critical,high"

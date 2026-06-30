@@ -16,6 +16,7 @@ import pytest
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.engine import AresEngine, ExecutionPlan, ModuleStatus
+from ares.core.notifier import build_notifier_from_settings
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -50,6 +51,17 @@ def _fast_run(**kwargs: Any):
 # ── Engine Tests ──────────────────────────────────────────────────────────────
 
 class TestAsyncEngine:
+
+    def test_blank_webhook_url_disables_notifier(self, settings: AresSettings) -> None:
+        """Blank/whitespace webhook config is disabled, not validated as a URL."""
+        settings.ares_webhook_url = "  "
+        assert build_notifier_from_settings(settings) is None
+
+    def test_http_webhook_url_still_rejected(self, settings: AresSettings) -> None:
+        """SSRF protection remains strict for configured non-HTTPS webhooks."""
+        settings.ares_webhook_url = "http://example.com/webhook"
+        with pytest.raises(ValueError, match="must use https"):
+            build_notifier_from_settings(settings)
 
     @pytest.mark.asyncio
     async def test_run_module_not_found(
