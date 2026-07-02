@@ -2,8 +2,11 @@
 
 **Version:** 1.0.0 | **Status:** Active
 
-> Complete guide for community module authors.
+> Complete guide for ARES module authors.
 > Everything needed to build, test, sign, and publish an ARES module.
+
+`ares.sdk` is the preferred public import path for new modules. The older
+`ares.modules.sdk` path remains available for existing modules.
 
 ---
 
@@ -11,7 +14,7 @@
 
 ```python
 # my_module.py
-from ares.modules.sdk import (
+from ares.sdk import (
     BaseModule, ExecutionContext, ModuleResult,
     OpsecLevel, Severity, Finding,
     module_metadata, get_logger,
@@ -214,7 +217,7 @@ class MyModule(BaseModule):
 Always raise typed SDK errors — engine uses the type to decide retry/fallback/abort:
 
 ```python
-from ares.modules.sdk import (
+from ares.sdk import (
     AuthenticationFailed,   # try next credential
     AccountLocked,          # ABORT all auth attempts
     HostUnreachable,        # skip this target
@@ -317,7 +320,7 @@ Use `ModuleTestHelper` from the SDK:
 ```python
 # tests/test_my_module.py
 import pytest
-from ares.modules.sdk import ModuleTestHelper
+from ares.sdk import ModuleTestHelper
 from my_module import MyModule
 
 class TestMyModule:
@@ -347,7 +350,7 @@ class TestMyModule:
             await helper.validate(ctx)
 
     def test_report_structure(self, helper):
-        from ares.modules.base import ModuleResult
+        from ares.sdk import ModuleResult
         result = ModuleResult(status="success", module_id="myorg.my_attack")
         report = helper.report(result)
         assert "module_id" in report

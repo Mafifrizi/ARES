@@ -1,237 +1,275 @@
-# ARES — First Engagement in 30 Minutes
+# ARES Quickstart
 
-> Written authorization required before testing any system.
+ARES is an operator dashboard and automation framework for authorized red-team validation, lab workflows, campaign orchestration, module execution, telemetry, reporting, RBAC, and security checks.
 
----
+Use it only on systems you own or have written permission to assess.
 
-## Before you start
-
-You need three things:
-
-1. **Python 3.10+** on your attacker machine
-2. **A Windows domain** to test against — even a home lab works
-3. **Domain credentials** — a regular user account is enough to start
-
-No lab? → [Set one up in 20 minutes](#lab-setup) with GOAD.
-
----
-
-## Step 1 — Install (3 min)
+## 1. Clone And Enter The Project
 
 ```bash
-pip install ares-redteam[ad]
-ares-setup                      # creates .env · generates random secrets
-ares doctor                     # verify everything is ready
+git clone https://github.com/Mafifrizi/ARES.git
+cd ARES
 ```
 
-What `ares doctor` should show:
-```
-✅  Python 3.11.x
-✅  impacket 0.12.x   (AD/SMB modules)
-✅  ldap3 2.9.x       (LDAP enumeration ready)
-✅  .env configured
-```
+## 2. Install The Local Environment
 
-If anything is red, it prints the exact command to fix it.
-
-For a full install with all optional integrations:
+Linux/macOS:
 
 ```bash
-pip install ares-redteam[full]
+bash scripts/setup.sh
+source .venv/bin/activate
 ```
 
-`[all]` remains available as a compatibility alias.
+Windows PowerShell:
 
----
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,pdf]"
+```
 
-## Step 2 — Create a campaign (1 min)
+Notes:
+
+- The setup script installs the local project in editable mode.
+- Some offensive-security integrations are optional. `ares doctor` will tell you which optional packages or native tools are missing for AD, cloud, container, or password-cracking workflows.
+- PDF support uses WeasyPrint when available and has a local browser fallback in the API.
+
+## 3. Configure Secrets
+
+ARES requires three local environment values before the API starts.
+
+These values are created by the operator or deployment owner. ARES does not provide shared public secrets.
+
+### Linux/macOS
 
 ```bash
-ares campaign create \
-  --name "First Lab Test" \
-  --client "Homelab" \
-  --scope "192.168.56.0/24" \
-  --noise normal
+export ARES_SECRET_KEY="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
 
-# Save the campaign ID
-export C=$(ares campaign list --json | jq -r '.[0].id')
-echo "Campaign: $C"
+export ARES_ENCRYPTION_KEY="$(python - <<'PY'
+from cryptography.fernet import Fernet
+print(Fernet.generate_key().decode())
+PY
+)"
+
+export ARES_DEFAULT_ADMIN_PASSWORD="ChangeThisAdminPassword123!"
 ```
 
-The scope is a hard stop — ARES will refuse to run modules against IPs outside it.
+### Windows PowerShell
 
-### Dashboard login flow
+```powershell
+$env:ARES_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:ARES_ENCRYPTION_KEY = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_DEFAULT_ADMIN_PASSWORD = "ChangeThisAdminPassword123!"
+```
+
+What each value does:
+
+| Variable | Purpose | Keep Stable? |
+| --- | --- | --- |
+| `ARES_SECRET_KEY` | Signs API sessions and tokens. | Yes, for a deployed instance. Rotating it invalidates sessions. |
+| `ARES_ENCRYPTION_KEY` | Encrypts sensitive local data such as credential vault material. | Yes. Losing or changing it can make existing encrypted data unreadable. |
+| `ARES_DEFAULT_ADMIN_PASSWORD` | Password for the first bootstrap `admin` account when the user table is empty. | Change after first login. |
+
+For repeated local use, copy `.env.example` to `.env`, fill these values once, and start ARES from the same project directory.
+
+## 4. Start The API And Dashboard
 
 ```bash
 ares-api
 ```
 
-Open `http://localhost:8080/dashboard`, sign in with the configured admin
-account, create a campaign, choose a module, keep `dry_run` enabled, and submit.
-The dashboard sends `POST /auth/token` as OAuth2 form data and calls only the
-main API routes documented in `docs/api-reference.md`.
+Open:
 
----
-
-## Step 3 — Enumerate (5 min, read-only)
-
-These modules only read from LDAP. No exploits, no alerts.
-
-```bash
-DC="192.168.56.10"
-DOMAIN="corp.local"
-CREDS="--dc $DC --domain $DOMAIN --username jdoe --password Password123"
-
-ares module run ad.enum_users     $CREDS   # who's in the domain?
-ares module run ad.enum_spn       $CREDS   # which accounts are kerberoastable?
-ares module run ad.enum_computers $CREDS   # what machines exist?
-ares module run recon.fingerprint --target $DC   # what EDR is running?
+```text
+http://localhost:8080/dashboard
 ```
 
-Check what was found:
-```bash
-ares findings list --campaign-id $C
-```
-
----
-
-## Step 4 — Harvest credentials (5 min)
+Health check:
 
 ```bash
-# Request TGS tickets for all SPN accounts — save to vault
-ares module run ad.kerberoast $CREDS
-
-# If any accounts don't require pre-auth (common misconfiguration)
-ares module run ad.asreproast --dc $DC --domain $DOMAIN \
-  --userfile /tmp/users.txt    # no creds needed for this one
-
-# Crack offline — uses hashcat if available, john as fallback
-ares module run credential.crack
-
-# See what got cracked
-ares vault list
+curl http://localhost:8080/health
 ```
 
----
+Expected result:
 
-## Step 5 — Escalate (if you have DA creds)
+```json
+{"status":"ok","version":"6.0.0","db":"connected"}
+```
+
+Login with:
+
+- Username: `admin`
+- Password: your `ARES_DEFAULT_ADMIN_PASSWORD`
+
+Then change the admin password from the `Security` page.
+
+## 5. Create A Campaign
+
+Open `Campaigns` and create a scoped campaign.
+
+Example local demo values:
+
+| Field | Example |
+| --- | --- |
+| Name | `ARES Local Finding Demo` |
+| Client | `Internal` |
+| Targets | `127.0.0.1` |
+| Scope CIDRs | `127.0.0.1/32` |
+
+Scope matters. Targeted modules will refuse to run if the target is outside the selected campaign scope.
+
+## 6. Run A Module Safely
+
+Open `Modules`:
+
+1. Select the campaign.
+2. Search for a module.
+3. Fill the generated parameter fields.
+4. Run with `Dry run` first when available.
+5. Run live only when the target and scope are authorized.
+
+Port behavior is module-specific. Some modules require explicit ports because they fingerprint a service. Broader discovery belongs in enumeration modules such as port scanning, then the discovered services can be used by more specific modules.
+
+## 7. Generate Reports
+
+Open `Reports`:
+
+1. Select a campaign.
+2. Choose HTML, PDF, Markdown, or JSON.
+3. Click `Generate`.
+4. Use the dashboard `Download` button.
+
+Do not open report file URLs directly in the browser address bar. Report downloads are authenticated, so direct unauthenticated URLs return `401`.
+
+## 8. Use Templates
+
+Open `Templates` when you want a repeatable plan.
+
+Templates:
+
+- Generate deterministic plan stages.
+- Do not call an LLM.
+- Do not execute modules by themselves.
+- Are useful as a checklist before running campaign modules.
+
+Typical flow:
+
+1. Select a built-in template such as `internal_pentest`.
+2. Optionally provide JSON parameters.
+3. Click `Generate Plan`.
+4. Review the returned stages and module IDs.
+5. Execute approved modules manually from the campaign workflow.
+
+## 9. Use Strategy And AI Planning
+
+Strategy is for goal-based planning against an existing campaign.
+
+The default strategy path expects an LLM provider key unless you configure a local backend. ARES API keys from the `Security` page are not LLM keys.
+
+Common LLM environment variables:
 
 ```bash
-# This requires team_lead authorization — protects against accidents
-ares module run ad.dcsync $CREDS
-# → dumps all NTLM hashes including krbtgt
-
-# Forge a golden ticket for persistent access
-ares module run credential.golden_ticket \
-  --domain $DOMAIN \
-  --domain-sid S-1-5-21-... \
-  --krbtgt-hash <hash from dcsync>
+export ANTHROPIC_API_KEY="..."
+export OPENAI_API_KEY="..."
 ```
 
----
+Use Strategy only after:
 
-## Step 6 — Generate the report (1 min)
+- A campaign exists.
+- Scope is correct.
+- Authorization notes are clear.
+- The required LLM provider key is configured, or a supported local backend is selected through the API.
+
+## 10. API Keys In The Security Page
+
+Dashboard API keys authenticate scripts and integrations to ARES itself.
+
+Use them as:
 
 ```bash
-ares report generate \
-  --campaign-id $C \
-  --format html \
-  --output lab_report.html
-
-open lab_report.html     # macOS
-xdg-open lab_report.html # Linux
+curl http://localhost:8080/campaigns \
+  -H "X-API-Key: ares_YOUR_KEY"
 ```
 
-The report includes:
-- MITRE ATT&CK heatmap of every technique used
-- Timeline of all actions with timestamps
-- Findings ranked by severity with evidence
-- Remediation steps per finding
+They are not OpenAI, Anthropic, or Ollama keys.
 
----
+## 11. Roles
 
-## What's next
+The first user is `admin` with the `team_lead` role.
 
-Once you're comfortable with the basics, try:
+| Role | Purpose |
+| --- | --- |
+| `team_lead` | Full local admin/operator lead. Can create users, delete campaigns, view security audit, and authorize higher-risk workflows. |
+| `operator` | Daily operator. Can run normal campaign/module/report workflows. |
+| `recon` | Read-heavy recon identity. Main dashboard execution endpoints remain operator-gated. |
+| `reporter` | Read-only reporting and review. |
 
-**Lateral movement:**
-```bash
-ares module run lateral.psexec \
-  --target 192.168.56.20 \
-  --username Administrator \
-  --password "CrackedPassword"
-```
+Create users through `POST /auth/register` with a team-lead token. See `docs/dashboard-guide.md` for a PowerShell example.
 
-**Cloud attack paths (AWS):**
-```bash
-pip install ares-redteam[cloud]
-ares module run cloud.aws --access-key AKIA... --secret-key ...
-ares module run cloud.aws_privesc --access-key AKIA...
-```
+## 12. Doctor And Optional Dependencies
 
-**AI autonomous planning** — let ARES plan the whole engagement:
-```bash
-# Start the API server first
-ares server start
-
-# Then trigger autonomous engagement
-curl -X POST http://localhost:8080/strategy/engage \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "campaign_id": "'$C'",
-    "goal": "domain_admin",
-    "max_rounds": 3,
-    "llm_backend": "claude",
-    "authorizations": []
-  }'
-```
-
-ARES will enumerate, select techniques, execute, check detection probability,
-and stop itself if anything looks too hot.
-
----
-
-## Common issues
-
-| Error | Fix |
-|-------|-----|
-| `No module named 'impacket'` | `pip install ares-redteam[ad]` |
-| `Connection refused :389` | Check DC IP — ARES needs ports 88, 389, 445 reachable |
-| `KDC_ERR_C_PRINCIPAL_UNKNOWN` | Username wrong — verify with `ares module run ad.enum_users` |
-| `STATUS_LOGON_FAILURE` | Wrong password |
-| `Scope violation: target not in scope` | Update `--scope` when creating campaign |
-| `ARES_SECRET_KEY not set` | Run `ares-setup` or `cp .env.example .env` |
-| `impacket version too old` | `pip install --upgrade impacket` |
-
----
-
-## Lab setup
-
-Don't have a Windows domain? Two options:
-
-**Option A — GOAD (recommended, 20 min)**
-
-[Game of Active Directory](https://github.com/Orange-Cyberdefense/GOAD) sets up
-a full 3-DC lab with pre-configured misconfigurations designed for testing.
+Run:
 
 ```bash
-git clone https://github.com/Orange-Cyberdefense/GOAD
-cd GOAD
-vagrant up    # needs VirtualBox + Vagrant
-# → 3 DCs on 192.168.56.0/24, many vulns ready to test
+ares doctor
 ```
 
-**Option B — Windows Server Eval (free, 180 days)**
+`ares doctor` checks Python, key dependencies, optional module integrations, native tools, network socket support, environment configuration, and the local database.
 
-1. Download [Windows Server 2022 Evaluation](https://www.microsoft.com/en-us/evalcenter/evaluate-windows-server-2022) (free, no account needed)
-2. Install in VirtualBox/VMware, promote to Domain Controller
-3. Create a regular user account
-4. Set scope to your VM's IP range in ARES
+A yellow warning means an optional integration is missing. A red failure means a required dependency or configuration item needs attention.
 
-→ You now have a target for all AD modules.
+Common examples:
 
----
+| Message | Meaning |
+| --- | --- |
+| `impacket` missing or old | AD/SMB modules need the optional impacket dependency. |
+| `pip-audit not installed` | Dependency audit is unavailable; core API can still start. |
+| `hashcat not in PATH` | Password-cracking helpers cannot use hashcat until installed. |
+| `.env configured` failed | Required environment values are missing. |
 
-*ARES is for authorized red team engagements only.*
-*Get written permission before testing any real system.*
+## 13. Public SDK
+
+Use the public SDK import path for custom modules:
+
+```python
+from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult, register_module
+```
+
+`ares.modules.sdk` remains as a compatibility shim, but new code should use `ares.sdk`.
+
+See:
+
+- `docs/module-development.md`
+- `docs/module_sdk.md`
+- `docs/examples/example_http_enum.py`
+
+## 14. Validation Lab
+
+Run the validation lab after changing API or dashboard behavior:
+
+```powershell
+$env:ARES_LAB_PASSWORD="YOUR_CURRENT_ADMIN_PASSWORD"
+.\scripts\run_validation_lab.ps1
+```
+
+The lab checks login, profile, campaign validation, dry-run validation, reports, and API key lifecycle.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| `ARES not configured` | Set `ARES_SECRET_KEY`, `ARES_ENCRYPTION_KEY`, and `ARES_DEFAULT_ADMIN_PASSWORD`. |
+| `Invalid credentials` | Use the current admin password, not the placeholder from docs. |
+| `Request failed with 422` | A required field is missing or a target/scope value is invalid. |
+| `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32`. |
+| `Global rate limit exceeded` | Wait briefly, then retry. Avoid repeatedly clicking actions while a request is pending. |
+| Report direct URL returns `401` | Use the authenticated dashboard Download button. |
+| Strategy does nothing useful | Confirm the campaign, authorization notes, and LLM provider key. |
+
+## Safety Reminder
+
+ARES is intended for authorized security testing, lab use, and defensive validation only.

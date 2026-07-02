@@ -8,9 +8,7 @@ Writing your first ARES module in 10 minutes.
 
 ```python
 # mymodule/mssql_enum.py
-from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
-from ares.core.campaign import Finding, Severity
-from ares.core.context import ExecutionContext
+from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult, OpsecLevel, Severity
 from ares.core.errors import NetworkError, ConnectionRefused
 
 
@@ -30,7 +28,7 @@ class MssqlEnumModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1505.001"]
     MODULE_AUTHOR      = "Your Name <you@example.com>"
 
-    # ── v0.9.0 SDK contract ─────────────────────────────────────────────
+    # ── ARES SDK contract ─────────────────────────────────────────────
 
     async def validate(self, ctx: ExecutionContext) -> None:
         """Check that context has everything we need before executing."""
@@ -127,7 +125,7 @@ class MssqlEnumModule(BaseModule):
 
 ---
 
-## The SDK Contract (v0.9.0)
+## The ARES SDK Contract
 
 ### `validate(ctx)` — Called before execution
 
@@ -277,7 +275,7 @@ result = ModuleResult(
 
 ```python
 import pytest
-from ares.core.context import ExecutionContext
+from ares.sdk import ExecutionContext
 from mymodule.mssql_enum import MssqlEnumModule
 
 @pytest.mark.asyncio
@@ -304,7 +302,7 @@ async def test_mssql_enum_dry_run():
     assert result.module_id == "db.mssql_enum"
 
 def test_module_metadata():
-    from ares.modules.base import validate_module_class
+    from ares.sdk import validate_module_class
     errors = validate_module_class(MssqlEnumModule)
     assert errors == [], f"Module metadata errors: {errors}"
 ```

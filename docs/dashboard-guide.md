@@ -76,6 +76,13 @@ Password rules:
 To review users, open `Security` as a `team_lead` or call
 `GET /security/users` with a team-lead token.
 
+
+## State And Navigation Behavior
+
+The dashboard keeps the active campaign, selected module, and recent result panels aligned with the current page context. When you change campaign, module, report format, graph path, or template input, stale results from the previous context are hidden so the UI does not imply that old output belongs to the new action.
+
+The `Live` page uses a browser WebSocket session. Leaving the page closes that browser connection. When you return, select the campaign and reconnect to start listening again. The underlying campaign data remains in the backend; only the current browser stream session is temporary.
+
 ## Pages
 
 ### Overview
@@ -352,3 +359,6 @@ Use it for:
 | Module says target is not in scope | Selected campaign has no matching scope CIDR. | Create or select a campaign whose scope includes the target, such as `127.0.0.1/32` for local testing. |
 | Telemetry looks empty after restart | Telemetry is an in-memory runtime snapshot. | Run modules in the current API process, or use Reports/Campaigns for durable history. |
 | PDF generation fails | No PDF backend or browser fallback is available. | Install the PDF extra/native libraries or run on a machine with an available Chromium-compatible browser; use HTML, Markdown, or JSON meanwhile. |
+## Cross-Platform Notes
+
+The core API, dashboard, database migrations, SDK imports, and unit suite are designed to run on Windows, Linux, and macOS. Optional module dependencies can vary by operating system. Use `ares doctor` on each host to see which optional integrations are available before running modules that need AD, cloud, container, PDF, or native password-cracking tooling.

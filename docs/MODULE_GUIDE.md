@@ -26,7 +26,7 @@ This creates two files:
 Every ARES module is a Python class that inherits from `BaseModule`:
 
 ```python
-from ares.modules.sdk import (
+from ares.sdk import (
     BaseModule, ExecutionContext, ModuleResult,
     OpsecLevel, Severity, module_metadata,
 )
@@ -130,7 +130,7 @@ Controls whether the planner includes your module in stealth profiles:
 ## Finding Severity
 
 ```python
-from ares.modules.sdk import Severity
+from ares.sdk import Severity
 
 Severity.CRITICAL   # CVSS 9.0–10.0
 Severity.HIGH       # CVSS 7.0–8.9

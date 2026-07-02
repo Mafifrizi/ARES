@@ -73,12 +73,14 @@ interface DashboardUiState {
 }
 
 interface ModuleRunRecord {
+  campaignId: string;
   moduleId: string;
   payload: unknown;
   isError?: boolean;
 }
 
 interface PersistedResult {
+  key: string;
   payload: unknown;
   isError?: boolean;
 }
@@ -597,8 +599,8 @@ function ModulesPage() {
   });
   const run = useMutation({
     mutationFn: () => api.runModule(selectedId, buildModuleRunPayload(campaignId, params, dryRun)),
-    onSuccess: (payload) => setLastRunRecord({ moduleId: selectedId, payload }),
-    onError: (error) => setLastRunRecord({ moduleId: selectedId, payload: serializeError(error), isError: true })
+    onSuccess: (payload) => setLastRunRecord({ campaignId, moduleId: selectedId, payload }),
+    onError: (error) => setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true })
   });
   const list = modules.data ?? [];
   const selected = list.find((item) => item.id === selectedId);
@@ -617,7 +619,7 @@ function ModulesPage() {
   const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending;
   const runBlocked = !canRun || Boolean(scopeWarning);
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
-  const persistedRun = lastRunRecord?.moduleId === selectedId ? lastRunRecord : null;
+  const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
   const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
   const runError = run.error ?? (persistedRun?.isError ? persistedRun.payload : undefined);
 
@@ -752,14 +754,16 @@ function ReportsPage() {
     queryFn: () => api.reports(campaignId),
     enabled: Boolean(campaignId)
   });
+  const reportResultKey = `${campaignId}:${format}`;
   const generate = useMutation({
     mutationFn: () => api.generateReport(campaignId, format),
     onSuccess: (payload) => {
-      setLastGenerateResult({ payload });
+      setLastGenerateResult({ key: reportResultKey, payload });
       void queryClient.invalidateQueries({ queryKey: ["reports", campaignId] });
     },
-    onError: (error) => setLastGenerateResult({ payload: serializeError(error), isError: true })
+    onError: (error) => setLastGenerateResult({ key: reportResultKey, payload: serializeError(error), isError: true })
   });
+  const persistedGenerateResult = lastGenerateResult?.key === reportResultKey ? lastGenerateResult : null;
   const download = useMutation({
     mutationFn: async (item: ReportItem) => {
       const blob = await api.downloadReport(campaignId, item.filename);
@@ -806,8 +810,8 @@ function ReportsPage() {
         </div>
         {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
         <DataPanel
-          title={(generate.error ?? (lastGenerateResult?.isError ? lastGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
-          data={generate.error ?? generate.data ?? lastGenerateResult?.payload}
+          title={(generate.error ?? (persistedGenerateResult?.isError ? persistedGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
+          data={generate.error ?? generate.data ?? persistedGenerateResult?.payload}
         />
       </div>
       <section className="panel mt-4 overflow-auto p-4">
@@ -844,11 +848,13 @@ function GraphPage() {
   const [lastIngestResult, setLastIngestResult] = useSessionState<PersistedResult | null>("ares.dashboard.graph.lastIngest", null);
   const graph = useQuery({ queryKey: ["graph", campaignId], queryFn: () => api.graph(campaignId), enabled: Boolean(campaignId) });
   const paths = useQuery({ queryKey: ["attack-paths", campaignId], queryFn: () => api.attackPaths(campaignId), enabled: Boolean(campaignId) });
+  const ingestResultKey = `${campaignId}:${jsonPath.trim()}`;
   const ingest = useMutation({
     mutationFn: () => api.ingestBloodhound(campaignId, jsonPath),
-    onSuccess: (payload) => setLastIngestResult({ payload }),
-    onError: (error) => setLastIngestResult({ payload: serializeError(error), isError: true })
+    onSuccess: (payload) => setLastIngestResult({ key: ingestResultKey, payload }),
+    onError: (error) => setLastIngestResult({ key: ingestResultKey, payload: serializeError(error), isError: true })
   });
+  const persistedIngestResult = lastIngestResult?.key === ingestResultKey ? lastIngestResult : null;
   const nodes = Array.isArray(graph.data?.nodes) ? graph.data.nodes : [];
   const links = Array.isArray(graph.data?.links) ? graph.data.links : [];
   return (
@@ -913,8 +919,8 @@ function GraphPage() {
           {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
           <DataPanel title="Attack Paths" data={paths.data} />
           <DataPanel
-            title={(ingest.error ?? (lastIngestResult?.isError ? lastIngestResult.payload : undefined)) ? "Ingest Error" : "Ingest Result"}
-            data={ingest.data ?? ingest.error ?? lastIngestResult?.payload}
+            title={(ingest.error ?? (persistedIngestResult?.isError ? persistedIngestResult.payload : undefined)) ? "Ingest Error" : "Ingest Result"}
+            data={ingest.data ?? ingest.error ?? persistedIngestResult?.payload}
           />
         </section>
       </div>
@@ -928,13 +934,15 @@ function TemplatesPage() {
   const [params, setParams] = useSessionState("ares.dashboard.templates.params", "{}");
   const [warning, setWarning] = useState("");
   const [lastPlanResult, setLastPlanResult] = useSessionState<PersistedResult | null>("ares.dashboard.templates.lastPlan", null);
+  const templatePlanKey = `${name.trim()}:${params}`;
   const plan = useMutation({
     mutationFn: () => api.templatePlan(name, safeJson(params)),
-    onSuccess: (payload) => setLastPlanResult({ payload }),
-    onError: (error) => setLastPlanResult({ payload: serializeError(error), isError: true })
+    onSuccess: (payload) => setLastPlanResult({ key: templatePlanKey, payload }),
+    onError: (error) => setLastPlanResult({ key: templatePlanKey, payload: serializeError(error), isError: true })
   });
   const selected = (templates.data ?? []).find((item) => item.name === name);
-  const generated = (plan.data ?? (!lastPlanResult?.isError ? lastPlanResult?.payload : undefined)) as TemplatePlanResponse | undefined;
+  const persistedPlanResult = lastPlanResult?.key === templatePlanKey ? lastPlanResult : null;
+  const generated = (plan.data ?? (!persistedPlanResult?.isError ? persistedPlanResult?.payload : undefined)) as TemplatePlanResponse | undefined;
   const paramsValid = isJsonObject(params);
   return (
     <Page title="Templates">
@@ -1036,8 +1044,8 @@ function TemplatesPage() {
           </button>
           <TemplatePlanSummary plan={generated} />
           <DataPanel
-            title={(plan.error ?? (lastPlanResult?.isError ? lastPlanResult.payload : undefined)) ? "Plan Error" : "Plan Details"}
-            data={plan.error ?? plan.data ?? lastPlanResult?.payload}
+            title={(plan.error ?? (persistedPlanResult?.isError ? persistedPlanResult.payload : undefined)) ? "Plan Error" : "Plan Details"}
+            data={plan.error ?? plan.data ?? persistedPlanResult?.payload}
           />
         </section>
       </div>
@@ -1054,6 +1062,7 @@ function StrategyPage() {
   const [llmBackend, setLlmBackend] = useSessionState("ares.dashboard.strategy.llmBackend", "claude");
   const [authorizations, setAuthorizations] = useSessionState("ares.dashboard.strategy.authorizations", "");
   const [lastEngageResult, setLastEngageResult] = useSessionState<PersistedResult | null>("ares.dashboard.strategy.lastEngage", null);
+  const strategyResultKey = `${campaignId}:${goal}:${llmBackend}:${authorizations}`;
   const engage = useMutation({
     mutationFn: () =>
       api.engageStrategy({
@@ -1063,9 +1072,10 @@ function StrategyPage() {
         max_rounds: 5,
         authorizations: splitLines(authorizations)
       }),
-    onSuccess: (payload) => setLastEngageResult({ payload }),
-    onError: (error) => setLastEngageResult({ payload: serializeError(error), isError: true })
+    onSuccess: (payload) => setLastEngageResult({ key: strategyResultKey, payload }),
+    onError: (error) => setLastEngageResult({ key: strategyResultKey, payload: serializeError(error), isError: true })
   });
+  const persistedEngageResult = lastEngageResult?.key === strategyResultKey ? lastEngageResult : null;
   const allowed = user?.role === "team_lead" || user?.role === "operator";
   return (
     <Page title="Strategy">
@@ -1114,8 +1124,8 @@ function StrategyPage() {
         <section>
           <DataPanel title="Active" data={active.data} />
           <DataPanel
-            title={(engage.error ?? (lastEngageResult?.isError ? lastEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
-            data={engage.data ?? engage.error ?? lastEngageResult?.payload}
+            title={(engage.error ?? (persistedEngageResult?.isError ? persistedEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
+            data={engage.data ?? engage.error ?? persistedEngageResult?.payload}
           />
         </section>
       </div>
@@ -1220,6 +1230,7 @@ function EdrPage() {
   const [success, setSuccess] = useSessionState("ares.dashboard.edr.success", false);
   const [notes, setNotes] = useSessionState("ares.dashboard.edr.notes", "");
   const [lastReportResult, setLastReportResult] = useSessionState<PersistedResult | null>("ares.dashboard.edr.lastReport", null);
+  const edrReportKey = `${techniqueId.trim()}:${vendor.trim()}:${version.trim()}:${success}:${notes.trim()}`;
   const report = useMutation({
     mutationFn: () =>
       api.reportBypass({
@@ -1229,9 +1240,10 @@ function EdrPage() {
         success,
         notes: notes.trim()
       }),
-    onSuccess: (payload) => setLastReportResult({ payload }),
-    onError: (error) => setLastReportResult({ payload: serializeError(error), isError: true })
+    onSuccess: (payload) => setLastReportResult({ key: edrReportKey, payload }),
+    onError: (error) => setLastReportResult({ key: edrReportKey, payload: serializeError(error), isError: true })
   });
+  const persistedReportResult = lastReportResult?.key === edrReportKey ? lastReportResult : null;
   return (
     <Page title="EDR/OPSEC">
       <section className="panel p-4">
@@ -1301,8 +1313,8 @@ function EdrPage() {
         </form>
       </section>
       <DataPanel
-        title={(report.error ?? (lastReportResult?.isError ? lastReportResult.payload : undefined)) ? "Outcome Error" : "Outcome Result"}
-        data={report.data ?? report.error ?? lastReportResult?.payload}
+        title={(report.error ?? (persistedReportResult?.isError ? persistedReportResult.payload : undefined)) ? "Outcome Error" : "Outcome Result"}
+        data={report.data ?? report.error ?? persistedReportResult?.payload}
       />
       <DataPanel title="Raw Stats" data={stats.data} />
     </Page>

@@ -38,3 +38,10 @@ Module forms are built from `GET /modules` `param_schema`; fields are not
 hardcoded in the frontend. Module runs default to `dry_run=true`, and
 high-noise or sensitive modules require explicit UI confirmation. Backend RBAC
 remains the enforcement boundary.
+## Runtime UX State
+
+Dashboard result panels are context-aware. Modules, reports, graph ingest, templates, strategy, and EDR/OPSEC views keep their latest result only while the selected campaign/module/input still matches the action that produced it. Changing page context hides stale output instead of showing old JSON under a new selection.
+
+Long-running actions should show a loading state on the button or result area. Operators should be able to tell that ARES is processing a request without watching the terminal.
+
+The Live page owns a browser WebSocket connection. Navigating away closes that connection, so users reconnect when they return to the page.

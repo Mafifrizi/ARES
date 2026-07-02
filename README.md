@@ -14,7 +14,7 @@ and professional report generation.
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/Unit%20Suite-1098%20passing-22C55E?style=for-the-badge)](tests/)
+[![Status](https://img.shields.io/badge/Unit%20Suite-1102%20passing-22C55E?style=for-the-badge)](tests/)
 
 **Built for labs, internal security teams, and authorized engagements only.**
 
@@ -486,8 +486,12 @@ dry-run mode.
 
 ## ARES SDK Surface
 
-ARES exposes SDK-style contracts for module authors and dashboard integrations,
-but this release does not claim a separate stable public client SDK package.
+ARES exposes a public SDK import path for module authors and local
+integrations:
+
+```python
+from ares.sdk import BaseModule, ExecutionContext, ModuleResult
+```
 
 Current SDK surface:
 
@@ -500,8 +504,9 @@ Current SDK surface:
   [docs/module_sdk.md](docs/module_sdk.md) describe how to build and test ARES
   modules without bypassing scope validation, RBAC, or audit controls.
 
-This keeps the public claim precise: ARES has module SDK contracts today. This
-README does not advertise a separate product SDK as a release feature.
+`ares.sdk` is the preferred import path for new code. The older
+`ares.modules.sdk` import path remains available so existing local modules keep
+working.
 
 ---
 
@@ -558,7 +563,7 @@ See [docs/architecture.md](docs/architecture.md) and
 Current local verification:
 
 ```text
-1098 unit tests passed
+1102 unit tests passed
 frontend build passed
 validation lab passed
 ares doctor dependency display and local-env isolation covered by tests

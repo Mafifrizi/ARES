@@ -5,7 +5,7 @@ Provides all base classes, helpers, and type definitions needed
 to write a compliant ARES module.
 
 Quick start:
-    from ares.modules.sdk import (
+    from ares.sdk import (
         BaseModule, ExecutionContext, ModuleResult,
         Finding, Severity, OpsecLevel,
         module_metadata, requires_privilege, timeout,

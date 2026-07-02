@@ -1593,7 +1593,7 @@ from __future__ import annotations
 MITRE ATT&CK: Fill in technique ID (e.g. T1558.003 for Kerberoasting)
 """
 from typing import Any
-from ares.modules.sdk import (
+from ares.sdk import (
     BaseModule, ExecutionContext, ModuleResult,
     OpsecLevel, Severity, module_metadata,
     get_logger, ModuleValidationError, HostUnreachable,

@@ -1,6 +1,6 @@
 """
 ARES Example Module — HTTP Service Enumeration
-A minimal, fully commented example of the v0.9.0 module SDK.
+A minimal, fully commented example of the ARES public module SDK.
 
 Copy this file as a starting point for your own module.
 Run the test at the bottom with: pytest docs/examples/example_http_enum.py -v
@@ -13,14 +13,12 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
-from ares.core.context import ExecutionContext
 from ares.core.errors import (
     ConnectionRefused,
     ConnectionTimeout,
     ModuleValidationError,
 )
-from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
+from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult, OpsecLevel, Severity
 
 
 class HttpEnumModule(BaseModule):
@@ -294,7 +292,7 @@ def test_report_has_narrative(module) -> None:
 
 
 def test_module_metadata_valid() -> None:
-    from ares.modules.base import validate_module_class
+    from ares.sdk import validate_module_class
     errors = validate_module_class(HttpEnumModule)
     assert errors == [], f"Metadata errors: {errors}"
 

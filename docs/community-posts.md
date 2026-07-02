@@ -50,8 +50,8 @@ It is intended for labs, internal security teams, and authorized engagements.
 Feedback is welcome, especially around UX, docs, module quality, and defensive
 validation workflows.
 
-GitHub: YOUR_GITHUB_LINK
-Docs: YOUR_DOCS_LINK
+GitHub: https://github.com/Mafifrizi/ARES
+Docs: https://github.com/Mafifrizi/ARES#readme
 ```
 
 ## Facebook Post - More Professional Version
@@ -73,7 +73,7 @@ Core features:
 - Encrypted vault and token revocation.
 - Team lead/operator/recon/reporter roles.
 - Local validation lab for safe smoke testing.
-- HTML report generation with ARES branding.
+- HTML, PDF, Markdown, and JSON report generation with ARES branding.
 
 ARES is for authorized security testing only. It is not a C2 framework, not an
 implant framework, and not intended for unauthorized access.
@@ -81,7 +81,7 @@ implant framework, and not intended for unauthorized access.
 I would appreciate feedback from practitioners on the dashboard UX, module
 coverage, documentation, and safe lab workflows.
 
-GitHub: YOUR_GITHUB_LINK
+GitHub: https://github.com/Mafifrizi/ARES
 ```
 
 ## Discord Announcement
@@ -97,7 +97,7 @@ ARES is an authorized red-team engagement framework with:
   lateral, EDR/OPSEC, and AI planning
 - Encrypted credential vault
 - RBAC and API key management
-- Report generation
+- HTML, PDF, Markdown, and JSON report generation
 - Local validation lab
 
 Use case: labs, internal security teams, and authorized engagements where you
@@ -105,8 +105,8 @@ want structure, reporting, and OPSEC controls around module execution.
 
 Not a C2, not an implant, not for unauthorized testing.
 
-GitHub: YOUR_GITHUB_LINK
-Docs: YOUR_DOCS_LINK
+GitHub: https://github.com/Mafifrizi/ARES
+Docs: https://github.com/Mafifrizi/ARES#readme
 Feedback welcome, especially around UX and module docs.
 ```
 
@@ -120,7 +120,7 @@ vault, OPSEC controls, reports, API keys, and a local validation lab.
 It is built for labs/internal teams/authorized engagements, not C2 or
 unauthorized testing.
 
-GitHub: YOUR_GITHUB_LINK
+GitHub: https://github.com/Mafifrizi/ARES
 ```
 
 ## GitHub Release Body
@@ -139,7 +139,7 @@ Highlights:
 - Encrypted credential vault.
 - RBAC, JWT refresh, token revocation, and API key lifecycle.
 - Local validation lab for safe smoke testing.
-- Branded HTML report generation.
+- Branded HTML, PDF, Markdown, and JSON report generation.
 
 Safety:
 ARES is for authorized security testing only. Do not use it against systems you
@@ -190,4 +190,3 @@ Before posting screenshots:
 - Blur tokens.
 - Blur real IPs/domains unless they are `localhost` or lab-only.
 - Do not show `.env`.
-

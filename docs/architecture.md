@@ -109,7 +109,7 @@ class BaseModule(ABC):
     MITRE_TECHNIQUES:   list[str]    # ["T1558.003"]
     MODULE_AUTHOR:      str
 
-    # v0.9.0 SDK (preferred)
+    # Public SDK (preferred)
     async def validate(self, ctx: ExecutionContext) -> None: ...
     async def execute(self, ctx: ExecutionContext) -> ModuleResult: ...
     def report(self, result: ModuleResult) -> dict: ...
@@ -132,7 +132,7 @@ ctx = ExecutionContext.build(
     session   = operator_session,
 )
 findings, raw = await module.run(**ctx.params)   # legacy
-result = await module.execute(ctx)               # v0.9.0
+result = await module.execute(ctx)               # ARES SDK
 ```
 
 ### 4. Error Hierarchy

@@ -122,7 +122,7 @@ Highlights:
 - Encrypted vault and token revocation.
 - RBAC for team lead, operator, recon, and reporter workflows.
 - Local validation lab for safe smoke testing.
-- HTML report generation with ARES branding.
+- HTML, PDF, Markdown, and JSON report generation with ARES branding.
 - Campaign delete flow for cleanup of lab/test campaigns.
 
 Safety note:
