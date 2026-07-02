@@ -172,6 +172,59 @@ report, graph, strategy, security, EDR/OPSEC, and live views.
 
 Yes. See `docs/module-development.md` and `docs/module_sdk.md`.
 
+
+## Threads Post - Concise
+
+```text
+I just published ARES, an operator dashboard and automation framework for
+authorized red-team validation and lab workflows.
+
+ARES focuses on the parts that usually need structure: scoped campaigns, module
+execution, dry-run checks, findings, reports, RBAC, API keys, telemetry, and a
+local validation lab.
+
+It is not a C2 or implant framework. The goal is to make authorized assessment
+work easier to review, document, and repeat safely.
+
+GitHub: https://github.com/Mafifrizi/ARES
+```
+
+## Threads Post - Indonesian Community Version
+
+```text
+Gue baru publish ARES, project dashboard + automation framework buat authorized
+red-team validation dan lab workflow.
+
+Fokusnya bukan buat jadi C2, tapi buat ngerapihin alur kerja: bikin campaign,
+set target/scope, jalanin module, dry-run dulu, review findings, generate
+report, manage API key/RBAC, dan lihat telemetry dari dashboard.
+
+Cocok buat lab, internal security team, atau assessment yang memang punya izin.
+Masih terbuka buat feedback soal UX, docs, module quality, dan workflow demo.
+
+GitHub: https://github.com/Mafifrizi/ARES
+```
+
+## Screenshot Pack For Posting
+
+Attach screenshots in this order when posting ARES publicly:
+
+1. `docs/assets/screenshots/dashboard-overview.png` - shows health, telemetry,
+   and the dashboard layout.
+2. `docs/assets/screenshots/dashboard-campaigns.png` - shows campaign creation,
+   targets, and scope CIDRs.
+3. `docs/assets/screenshots/dashboard-modules-catalog.png` - shows the module
+   catalog, OPSEC filters, campaign selection, and run form.
+4. `docs/assets/screenshots/dashboard-reports.png` - shows report generation
+   and downloadable artifacts.
+
+Recommended caption for the screenshot set:
+
+```text
+Screenshots use local/demo data only. ARES is intended for authorized security
+validation, lab use, and defensive workflow documentation.
+```
+
 ## Screenshot Suggestions
 
 Use screenshots that do not expose secrets:

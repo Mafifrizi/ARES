@@ -9,6 +9,19 @@ Production URL:
 http://localhost:8080/dashboard
 ```
 
+## Screenshot Set
+
+The dashboard screenshots in this repository use local/demo data only. Do not
+publish screenshots that show real client names, real targets, passwords, API
+keys, bearer tokens, or sensitive report URLs.
+
+| View | File | Use |
+| --- | --- | --- |
+| Overview | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, and campaign summary. |
+| Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
+| Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
+| Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
+
 ## Login
 
 Use the admin account created at startup or an account created by a team lead.
@@ -86,6 +99,8 @@ The `Live` page uses a browser WebSocket session. Leaving the page closes that b
 ## Pages
 
 ### Overview
+
+![Dashboard overview telemetry](assets/screenshots/dashboard-overview.png)
 
 Purpose: quick system status.
 
