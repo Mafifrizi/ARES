@@ -16,7 +16,7 @@
 
 ### How to report
 
-Email: **security@ares-framework.io**
+Email: **mafifrizi@gmail.com**
 
 Include in your report:
 - Description of the vulnerability
