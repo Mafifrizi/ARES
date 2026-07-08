@@ -71,6 +71,33 @@ class TestAresDatabase:
         assert row["client"] == "ACME"
 
     @pytest.mark.asyncio
+    async def test_save_campaign_upsert_refreshes_persisted_fields(self, db):
+        """Saving an existing campaign should refresh every persisted campaign field."""
+        import json
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+
+        c = Campaign(
+            name="TestOp", client="ACME", operator="tester",
+            scope=[ScopeEntry(cidr="10.0.0.0/24")],
+            noise_profile=NoiseProfile.NORMAL,
+            targets=["10.0.0.5"],
+        )
+        await db.save_campaign(c)
+
+        c.operator = "second-operator"
+        c.noise_profile = NoiseProfile.AGGRESSIVE
+        c.scope = [ScopeEntry(cidr="192.168.10.0/24")]
+        c.targets = ["192.168.10.5"]
+        await db.save_campaign(c)
+
+        row = await db.get_campaign(c.id)
+        assert row is not None
+        assert row["operator"] == "second-operator"
+        assert row["noise_profile"] == NoiseProfile.AGGRESSIVE.value
+        assert json.loads(row["scope_json"])[0]["cidr"] == "192.168.10.0/24"
+        assert json.loads(row["targets_json"]) == ["192.168.10.5"]
+
+    @pytest.mark.asyncio
     async def test_get_nonexistent_campaign(self, db):
         """Fetching a campaign that doesn't exist should return None."""
         row = await db.get_campaign("nonexistent-id")

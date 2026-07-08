@@ -288,8 +288,10 @@ class AresDatabase:
             INSERT INTO campaigns(id,name,client,operator,noise_profile,status,scope_json,targets_json,notes)
             VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
-              name=excluded.name, client=excluded.client, status=excluded.status,
-              targets_json=excluded.targets_json, notes=excluded.notes,
+              name=excluded.name, client=excluded.client, operator=excluded.operator,
+              noise_profile=excluded.noise_profile, status=excluded.status,
+              scope_json=excluded.scope_json, targets_json=excluded.targets_json,
+              notes=excluded.notes,
               updated_at=datetime('now')
         """, (c.id, c.name, c.client, c.operator, c.noise_profile.value,
               c.status.value if hasattr(c.status, 'value') else str(c.status),

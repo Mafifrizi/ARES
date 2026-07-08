@@ -30,8 +30,23 @@ if [ ! -f ".env" ]; then
     cp .env.example .env
     SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
     ENC=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-    sed -i "s|ARES_SECRET_KEY=CHANGE_ME.*|ARES_SECRET_KEY=$SECRET|" .env
-    sed -i "s|ARES_ENCRYPTION_KEY=CHANGE_ME.*|ARES_ENCRYPTION_KEY=$ENC|" .env
+    ARES_GENERATED_SECRET="$SECRET" ARES_GENERATED_ENC="$ENC" python3 - <<'PY'
+import os
+from pathlib import Path
+
+updates = {
+    "ARES_SECRET_KEY=": f"ARES_SECRET_KEY={os.environ['ARES_GENERATED_SECRET']}",
+    "ARES_ENCRYPTION_KEY=": f"ARES_ENCRYPTION_KEY={os.environ['ARES_GENERATED_ENC']}",
+}
+env_path = Path(".env")
+lines = env_path.read_text(encoding="utf-8").splitlines()
+for index, line in enumerate(lines):
+    for prefix, value in updates.items():
+        if line.startswith(prefix):
+            lines[index] = value
+            break
+env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
     echo "[!] .env created - set ARES_DEFAULT_ADMIN_PASSWORD before starting"
 fi
 

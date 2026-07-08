@@ -293,8 +293,10 @@ class PostgresDatabase:
                 INSERT INTO campaigns(id,name,client,operator,noise_profile,status,scope_json,targets_json,notes)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 ON CONFLICT(id) DO UPDATE SET
-                  name=EXCLUDED.name, client=EXCLUDED.client, status=EXCLUDED.status,
-                  targets_json=EXCLUDED.targets_json, notes=EXCLUDED.notes,
+                  name=EXCLUDED.name, client=EXCLUDED.client, operator=EXCLUDED.operator,
+                  noise_profile=EXCLUDED.noise_profile, status=EXCLUDED.status,
+                  scope_json=EXCLUDED.scope_json, targets_json=EXCLUDED.targets_json,
+                  notes=EXCLUDED.notes,
                   updated_at=now()
             """, c.id, c.name, c.client, c.operator,
                 c.noise_profile.value if hasattr(c.noise_profile, "value") else str(c.noise_profile),
