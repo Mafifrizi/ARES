@@ -464,6 +464,7 @@ class AresEngine:
         skip_validation:    bool = False,
         timeout_per_module: int  = 120,
         on_progress:        ProgressCallback | None = None,
+        actor_role:         str = "operator",
     ) -> dict[str, EngineModuleResult]:
         """
         Run all stages.
@@ -493,6 +494,7 @@ class AresEngine:
                     timeout_seconds=timeout_per_module,
                     stage_name=name,
                     on_progress=on_progress,
+                    actor_role=actor_role,
                 )
                 for mid in module_ids
             ]
@@ -741,6 +743,7 @@ class AresEngine:
         timeout_seconds: int,
         stage_name:      str,
         on_progress:     ProgressCallback | None,
+        actor_role:      str,
     ) -> EngineModuleResult:
         if self._semaphore is None:
             raise RuntimeError(
