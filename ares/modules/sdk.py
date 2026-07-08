@@ -193,6 +193,7 @@ def timeout(seconds: int) -> Any:
             ...
     """
     def decorator(cls: type) -> type:
+        cls.MODULE_TIMEOUT_SECONDS = seconds
         cls.DEFAULT_TIMEOUT_S = seconds
         return cls
     return decorator

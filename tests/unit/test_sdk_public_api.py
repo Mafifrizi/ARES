@@ -53,6 +53,16 @@ def test_module_metadata_decorator_available_from_public_sdk() -> None:
     assert sdk.validate_module_class(DemoModule) == []
 
 
+def test_timeout_decorator_sets_runtime_timeout_contract() -> None:
+    @sdk.timeout(42)
+    class DemoModule(sdk.BaseModule):
+        async def run(self, **kwargs):
+            return [], {"ok": True}
+
+    assert DemoModule.MODULE_TIMEOUT_SECONDS == 42
+    assert DemoModule.DEFAULT_TIMEOUT_S == 42
+
+
 @pytest.mark.asyncio
 async def test_module_test_helper_available_from_public_sdk() -> None:
     @sdk.module_metadata(
