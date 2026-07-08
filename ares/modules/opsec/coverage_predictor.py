@@ -625,9 +625,10 @@ class CoveragePredictor:
         # SIEM correlation recommendations
         if siem_hits:
             fastest = siem_hits[0]
+            common_rules = ", ".join(fastest["common_in"][:3])
             recs.append(
                 f"SIEM ALERT: '{fastest['rule']}' would fire in ~{fastest['time_to_detect_min']} min "
-                f"in {", ".join(fastest['common_in'][:3])}. "
+                f"in {common_rules}. "
                 f"{fastest['recommendation']}"
             )
 

@@ -639,7 +639,6 @@ class StrategyEngine:
         )
 
         try:
-            import json
             backend_map = {
                 "claude": lambda: ClaudeBackend(),
                 "openai": lambda: OpenAIBackend(),
@@ -689,4 +688,3 @@ class StrategyEngine:
             if any(ind.lower() in title.lower() for ind in indicators):
                 return True
         return False
-

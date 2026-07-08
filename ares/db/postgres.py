@@ -645,8 +645,13 @@ class PostgresDatabase:
                     await conn.execute(
                         "UPDATE api_keys SET last_used=now() WHERE id=$1", d["id"]
                     )
-                return {"username": d["username"], "role": d["role"],
-                        "auth_type": "api_key", "key_id": d["id"]}
+                return {
+                    "username": d["username"],
+                    "role": d["role"],
+                    "auth_type": "api_key",
+                    "key_id": d["id"],
+                    "scopes": [d["scopes"]] if d.get("scopes") else [],
+                }
         return None
 
     async def list_api_keys(self, user_id: str) -> list[dict]:

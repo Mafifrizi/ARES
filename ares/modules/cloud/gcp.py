@@ -528,7 +528,7 @@ class GCPModule(BaseModule):
                     ),
                 )
                 return {"accessible": True, "service_accounts": sa_list}
-        except requests.exceptions.ConnectionError:
+        except httpx.ConnectError:
             # Expected — not running on GCE or metadata blocked
             pass
         except Exception as exc:

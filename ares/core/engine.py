@@ -753,7 +753,12 @@ class AresEngine:
                     status=ModuleStatus.RUNNING,
                 ))
             result = await self.run_module(
-                module_id, campaign, params, skip_validation, timeout_seconds
+                module_id,
+                campaign,
+                params,
+                skip_validation,
+                timeout_seconds,
+                actor_role=actor_role,
             )
             if on_progress:
                 await on_progress(ProgressEvent(

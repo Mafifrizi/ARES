@@ -794,7 +794,7 @@ async def list_api_keys(
 @app.delete("/auth/api-keys/{key_id}", tags=["auth"])
 async def revoke_api_key(
     key_id: str,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = Depends(get_current_user),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
     user = await db.get_user(actor.username)
@@ -2068,7 +2068,7 @@ async def run_campaign_plan(
         return engine.dry_run_plan(plan, body.global_params)
 
     c_obj = _campaign_from_db_row(campaign)
-    results = await engine.run_plan(plan, c_obj, body.global_params)
+    results = await engine.run_plan(plan, c_obj, body.global_params, actor_role=actor.role)
     return {
         "campaign_id": campaign_id,
         "modules_run": len(results),

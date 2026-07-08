@@ -684,8 +684,13 @@ class AresDatabase:
                     "UPDATE api_keys SET last_used=datetime('now') WHERE id=?", (row["id"],)
                 )
                 await self._conn.commit()
-                return {"username": row["username"], "role": row["role"],
-                        "auth_type": "api_key", "key_id": row["id"]}
+                return {
+                    "username": row["username"],
+                    "role": row["role"],
+                    "auth_type": "api_key",
+                    "key_id": row["id"],
+                    "scopes": [row["scopes"]] if row["scopes"] else [],
+                }
         return None
 
     async def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:

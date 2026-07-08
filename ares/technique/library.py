@@ -761,12 +761,14 @@ class CoverageReport:
                 f'{t["id"]}</span>'
                 for t in techs[:5]
             )
+            empty_tags = "<span style='color:#475569;font-size:.75rem'>&mdash;</span>"
+            rendered_tags = tech_tags if techs else empty_tags
             rows.append(
                 f'<div style="background:{color};{border}border-radius:6px;'
                 f'padding:8px 10px;min-width:140px">'
                 f'<div style="font-size:.72rem;color:#94a3b8;text-transform:uppercase;'
                 f'letter-spacing:.04em">{tactic}</div>'
-                f'{tech_tags if techs else "<span style=\'color:#475569;font-size:.75rem\'>—</span>"}'
+                f'{rendered_tags}'
                 f'</div>'
             )
         return (

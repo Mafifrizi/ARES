@@ -10,6 +10,7 @@ Patterns: credentials, keys, configs, databases, source code secrets.
 """
 from __future__ import annotations
 import asyncio
+import shlex
 from typing import Any
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity

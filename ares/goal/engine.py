@@ -554,7 +554,7 @@ class GoalEngine:
         engine  = AresEngine()
         engine._registry = self.registry   # reuse GoalEngine's registry — avoid re-loading modules
         t0      = time.monotonic()
-        results = await engine.run_plan(exec_plan, campaign, plan.context)
+        results = await engine.run_plan(exec_plan, campaign, plan.context, actor_role="operator")
 
         return {
             "goal":       plan.goal.value,

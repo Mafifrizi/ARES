@@ -47,6 +47,16 @@ from ares.collab.manager import (   # noqa: E402
 class AuthenticatedUser:
     username: str
     role:     str   # team_lead | operator | recon | reporter
+    auth_type: str = "bearer"
+    api_key_id: str | None = None
+    api_key_scopes: tuple[str, ...] = ()
+
+    @property
+    def is_api_key(self) -> bool:
+        return self.auth_type == "api_key"
+
+    def has_api_scope(self, *allowed: str) -> bool:
+        return bool(set(allowed).intersection(self.api_key_scopes))
 
     @property
     def operator_role(self) -> OperatorRole:

