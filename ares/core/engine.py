@@ -221,6 +221,15 @@ class AresEngine:
         cls      = self.registry.get(module_id)
         noise    = NoiseController(campaign)
         instance = cls(settings=self.settings, campaign=campaign, noise=noise)  # type: ignore[misc]
+        # Respect per-module timeout if declared (MODULE_TIMEOUT_SECONDS)
+        module_timeout = getattr(instance.__class__, "MODULE_TIMEOUT_SECONDS", None)
+        effective_timeout = (
+            module_timeout if module_timeout is not None else timeout_seconds
+        )
+        if effective_timeout != timeout_seconds:
+            logger.debug("engine_using_module_timeout",
+                         module_id=module_id,
+                         timeout=effective_timeout)
 
         audit("module_run_start", actor=campaign.operator,
               detail=f"module={module_id} campaign={campaign.id[:8]}")
@@ -279,23 +288,20 @@ class AresEngine:
             # Falls back to run(**ctx.params) via BaseModule.execute() default
             # for modules that haven't migrated yet.
             execute_coro = instance.execute(ctx)
-            # Respect per-module timeout if declared (MODULE_TIMEOUT_SECONDS)
-            effective_timeout = (
-                getattr(instance.__class__, "MODULE_TIMEOUT_SECONDS", None)
-                or timeout_seconds
-            )
-            if effective_timeout != timeout_seconds:
-                logger.debug("engine_using_module_timeout",
-                             module_id=module_id,
-                             timeout=effective_timeout)
             module_result = await asyncio.wait_for(
                 execute_coro, timeout=effective_timeout
             )
             findings = module_result.findings
             raw      = module_result.raw
         except asyncio.TimeoutError:
-            logger.error("engine_timed_out_s", module_id=module_id, timeout_seconds=timeout_seconds)
-            _last_exc: Exception = asyncio.TimeoutError(f"Timed out after {timeout_seconds}s")
+            logger.error(
+                "engine_timed_out_s",
+                module_id=module_id,
+                timeout_seconds=effective_timeout,
+            )
+            _last_exc: Exception = asyncio.TimeoutError(
+                f"Timed out after {effective_timeout}s"
+            )
             _action = AresError.RETRY
         except AresError as exc:
             logger.warning("engine_areserror", module_id=module_id, action=exc.action, exc=exc)
@@ -339,7 +345,7 @@ class AresEngine:
                         noise      = noise,
                     )
                     module_result2 = await asyncio.wait_for(
-                        module2.execute(ctx2), timeout=timeout_seconds
+                        module2.execute(ctx2), timeout=effective_timeout
                     )
                     findings = module_result2.findings
                     raw      = module_result2.raw
@@ -348,7 +354,12 @@ class AresEngine:
                 except asyncio.TimeoutError as te:
                     _last_exc = te
                     _was_timeout = True
-                    logger.warning("engine_retry_timed_out", module_id=module_id, attempt=attempt)
+                    logger.warning(
+                        "engine_retry_timed_out",
+                        module_id=module_id,
+                        attempt=attempt,
+                        timeout_seconds=effective_timeout,
+                    )
                 except Exception as re:
                     _last_exc = re
                     logger.warning("engine_retry_failed", module_id=module_id, attempt=attempt, re=re)
