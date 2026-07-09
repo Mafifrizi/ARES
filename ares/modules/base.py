@@ -375,6 +375,7 @@ class BaseModule(abc.ABC):
             "mitre_list":       cls.MITRE_TECHNIQUES,
             "author":           cls.MODULE_AUTHOR,
             "min_noise_profile": cls.MIN_NOISE_PROFILE,
+            "required_privilege": getattr(cls, "REQUIRED_PRIVILEGE", None),
         }
 
     @classmethod

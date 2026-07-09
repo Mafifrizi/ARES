@@ -114,6 +114,7 @@ from ares.normalize.artifacts import (
 
 # ── Convenience types for type hints ──────────────────────────────────────────
 from typing import Any
+import math
 
 
 # ── Decorators / helpers ──────────────────────────────────────────────────────
@@ -147,6 +148,20 @@ def module_metadata(
         class MyModule(BaseModule):
             ...
     """
+    if not isinstance(category, str) or not category.strip():
+        raise ValueError("module_metadata category must be a non-empty string")
+    if not isinstance(opsec, OpsecLevel) and str(opsec) not in {level.value for level in OpsecLevel}:
+        raise ValueError("module_metadata opsec must be an OpsecLevel or valid opsec level string")
+    for field_name, value in (
+        ("requires", requires),
+        ("outputs", outputs),
+        ("mitre", mitre),
+    ):
+        if value is None:
+            continue
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError(f"module_metadata {field_name} must be a list of strings")
+
     def decorator(cls: type) -> type:
         cls.MODULE_ID          = module_id
         cls.MODULE_NAME        = name
@@ -177,13 +192,16 @@ def requires_privilege(level: str) -> Any:
         class DCSyncModule(BaseModule):
             ...
     """
+    if not isinstance(level, str) or not level.strip():
+        raise ValueError("requires_privilege level must be a non-empty string")
+
     def decorator(cls: type) -> type:
-        cls.REQUIRED_PRIVILEGE = level
+        cls.REQUIRED_PRIVILEGE = level.strip()
         return cls
     return decorator
 
 
-def timeout(seconds: int) -> Any:
+def timeout(seconds: int | float) -> Any:
     """
     Class decorator: override default execution timeout.
 
@@ -192,6 +210,14 @@ def timeout(seconds: int) -> Any:
         class FastModule(BaseModule):
             ...
     """
+    if (
+        isinstance(seconds, bool)
+        or not isinstance(seconds, (int, float))
+        or not math.isfinite(seconds)
+        or seconds <= 0
+    ):
+        raise ValueError("timeout seconds must be a positive finite number")
+
     def decorator(cls: type) -> type:
         cls.MODULE_TIMEOUT_SECONDS = seconds
         cls.DEFAULT_TIMEOUT_S = seconds

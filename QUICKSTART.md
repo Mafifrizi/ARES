@@ -237,7 +237,7 @@ Common examples:
 Use the public SDK import path for custom modules:
 
 ```python
-from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult, register_module
+from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult
 ```
 
 `ares.modules.sdk` remains as a compatibility shim, but new code should use `ares.sdk`.
