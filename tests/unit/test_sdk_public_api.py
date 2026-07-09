@@ -166,6 +166,64 @@ async def test_runtime_uses_module_timeout_contract(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_retries_use_module_timeout_contract(monkeypatch) -> None:
+    @sdk.module_metadata(
+        module_id="demo.retry_timeout",
+        name="Demo Retry Timeout",
+        category="network",
+        description="Runtime retry timeout contract test",
+    )
+    @sdk.timeout(7)
+    class DemoModule(sdk.BaseModule):
+        execute_calls = 0
+
+        async def execute(self, ctx: sdk.ExecutionContext) -> sdk.ModuleResult:
+            type(self).execute_calls += 1
+            if type(self).execute_calls == 1:
+                raise asyncio.TimeoutError
+            return sdk.ModuleResult(status="success", module_id=self.MODULE_ID)
+
+        async def run(self, **kwargs):
+            return [], {"ok": True}
+
+    observed_timeouts: list[int | float | None] = []
+    original_wait_for = asyncio.wait_for
+
+    async def capture_wait_for(awaitable, timeout=None):
+        observed_timeouts.append(timeout)
+        return await original_wait_for(awaitable, timeout)
+
+    async def no_sleep(_delay):
+        return None
+
+    class Registry:
+        def __contains__(self, module_id):
+            return module_id == "demo.retry_timeout"
+
+        def get(self, module_id):
+            assert module_id == "demo.retry_timeout"
+            return DemoModule
+
+    monkeypatch.setattr(asyncio, "wait_for", capture_wait_for)
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    engine = AresEngine()
+    engine._registry = Registry()
+    helper = sdk.ModuleTestHelper(DemoModule, scope_cidrs=["127.0.0.1/32"])
+
+    result = await engine.run_module(
+        "demo.retry_timeout",
+        campaign=helper.campaign,
+        params={"target": "127.0.0.1"},
+        timeout_seconds=120,
+        actor_role="team_lead",
+    )
+
+    assert result.status.value == "done"
+    assert result.error is None
+    assert observed_timeouts == [10, 7, 7]
+
+
+@pytest.mark.asyncio
 async def test_module_test_helper_available_from_public_sdk() -> None:
     @sdk.module_metadata(
         module_id="demo.helper",
