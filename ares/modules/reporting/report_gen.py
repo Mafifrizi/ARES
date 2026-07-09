@@ -58,6 +58,8 @@ REMEDIATION_SLA = {
     "info": 365,
 }
 
+BROWSER_PDF_TIMEOUT_SECONDS = 15
+
 
 # ── Context builder ───────────────────────────────────────────────────────────
 
@@ -1876,8 +1878,16 @@ class ReportGenerator:
                         capture_output=True,
                         check=False,
                         text=True,
-                        timeout=60,
+                        timeout=BROWSER_PDF_TIMEOUT_SECONDS,
                     )
+                except subprocess.TimeoutExpired as exc:
+                    logger.warning(
+                        "pdf_browser_failed",
+                        browser=str(browser),
+                        error=str(exc),
+                        timeout_s=BROWSER_PDF_TIMEOUT_SECONDS,
+                    )
+                    continue
                 except (OSError, subprocess.SubprocessError) as exc:
                     logger.warning(
                         "pdf_browser_failed", browser=str(browser), error=str(exc)

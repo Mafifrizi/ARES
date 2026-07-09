@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,10 @@ from ares.core.engine import AresEngine, ExecutionPlan, ModuleStatus
 from ares.core.plugin.loader import ModuleRegistry, PluginLoader
 from ares.db.database import AresDatabase, Credential, Host, Loot
 from ares.modules.base import BaseModule
-from ares.modules.reporting.report_gen import ReportGenerator
+from ares.modules.reporting.report_gen import (
+    BROWSER_PDF_TIMEOUT_SECONDS,
+    ReportGenerator,
+)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -277,6 +281,26 @@ class TestReportGenerator:
         assert "markdown" in paths
         for p in paths.values():
             assert p.exists()
+
+    def test_pdf_browser_timeout_returns_false(self, tmp_path: Path) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        browser = tmp_path / "chromium"
+        browser.write_text("", encoding="utf-8")
+        pdf_path = tmp_path / "report.pdf"
+
+        with (
+            patch.object(gen, "_pdf_browser_candidates", return_value=[browser]),
+            patch(
+                "ares.modules.reporting.report_gen.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(
+                    cmd=[str(browser)], timeout=BROWSER_PDF_TIMEOUT_SECONDS
+                ),
+            ) as run_browser,
+        ):
+            assert gen._write_pdf_with_browser("<html></html>", pdf_path) is False
+
+        assert run_browser.call_args.kwargs["timeout"] == BROWSER_PDF_TIMEOUT_SECONDS
+        assert not pdf_path.exists()
 
     def test_json_structure_valid(self, campaign_with_findings: Campaign, tmp_path: Path) -> None:
         gen = ReportGenerator(output_dir=str(tmp_path))
