@@ -19,7 +19,7 @@ frontend/dist/
 ares.db
 ares_redteam.egg-info/
 
-# Shadow module dirs — real code lives in ares/ package only
+# Shadow module dirs - real code lives in ares/ package only
 /api/
 !frontend/src/api/
 !frontend/src/api/**

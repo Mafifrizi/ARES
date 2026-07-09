@@ -30,7 +30,8 @@ python -m pip install -e ".[dev,pdf]"
 
 Notes:
 
-- The setup script installs the local project in editable mode.
+- The setup script is the Linux/macOS bootstrap path. On Windows, use the
+  PowerShell commands above to create `.venv` and install the editable package.
 - Some offensive-security integrations are optional. `ares doctor` will tell you which optional packages or native tools are missing for AD, cloud, container, or password-cracking workflows.
 - PDF support uses WeasyPrint when available and has a local browser fallback in the API.
 

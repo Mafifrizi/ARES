@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |---------|-----------|
-| 6.x     | ✅ Active security fixes |
-| 5.x     | ❌ End of life — upgrade to v6 |
-| < 5.0   | ❌ End of life |
+| 6.x     |  Active security fixes |
+| 5.x     |  End of life - upgrade to v6 |
+| < 5.0   |  End of life |
 
 ---
 
@@ -24,8 +24,9 @@ Include in your report:
 - Potential impact assessment
 - Any suggested mitigations (optional)
 
-PGP key: Generate and publish your PGP key before making this repository public.
-Upload to a public keyserver (keys.openpgp.org) and link it here.
+PGP: No project PGP key is currently published. Email first if encrypted
+coordination is required, and do not include sensitive exploit details until an
+encrypted channel has been agreed.
 
 ### Response timeline
 
@@ -44,14 +45,14 @@ We follow [coordinated vulnerability disclosure](https://vuls.cert.org/confluenc
 
 ### In scope
 - Authentication bypass in the ARES API (`ares/api/`)
-- Credential exposure — vault encryption, log redaction failures
-- RBAC bypass — escalating from `reporter` to `operator` or `team_lead`
+- Credential exposure - vault encryption, log redaction failures
+- RBAC bypass - escalating from `reporter` to `operator` or `team_lead`
 - SQL injection or command injection in any module input handling
-- Scope guard bypass — running modules against out-of-scope targets
+- Scope guard bypass - running modules against out-of-scope targets
 - Dependency vulnerabilities with direct exploitability in ARES context
 
 ### Out of scope
-- Issues in modules that require compromising the target first (by design — ARES is a red team tool)
+- Issues in modules that require compromising the target first (by design - ARES is a red team tool)
 - Denial of service against the ARES API
 - Issues in `[dev]` optional dependencies
 - Social engineering
@@ -60,25 +61,25 @@ We follow [coordinated vulnerability disclosure](https://vuls.cert.org/confluenc
 
 ## Security Design
 
-### API Response Data — Intentional Sensitive Output
+### API Response Data - Intentional Sensitive Output
 
 `EngineModuleResult.raw_output` in API responses intentionally contains
 captured hashes, Kerberos tickets, and credentials. This is the core value
-of a red team tool — the operator needs this data to continue the engagement.
+of a red team tool - the operator needs this data to continue the engagement.
 
 Protections applied to this data:
 
 | Protection | Implementation |
 |-----------|----------------|
-| Authentication | `require_operator()` — only authenticated operators can run modules |
-| Authorization | RBAC — `reporter` and `recon` roles cannot run credential modules |
+| Authentication | `require_operator()` - only authenticated operators can run modules |
+| Authorization | RBAC - `reporter` and `recon` roles cannot run credential modules |
 | Transport | HTTPS enforced via nginx TLS + HSTS |
 | Caching | `Cache-Control: no-store` on all API responses |
 | Rate limiting | Per-endpoint limits prevent bulk extraction |
 | Audit log | Every `module_run_start` and `module_run_complete` is logged with actor |
 
 Operators should treat ARES API responses with the same sensitivity as
-the data they contain — store engagement results in encrypted storage.
+the data they contain - store engagement results in encrypted storage.
 
 ## Security Design
 
@@ -89,7 +90,7 @@ Key security controls in ARES v6:
 | Credential encryption | Fernet with per-record PBKDF2-SHA256 salt (100,000 iterations) |
 | Legacy encryption | Configurable via `ARES_LEGACY_SALT` env var |
 | JWT tokens | HS256 default; RS256 supported via `ARES_JWT_ALGORITHM=RS256` |
-| Token revocation | JTI blacklist — logout immediately invalidates tokens |
+| Token revocation | JTI blacklist - logout immediately invalidates tokens |
 | Scope enforcement | `ScopeGuard` hard-stops all modules; fails closed |
 | Log redaction | Hashes, passwords, JWTs stripped from all structlog output |
 | STEALTH enforcement | HIGH_NOISE modules raise `ModuleValidationError` before any network call |
