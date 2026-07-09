@@ -14,7 +14,7 @@ and professional report generation.
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Dashboard-React-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)](LICENSE)
-[![Status](https://img.shields.io/badge/Unit%20Suite-1102%20passing-22C55E?style=for-the-badge)](tests/)
+[![Status](https://img.shields.io/badge/Unit%20Suite-passing-22C55E?style=for-the-badge)](tests/)
 
 **Built for labs, internal security teams, and authorized engagements only.**
 
@@ -563,7 +563,7 @@ See [docs/architecture.md](docs/architecture.md) and
 Current local verification:
 
 ```text
-1102 unit tests passed
+unit suite passed
 frontend build passed
 validation lab passed
 ares doctor dependency display and local-env isolation covered by tests

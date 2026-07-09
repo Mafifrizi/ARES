@@ -1,7 +1,7 @@
 # Contributing to ARES
 
 Thank you for contributing to ARES. This guide covers everything you need
-to get started — from dev environment setup to submitting a pull request.
+to get started - from dev environment setup to submitting a pull request.
 
 ---
 
@@ -24,17 +24,17 @@ to get started — from dev environment setup to submitting a pull request.
 git clone https://github.com/<your-fork>/ares && cd ares
 
 # 2. Create virtual environment
-python -m venv venv && source venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 
-# 3. Install in dev mode with all extras
-pip install -e ".[full,dev]"
+# 3. Install in dev mode
+pip install -e ".[dev,pdf]"
 
 # 4. Install pre-commit hooks
 pip install pre-commit && pre-commit install
 
 # 5. Copy and configure .env
 cp .env.example .env
-# Edit .env — set ARES_SECRET_KEY and ARES_ENCRYPTION_KEY
+# Edit .env - set ARES_SECRET_KEY, ARES_ENCRYPTION_KEY, and ARES_DEFAULT_ADMIN_PASSWORD
 # Generate: openssl rand -hex 32
 
 # 6. Verify setup
@@ -46,26 +46,25 @@ pytest tests/unit/ -v
 
 ## Branching Strategy
 
-ARES uses Git Flow:
+ARES uses short-lived branches from `main`:
 
 | Branch | Purpose |
 |--------|---------|
-| `main` | Production — protected, requires PR + review |
-| `develop` | Integration branch — PRs target here |
+| `main` | Protected default branch; requires PR + review |
 | `feature/<name>` | New features and modules |
 | `fix/<name>` | Bug fixes |
 | `hotfix/<name>` | Critical fixes that go directly to main |
-| `security/<name>` | Security fixes — keep private until patched |
+| `security/<name>` | Security fixes; keep private until patched |
 
 ```bash
 # Start a new module
-git checkout develop
-git pull origin develop
+git checkout main
+git pull origin main
 git checkout -b feature/ad-my-new-module
 
 # When done
 git push origin feature/ad-my-new-module
-# Open PR targeting develop
+# Open PR targeting main
 ```
 
 ---
@@ -110,8 +109,8 @@ Every ARES module is a class that extends `BaseModule` in `ares/modules/base.py`
 
 ```python
 """
-My Module — category.module_name
-MITRE: T1234 — Technique Name
+My Module - category.module_name
+MITRE: T1234 - Technique Name
 
 One paragraph: what this module does, what it needs, what it produces.
 """
@@ -137,7 +136,7 @@ class MyModule(BaseModule):
     MODULE_TIMEOUT_SECONDS: int | None = None   # override if slow (e.g. 300 for dump)
 
     async def validate(self, ctx: "Any") -> None:
-        """Pre-flight checks — runs before any network call."""
+        """Pre-flight checks - runs before any network call."""
         await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
@@ -190,7 +189,7 @@ class MyModule(BaseModule):
         return self._findings[:], {"target": target, "result": result}
 
     def _do_work_sync(self, target: str) -> bool:
-        """Blocking work. Called via run_in_executor — no await here."""
+        """Blocking work. Called via run_in_executor - no await here."""
         return True
 ```
 
@@ -199,7 +198,7 @@ class MyModule(BaseModule):
 | Pattern | Rule |
 |---------|------|
 | Blocking I/O | Always `loop.run_in_executor(None, self._sync_fn)` |
-| Connection cleanup | `conn = None` → `try:` → `finally: if conn: conn.close()` |
+| Connection cleanup | `conn = None` -> `try:` -> `finally: if conn: conn.close()` |
 | Pagination | `while cookie:` loop with `1.2.840.113556.1.4.319` OID for LDAP |
 | STEALTH block | HIGH_NOISE modules must raise `ModuleValidationError` in STEALTH |
 | dry_run | Always check `ctx.dry_run` first in `execute()` |
@@ -250,20 +249,20 @@ pytest tests/unit/ --cov=ares --cov-fail-under=82 -v  # with coverage
 1. All pre-commit hooks pass (`pre-commit run --all-files`)
 2. Tests pass with `pytest tests/unit/ --cov=ares --cov-fail-under=82`
 3. PR description includes: what changed, why, MITRE reference (for modules)
-4. Update `CHANGELOG.md` — add entry under `[Unreleased]` section
-5. At least one maintainer review required before merge to `develop`
-6. Squash merge to `develop` — no merge commits
+4. Update `CHANGELOG.md` - add entry under `[Unreleased]` section
+5. At least one maintainer review required before merge to `main`
+6. Squash merge to `main`; no merge commits
 
 ---
 
 ## Code Standards
 
-- **Python 3.10+** — use `match`, `|` union types, `TypeAlias` where appropriate
+- **Python 3.10+** - use `match`, `|` union types, `TypeAlias` where appropriate
 - **Pydantic v2** for all settings and data models
-- **structlog** for all logging — never `print()` or stdlib `logging` directly
-- **asyncio** throughout — no blocking calls on the event loop
-- **type annotations** on all public functions — mypy strict enabled
+- **structlog** for all logging - never `print()` or stdlib `logging` directly
+- **asyncio** throughout - no blocking calls on the event loop
+- **type annotations** on all public functions - mypy strict enabled
 - **ruff** for linting (replaces flake8, isort, pyupgrade)
-- **No hardcoded secrets** — everything via `.env` or env vars
+- **No hardcoded secrets** - everything via `.env` or env vars
 
 Questions? Open an issue or ping `@ares-framework/maintainers` on GitHub.

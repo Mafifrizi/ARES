@@ -6,11 +6,11 @@
 # freeze to SHA commits by running: pre-commit autoupdate --freeze
 # This replaces version tags like v0.4.4 with immutable commit SHAs.
 #
-# Hooks run on every git commit — catches issues before CI.
+# Hooks run on every git commit - catches issues before CI.
 # To skip once: git commit --no-verify (use sparingly)
 
 repos:
-  # ── Formatting & linting ──────────────────────────────────────────────
+  # Formatting & linting
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4  # frozen: use `pre-commit autoupdate --freeze` to update SHA
     hooks:
@@ -18,7 +18,7 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # ── Type checking ─────────────────────────────────────────────────────
+  # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.9.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
     hooks:
@@ -27,7 +27,7 @@ repos:
         additional_dependencies: [pydantic, types-pyyaml]
         files: ^ares/
 
-  # ── Security ──────────────────────────────────────────────────────────
+  # Security
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.8  # frozen: use `pre-commit autoupdate --freeze` to update SHA
     hooks:
@@ -35,7 +35,7 @@ repos:
         args: [-ll, -x, tests/]
         files: ^ares/
 
-  # ── Secret detection ──────────────────────────────────────────────────
+  # Secret detection
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.4.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
     hooks:
@@ -43,7 +43,7 @@ repos:
         args: [--baseline, .secrets.baseline]
         exclude: (\.env\.example|requirements-lock\.txt|CHANGELOG\.md)
 
-  # ── General file hygiene ──────────────────────────────────────────────
+  # General file hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
     hooks:
@@ -57,7 +57,7 @@ repos:
       - id: debug-statements
       - id: detect-private-key
 
-  # ── Commit message convention (Conventional Commits) ──────────────────
+  # Commit message convention (Conventional Commits)
   # feat: / fix: / docs: / security: / refactor: / test: / chore:
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.2.0  # frozen: use `pre-commit autoupdate --freeze` to update SHA
