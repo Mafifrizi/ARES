@@ -65,6 +65,10 @@ def _get_signing_policy():
         return None
 
 
+def _is_path_within_base(path: Path, base: Path) -> bool:
+    return path == base or path.is_relative_to(base)
+
+
 def _enforce_capabilities(cls: Any, source: str) -> list[str]:
     """
     Check a module's declared CAPABILITIES against its trust level.
@@ -309,7 +313,9 @@ class PluginLoader:
             Path.home().resolve(),
             Path("/tmp").resolve(),  # noqa: S108  — sandbox staging area
         ]
-        if not any(str(plugin_dir).startswith(str(base)) for base in _allowed_bases):
+        if not any(
+            _is_path_within_base(plugin_dir, base) for base in _allowed_bases
+        ):
             logger.error(
                 f"[plugin_loader] Rejected plugin dir outside allowed locations: {plugin_dir}. "
                 f"Must be under home directory or /tmp."

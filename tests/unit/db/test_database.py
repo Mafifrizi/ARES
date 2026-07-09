@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import ares.core.plugin.loader as plugin_loader_module
 from ares.core.campaign import Campaign, Finding, NoiseProfile, Severity, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.engine import AresEngine, ExecutionPlan, ModuleStatus
@@ -96,6 +97,22 @@ class TestPluginLoader:
         loader = PluginLoader()
         loader._load_external(str(tmp_path))  # Should not raise
         assert loader.errors == []
+
+    def test_external_dir_containment_rejects_same_prefix_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        allowed_base = (tmp_path / "plugins").resolve()
+        child_dir = (allowed_base / "child").resolve()
+        sibling_dir = (tmp_path / "plugins_evil").resolve()
+
+        child_dir.mkdir(parents=True)
+        sibling_dir.mkdir()
+
+        assert plugin_loader_module._is_path_within_base(allowed_base, allowed_base)
+        assert plugin_loader_module._is_path_within_base(child_dir, allowed_base)
+        assert not plugin_loader_module._is_path_within_base(
+            sibling_dir, allowed_base
+        )
 
     def test_external_plugin_loaded(self, tmp_path: Path) -> None:
         """Write a valid external plugin and verify it's discovered."""
