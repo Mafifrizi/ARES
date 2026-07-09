@@ -402,26 +402,115 @@ _ARTIFACT_LOCK = threading.Lock()
 _GLOBAL_SCOPE = "_GLOBAL"
 
 
-def _restrict_windows_acl(path: str, *, is_dir: bool = False) -> None:
-    """Best-effort owner-only ACL restriction for Windows temp artifacts."""
+def _restrict_windows_acl(
+    path: str,
+    *,
+    is_dir: bool = False,
+    require_success: bool = False,
+) -> bool:
+    """Best-effort owner-only ACL restriction for Windows temp artifacts.
+
+    Returns True when the ACL was hardened. If hardening fails, the default is
+    to preserve a usable temp artifact and log the failure; callers that need
+    fail-closed behavior can pass require_success=True.
+    """
+    import csv
     import getpass
     import os
     import subprocess
 
     if os.name != "nt":
-        return
+        return True
 
-    user = os.environ.get("USERNAME") or getpass.getuser()
-    grant = f"{user}:{'(OI)(CI)F' if is_dir else 'F'}"
-    try:
-        subprocess.run(
-            ["icacls", path, "/inheritance:r", "/grant:r", grant],
+    def _run_icacls(args: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["icacls", path, *args],
             capture_output=True,
             check=False,
             text=True,
+            timeout=10,
         )
-    except OSError as exc:
-        logger.debug("credential_artifact_acl_restrict_failed", path=path, error=str(exc))
+
+    def _current_principal() -> str:
+        try:
+            completed = subprocess.run(
+                ["whoami", "/user", "/fo", "csv", "/nh"],
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=10,
+            )
+            if completed.returncode == 0 and completed.stdout.strip():
+                rows = list(csv.reader(completed.stdout.splitlines()))
+                if rows and len(rows[0]) >= 2 and rows[0][1].strip():
+                    return f"*{rows[0][1].strip()}"
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+        username = os.environ.get("USERNAME") or getpass.getuser()
+        domain = os.environ.get("USERDOMAIN", "").strip()
+        return f"{domain}\\{username}" if domain and username else username
+
+    def _warn(event: str, completed: subprocess.CompletedProcess[str] | None = None) -> None:
+        logger.warning(
+            event,
+            path=path,
+            returncode=getattr(completed, "returncode", None),
+            stdout=(getattr(completed, "stdout", "") or "")[:300],
+            stderr=(getattr(completed, "stderr", "") or "")[:300],
+        )
+
+    def _fail(event: str, completed: subprocess.CompletedProcess[str] | None = None) -> bool:
+        _warn(event, completed)
+        if require_success:
+            raise PermissionError(f"{event}: unable to harden ACL for {path!r}")
+        return False
+
+    principal = _current_principal()
+    grant = f"{principal}:{'(OI)(CI)F' if is_dir else 'F'}"
+    try:
+        grant_result = _run_icacls(["/grant:r", grant])
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("credential_artifact_acl_grant_failed", path=path, error=str(exc))
+        if require_success:
+            raise PermissionError(f"unable to grant owner ACL for {path!r}") from exc
+        return False
+    if grant_result.returncode != 0:
+        return _fail("credential_artifact_acl_grant_failed", grant_result)
+
+    try:
+        inherit_result = _run_icacls(["/inheritance:r"])
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("credential_artifact_acl_inheritance_failed", path=path, error=str(exc))
+        try:
+            _run_icacls(["/inheritance:e"])
+            _run_icacls(["/grant:r", grant])
+        except (OSError, subprocess.SubprocessError) as restore_exc:
+            logger.warning(
+                "credential_artifact_acl_restore_failed",
+                path=path,
+                error=str(restore_exc),
+            )
+        if require_success:
+            raise PermissionError(f"unable to remove inherited ACL for {path!r}") from exc
+        return False
+    if inherit_result.returncode != 0:
+        try:
+            restore_result = _run_icacls(["/inheritance:e"])
+            if restore_result.returncode != 0:
+                _warn("credential_artifact_acl_restore_failed", restore_result)
+            restore_grant_result = _run_icacls(["/grant:r", grant])
+            if restore_grant_result.returncode != 0:
+                _warn("credential_artifact_acl_restore_failed", restore_grant_result)
+        except (OSError, subprocess.SubprocessError) as restore_exc:
+            logger.warning(
+                "credential_artifact_acl_restore_failed",
+                path=path,
+                error=str(restore_exc),
+            )
+        return _fail("credential_artifact_acl_inheritance_failed", inherit_result)
+
+    return True
 
 
 def secure_mkstemp(

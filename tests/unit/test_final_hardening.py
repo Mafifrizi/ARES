@@ -124,6 +124,21 @@ class TestCleanupGuarantee:
         with _ARTIFACT_LOCK:
             _CREDENTIAL_ARTIFACTS.clear()
 
+    def test_secure_mkstemp_reopenable_after_close(self):
+        """Windows ACL hardening must not make the temp file unusable."""
+        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        self._reset_tracking()
+
+        p, fd = secure_mkstemp(suffix=".ccache", campaign_id="reopen-test")
+        os.close(fd)
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("ticket data")
+            with open(p, encoding="utf-8") as f:
+                assert f.read() == "ticket data"
+        finally:
+            cleanup_credential_artifacts("reopen-test")
+
     def test_cleanup_always_runs_on_success(self):
         """Cleanup works after successful operation."""
         from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
