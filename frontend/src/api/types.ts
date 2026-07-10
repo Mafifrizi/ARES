@@ -86,8 +86,14 @@ export interface ApiKeyMeta {
   id: string;
   name?: string;
   prefix?: string;
+  key_prefix?: string;
   scopes?: string;
   created_at?: string;
   expires_at?: string;
   [key: string]: unknown;
+}
+
+export interface ApiKeyCreateResponse extends ApiKeyMeta {
+  key: string;
+  note?: string;
 }

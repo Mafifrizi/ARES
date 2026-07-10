@@ -2,6 +2,8 @@ import {
   Activity,
   BarChart3,
   Boxes,
+  CheckCircle2,
+  Copy,
   FileText,
   GitGraph,
   KeyRound,
@@ -42,7 +44,7 @@ import {
   login as loginRequest,
   logout as logoutRequest
 } from "./api/client";
-import type { Campaign, Finding, ModuleMeta, ParamField, ReportItem, UserProfile } from "./api/types";
+import type { ApiKeyMeta, Campaign, Finding, ModuleMeta, ParamField, ReportItem, UserProfile } from "./api/types";
 
 interface AuthState {
   user: UserProfile | null;
@@ -84,6 +86,15 @@ interface PersistedResult {
   payload: unknown;
   isError?: boolean;
 }
+
+interface GeneratedApiKey {
+  id?: string;
+  key: string;
+  note?: string;
+  prefix?: string;
+}
+
+type ApiKeyCopyStatus = "idle" | "copied" | "manual";
 
 const DashboardUiContext = createContext<DashboardUiState | null>(null);
 
@@ -1133,16 +1144,40 @@ function StrategyPage() {
   );
 }
 
+function apiKeyVisibleIdentifier(key: ApiKeyMeta): string {
+  const prefix = typeof key.key_prefix === "string" && key.key_prefix
+    ? key.key_prefix
+    : typeof key.prefix === "string" && key.prefix
+      ? key.prefix
+      : "";
+  return prefix ? `Prefix: ${prefix}` : `ID: ${key.id.slice(0, 12)}`;
+}
+
+function apiKeyOwnerLabel(key: ApiKeyMeta): string {
+  const owner = key.owner ?? key.owner_username ?? key.username ?? key.role;
+  return typeof owner === "string" && owner.trim() ? owner : "";
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 function SecurityPage() {
   const { user } = useAuth();
   const keys = useQuery({ queryKey: ["api-keys"], queryFn: api.apiKeys });
   const audit = useQuery({ queryKey: ["security-audit"], queryFn: api.securityAudit, enabled: user?.role === "team_lead" });
   const users = useQuery({ queryKey: ["security-users"], queryFn: api.users, enabled: user?.role === "team_lead" });
   const queryClient = useQueryClient();
+  const secretKeyInputRef = useRef<HTMLInputElement | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [keyName, setKeyName] = useState("");
   const [scopes, setScopes] = useState("read");
+  const [creatingApiKey, setCreatingApiKey] = useState(false);
+  const [generatedApiKey, setGeneratedApiKey] = useState<GeneratedApiKey | null>(null);
+  const [apiKeyError, setApiKeyError] = useState<unknown>(null);
+  const [copyStatus, setCopyStatus] = useState<ApiKeyCopyStatus>("idle");
   const change = useMutation({
     mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }),
     onSuccess: () => {
@@ -1150,20 +1185,77 @@ function SecurityPage() {
       setNewPassword("");
     }
   });
-  const create = useMutation({
-    mutationFn: () => api.createApiKey({ name: keyName, scopes }),
-    onSuccess: () => {
-      setKeyName("");
-      void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-    }
-  });
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteApiKey(id),
     onSuccess: () => {
-      create.reset();
       void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
     }
   });
+
+  useEffect(() => {
+    if (generatedApiKey) {
+      secretKeyInputRef.current?.focus();
+    }
+  }, [generatedApiKey]);
+
+  async function handleCreateApiKey(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
+    setApiKeyError(null);
+    setGeneratedApiKey(null);
+    setCopyStatus("idle");
+    setCreatingApiKey(true);
+    try {
+      const response = await api.createApiKey({ name: keyName, scopes });
+      if (!response.key) {
+        throw new Error("API key created, but the secret was not returned by the API.");
+      }
+      setGeneratedApiKey({
+        id: response.id,
+        key: response.key,
+        note: response.note,
+        prefix: response.prefix ?? response.key_prefix
+      });
+      setKeyName("");
+      void queryClient.invalidateQueries({ queryKey: ["api-keys"] });
+    } catch (error) {
+      setApiKeyError(error);
+    } finally {
+      setCreatingApiKey(false);
+    }
+  }
+
+  async function copyGeneratedKey(): Promise<void> {
+    if (!generatedApiKey?.key) return;
+
+    let copied = false;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(generatedApiKey.key);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    if (!copied && secretKeyInputRef.current) {
+      secretKeyInputRef.current.focus();
+      secretKeyInputRef.current.select();
+      try {
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+    }
+
+    setCopyStatus(copied ? "copied" : "manual");
+  }
+
+  function closeGeneratedKeyModal(): void {
+    setGeneratedApiKey(null);
+    setCopyStatus("idle");
+  }
+
   return (
     <Page title="Security">
       <div className="grid gap-4 xl:grid-cols-2">
@@ -1189,33 +1281,86 @@ function SecurityPage() {
           <p className="mb-3 text-sm text-slate-600">
             Use ARES API keys for scripts, integrations, or CI jobs that call ARES. They are not LLM provider keys for Strategy.
           </p>
-          <form className="mb-3 grid gap-2 sm:grid-cols-[1fr_120px_auto]" onSubmit={(event) => {
-            event.preventDefault();
-            if (!event.currentTarget.reportValidity()) return;
-            create.mutate();
-          }}>
+          <form className="mb-3 grid gap-2 sm:grid-cols-[1fr_120px_auto]" onSubmit={(event) => void handleCreateApiKey(event)}>
             <input className="field" required placeholder="Name" value={keyName} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setKeyName(e.target.value); }} />
             <select className="field" value={scopes} onChange={(e) => setScopes(e.target.value)}>
               <option value="read">read</option>
               <option value="write">write</option>
               <option value="admin">admin</option>
             </select>
-            <button className="btn" disabled={create.isPending} type="submit">
-              {create.isPending ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
+            <button className="btn" disabled={creatingApiKey} type="submit">
+              {creatingApiKey ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
               Create
             </button>
           </form>
           {(keys.data ?? []).map((key) => (
-            <div className="mb-2 flex items-center justify-between rounded-md border border-slate-200 p-2" key={key.id}>
-              <span>{key.name ?? key.prefix ?? key.id}</span>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 p-3" key={key.id}>
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-950">{key.name ?? "Unnamed API key"}</div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                  <span className="font-mono">{apiKeyVisibleIdentifier(key)}</span>
+                  {key.scopes ? <span>Scope: {key.scopes}</span> : null}
+                  {apiKeyOwnerLabel(key) ? <span>Owner: {apiKeyOwnerLabel(key)}</span> : null}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                  {key.created_at ? <span>Created: {formatDateTime(key.created_at)}</span> : null}
+                  {key.expires_at ? <span>Expires: {formatDateTime(key.expires_at)}</span> : <span>No expiry</span>}
+                </div>
+              </div>
               <button className="btn btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(key.id)}>Delete</button>
             </div>
           ))}
           {(keys.data ?? []).length === 0 && <EmptyState text="No API keys have been created yet." />}
-          <DataPanel title="New Key" data={create.data} />
-          <DataPanel title="API Key Error" data={create.error ?? remove.error} />
+          <DataPanel title="API Key Error" data={apiKeyError ?? remove.error} />
         </section>
       </div>
+      {generatedApiKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <section
+            aria-labelledby="api-key-dialog-title"
+            aria-modal="true"
+            className="panel w-full max-w-2xl p-5 shadow-2xl"
+            role="dialog"
+          >
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-950" id="api-key-dialog-title">Save your key</h2>
+                <p className="mt-1 text-sm text-slate-600">Copy this secret key now and store it somewhere safe.</p>
+              </div>
+              {generatedApiKey.prefix ? <span className="badge font-mono">{generatedApiKey.prefix}</span> : null}
+            </div>
+            <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+              This secret key is shown only once. After you close this dialog, ARES will not show the full key again.
+            </p>
+            <label className="block text-sm font-semibold text-slate-800">
+              Secret key
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  aria-label="Generated API key secret"
+                  className="field font-mono text-sm"
+                  onFocus={(event) => event.currentTarget.select()}
+                  readOnly
+                  ref={secretKeyInputRef}
+                  value={generatedApiKey.key}
+                />
+                <button className="btn" onClick={() => void copyGeneratedKey()} type="button">
+                  {copyStatus === "copied" ? <CheckCircle2 size={16} /> : <Copy size={16} />}
+                  {copyStatus === "copied" ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </label>
+            {copyStatus === "manual" && (
+              <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                Clipboard access was blocked. The key field is selected; press Ctrl+C to copy it manually.
+              </p>
+            )}
+            {generatedApiKey.note ? <p className="mt-3 text-sm text-slate-600">{generatedApiKey.note}</p> : null}
+            <div className="mt-5 flex justify-end">
+              <button className="btn btn-primary" onClick={closeGeneratedKeyModal} type="button">Done</button>
+            </div>
+          </section>
+        </div>
+      )}
       <DataPanel title="Security Audit" data={audit.data} />
       <DataPanel title="Users" data={users.data} />
     </Page>
