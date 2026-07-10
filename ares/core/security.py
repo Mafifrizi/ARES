@@ -261,25 +261,19 @@ class DataEncryptor:
 
 # ── Input sanitization ────────────────────────────────────────────────────────
 
-_LDAP_INJECTION_CHARS = re.compile(r"[\\*()\x00]")
+_LDAP_INJECTION_CHARS = re.compile(r"[\\*()\x00-\x1f\x7f]")
 _COMMAND_INJECTION_CHARS = re.compile(r"[;&|`$<>]")
 _PATH_TRAVERSAL = re.compile(r"\.\./|\.\.\\")
 
 
 def sanitize_ldap(value: str) -> str:
-    """Escape LDAP special chars per RFC 4515 to prevent injection."""
-    try:
-        from ldap3.utils.conv import escape_filter_chars  # type: ignore[import]
-
-        return escape_filter_chars(value)
-    except ImportError:
-        # Fallback if ldap3 not installed — strip dangerous chars
-        sanitized = _LDAP_INJECTION_CHARS.sub("", value)
-        if sanitized != value:
-            logger.warning(
-                "security_ldap_injection_chars_stripped_from", value=repr(value)
-            )
-        return sanitized
+    """Strip LDAP injection metacharacters from user-controlled input."""
+    sanitized = _LDAP_INJECTION_CHARS.sub("", value)
+    if sanitized != value:
+        logger.warning(
+            "security_ldap_injection_chars_stripped_from", value=repr(value)
+        )
+    return sanitized
 
 
 def sanitize_hostname(value: str) -> str:
