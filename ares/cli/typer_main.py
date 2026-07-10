@@ -1071,14 +1071,21 @@ def doctor() -> None:
         nonlocal ok, warn, fail
         suffix = f"  [dim]{escape(str(detail))}[/dim]" if detail else ""
         if status == "ok":
-            console.print(f"  [green]✅[/green]  {label}" + suffix)
+            console.print(f"  [green][OK][/green]  {label}" + suffix)
             ok += 1
         elif status == "warn":
-            console.print(f"  [yellow]⚠️ [/yellow]  {label}" + suffix)
+            console.print(f"  [yellow][WARN][/yellow]  {label}" + suffix)
             warn += 1
         else:
-            console.print(f"  [red]❌[/red]  {label}" + suffix)
+            console.print(f"  [red][FAIL][/red]  {label}" + suffix)
             fail += 1
+
+    def import_failure_detail(import_name: str, exc: Exception, hint: str = "") -> str:
+        message = str(exc) or repr(exc)
+        detail = f"import {import_name} failed: {exc.__class__.__name__}: {message}"
+        if hint:
+            detail = f"{detail}; {hint}"
+        return detail
 
     # Python version
     import sys
@@ -1104,11 +1111,15 @@ def doctor() -> None:
             mod = importlib.import_module(import_name)
             ver = getattr(mod, "__version__", "")
             check(label, "ok", ver)
-        except ImportError:
+        except Exception as exc:
             if pkg in ("impacket", "paramiko"):
-                check(label, "fail", f"pip install ares-redteam[ad]")
+                check(
+                    label,
+                    "fail",
+                    import_failure_detail(import_name, exc, "pip install ares-redteam[ad]"),
+                )
             else:
-                check(label, "warn", f"pip install {pkg}")
+                check(label, "warn", import_failure_detail(import_name, exc, f"pip install {pkg}"))
 
     # ── impacket version ──────────────────────────────────────────────────────
     try:
@@ -1127,30 +1138,34 @@ def doctor() -> None:
         else:
             check("impacket", "warn",
                   "installed, but version could not be detected — expected >= 0.11")
-    except ImportError:
-        check("impacket", "fail", "pip install ares-redteam[ad]")
+    except Exception as exc:
+        check(
+            "impacket",
+            "fail",
+            import_failure_detail("impacket", exc, "pip install ares-redteam[ad]"),
+        )
 
     # ── ldap3 ─────────────────────────────────────────────────────────────────
     try:
         import ldap3
         check(f"ldap3 {ldap3.__version__}", "ok", "AD LDAP enumeration ready")
-    except ImportError:
-        check("ldap3", "warn", "pip install ares-redteam[ad]")
+    except Exception as exc:
+        check("ldap3", "warn", import_failure_detail("ldap3", exc, "pip install ares-redteam[ad]"))
 
     # ── optional Windows modules ───────────────────────────────────────────────
     try:
         import pypykatz  # type: ignore[import]
         check("pypykatz  (windows.lsass_dump)", "ok", "LSASS dump parsing ready")
-    except ImportError:
+    except Exception as exc:
         check("pypykatz  (windows.lsass_dump)", "warn",
-              "pip install ares-redteam[windows]")
+              import_failure_detail("pypykatz", exc, "pip install ares-redteam[windows]"))
 
     try:
         import httpx_ntlm  # type: ignore[import]
         check("httpx-ntlm  (ad.adcs ESC1)", "ok", "ADCS HTTP enrollment ready")
-    except ImportError:
+    except Exception as exc:
         check("httpx-ntlm  (ad.adcs ESC1)", "warn",
-              "pip install ares-redteam[ad]")
+              import_failure_detail("httpx_ntlm", exc, "pip install ares-redteam[ad]"))
 
     # ── cloud SDKs ────────────────────────────────────────────────────────────
     for import_name, module_label in [
@@ -1162,9 +1177,9 @@ def doctor() -> None:
         try:
             importlib.import_module(import_name)
             check(f"{import_name.split('.')[0]}  ({module_label})", "ok")
-        except ImportError:
+        except Exception as exc:
             check(f"{import_name.split('.')[0]}  ({module_label})", "warn",
-                  "pip install ares-redteam[cloud]")
+                  import_failure_detail(import_name, exc, "pip install ares-redteam[cloud]"))
 
     # ── cracking tools ────────────────────────────────────────────────────────
     for tool, desc in [("hashcat", "GPU cracking"), ("john", "CPU cracking")]:
@@ -1223,7 +1238,7 @@ def doctor() -> None:
                       " ARES should work — optional tools missing.\n")
     else:
         console.print(f"[bold red]{fail} check(s) failed.[/bold red]"
-                      f" Fix the ❌ items above, then re-run [cyan]ares doctor[/cyan].\n")
+                      f" Fix the [FAIL] items above, then re-run [cyan]ares doctor[/cyan].\n")
         raise typer.Exit(1)
 
 
@@ -1265,35 +1280,103 @@ def quickstart() -> None:
 
 # ── ares-setup entry point ────────────────────────────────────────────────────
 
-def setup_entrypoint() -> None:
-    """Entry point for `ares-setup` — runs setup.sh or inline setup."""
-    import subprocess, shutil, os
-    from pathlib import Path
+def _setup_platform_label(platform_name: str, os_name: str) -> str:
+    if os_name == "nt" or platform_name.startswith("win"):
+        return "Windows"
+    if platform_name == "darwin":
+        return "macOS"
+    if platform_name.startswith("linux"):
+        return "Linux"
+    return platform_name or os_name
 
-    setup_sh = Path(__file__).parent.parent.parent / "scripts" / "setup.sh"
-    if setup_sh.exists() and shutil.which("bash"):
-        os.execv(shutil.which("bash"), ["bash", str(setup_sh)])
+
+def _setup_fernet_key() -> str:
+    import base64
+    import secrets
+
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+
+
+def _setup_admin_password(length: int = 20) -> str:
+    import secrets
+
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _upsert_env_value(template: str, key: str, value: str) -> str:
+    prefix = f"{key}="
+    lines = template.splitlines()
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[index] = f"{prefix}{value}"
+            break
     else:
-        # Inline fallback for pip-installed package without scripts/
-        from cryptography.fernet import Fernet
-        import secrets
-        env = Path(".env")
-        if not env.exists():
-            ex = Path(".env.example")
-            template = ex.read_text() if ex.exists() else (
-                "ARES_SECRET_KEY=\nARES_ENCRYPTION_KEY=\nARES_DEFAULT_ADMIN_PASSWORD=\n"
-            )
-            sk  = secrets.token_hex(32)
-            ek  = Fernet.generate_key().decode()
-            pw  = ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$") for _ in range(20))
-            import re
-            template = re.sub(r"ARES_SECRET_KEY=.*",             f"ARES_SECRET_KEY={sk}",  template)
-            template = re.sub(r"ARES_ENCRYPTION_KEY=.*",         f"ARES_ENCRYPTION_KEY={ek}", template)
-            template = re.sub(r"ARES_DEFAULT_ADMIN_PASSWORD=.*", f"ARES_DEFAULT_ADMIN_PASSWORD={pw}", template)
-            env.write_text(template)
-            print(f"\n✅ .env created\n   Admin password: {pw}\n   Run: ares doctor\n")
+        lines.append(f"{prefix}{value}")
+    return "\n".join(lines) + "\n"
+
+
+def _run_python_setup(
+    root: Path | None = None,
+    platform_name: str | None = None,
+    os_name: str | None = None,
+) -> None:
+    import os
+    import secrets
+
+    root_path = Path.cwd() if root is None else Path(root)
+    platform_value = sys.platform if platform_name is None else platform_name
+    os_value = os.name if os_name is None else os_name
+    platform_label = _setup_platform_label(platform_value, os_value)
+
+    console.print("\n[bold]ARES Setup[/bold]")
+    console.print(f"Platform: {platform_label} ({platform_value}/{os_value})")
+    console.print(f"Python: {sys.version.split()[0]} ({sys.executable})")
+
+    if sys.version_info < (3, 10):
+        console.print("[red]ERROR[/red] Python 3.10+ is required.")
+        raise SystemExit(1)
+
+    env_path = root_path / ".env"
+    example_path = root_path / ".env.example"
+
+    try:
+        if env_path.exists():
+            console.print("[green]OK[/green] .env already exists; leaving it unchanged.")
+            admin_password = None
         else:
-            print("✅ .env already exists. Run: ares doctor")
+            if example_path.exists():
+                template = example_path.read_text(encoding="utf-8")
+            else:
+                console.print("[yellow]Warning[/yellow] .env.example not found; using minimal template.")
+                template = "ARES_SECRET_KEY=\nARES_ENCRYPTION_KEY=\nARES_DEFAULT_ADMIN_PASSWORD=\n"
+
+            admin_password = _setup_admin_password()
+            template = _upsert_env_value(template, "ARES_SECRET_KEY", secrets.token_hex(32))
+            template = _upsert_env_value(template, "ARES_ENCRYPTION_KEY", _setup_fernet_key())
+            template = _upsert_env_value(template, "ARES_DEFAULT_ADMIN_PASSWORD", admin_password)
+            env_path.write_text(template, encoding="utf-8")
+            console.print(f"[green]OK[/green] .env created at {env_path}")
+            console.print(f"Admin password: {admin_password}")
+    except OSError as exc:
+        console.print(f"[red]ERROR[/red] setup failed: {exc.__class__.__name__}: {exc}")
+        raise SystemExit(1) from None
+
+    setup_sh = root_path / "scripts" / "setup.sh"
+    if setup_sh.exists() and (os_value == "nt" or platform_value.startswith("win")):
+        console.print("[yellow]Info[/yellow] scripts/setup.sh is POSIX-only and was skipped on Windows.")
+    elif setup_sh.exists():
+        console.print("[dim]Developer helper available: scripts/setup.sh (optional).[/dim]")
+
+    console.print("Next steps:")
+    console.print("  ares doctor")
+    if admin_password is not None:
+        console.print("  Store the generated admin password securely.")
+
+
+def setup_entrypoint() -> None:
+    """Entry point for `ares-setup` using Python-native cross-platform setup."""
+    _run_python_setup()
 
 
 # ── backup command ────────────────────────────────────────────────────────────
