@@ -132,6 +132,11 @@ class TestSecurity:
     def test_sanitize_ldap_strips_injection(self):
         assert sanitize_ldap("admin)(uid=*)") == "adminuid="
 
+    def test_sanitize_ldap_strips_metachars_and_preserves_safe_chars(self):
+        assert sanitize_ldap(r"user\name*(cn=admin)\x00") == r"usernamecn=adminx00"
+        assert sanitize_ldap("a\x00b\x1fc\x7fd") == "abcd"
+        assert sanitize_ldap("john.doe-user_1@example.com = ok") == "john.doe-user_1@example.com = ok"
+
     def test_sanitize_hostname_strips_special(self):
         assert sanitize_hostname("host; rm -rf /") == "hostrm-rf"
 
