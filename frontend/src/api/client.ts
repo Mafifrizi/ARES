@@ -1,4 +1,5 @@
 import type {
+  ApiKeyCreateResponse,
   ApiKeyMeta,
   Campaign,
   Finding,
@@ -236,7 +237,7 @@ export const api = {
     }),
   apiKeys: () => apiRequest<ApiKeyMeta[]>("/auth/api-keys"),
   createApiKey: (body: { name: string; scopes: string; expires_days?: number }) =>
-    apiRequest<Record<string, string>>("/auth/api-keys", {
+    apiRequest<ApiKeyCreateResponse>("/auth/api-keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
