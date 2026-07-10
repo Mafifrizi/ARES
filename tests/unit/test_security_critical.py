@@ -234,6 +234,60 @@ class TestDashboardAuthentication:
 # TEST CLASS 3 — RBAC ENFORCEMENT PER ROLE
 # ══════════════════════════════════════════════════════════════════════
 
+def test_legacy_dashboard_escapes_api_fields_before_innerhtml():
+    """API-derived strings must be escaped before legacy dashboard innerHTML use."""
+    from ares.api.dashboard.app import _DASHBOARD_HTML
+
+    escaped_fragments = [
+        "${escHtml(c.id)}",
+        "${escHtml(c.name)}",
+        "${escHtml(c.client)}",
+        "${escHtml(c.noise_profile)}",
+        "${escHtml(c.status)}",
+        "${escHtml(String(f.severity || 'info').toUpperCase())}",
+        "${escHtml(f.mitre_technique)}",
+        "${escHtml(h.ip_address)}",
+        "${escHtml(h.hostname)}",
+        "${escHtml(h.os || 'Unknown OS')}",
+        "escHtml(h.os_version)",
+        "escHtml(h.domain)",
+        "JSON.parse(h.open_ports_json).map(escHtml).join(', ')",
+        "${escHtml(w.hostname)}",
+        "${escHtml(String(w.id || '').slice(0,8))}",
+        "(w.capabilities || []).map(escHtml).join(', ')",
+        "${escHtml(w.last_beat)}",
+        "${escHtml(w.active_tasks)}",
+        "${escHtml(w.completed)}",
+        "${escHtml(w.failed)}",
+    ]
+    for fragment in escaped_fragments:
+        assert fragment in _DASHBOARD_HTML
+
+    vulnerable_fragments = [
+        "onclick=\"selectCampaign('${c.id}', this)\"",
+        "${c.name}</div>",
+        "${c.client}",
+        "${f.mitre_technique}</span>",
+        "<span class=\"ip\">${h.ip_address}</span>",
+        ">(${h.hostname})</span>",
+        "${h.os || 'Unknown OS'}",
+        "' ' + h.os_version",
+        "JSON.parse(h.open_ports_json).join(', ')",
+        "${w.hostname}</strong>",
+        "${w.id.slice(0,8)}",
+        "${w.capabilities.join(', ')||'all'}",
+        "${w.last_beat}s ago",
+        "${w.active_tasks}</strong>",
+        "Done: ${w.completed}",
+        "Failed: ${w.failed}",
+    ]
+    for fragment in vulnerable_fragments:
+        assert fragment not in _DASHBOARD_HTML
+
+    assert ".replace(/\"/g,'&quot;')" in _DASHBOARD_HTML
+    assert ".replace(/'/g,'&#39;')" in _DASHBOARD_HTML
+
+
 class TestRBACEnforcement:
     """
     Every role must be restricted to its allowed operations.

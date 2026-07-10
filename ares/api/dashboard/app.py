@@ -272,14 +272,18 @@ async function loadCampaigns() {
 
     if (!campaigns.length) { list.innerHTML = '<div class="empty">No campaigns yet</div>'; return; }
 
-    list.innerHTML = campaigns.map(c => `
-      <div class="campaign-item" onclick="selectCampaign('${c.id}', this)">
-        <div class="cname">${c.name}</div>
-        <div class="cmeta">${c.client} · ${c.noise_profile} · ${c.status}</div>
+    list.innerHTML = campaigns.map((c, i) => `
+      <div class="campaign-item" data-campaign-index="${i}" data-campaign-id="${escHtml(c.id)}">
+        <div class="cname">${escHtml(c.name)}</div>
+        <div class="cmeta">${escHtml(c.client)} · ${escHtml(c.noise_profile)} · ${escHtml(c.status)}</div>
       </div>
     `).join('');
+    list.querySelectorAll('.campaign-item').forEach(item => {
+      const index = Number(item.dataset.campaignIndex);
+      item.addEventListener('click', () => selectCampaign(campaigns[index].id, item));
+    });
 
-    if (campaigns.length > 0) selectCampaign(campaigns[0].id, list.firstChild);
+    if (campaigns.length > 0) selectCampaign(campaigns[0].id, list.querySelector('.campaign-item'));
   } catch(e) {
     document.getElementById('campaign-list').innerHTML = '<div class="empty" style="color:#ef4444">API offline</div>';
     document.getElementById('status-dot').style.background = '#ef4444';
@@ -324,9 +328,9 @@ function renderFindings(findings) {
   if (!findings.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty">No confirmed findings</td></tr>'; return; }
   tbody.innerHTML = findings.map(f => `
     <tr>
-      <td><span class="badge ${f.severity}">${f.severity.toUpperCase()}</span></td>
+      <td><span class="badge ${escCssToken(f.severity)}">${escHtml(String(f.severity || 'info').toUpperCase())}</span></td>
       <td>${escHtml(f.title)}</td>
-      <td>${f.mitre_technique ? `<span class="mitre">${f.mitre_technique}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${f.mitre_technique ? `<span class="mitre">${escHtml(f.mitre_technique)}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
       <td style="font-family:monospace;font-size:.78rem">${escHtml(f.module_id || '')}</td>
       <td class="conf">${Math.round((f.confidence||1)*100)}%</td>
       <td style="font-family:monospace;font-size:.78rem">${escHtml(f.host||'—')}</td>
@@ -351,16 +355,16 @@ async function loadHosts(id) {
     el.innerHTML = hosts.map(h => `
       <div class="host-card">
         <div>
-          <span class="ip">${h.ip_address}</span>
+          <span class="ip">${escHtml(h.ip_address)}</span>
           ${h.is_dc ? '<span class="dc-badge">DC</span>' : ''}
-          ${h.hostname ? ` <span style="color:var(--muted);font-size:.85rem">(${h.hostname})</span>` : ''}
+          ${h.hostname ? ` <span style="color:var(--muted);font-size:.85rem">(${escHtml(h.hostname)})</span>` : ''}
         </div>
         <div style="margin-top:.4rem;font-size:.82rem;color:var(--muted)">
-          ${h.os || 'Unknown OS'}${h.os_version ? ' ' + h.os_version : ''}
-          ${h.domain ? ` · ${h.domain}` : ''}
+          ${escHtml(h.os || 'Unknown OS')}${h.os_version ? ' ' + escHtml(h.os_version) : ''}
+          ${h.domain ? ` · ${escHtml(h.domain)}` : ''}
         </div>
         ${h.open_ports_json && h.open_ports_json !== '[]' ?
-          `<div style="margin-top:.3rem;font-size:.78rem;color:var(--muted)">Ports: ${JSON.parse(h.open_ports_json).join(', ')}</div>` : ''}
+          `<div style="margin-top:.3rem;font-size:.78rem;color:var(--muted)">Ports: ${JSON.parse(h.open_ports_json).map(escHtml).join(', ')}</div>` : ''}
       </div>
     `).join('');
   } catch(e) {}
@@ -408,16 +412,16 @@ async function loadWorkers() {
       <div class="worker-card">
         <div>
           <div><span class="${w.alive ? 'alive' : 'dead'}">${w.alive ? '●' : '○'}</span>
-               <strong style="margin-left:.4rem">${w.hostname}</strong>
-               <span style="color:var(--muted);font-size:.8rem;margin-left:.5rem">${w.id.slice(0,8)}</span></div>
+               <strong style="margin-left:.4rem">${escHtml(w.hostname)}</strong>
+               <span style="color:var(--muted);font-size:.8rem;margin-left:.5rem">${escHtml(String(w.id || '').slice(0,8))}</span></div>
           <div style="font-size:.8rem;color:var(--muted);margin-top:.2rem">
-            Capabilities: ${w.capabilities.join(', ')||'all'} · Last heartbeat: ${w.last_beat}s ago
+            Capabilities: ${(w.capabilities || []).map(escHtml).join(', ')||'all'} · Last heartbeat: ${escHtml(w.last_beat)}s ago
           </div>
         </div>
         <div style="text-align:right;font-size:.85rem">
-          <div>Active: <strong>${w.active_tasks}</strong></div>
-          <div style="color:var(--green)">Done: ${w.completed}</div>
-          <div style="color:#ef4444">Failed: ${w.failed}</div>
+          <div>Active: <strong>${escHtml(w.active_tasks)}</strong></div>
+          <div style="color:var(--green)">Done: ${escHtml(w.completed)}</div>
+          <div style="color:#ef4444">Failed: ${escHtml(w.failed)}</div>
         </div>
       </div>
     `).join('');
@@ -428,7 +432,16 @@ async function loadWorkers() {
 
 // ── Utils ─────────────────────────────────────────────────────────────────
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
+function escCssToken(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'info';
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
