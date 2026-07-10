@@ -311,6 +311,134 @@ class TestCredentialArtifactCleanup:
         assert has_unlink_in_finally, \
             "BLOCKER-002 FAIL: _auth_with_cert finally block doesn't unlink pfx_path"
 
+    def test_dpapi_uses_secure_mkstemp_for_credential_tempfiles(self):
+        """
+        BLOCKER-002: windows.dpapi must use secure_mkstemp for credential artifacts.
+        """
+        source = Path("ares/modules/windows/dpapi.py").read_text(encoding="utf-8")
+        assert "secure_mkstemp" in source, \
+            "BLOCKER-002 FAIL: dpapi.py not using secure_mkstemp"
+        assert "tempfile.mkstemp(" not in source, \
+            "BLOCKER-002 FAIL: dpapi.py still uses raw tempfile.mkstemp"
+
+    def test_dpapi_transfer_cleans_secure_temp_on_write_failure(self, tmp_path, monkeypatch):
+        """
+        BLOCKER-002: _transfer_dpapi_files must unlink a secure temp file if
+        transfer succeeds but local persistence fails.
+        """
+        import builtins
+        import types
+        from ares.modules.windows import dpapi as dpapi_mod
+
+        created = tmp_path / "dpapi-transfer.tmp"
+        calls: dict[str, object] = {"count": 0, "campaign_id": ""}
+
+        def fake_secure_mkstemp(suffix="", prefix="ares_", campaign_id=""):
+            calls["count"] = int(calls["count"]) + 1
+            calls["campaign_id"] = campaign_id
+            fd = os.open(str(created), os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+            return str(created), fd
+
+        cleanup_attempts: list[str] = []
+        real_unlink = os.unlink
+
+        def tracking_unlink(path):
+            cleanup_attempts.append(os.fspath(path))
+            real_unlink(path)
+
+        real_open = builtins.open
+
+        def failing_open(path, *args, **kwargs):
+            mode = args[0] if args else kwargs.get("mode", "r")
+            if os.fspath(path) == str(created) and mode == "wb":
+                raise OSError("simulated write failure")
+            return real_open(path, *args, **kwargs)
+
+        class FakeSMB:
+            def __init__(self, *args, **kwargs):
+                self.getfile_calls = 0
+
+            def login(self, *args, **kwargs):
+                return None
+
+            def getFile(self, share, remote_path, writer):
+                self.getfile_calls += 1
+                if self.getfile_calls == 1:
+                    writer(b"credential bytes")
+                    return None
+                raise FileNotFoundError(remote_path)
+
+            def logoff(self):
+                return None
+
+        fake_impacket = types.ModuleType("impacket")
+        fake_smbconnection = types.ModuleType("impacket.smbconnection")
+        fake_smbconnection.SMBConnection = FakeSMB
+        fake_impacket.smbconnection = fake_smbconnection
+
+        monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+        monkeypatch.setitem(sys.modules, "impacket.smbconnection", fake_smbconnection)
+        monkeypatch.setattr(dpapi_mod, "secure_mkstemp", fake_secure_mkstemp)
+        monkeypatch.setattr(dpapi_mod.os, "unlink", tracking_unlink)
+        monkeypatch.setattr(builtins, "open", failing_open)
+
+        module = object.__new__(dpapi_mod.DPAPIModule)
+        result = module._transfer_dpapi_files(
+            "host", "user", "password", "", "", "", "user",
+            campaign_id="campaign-123",
+        )
+
+        assert result == {}
+        assert calls == {"count": 1, "campaign_id": "campaign-123"}
+        assert cleanup_attempts == [str(created)]
+        assert not created.exists()
+
+    def test_dpapi_chrome_parse_cleans_secure_temp_on_copy_failure(self, tmp_path, monkeypatch):
+        """
+        BLOCKER-002: _parse_chrome_logindata must unlink its secure SQLite copy
+        even if copying into the temp file fails before sqlite opens it.
+        """
+        import shutil
+        from ares.modules.windows import dpapi as dpapi_mod
+
+        login_path = tmp_path / "Login Data"
+        login_path.write_bytes(b"not a real sqlite database")
+        created = tmp_path / "dpapi-login-copy.db"
+        calls: dict[str, object] = {"count": 0, "campaign_id": ""}
+
+        def fake_secure_mkstemp(suffix="", prefix="ares_", campaign_id=""):
+            calls["count"] = int(calls["count"]) + 1
+            calls["campaign_id"] = campaign_id
+            fd = os.open(str(created), os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+            return str(created), fd
+
+        cleanup_attempts: list[str] = []
+        real_unlink = os.unlink
+
+        def tracking_unlink(path):
+            cleanup_attempts.append(os.fspath(path))
+            real_unlink(path)
+
+        def failing_copy2(src, dst):
+            assert src == str(login_path)
+            assert dst == str(created)
+            raise OSError("simulated copy failure")
+
+        monkeypatch.setattr(dpapi_mod, "secure_mkstemp", fake_secure_mkstemp)
+        monkeypatch.setattr(dpapi_mod.os, "unlink", tracking_unlink)
+        monkeypatch.setattr(shutil, "copy2", failing_copy2)
+
+        module = object.__new__(dpapi_mod.DPAPIModule)
+        result = module._parse_chrome_logindata(
+            {"chrome_login_data": str(login_path)}, "",
+            campaign_id="campaign-123",
+        )
+
+        assert result == []
+        assert calls == {"count": 1, "campaign_id": "campaign-123"}
+        assert cleanup_attempts == [str(created)]
+        assert not created.exists()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HIGH-001 PROOF: Subprocess Timeout + Kill

