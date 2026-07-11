@@ -22,15 +22,31 @@ for the FastAPI backend.
 ## Routes
 
 - `/` overview: health, telemetry, campaign summary
-- `/campaigns`: list, create, detail, delete, findings, CVSS, diff, restore, dry-run plan
-- `/modules`: catalog filters, backend-derived dynamic params, dry-run default
-- `/reports`: generate, list, and authenticated download for campaign reports
-- `/graph`: graph, attack paths, BloodHound ingest
-- `/templates`: list templates and generate plans
-- `/strategy`: active engagements and role-gated engagement start
-- `/security`: profile, password change, API keys, audit, users
-- `/edr`: bypass telemetry and outcome reporting
-- `/live`: `WS /ws/campaigns/{campaign_id}/events?token=<token>`
+- `/campaigns`: `List`, `Scope`, and `Findings` tabs for list/create/detail/delete, findings, CVSS, diff, restore, and dry-run plan actions
+- `/modules`: `Catalog`, `Run Panel`, and `Results` tabs for catalog filters, backend-derived dynamic params, dry-run default, and execution output
+- `/reports`: `Generate` and `Library` tabs for report creation, listing, and authenticated download
+- `/graph`: `Entities`, `Attack Paths`, and `Ingest` tabs for graph review, attack paths, and BloodHound ingest
+- `/templates`: `Templates` and `Plan Builder` tabs for listing templates and generating plans
+- `/strategy`: `Objective`, `Active`, and `Result` tabs for active engagements and role-gated engagement start
+- `/security`: `Account`, `API Keys`, and `Audit` tabs for profile, password change, API keys, audit, and users
+- `/edr`: `Knowledge Base` and `Report Outcome` tabs for bypass telemetry and outcome reporting
+- `/live`: `Stream` and `Buffer` tabs backed by `WS /ws/campaigns/{campaign_id}/events?token=<token>`
+
+## Shell Controls
+
+- The left sidebar handles route navigation.
+- The topbar menu button collapses and expands the sidebar.
+- Topbar quick search is client-side navigation over currently loaded page
+  names/routes, campaigns, modules, reports, and templates. It is not a
+  server-backed search across unloaded historical data.
+- The notification bell is the health/status surface. There is no separate
+  topbar status pill for online/offline state.
+- The bell badge counts unread notifications only. Opening the drawer marks
+  visible notifications as read; individual dismiss and clear-all remove
+  notifications from the current session.
+- Notification state must not persist bodies, API keys, tokens, stack traces,
+  or raw payloads.
+- The topbar keeps the user identity and logout action.
 
 ## Safety
 

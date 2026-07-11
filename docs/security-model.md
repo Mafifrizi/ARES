@@ -112,7 +112,11 @@ API keys are created after login from the Security page or
 CI jobs, internal integrations, or repeatable local validation where an
 interactive browser session is not practical. The raw API key is shown only
 once at creation time, is stored hashed, and can be revoked from the Security
-page.
+page. In the dashboard, key creation opens the `Save your key` modal. The full
+secret appears there once, `Copy` changes to `Copied` after a successful copy,
+and `Done` closes the modal and clears the in-memory new-key state. The key
+list shows metadata and a prefix only; the full secret cannot be retrieved
+later.
 
 **Unauthenticated endpoints** (by design):
 - `POST /auth/token` — login (takes credentials, returns token)
@@ -141,6 +145,11 @@ The first account is bootstrapped as:
 | Username | Role | Password source |
 |----------|------|-----------------|
 | `admin` | `team_lead` | `ARES_DEFAULT_ADMIN_PASSWORD` |
+
+ARES creates that account only when the user table is empty. Changing
+`ARES_DEFAULT_ADMIN_PASSWORD` after the `admin` account exists does not reset
+the password. Use the Security page after login for normal password changes,
+or recreate the local database only when disposable local data can be lost.
 
 Additional accounts are created by a `team_lead` through `POST /auth/register`.
 The role is assigned at creation time:

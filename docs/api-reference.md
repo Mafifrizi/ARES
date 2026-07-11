@@ -134,6 +134,8 @@ separate from deployment secrets such as `ARES_SECRET_KEY` and
 ```
 
 > Store `raw_key` immediately — it is not recoverable after this response.
+> In the dashboard, the same one-time secret is shown in the `Save your key`
+> modal. The key list shows metadata and a prefix only.
 
 ---
 
@@ -523,6 +525,21 @@ The dashboard uses `POST /auth/token`, `POST /auth/refresh`, the main REST API,
 and `WS /ws/campaigns/{campaign_id}/events?token=<token>`. Legacy
 `/dashboard/api/*` and `/dashboard/ws/live` routes are not the primary data
 source.
+
+Dashboard shell behavior:
+
+- The left sidebar routes between pages, and the topbar menu collapses or
+  expands it.
+- Topbar quick search is client-side navigation over currently loaded page
+  names/routes, campaigns, modules, reports, and templates. It is not a
+  server-backed global search over unloaded historical data.
+- The notification bell is the only topbar status surface. Its badge counts
+  unread notifications; opening the drawer marks visible items as read, and
+  dismiss/clear-all remove notifications from the current session.
+- Notification state does not store bodies, API keys, tokens, stack traces, or
+  raw payloads.
+- Overview has no variation tabs. Other pages use the tabs documented in
+  `docs/dashboard-guide.md`.
 
 ---
 

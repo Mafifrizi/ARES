@@ -38,6 +38,12 @@ layer; the backend remains the enforcement boundary.
 
 The module form is generated from backend metadata. That means new or updated
 modules can expose their own parameters without hardcoding fields in React.
+The dashboard catalog uses the backend loader output for built-in module IDs,
+names, categories, OPSEC labels, and parameter schemas. High-noise or sensitive
+modules remain guarded by RBAC, scope checks, and explicit confirmation. Do not
+run destructive, credential theft, lateral movement, exfiltration,
+persistence, EDR bypass, or other noisy workflows without written
+authorization and a scoped campaign.
 
 ### API Flow
 

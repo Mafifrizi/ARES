@@ -73,7 +73,7 @@ What each value does:
 | --- | --- | --- |
 | `ARES_SECRET_KEY` | Signs API sessions and tokens. | Yes, for a deployed instance. Rotating it invalidates sessions. |
 | `ARES_ENCRYPTION_KEY` | Encrypts sensitive local data such as credential vault material. | Yes. Losing or changing it can make existing encrypted data unreadable. |
-| `ARES_DEFAULT_ADMIN_PASSWORD` | Password for the first bootstrap `admin` account when the user table is empty. | Change after first login. |
+| `ARES_DEFAULT_ADMIN_PASSWORD` | Password for the first bootstrap `admin` account when the user table is empty. | Change after first login. Updating this value later does not reset an existing admin. |
 
 For repeated local use, copy `.env.example` to `.env`, fill these values once, and start ARES from the same project directory.
 
@@ -108,6 +108,31 @@ Login with:
 
 Then change the admin password from the `Security` page.
 
+The first `admin` user is created only when the user table is empty. If you
+already have a local database, use the current admin password. Changing
+`ARES_DEFAULT_ADMIN_PASSWORD` after the account exists will not update that
+password. For disposable local data, recreate the local `ares.db`; otherwise,
+change the password from the dashboard after login.
+
+Dashboard shell:
+
+- The left sidebar routes between Overview, Campaigns, Modules, Reports, Graph,
+  Templates, Strategy, Security, EDR/OPSEC, and Live.
+- The topbar menu button collapses or expands the sidebar.
+- Topbar quick search navigates over currently loaded page names/routes,
+  campaigns, modules, reports, and templates. It is not a backend global search
+  over unloaded history.
+- The notification bell is the only topbar status surface. Its badge counts
+  unread notifications; opening the drawer marks visible items as read, and the
+  drawer supports individual dismiss plus clear-all.
+- The topbar also provides signed-in identity and logout.
+- Current tabs are: Campaigns `List`/`Scope`/`Findings`, Modules
+  `Catalog`/`Run Panel`/`Results`, Reports `Generate`/`Library`, Graph
+  `Entities`/`Attack Paths`/`Ingest`, Templates `Templates`/`Plan Builder`,
+  Strategy `Objective`/`Active`/`Result`, Security `Account`/`API Keys`/`Audit`,
+  EDR/OPSEC `Knowledge Base`/`Report Outcome`, and Live `Stream`/`Buffer`.
+  Overview has no variation tabs.
+
 ## 5. Create A Campaign
 
 Open `Campaigns` and create a scoped campaign.
@@ -132,6 +157,13 @@ Open `Modules`:
 3. Fill the generated parameter fields.
 4. Run with `Dry run` first when available.
 5. Run live only when the target and scope are authorized.
+
+The dashboard catalog loads the built-in module metadata from the backend.
+Module IDs, names, categories, OPSEC labels, and parameter schemas come from
+that catalog. High-noise or sensitive modules remain guarded by authorization
+and confirmation checks; do not run destructive, credential, lateral movement,
+exfiltration, persistence, or bypass workflows outside an approved lab or
+engagement.
 
 Port behavior is module-specific. Some modules require explicit ports because they fingerprint a service. Broader discovery belongs in enumeration modules such as port scanning, then the discovered services can be used by more specific modules.
 
@@ -197,6 +229,12 @@ curl http://localhost:8080/campaigns \
 ```
 
 They are not OpenAI, Anthropic, or Ollama keys.
+
+When you create a key, the dashboard opens the `Save your key` modal and shows
+the full secret once. Use `Copy`; after a successful copy the button changes to
+`Copied`. `Done` closes the modal and clears the in-memory new-key state. The
+API key list shows metadata and a prefix only, so the full secret cannot be
+retrieved later.
 
 ## 11. Roles
 
@@ -264,7 +302,7 @@ The lab checks login, profile, campaign validation, dry-run validation, reports,
 | Symptom | Check |
 | --- | --- |
 | `ARES not configured` | Set `ARES_SECRET_KEY`, `ARES_ENCRYPTION_KEY`, and `ARES_DEFAULT_ADMIN_PASSWORD`. |
-| `Invalid credentials` | Use the current admin password, not the placeholder from docs. |
+| `Invalid credentials` | Use the current admin password, not the placeholder or a newly changed `ARES_DEFAULT_ADMIN_PASSWORD` value after the admin already exists. |
 | `Request failed with 422` | A required field is missing or a target/scope value is invalid. |
 | `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32`. |
 | `Global rate limit exceeded` | Wait briefly, then retry. Avoid repeatedly clicking actions while a request is pending. |
