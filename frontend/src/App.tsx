@@ -5,7 +5,6 @@ import {
   Bell,
   Boxes,
   CheckCircle2,
-  CircleDot,
   Copy,
   Database,
   Download,
@@ -370,6 +369,8 @@ function ProtectedShell() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
+  const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>([]);
   const liveSocketRef = useRef<WebSocket | null>(null);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
@@ -537,21 +538,21 @@ function ProtectedShell() {
     const healthStatus = String(health.data?.status ?? "").toLowerCase();
 
     if (health.isError) {
-      items.push({ id: "health-error", title: "Backend health check failed", detail: "ARES API health is not reachable.", tone: "danger" });
+      items.push({ id: "health:error", title: "Backend health check failed", detail: "ARES API health is not reachable.", tone: "danger" });
     } else if (health.isSuccess && healthStatus && !["ok", "healthy", "online"].includes(healthStatus)) {
-      items.push({ id: "health-status", title: "Backend status needs attention", detail: String(health.data?.status), tone: "warn" });
+      items.push({ id: `health:status:${healthStatus}`, title: "Backend status needs attention", detail: String(health.data?.status), tone: "warn" });
     }
     if (telemetry.isError) {
-      items.push({ id: "telemetry-error", title: "Telemetry unavailable", detail: "Runtime telemetry could not be loaded.", tone: "warn" });
+      items.push({ id: "telemetry:error", title: "Telemetry unavailable", detail: "Runtime telemetry could not be loaded.", tone: "warn" });
     }
     if (campaigns.isError) {
-      items.push({ id: "campaigns-error", title: "Campaign list unavailable", detail: "Campaign data could not be loaded.", tone: "warn" });
+      items.push({ id: "campaigns:error", title: "Campaign list unavailable", detail: "Campaign data could not be loaded.", tone: "warn" });
     }
     if (modules.isError) {
-      items.push({ id: "modules-error", title: "Module catalog unavailable", detail: "Module metadata could not be loaded.", tone: "warn" });
+      items.push({ id: "modules:error", title: "Module catalog unavailable", detail: "Module metadata could not be loaded.", tone: "warn" });
     }
     if (reports.isError && selectedCampaignId) {
-      items.push({ id: "reports-error", title: "Report library unavailable", detail: "Selected campaign reports could not be loaded.", tone: "warn" });
+      items.push({ id: `reports:error:${selectedCampaignId}`, title: "Report library unavailable", detail: "Selected campaign reports could not be loaded.", tone: "warn" });
     }
 
     const failedRuns = metricNumber(snapshot?.modules, "failed");
@@ -559,19 +560,57 @@ function ProtectedShell() {
     const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
     const queueDepth = metricNumber(snapshot?.queue, "depth");
     if (failedRuns > 0) {
-      items.push({ id: "failed-runs", title: "Failed module runs", detail: `${failedRuns} failed module run(s) reported by telemetry.`, tone: "warn" });
+      items.push({ id: `telemetry:failed-runs:${failedRuns}`, title: "Failed module runs", detail: `${failedRuns} failed module run(s) reported by telemetry.`, tone: "warn" });
     }
     if (errorRate > 0) {
-      items.push({ id: "error-rate", title: "Runtime error rate above zero", detail: `${formatRate(errorRate)} module error rate.`, tone: "warn" });
+      items.push({ id: `telemetry:error-rate:${errorRate}`, title: "Runtime error rate above zero", detail: `${formatRate(errorRate)} module error rate.`, tone: "warn" });
     }
     if (unhealthyWorkers > 0) {
-      items.push({ id: "workers", title: "Unhealthy worker detected", detail: `${unhealthyWorkers} worker(s) unhealthy.`, tone: "danger" });
+      items.push({ id: `telemetry:workers:${unhealthyWorkers}`, title: "Unhealthy worker detected", detail: `${unhealthyWorkers} worker(s) unhealthy.`, tone: "danger" });
     }
     if (queueDepth > 0) {
-      items.push({ id: "queue", title: "Queue has pending work", detail: `${queueDepth} queued task(s).`, tone: "info" });
+      items.push({ id: `telemetry:queue:${queueDepth}`, title: "Queue has pending work", detail: `${queueDepth} queued task(s).`, tone: "info" });
     }
     return items;
   }, [campaigns.isError, health.data, health.isError, health.isSuccess, modules.isError, reports.isError, selectedCampaignId, telemetry.data, telemetry.isError]);
+
+  const activeNotificationKey = useMemo(() => notifications.map((item) => item.id).join("|"), [notifications]);
+  const visibleNotifications = useMemo(
+    () => notifications.filter((item) => !deletedNotificationIds.includes(item.id)),
+    [deletedNotificationIds, notifications]
+  );
+  const unreadNotificationCount = visibleNotifications.filter((item) => !readNotificationIds.includes(item.id)).length;
+
+  useEffect(() => {
+    const activeIds = activeNotificationKey ? activeNotificationKey.split("|") : [];
+    setReadNotificationIds((current) => current.filter((id) => activeIds.includes(id)));
+    setDeletedNotificationIds((current) => current.filter((id) => activeIds.includes(id)));
+  }, [activeNotificationKey]);
+
+  function markVisibleNotificationsRead(): void {
+    const visibleIds = visibleNotifications.map((item) => item.id);
+    if (visibleIds.length === 0) return;
+    setReadNotificationIds((current) => unique([...current, ...visibleIds]));
+  }
+
+  function toggleNotifications(): void {
+    const nextOpen = !notificationsOpen;
+    if (nextOpen) {
+      markVisibleNotificationsRead();
+    }
+    setNotificationsOpen(nextOpen);
+  }
+
+  function deleteNotification(id: string): void {
+    setDeletedNotificationIds((current) => unique([...current, id]));
+    setReadNotificationIds((current) => unique([...current, id]));
+  }
+
+  function clearNotifications(): void {
+    const visibleIds = visibleNotifications.map((item) => item.id);
+    setDeletedNotificationIds((current) => unique([...current, ...visibleIds]));
+    setReadNotificationIds((current) => unique([...current, ...visibleIds]));
+  }
 
   function selectSearchResult(result: SearchResult): void {
     result.onSelect?.();
@@ -673,33 +712,42 @@ function ProtectedShell() {
               </div>
             </div>
             <div className="topbar-right">
-              <span className={liveConnected ? "status-pill status-low" : "status-pill"}>
-                <CircleDot size={11} /> {liveConnected ? "Live" : "Offline"}
-              </span>
               <button
                 className="icon-button has-badge"
                 aria-expanded={notificationsOpen}
                 aria-label="Notifications"
-                onClick={() => setNotificationsOpen((value) => !value)}
+                onClick={toggleNotifications}
                 type="button"
               >
                 <Bell size={16} />
-                {notifications.length > 0 ? <span>{notifications.length}</span> : null}
+                {unreadNotificationCount > 0 ? <span>{unreadNotificationCount}</span> : null}
               </button>
               {notificationsOpen && (
                 <aside className="notification-drawer" aria-label="Notifications">
-                  <SectionHeader title="Notifications" action={<span className="badge">{notifications.length}</span>} />
-                  {notifications.length > 0 ? (
+                  <SectionHeader
+                    title="Notifications"
+                    action={visibleNotifications.length > 0 ? (
+                      <button className="btn btn-compact" onClick={clearNotifications} type="button">
+                        Clear all
+                      </button>
+                    ) : <span className="badge">0</span>}
+                  />
+                  {visibleNotifications.length > 0 ? (
                     <div className="notification-list">
-                      {notifications.map((item) => (
+                      {visibleNotifications.map((item) => (
                         <div className={`notification-item notification-${item.tone}`} key={item.id}>
-                          <strong>{item.title}</strong>
-                          <span>{item.detail}</span>
+                          <div className="notification-item-header">
+                            <strong>{item.title}</strong>
+                            <button className="icon-button icon-button-small" aria-label={`Dismiss ${item.title}`} onClick={() => deleteNotification(item.id)} type="button">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                          <p>{item.detail}</p>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <EmptyState text="No current dashboard notifications." />
+                    <EmptyState text="No notifications." />
                   )}
                 </aside>
               )}
