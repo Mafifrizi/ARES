@@ -79,8 +79,16 @@ For repeated local use, copy `.env.example` to `.env`, fill these values once, a
 
 ## 4. Start The API And Dashboard
 
+Recommended local startup from the repository root:
+
 ```bash
 ares dashboard dev
+```
+
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe dashboard dev
 ```
 
 This starts the FastAPI backend and the Vite dashboard dev server in one
@@ -92,8 +100,17 @@ terminal. It prints:
 - Login password: value of `ARES_DEFAULT_ADMIN_PASSWORD` in `.env`
 
 The launcher opens the dashboard by default and does not print the password
-value. Use `ares dashboard dev --no-open` to print the URL without opening a
-browser. If `frontend/node_modules` is missing, run:
+value.
+
+Useful launcher options:
+
+- `--no-open`: print the URL without opening a browser.
+- `--no-reload`: start uvicorn without reload.
+- `--api-host` / `--api-port`: change the backend bind address.
+- `--ui-host` / `--ui-port`: change the Vite bind address.
+- `--install`: run `npm ci` in `frontend/` if `node_modules` is missing.
+
+For example:
 
 ```bash
 ares dashboard dev --install
@@ -104,13 +121,14 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
+Set-Location C:\path\to\ARES
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-cd frontend
+Set-Location C:\path\to\ARES\frontend
 "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 

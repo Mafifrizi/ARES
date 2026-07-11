@@ -426,8 +426,13 @@ missing, run `npm ci` in `frontend/` or start with:
 ares dashboard dev --install
 ```
 
-Use `--no-open` when you want the command to print the URL without opening a
-browser.
+Useful launcher options:
+
+- `--no-open`: print the URL without opening a browser.
+- `--no-reload`: start uvicorn without reload.
+- `--api-host` / `--api-port`: change the backend bind address.
+- `--ui-host` / `--ui-port`: change the Vite bind address.
+- `--install`: run `npm ci` in `frontend/` if `node_modules` is missing.
 
 Manual fallback for troubleshooting:
 
