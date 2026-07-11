@@ -17,6 +17,12 @@ Recommended local dashboard startup from the repository root:
 ares dashboard dev
 ```
 
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe dashboard dev
+```
+
 This one-terminal launcher starts:
 
 - Backend API: `python -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload`
@@ -28,6 +34,9 @@ the value of `ARES_DEFAULT_ADMIN_PASSWORD` from `.env`; the launcher does not
 print that password. Use `ares dashboard dev --no-open` to skip browser open,
 or `ares dashboard dev --install` to run `npm ci` if `frontend/node_modules`
 is missing.
+
+Options: `--api-host`, `--api-port`, `--ui-host`, `--ui-port`, `--no-open`,
+`--no-reload`, and `--install`.
 
 Manual fallback for troubleshooting:
 

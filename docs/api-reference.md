@@ -516,10 +516,15 @@ Auth: `?token=<access_token>` query param (WebSocket cannot send headers before 
 
 ## Dashboard
 
-The React dashboard is served at `GET /dashboard/`, with SPA fallback for
-routes like `/dashboard/campaigns`. The static shell can load without auth so
-the login screen works; all sensitive data is fetched from the main authenticated
-API routes above.
+After frontend assets are built, FastAPI serves the production/static React
+dashboard at `GET /dashboard/`, with SPA fallback for routes like
+`/dashboard/campaigns`. The static shell can load without auth so the login
+screen works; all sensitive data is fetched from the main authenticated API
+routes above.
+
+For local development, run `ares dashboard dev` from the repository root and
+open the Vite-served dashboard at `http://127.0.0.1:5173/dashboard/`. The
+backend API remains on `http://127.0.0.1:8080` by default.
 
 The dashboard uses `POST /auth/token`, `POST /auth/refresh`, the main REST API,
 and `WS /ws/campaigns/{campaign_id}/events?token=<token>`. Legacy

@@ -149,7 +149,9 @@ The first account is bootstrapped as:
 ARES creates that account only when the user table is empty. Changing
 `ARES_DEFAULT_ADMIN_PASSWORD` after the `admin` account exists does not reset
 the password. Use the Security page after login for normal password changes,
-or recreate the local database only when disposable local data can be lost.
+or recreate the local `ares.db` only when disposable local dashboard data can
+be lost. Do not use local database reset guidance on real or shared
+deployments.
 
 Additional accounts are created by a `team_lead` through `POST /auth/register`.
 The role is assigned at creation time:
