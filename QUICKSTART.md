@@ -80,19 +80,50 @@ For repeated local use, copy `.env.example` to `.env`, fill these values once, a
 ## 4. Start The API And Dashboard
 
 ```bash
-ares-api
+ares dashboard dev
 ```
 
-Open:
+This starts the FastAPI backend and the Vite dashboard dev server in one
+terminal. It prints:
+
+- Backend API URL: `http://127.0.0.1:8080`
+- Dashboard URL: `http://127.0.0.1:5173/dashboard/`
+- Login username: `admin`
+- Login password: value of `ARES_DEFAULT_ADMIN_PASSWORD` in `.env`
+
+The launcher opens the dashboard by default and does not print the password
+value. Use `ares dashboard dev --no-open` to print the URL without opening a
+browser. If `frontend/node_modules` is missing, run:
+
+```bash
+ares dashboard dev --install
+```
+
+Manual fallback for troubleshooting:
+
+Terminal 1:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
+```
+
+Terminal 2:
+
+```powershell
+cd frontend
+"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+```
+
+Then open:
 
 ```text
-http://localhost:8080/dashboard
+http://127.0.0.1:5173/dashboard/
 ```
 
 Health check:
 
 ```bash
-curl http://localhost:8080/health
+curl http://127.0.0.1:8080/health
 ```
 
 Expected result:
@@ -113,6 +144,17 @@ already have a local database, use the current admin password. Changing
 `ARES_DEFAULT_ADMIN_PASSWORD` after the account exists will not update that
 password. For disposable local data, recreate the local `ares.db`; otherwise,
 change the password from the dashboard after login.
+
+Local development reset warning: this deletes local dashboard data in
+`ares.db`. Do not use it on real or shared deployments.
+
+```powershell
+New-Item -ItemType Directory -Force ".\_db_backup" | Out-Null
+if (Test-Path ".\ares.db") {
+  Copy-Item ".\ares.db" ".\_db_backup\ares.db.before-reset" -Force
+}
+Remove-Item ".\ares.db" -Force -ErrorAction SilentlyContinue
+```
 
 Dashboard shell:
 

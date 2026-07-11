@@ -9,6 +9,47 @@ Production URL:
 http://localhost:8080/dashboard
 ```
 
+## Local Developer Startup
+
+Recommended local dashboard startup from the repository root:
+
+```bash
+ares dashboard dev
+```
+
+This one-terminal launcher starts:
+
+- Backend API: `python -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload`
+- Frontend: `npm run dev -- --host 127.0.0.1 --port 5173`
+
+It prints `http://127.0.0.1:5173/dashboard/`, opens it by default, and stops
+both child processes when you press `Ctrl+C`. Login with username `admin` and
+the value of `ARES_DEFAULT_ADMIN_PASSWORD` from `.env`; the launcher does not
+print that password. Use `ares dashboard dev --no-open` to skip browser open,
+or `ares dashboard dev --install` to run `npm ci` if `frontend/node_modules`
+is missing.
+
+Manual fallback for troubleshooting:
+
+Terminal 1:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
+```
+
+Terminal 2:
+
+```powershell
+cd frontend
+"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/dashboard/
+```
+
 ## Screenshot Set
 
 The dashboard screenshots in this repository use local/demo data only. Do not
@@ -75,6 +116,17 @@ existing password. Change the bootstrap password from the `Security` page after
 first login. For disposable local development data, recreate the local
 database only when you intentionally want to discard existing users and
 campaign data.
+
+Local development reset warning: this deletes local dashboard data in
+`ares.db`. Do not use it on real or shared deployments.
+
+```powershell
+New-Item -ItemType Directory -Force ".\_db_backup" | Out-Null
+if (Test-Path ".\ares.db") {
+  Copy-Item ".\ares.db" ".\_db_backup\ares.db.before-reset" -Force
+}
+Remove-Item ".\ares.db" -Force -ErrorAction SilentlyContinue
+```
 
 Additional users are created by a `team_lead` through `POST /auth/register`.
 The dashboard currently shows users in the `Security` page, but it does not

@@ -23,9 +23,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
 import sys
+import threading
+import time
+import webbrowser
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import typer
 from rich.console import Console
@@ -60,6 +68,7 @@ report_app   = typer.Typer(help="Generate engagement reports", no_args_is_help=T
 signing_app  = typer.Typer(help="Module signing and verification", no_args_is_help=True)
 goal_app     = typer.Typer(help="Goal-based autonomous attack planning", no_args_is_help=True)
 graph_app    = typer.Typer(help="Attack graph queries and visualization", no_args_is_help=True)
+dashboard_app = typer.Typer(help="Local dashboard developer tools", no_args_is_help=True)
 
 app.add_typer(campaign_app, name="campaign")
 app.add_typer(target_app,   name="target")
@@ -69,6 +78,7 @@ app.add_typer(report_app,   name="report")
 app.add_typer(signing_app,  name="signing")
 app.add_typer(goal_app,     name="goal")
 app.add_typer(graph_app,    name="graph")
+app.add_typer(dashboard_app, name="dashboard")
 
 
 # ── Version ────────────────────────────────────────────────────────────────────
@@ -1243,6 +1253,472 @@ def doctor() -> None:
 
 
 # ── quickstart wizard ─────────────────────────────────────────────────────────
+
+# -- dashboard developer launcher ------------------------------------------------
+
+def find_repo_root(start: Path | None = None) -> Path:
+    """Find the repository root from the current directory or one of its parents."""
+    current = Path.cwd().resolve() if start is None else Path(start).resolve()
+    candidates = [current, *current.parents]
+    for candidate in candidates:
+        if (candidate / "pyproject.toml").exists() and (candidate / "frontend").is_dir():
+            return candidate
+    raise FileNotFoundError(
+        "Could not find the ARES repository root. Run this command from the repo checkout."
+    )
+
+
+def resolve_npm_command(
+    os_name: str | None = None,
+    program_files_npm: Path | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> str:
+    """Resolve the npm executable without using a shell."""
+    effective_os = os.name if os_name is None else os_name
+    if effective_os == "nt":
+        preferred = program_files_npm or Path(r"C:\Program Files\nodejs\npm.cmd")
+        if preferred.exists():
+            return str(preferred)
+        return which("npm.cmd") or which("npm") or "npm.cmd"
+    return which("npm") or "npm"
+
+
+def build_backend_command(
+    api_host: str,
+    api_port: int,
+    *,
+    reload: bool = True,
+    python_executable: str | None = None,
+) -> list[str]:
+    command = [
+        python_executable or sys.executable,
+        "-m",
+        "uvicorn",
+        "ares.api.server:app",
+        "--host",
+        api_host,
+        "--port",
+        str(api_port),
+    ]
+    if reload:
+        command.append("--reload")
+    return command
+
+
+def build_frontend_command(npm_command: str, ui_host: str, ui_port: int) -> list[str]:
+    return [
+        npm_command,
+        "run",
+        "dev",
+        "--",
+        "--host",
+        ui_host,
+        "--port",
+        str(ui_port),
+    ]
+
+
+def wait_for_port(host: str, port: int, *, timeout_seconds: float = 30.0) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except OSError:
+            time.sleep(0.25)
+    return False
+
+
+def _popen_kwargs(os_name: str | None = None) -> dict[str, object]:
+    effective_os = os.name if os_name is None else os_name
+    if effective_os == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+class _WindowsCleanupJob:
+    """Best-effort Windows job object that kills child processes if ARES exits."""
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        self._ctypes = ctypes
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+        class _JobBasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_ulonglong),
+                ("WriteOperationCount", ctypes.c_ulonglong),
+                ("OtherOperationCount", ctypes.c_ulonglong),
+                ("ReadTransferCount", ctypes.c_ulonglong),
+                ("WriteTransferCount", ctypes.c_ulonglong),
+                ("OtherTransferCount", ctypes.c_ulonglong),
+            ]
+
+        class _JobExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _JobBasicLimitInformation),
+                ("IoInfo", _IoCounters),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        self._kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        self._kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        self._kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            wintypes.INT,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+        ]
+        self._kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        self._kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        self._kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._kernel32.CloseHandle.restype = wintypes.BOOL
+
+        self.handle = self._kernel32.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+
+        info = _JobExtendedLimitInformation()
+        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        ok = self._kernel32.SetInformationJobObject(
+            self.handle,
+            9,  # JobObjectExtendedLimitInformation
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if not ok:
+            error = ctypes.get_last_error()
+            self.close()
+            raise OSError(error, "SetInformationJobObject failed")
+
+    def assign(self, process: subprocess.Popen) -> None:
+        process_handle = getattr(process, "_handle", None)
+        if not process_handle or not self.handle:
+            return
+        self._kernel32.AssignProcessToJobObject(self.handle, process_handle)
+
+    def close(self) -> None:
+        if getattr(self, "handle", None):
+            self._kernel32.CloseHandle(self.handle)
+            self.handle = None
+
+
+def _create_windows_cleanup_job(os_name: str | None = None) -> _WindowsCleanupJob | None:
+    effective_os = os.name if os_name is None else os_name
+    if effective_os != "nt":
+        return None
+    try:
+        return _WindowsCleanupJob()
+    except Exception:
+        return None
+
+
+def _start_dashboard_process(
+    label: str,
+    command: list[str],
+    cwd: Path,
+    *,
+    popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
+    os_name: str | None = None,
+) -> subprocess.Popen:
+    console.print(f"[cyan]{label}[/cyan] {' '.join(command)}")
+    return popen_factory(
+        command,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+        **_popen_kwargs(os_name),
+    )
+
+
+def _stream_dashboard_logs(label: str, process: subprocess.Popen) -> None:
+    stream = getattr(process, "stdout", None)
+    if stream is None:
+        return
+    try:
+        for line in stream:
+            text = str(line).rstrip()
+            if text:
+                console.print(f"[dim]{label}[/dim] {text}")
+    except Exception as exc:  # pragma: no cover - best-effort log streaming
+        console.print(f"[yellow]{label} log stream ended:[/yellow] {exc}")
+
+
+def terminate_process_tree(
+    process: subprocess.Popen | None,
+    *,
+    os_name: str | None = None,
+    timeout_seconds: float = 8.0,
+) -> None:
+    if process is None or process.poll() is not None:
+        return
+
+    effective_os = os.name if os_name is None else os_name
+    if effective_os == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            process.wait(timeout=timeout_seconds)
+            return
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except Exception:
+        try:
+            process.terminate()
+        except Exception:
+            pass
+
+    try:
+        process.wait(timeout=timeout_seconds)
+        return
+    except Exception:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+
+
+def _ensure_frontend_dependencies(
+    frontend_dir: Path,
+    npm_command: str,
+    *,
+    install: bool = False,
+    run_func: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> None:
+    node_modules = frontend_dir / "node_modules"
+    if node_modules.exists():
+        return
+
+    if not install:
+        console.print(
+            "[red]frontend/node_modules is missing.[/red] "
+            "Run [cyan]npm ci[/cyan] in the frontend directory, or re-run with "
+            "[cyan]--install[/cyan]."
+        )
+        raise typer.Exit(1)
+
+    console.print("[cyan]Installing frontend dependencies with npm ci...[/cyan]")
+    result = run_func([npm_command, "ci"], cwd=str(frontend_dir), check=False)
+    if result.returncode != 0:
+        console.print("[red]npm ci failed; dashboard dev server was not started.[/red]")
+        raise typer.Exit(result.returncode or 1)
+
+
+def _install_dashboard_signal_handlers() -> list[tuple[int, object]]:
+    previous_handlers: list[tuple[int, object]] = []
+
+    def _raise_keyboard_interrupt(_signum, _frame) -> None:
+        raise KeyboardInterrupt
+
+    signals = [signal.SIGINT]
+    sigbreak = getattr(signal, "SIGBREAK", None)
+    if sigbreak is not None:
+        signals.append(sigbreak)
+
+    for sig in signals:
+        try:
+            previous_handlers.append((sig, signal.getsignal(sig)))
+            signal.signal(sig, _raise_keyboard_interrupt)
+        except Exception:
+            pass
+    return previous_handlers
+
+
+def _restore_dashboard_signal_handlers(previous_handlers: list[tuple[int, object]]) -> None:
+    for sig, handler in previous_handlers:
+        try:
+            signal.signal(sig, handler)
+        except Exception:
+            pass
+
+
+def _run_dashboard_dev(
+    *,
+    api_host: str = "127.0.0.1",
+    api_port: int = 8080,
+    ui_host: str = "127.0.0.1",
+    ui_port: int = 5173,
+    open_browser: bool = True,
+    reload: bool = True,
+    install: bool = False,
+    root: Path | None = None,
+    os_name: str | None = None,
+    popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
+    run_func: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    wait_for_port_func: Callable[..., bool] = wait_for_port,
+    open_browser_func: Callable[[str], object] = webbrowser.open,
+    sleep_func: Callable[[float], object] = time.sleep,
+) -> int:
+    root_path = find_repo_root(root)
+    frontend_dir = root_path / "frontend"
+    if not (frontend_dir / "package.json").exists():
+        console.print(f"[red]Frontend directory not found:[/red] {frontend_dir}")
+        raise typer.Exit(1)
+
+    npm_command = resolve_npm_command(os_name=os_name)
+    _ensure_frontend_dependencies(
+        frontend_dir,
+        npm_command,
+        install=install,
+        run_func=run_func,
+    )
+
+    backend_url = f"http://{api_host}:{api_port}"
+    dashboard_url = f"http://{ui_host}:{ui_port}/dashboard/"
+    backend_command = build_backend_command(api_host, api_port, reload=reload)
+    frontend_command = build_frontend_command(npm_command, ui_host, ui_port)
+
+    console.print("\n[bold]ARES dashboard developer launcher[/bold]")
+    console.print(f"Backend API URL: {backend_url}")
+    console.print(f"Dashboard URL: {dashboard_url}")
+    console.print("Login username: admin")
+    console.print("Login password: value of ARES_DEFAULT_ADMIN_PASSWORD in .env (not printed)")
+    if not (root_path / ".env").exists():
+        console.print("[yellow]Warning:[/yellow] .env was not found in the repo root.")
+    console.print()
+
+    backend_process: subprocess.Popen | None = None
+    frontend_process: subprocess.Popen | None = None
+    threads: list[threading.Thread] = []
+    cleanup_job = _create_windows_cleanup_job(os_name)
+    previous_signal_handlers = _install_dashboard_signal_handlers()
+
+    try:
+        backend_process = _start_dashboard_process(
+            "backend",
+            backend_command,
+            root_path,
+            popen_factory=popen_factory,
+            os_name=os_name,
+        )
+        if cleanup_job is not None:
+            cleanup_job.assign(backend_process)
+        frontend_process = _start_dashboard_process(
+            "frontend",
+            frontend_command,
+            frontend_dir,
+            popen_factory=popen_factory,
+            os_name=os_name,
+        )
+        if cleanup_job is not None:
+            cleanup_job.assign(frontend_process)
+
+        for label, process in (("backend", backend_process), ("frontend", frontend_process)):
+            thread = threading.Thread(
+                target=_stream_dashboard_logs,
+                args=(label, process),
+                daemon=True,
+            )
+            thread.start()
+            threads.append(thread)
+
+        if open_browser:
+            if wait_for_port_func(ui_host, ui_port, timeout_seconds=30.0):
+                console.print(f"[green]Opening dashboard:[/green] {dashboard_url}")
+            else:
+                console.print(
+                    "[yellow]Dashboard port was not ready yet; opening the URL anyway.[/yellow]"
+                )
+            open_browser_func(dashboard_url)
+        else:
+            console.print("[dim]Browser open skipped because --no-open was provided.[/dim]")
+
+        while True:
+            backend_code = backend_process.poll()
+            frontend_code = frontend_process.poll()
+            if backend_code is not None:
+                console.print(f"[red]Backend process exited with code {backend_code}.[/red]")
+                return backend_code or 1
+            if frontend_code is not None:
+                console.print(f"[red]Frontend process exited with code {frontend_code}.[/red]")
+                return frontend_code or 1
+            sleep_func(0.25)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down dashboard dev servers...[/yellow]")
+        return 0
+    finally:
+        terminate_process_tree(frontend_process, os_name=os_name)
+        terminate_process_tree(backend_process, os_name=os_name)
+        if cleanup_job is not None:
+            cleanup_job.close()
+        _restore_dashboard_signal_handlers(previous_signal_handlers)
+        for thread in threads:
+            thread.join(timeout=1.0)
+
+
+@dashboard_app.command("dev")
+def dashboard_dev(
+    api_host: str = typer.Option("127.0.0.1", "--api-host", help="Backend API host."),
+    api_port: int = typer.Option(8080, "--api-port", help="Backend API port."),
+    ui_host: str = typer.Option("127.0.0.1", "--ui-host", help="Frontend dev host."),
+    ui_port: int = typer.Option(5173, "--ui-port", help="Frontend dev port."),
+    open_browser: bool = typer.Option(
+        True,
+        "--open/--no-open",
+        help="Open the dashboard URL in the default browser.",
+    ),
+    reload: bool = typer.Option(
+        True,
+        "--reload/--no-reload",
+        help="Run uvicorn with reload enabled.",
+    ),
+    install: bool = typer.Option(
+        False,
+        "--install",
+        help="Run npm ci in frontend/ if node_modules is missing.",
+    ),
+) -> None:
+    """Run the FastAPI backend and Vite dashboard dev server together."""
+    exit_code = _run_dashboard_dev(
+        api_host=api_host,
+        api_port=api_port,
+        ui_host=ui_host,
+        ui_port=ui_port,
+        open_browser=open_browser,
+        reload=reload,
+        install=install,
+    )
+    if exit_code:
+        raise typer.Exit(exit_code)
+
 
 @app.command("quickstart")
 def quickstart() -> None:

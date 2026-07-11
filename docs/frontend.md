@@ -5,10 +5,28 @@ for the FastAPI backend.
 
 ## Runtime
 
-- Development: `cd frontend && npm ci && npm run dev`
+- Development: run `ares dashboard dev` from the repository root. It starts
+  the FastAPI API on `http://127.0.0.1:8080` and the Vite dashboard on
+  `http://127.0.0.1:5173/dashboard/` in one terminal.
+- Browser open can be skipped with `ares dashboard dev --no-open`.
+- If `frontend/node_modules` is missing, run `ares dashboard dev --install` or
+  `cd frontend && npm ci`.
 - Production: `npm run build`, then FastAPI serves `frontend/dist` at `/dashboard`
 - Vite base path: `/dashboard/`
 - API proxy: main FastAPI routes, not legacy dashboard shadow routes
+
+Manual fallback for troubleshooting:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
+```
+
+```powershell
+cd frontend
+"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+```
+
+Then open `http://127.0.0.1:5173/dashboard/`.
 
 ## Auth
 

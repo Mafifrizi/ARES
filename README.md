@@ -237,6 +237,17 @@ reset that user's password. For local development, either change the password
 from the `Security` page after logging in or recreate the local database if you
 intend to discard existing local data.
 
+Local development reset warning: this deletes local dashboard data in
+`ares.db`. Do not use it on real or shared deployments.
+
+```powershell
+New-Item -ItemType Directory -Force ".\_db_backup" | Out-Null
+if (Test-Path ".\ares.db") {
+  Copy-Item ".\ares.db" ".\_db_backup\ares.db.before-reset" -Force
+}
+Remove-Item ".\ares.db" -Force -ErrorAction SilentlyContinue
+```
+
 Roles are assigned when a `team_lead` creates a user:
 
 | Role | Intended use | Practical access |
@@ -372,30 +383,52 @@ $env:ANTHROPIC_API_KEY="sk-ant-..."
 
 ### 2. Start the API and Dashboard
 
-From an installed package:
+Recommended local dashboard startup from the repository root:
 
 ```bash
-ares-api
+ares dashboard dev
 ```
 
-From this repository on Windows:
+The launcher starts both services in one terminal:
+
+- Backend API: `http://127.0.0.1:8080`
+- Dashboard dev server: `http://127.0.0.1:5173/dashboard/`
+
+It prints both URLs, opens the dashboard by default, prefixes backend/frontend
+logs, and shuts both child processes down when you press `Ctrl+C`. Login with:
+
+- Username: `admin`
+- Password: the value of `ARES_DEFAULT_ADMIN_PASSWORD` in `.env`
+
+The command does not print the password value. If `frontend/node_modules` is
+missing, run `npm ci` in `frontend/` or start with:
+
+```bash
+ares dashboard dev --install
+```
+
+Use `--no-open` when you want the command to print the URL without opening a
+browser.
+
+Manual fallback for troubleshooting:
+
+Terminal 1:
 
 ```powershell
-.\.venv\Scripts\ares-api.exe
+.\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
-Expected startup:
+Terminal 2:
 
-```text
-ARES API v6.0.0 started
-db_ready
-engine_loaded_modules
+```powershell
+cd frontend
+"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open:
 
 ```text
-http://localhost:8080/dashboard
+http://127.0.0.1:5173/dashboard/
 ```
 
 ### 3. Check Health
