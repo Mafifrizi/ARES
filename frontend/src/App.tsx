@@ -569,7 +569,6 @@ function OverviewPage() {
           </span>
         </>
       )}
-      tabs={["Variation 1", "Variation 2"]}
     >
       <div className="dashboard-grid">
         <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
