@@ -56,7 +56,7 @@ print(Fernet.generate_key().decode())
 PY
 )"
 
-export ARES_DEFAULT_ADMIN_PASSWORD="ChangeThisAdminPassword123!"
+export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
 ```
 
 ### Windows PowerShell
@@ -64,7 +64,7 @@ export ARES_DEFAULT_ADMIN_PASSWORD="ChangeThisAdminPassword123!"
 ```powershell
 $env:ARES_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
 $env:ARES_ENCRYPTION_KEY = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-$env:ARES_DEFAULT_ADMIN_PASSWORD = "ChangeThisAdminPassword123!"
+$env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 ```
 
 What each value does:
@@ -97,7 +97,8 @@ terminal. It prints:
 - Backend API URL: `http://127.0.0.1:8080`
 - Dashboard URL: `http://127.0.0.1:5173/dashboard/`
 - Login username: `admin`
-- Login password: value of `ARES_DEFAULT_ADMIN_PASSWORD` in `.env`
+- Login password: value of `ARES_DEFAULT_ADMIN_PASSWORD` in the current
+  environment or `.env` file
 
 The launcher opens the dashboard by default and does not print the password
 value.
@@ -121,15 +122,15 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
-Set-Location C:\path\to\ARES
+Set-Location "<ARES repo root>"
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-Set-Location C:\path\to\ARES\frontend
-"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+Set-Location "<ARES repo root>\frontend"
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Then open:
@@ -315,6 +316,12 @@ Run:
 
 ```bash
 ares doctor
+```
+
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe doctor
 ```
 
 `ares doctor` checks Python, key dependencies, optional module integrations, native tools, network socket support, environment configuration, and the local database.
