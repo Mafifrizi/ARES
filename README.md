@@ -417,7 +417,8 @@ It prints both URLs, opens the dashboard by default, prefixes backend/frontend
 logs, and shuts both child processes down when you press `Ctrl+C`. Login with:
 
 - Username: `admin`
-- Password: the value of `ARES_DEFAULT_ADMIN_PASSWORD` in `.env`
+- Password: the value of `ARES_DEFAULT_ADMIN_PASSWORD` in the current
+  environment or `.env` file
 
 The command does not print the password value. If `frontend/node_modules` is
 missing, run `npm ci` in `frontend/` or start with:
@@ -439,15 +440,15 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
-Set-Location C:\path\to\ARES
+Set-Location "<ARES repo root>"
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-Set-Location C:\path\to\ARES\frontend
-"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+Set-Location "<ARES repo root>\frontend"
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open:

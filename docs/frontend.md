@@ -23,13 +23,13 @@ for the FastAPI backend.
 Manual fallback for troubleshooting:
 
 ```powershell
-Set-Location C:\path\to\ARES
+Set-Location "<ARES repo root>"
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 ```powershell
-Set-Location C:\path\to\ARES\frontend
-"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+Set-Location "<ARES repo root>\frontend"
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Then open `http://127.0.0.1:5173/dashboard/`.

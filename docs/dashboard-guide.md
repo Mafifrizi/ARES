@@ -30,10 +30,11 @@ This one-terminal launcher starts:
 
 It prints `http://127.0.0.1:5173/dashboard/`, opens it by default, and stops
 both child processes when you press `Ctrl+C`. Login with username `admin` and
-the value of `ARES_DEFAULT_ADMIN_PASSWORD` from `.env`; the launcher does not
-print that password. Use `ares dashboard dev --no-open` to skip browser open,
-or `ares dashboard dev --install` to run `npm ci` if `frontend/node_modules`
-is missing.
+the value of `ARES_DEFAULT_ADMIN_PASSWORD` from the current environment or
+`.env` file; the launcher does not print that password. Use
+`ares dashboard dev --no-open` to skip browser open, or
+`ares dashboard dev --install` to run `npm ci` if `frontend/node_modules` is
+missing.
 
 Options: `--api-host`, `--api-port`, `--ui-host`, `--ui-port`, `--no-open`,
 `--no-reload`, and `--install`.
@@ -43,15 +44,15 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
-Set-Location C:\path\to\ARES
+Set-Location "<ARES repo root>"
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-Set-Location C:\path\to\ARES\frontend
-"C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
+Set-Location "<ARES repo root>\frontend"
+& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open:
