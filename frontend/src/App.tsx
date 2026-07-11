@@ -37,6 +37,7 @@ import {
   createContext,
   Dispatch,
   FormEvent,
+  KeyboardEvent,
   ReactNode,
   SetStateAction,
   useContext,
@@ -108,6 +109,21 @@ interface GeneratedApiKey {
 }
 
 type ApiKeyCopyStatus = "idle" | "copied" | "manual";
+
+interface SearchResult {
+  id: string;
+  label: string;
+  detail: string;
+  route: string;
+  onSelect?: () => void;
+}
+
+interface DashboardNotification {
+  id: string;
+  title: string;
+  detail: string;
+  tone: "info" | "warn" | "danger";
+}
 
 const DashboardUiContext = createContext<DashboardUiState | null>(null);
 
@@ -345,11 +361,26 @@ function App() {
 
 function ProtectedShell() {
   const { user, loading, logout } = useAuth();
+  const navigate = useNavigate();
   const [selectedCampaignId, setSelectedCampaignId] = useSessionState("ares.dashboard.selectedCampaignId", "");
   const [liveCampaignId, setLiveCampaignId] = useSessionState("ares.dashboard.live.campaignId", "");
   const [liveEvents, setLiveEvents] = useSessionState<unknown[]>("ares.dashboard.live.events", []);
   const [liveConnected, setLiveConnected] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const liveSocketRef = useRef<WebSocket | null>(null);
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
+  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+  const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
+  const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates });
+  const reports = useQuery({
+    queryKey: ["reports", selectedCampaignId],
+    queryFn: () => api.reports(selectedCampaignId),
+    enabled: Boolean(selectedCampaignId)
+  });
 
   useEffect(() => {
     const accessToken = getAccessToken();
@@ -409,6 +440,145 @@ function ProtectedShell() {
       setSelectedCampaignId
     ]
   );
+  const searchResults = useMemo<SearchResult[]>(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return [];
+    const results: SearchResult[] = [];
+    const addIfMatch = (result: SearchResult, haystack: string) => {
+      if (haystack.toLowerCase().includes(term)) {
+        results.push(result);
+      }
+    };
+
+    navItems.forEach((item) => {
+      addIfMatch(
+        {
+          id: `page:${item.to}`,
+          label: item.label,
+          detail: `Open ${item.to === "/" ? "Overview" : item.to}`,
+          route: item.to
+        },
+        `${item.label} ${item.to}`
+      );
+    });
+
+    (campaigns.data ?? []).forEach((campaign) => {
+      addIfMatch(
+        {
+          id: `campaign:${campaign.id}`,
+          label: campaign.name || campaign.id,
+          detail: `Campaign ${campaign.id.slice(0, 12)}`,
+          route: "/campaigns",
+          onSelect: () => {
+            setSelectedCampaignId(campaign.id);
+            window.sessionStorage.setItem("ares.dashboard.campaigns.tab", JSON.stringify("Scope"));
+          }
+        },
+        `${campaign.name ?? ""} ${campaign.id} ${campaign.client ?? ""} ${campaign.status ?? ""}`
+      );
+    });
+
+    (modules.data ?? []).forEach((module) => {
+      addIfMatch(
+        {
+          id: `module:${module.id}`,
+          label: module.id,
+          detail: module.description || "Module",
+          route: "/modules",
+          onSelect: () => {
+            window.sessionStorage.setItem("ares.dashboard.modules.selectedId", JSON.stringify(module.id));
+            window.sessionStorage.setItem("ares.dashboard.modules.tab", JSON.stringify("Run Panel"));
+          }
+        },
+        `${module.id} ${module.name ?? ""} ${module.description ?? ""} ${module.category ?? ""} ${module.mitre ?? ""}`
+      );
+    });
+
+    const reportItems = reports.data?.reports ?? [];
+    reportItems.forEach((report) => {
+      addIfMatch(
+        {
+          id: `report:${report.filename}`,
+          label: report.filename,
+          detail: `${report.format || "report"} artifact`,
+          route: "/reports",
+          onSelect: () => {
+            window.sessionStorage.setItem("ares.dashboard.reports.tab", JSON.stringify("Library"));
+          }
+        },
+        `${report.filename} ${report.format ?? ""}`
+      );
+    });
+
+    const templateItems = Array.isArray(templates.data) ? templates.data as Array<Record<string, unknown>> : [];
+    templateItems.forEach((template, index) => {
+      const templateName = String(template.name ?? template.id ?? index);
+      addIfMatch(
+        {
+          id: `template:${templateName}`,
+          label: templateName,
+          detail: String(template.description ?? "Campaign template"),
+          route: "/templates",
+          onSelect: () => {
+            window.sessionStorage.setItem("ares.dashboard.templates.name", JSON.stringify(templateName));
+            window.sessionStorage.setItem("ares.dashboard.templates.tab", JSON.stringify("Plan Builder"));
+          }
+        },
+        `${templateName} ${String(template.description ?? "")}`
+      );
+    });
+
+    return results.slice(0, 8);
+  }, [campaigns.data, modules.data, reports.data, searchTerm, setSelectedCampaignId, templates.data]);
+
+  const notifications = useMemo<DashboardNotification[]>(() => {
+    const items: DashboardNotification[] = [];
+    const snapshot = telemetry.data as TelemetrySnapshot | undefined;
+    const healthStatus = String(health.data?.status ?? "").toLowerCase();
+
+    if (health.isError) {
+      items.push({ id: "health-error", title: "Backend health check failed", detail: "ARES API health is not reachable.", tone: "danger" });
+    } else if (health.isSuccess && healthStatus && !["ok", "healthy", "online"].includes(healthStatus)) {
+      items.push({ id: "health-status", title: "Backend status needs attention", detail: String(health.data?.status), tone: "warn" });
+    }
+    if (telemetry.isError) {
+      items.push({ id: "telemetry-error", title: "Telemetry unavailable", detail: "Runtime telemetry could not be loaded.", tone: "warn" });
+    }
+    if (campaigns.isError) {
+      items.push({ id: "campaigns-error", title: "Campaign list unavailable", detail: "Campaign data could not be loaded.", tone: "warn" });
+    }
+    if (modules.isError) {
+      items.push({ id: "modules-error", title: "Module catalog unavailable", detail: "Module metadata could not be loaded.", tone: "warn" });
+    }
+    if (reports.isError && selectedCampaignId) {
+      items.push({ id: "reports-error", title: "Report library unavailable", detail: "Selected campaign reports could not be loaded.", tone: "warn" });
+    }
+
+    const failedRuns = metricNumber(snapshot?.modules, "failed");
+    const errorRate = metricNumber(snapshot?.modules, "error_rate");
+    const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
+    const queueDepth = metricNumber(snapshot?.queue, "depth");
+    if (failedRuns > 0) {
+      items.push({ id: "failed-runs", title: "Failed module runs", detail: `${failedRuns} failed module run(s) reported by telemetry.`, tone: "warn" });
+    }
+    if (errorRate > 0) {
+      items.push({ id: "error-rate", title: "Runtime error rate above zero", detail: `${formatRate(errorRate)} module error rate.`, tone: "warn" });
+    }
+    if (unhealthyWorkers > 0) {
+      items.push({ id: "workers", title: "Unhealthy worker detected", detail: `${unhealthyWorkers} worker(s) unhealthy.`, tone: "danger" });
+    }
+    if (queueDepth > 0) {
+      items.push({ id: "queue", title: "Queue has pending work", detail: `${queueDepth} queued task(s).`, tone: "info" });
+    }
+    return items;
+  }, [campaigns.isError, health.data, health.isError, health.isSuccess, modules.isError, reports.isError, selectedCampaignId, telemetry.data, telemetry.isError]);
+
+  function selectSearchResult(result: SearchResult): void {
+    result.onSelect?.();
+    navigate(result.route);
+    setSearchTerm("");
+    setSearchOpen(false);
+  }
 
   if (loading) {
     return <ScreenMessage title="ARES" body="Loading session" />;
@@ -418,7 +588,7 @@ function ProtectedShell() {
   }
   return (
     <DashboardUiContext.Provider value={dashboardUi}>
-      <div className="app-shell">
+      <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
         <aside className="sidebar">
           <div className="sidebar-brand">
             <img className="sidebar-mark" src={brandMarkPath} alt="" aria-hidden="true" />
@@ -435,7 +605,7 @@ function ProtectedShell() {
                   {group.items.map((item) => {
                     const Icon = item.icon;
                     return (
-                      <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link">
+                      <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link" title={sidebarCollapsed ? item.label : undefined}>
                         <Icon size={16} />
                         <span>{item.label}</span>
                       </NavLink>
@@ -449,21 +619,90 @@ function ProtectedShell() {
         <main className="main-shell">
           <header className="topbar">
             <div className="topbar-left">
-              <button className="icon-button" aria-label="Menu" type="button">
+              <button
+                className="icon-button"
+                aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+                aria-pressed={sidebarCollapsed}
+                onClick={() => setSidebarCollapsed((value) => !value)}
+                type="button"
+              >
                 <Menu size={17} />
               </button>
-              <div className="topbar-search" aria-label="Dashboard search">
-                <Search size={16} />
-                <span>Search campaigns, modules, reports</span>
+              <div className="topbar-search-wrap">
+                <label className="topbar-search" aria-label="Dashboard search">
+                  <Search size={16} />
+                  <input
+                    aria-label="Search dashboard"
+                    onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
+                    onChange={(event) => {
+                      setSearchTerm(event.target.value);
+                      setSearchOpen(true);
+                    }}
+                    onFocus={() => setSearchOpen(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setSearchOpen(false);
+                      }
+                      if (event.key === "Enter" && searchResults.length > 0) {
+                        event.preventDefault();
+                        selectSearchResult(searchResults[0]);
+                      }
+                    }}
+                    placeholder="Search campaigns, modules, reports"
+                    value={searchTerm}
+                  />
+                </label>
+                {searchOpen && (
+                  <div className="search-results" role="listbox">
+                    {searchTerm.trim() ? (
+                      searchResults.length > 0 ? (
+                        searchResults.map((result) => (
+                          <button key={result.id} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSearchResult(result)} type="button">
+                            <strong>{result.label}</strong>
+                            <span>{result.detail}</span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="search-empty">No matches</div>
+                      )
+                    ) : (
+                      <div className="search-empty">Type to search dashboard</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="topbar-right">
               <span className={liveConnected ? "status-pill status-low" : "status-pill"}>
                 <CircleDot size={11} /> {liveConnected ? "Live" : "Offline"}
               </span>
-              <button className="icon-button" aria-label="Notifications" type="button">
+              <button
+                className="icon-button has-badge"
+                aria-expanded={notificationsOpen}
+                aria-label="Notifications"
+                onClick={() => setNotificationsOpen((value) => !value)}
+                type="button"
+              >
                 <Bell size={16} />
+                {notifications.length > 0 ? <span>{notifications.length}</span> : null}
               </button>
+              {notificationsOpen && (
+                <aside className="notification-drawer" aria-label="Notifications">
+                  <SectionHeader title="Notifications" action={<span className="badge">{notifications.length}</span>} />
+                  {notifications.length > 0 ? (
+                    <div className="notification-list">
+                      {notifications.map((item) => (
+                        <div className={`notification-item notification-${item.tone}`} key={item.id}>
+                          <strong>{item.title}</strong>
+                          <span>{item.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState text="No current dashboard notifications." />
+                  )}
+                </aside>
+              )}
               <span className="user-chip">
                 <span className="user-chip-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
                 <span className="user-chip-copy">
@@ -606,6 +845,7 @@ function CampaignsPage() {
   const [scope, setScope] = useSessionState("ares.dashboard.campaigns.create.scope", "");
   const [createWarning, setCreateWarning] = useState("");
   const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.campaigns.tab", "List");
   const detail = useQuery({
     queryKey: ["campaign", selected],
     queryFn: () => api.campaign(selected),
@@ -640,6 +880,7 @@ function CampaignsPage() {
       setTargets("");
       setScope("");
       setCreateWarning("");
+      setActiveTab("Scope");
       void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     }
   });
@@ -668,66 +909,83 @@ function CampaignsPage() {
       title="Campaigns"
       actions={<span className="status-pill">{campaignList.length} campaigns</span>}
       tabs={["List", "Scope", "Findings"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="two-column-grid">
-        <section className="panel p-4">
-          <SectionHeader title="Create Campaign" />
-          <form className="grid gap-3" onSubmit={(e) => {
-            e.preventDefault();
-            if (!e.currentTarget.reportValidity()) return;
-            const invalidScopeEntries = findInvalidScopeEntries(scope);
-            if (invalidScopeEntries.length > 0) {
-              setCreateWarning(`Scope CIDRs must be valid IPv4 CIDR/IP entries. Invalid: ${invalidScopeEntries.slice(0, 3).join(", ")}. Example: 10.0.0.0/24`);
-              return;
-            }
-            setCreateWarning("");
-            create.mutate();
-          }}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
-              <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
+      {activeTab === "List" && (
+        <>
+          <section className="panel p-4">
+            <SectionHeader title="Create Campaign" />
+            <form className="grid gap-3" onSubmit={(e) => {
+              e.preventDefault();
+              if (!e.currentTarget.reportValidity()) return;
+              const invalidScopeEntries = findInvalidScopeEntries(scope);
+              if (invalidScopeEntries.length > 0) {
+                setCreateWarning(`Scope CIDRs must be valid IPv4 CIDR/IP entries. Invalid: ${invalidScopeEntries.slice(0, 3).join(", ")}. Example: 10.0.0.0/24`);
+                return;
+              }
+              setCreateWarning("");
+              create.mutate();
+            }}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
+                <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
+              </div>
+              <textarea className="field min-h-20" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
+              <textarea className="field min-h-20" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
+              {createWarning && <p className="notice notice-danger">{createWarning}</p>}
+              <button className="btn btn-primary" disabled={create.isPending} type="submit">
+                <ListChecks size={16} /> Create
+              </button>
+            </form>
+            <DataPanel title="Create Error" data={create.error} />
+          </section>
+          <CampaignTable campaigns={campaignList} />
+        </>
+      )}
+      {activeTab === "Scope" && (
+        <>
+          <section className="panel p-4">
+            <SectionHeader title="Campaign Detail" />
+            <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
+            <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
+                <ShieldCheck size={16} /> Restore Vault
+              </button>
+              <button className="btn" disabled={!selected} onClick={() => run.mutate()}>
+                <Play size={16} /> Dry Run Plan
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={!selected || remove.isPending}
+                onClick={() => {
+                  if (window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
+                    remove.mutate();
+                  }
+                }}
+              >
+                <Trash2 size={16} /> Delete
+              </button>
+              <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
             </div>
-            <textarea className="field min-h-20" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
-            <textarea className="field min-h-20" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
-            {createWarning && <p className="notice notice-danger">{createWarning}</p>}
-            <button className="btn btn-primary" disabled={create.isPending} type="submit">
-              <ListChecks size={16} /> Create
-            </button>
-          </form>
-          <DataPanel title="Create Error" data={create.error} />
+          </section>
+          <DataPanel title="Delete Error" data={remove.error} />
+          <DataPanel title="Campaign Detail" data={detail.data} />
+          <DataPanel title="CVSS Summary" data={cvss.data} />
+          <DataPanel title="Diff" data={diff.data} />
+        </>
+      )}
+      {activeTab === "Findings" && (
+        <section className="grid gap-4">
+          <section className="panel p-4">
+            <SectionHeader title="Campaign Findings" />
+            <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
+            {!selected ? <EmptyState text="Select a campaign to review findings." /> : null}
+          </section>
+          {selected ? <FindingsTable findings={findings.data ?? []} /> : null}
         </section>
-        <section className="panel p-4">
-          <SectionHeader title="Campaign Detail" />
-          <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
-          <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
-              <ShieldCheck size={16} /> Restore Vault
-            </button>
-            <button className="btn" disabled={!selected} onClick={() => run.mutate()}>
-              <Play size={16} /> Dry Run Plan
-            </button>
-            <button
-              className="btn btn-danger"
-              disabled={!selected || remove.isPending}
-              onClick={() => {
-                if (window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
-                  remove.mutate();
-                }
-              }}
-            >
-              <Trash2 size={16} /> Delete
-            </button>
-            <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
-          </div>
-        </section>
-      </div>
-      <CampaignTable campaigns={campaignList} />
-      <FindingsTable findings={findings.data ?? []} />
-      <DataPanel title="Delete Error" data={remove.error} />
-      <DataPanel title="Campaign Detail" data={detail.data} />
-      <DataPanel title="CVSS Summary" data={cvss.data} />
-      <DataPanel title="Diff" data={diff.data} />
+      )}
     </Page>
   );
 }
@@ -744,6 +1002,7 @@ function ModulesPage() {
   const [confirmed, setConfirmed] = useSessionState("ares.dashboard.modules.confirmed", false);
   const [params, setParams] = useSessionState<Record<string, unknown>>("ares.dashboard.modules.params", {});
   const [lastRunRecord, setLastRunRecord] = useSessionState<ModuleRunRecord | null>("ares.dashboard.modules.lastRun", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.modules.tab", "Catalog");
   const previousSelectedId = useRef(selectedId);
   const campaignDetail = useQuery({
     queryKey: ["campaign", campaignId],
@@ -752,8 +1011,14 @@ function ModulesPage() {
   });
   const run = useMutation({
     mutationFn: () => api.runModule(selectedId, buildModuleRunPayload(campaignId, params, dryRun)),
-    onSuccess: (payload) => setLastRunRecord({ campaignId, moduleId: selectedId, payload }),
-    onError: (error) => setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true })
+    onSuccess: (payload) => {
+      setLastRunRecord({ campaignId, moduleId: selectedId, payload });
+      setActiveTab("Results");
+    },
+    onError: (error) => {
+      setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true });
+      setActiveTab("Results");
+    }
   });
   const list = modules.data ?? [];
   const selected = list.find((item) => item.id === selectedId);
@@ -791,8 +1056,10 @@ function ModulesPage() {
       title="Modules"
       actions={<span className="status-pill">{visible.length} shown</span>}
       tabs={["Catalog", "Run Panel", "Results"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="module-layout">
+      {activeTab === "Catalog" && (
         <section className="panel p-4">
           <SectionHeader title="Module Catalog" />
           <div className="mb-3 grid gap-2 sm:grid-cols-3">
@@ -814,7 +1081,10 @@ function ModulesPage() {
               <button
                 className={`catalog-card ${selectedId === item.id ? "active" : ""}`}
                 key={item.id}
-                onClick={() => setSelectedId(item.id)}
+                onClick={() => {
+                  setSelectedId(item.id);
+                  setActiveTab("Run Panel");
+                }}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -833,6 +1103,8 @@ function ModulesPage() {
             )}
           </div>
         </section>
+      )}
+      {activeTab === "Run Panel" && (
         <section className="panel p-4">
           <SectionHeader
             title="Run Panel"
@@ -899,10 +1171,25 @@ function ModulesPage() {
           ) : (
             <EmptyState text="Select a module" />
           )}
-          <ModuleRunSummary result={runResult} error={runError} />
-          <DataPanel title={runError ? "Run Error" : "Run Result"} data={runError ?? runResult} />
         </section>
-      </div>
+      )}
+      {activeTab === "Results" && (
+        <section className="panel p-4">
+          <SectionHeader
+            title="Run Results"
+            eyebrow={selected ? selected.id : undefined}
+            action={persistedRun ? <span className={persistedRun.isError ? "badge badge-high" : "badge badge-low"}>{persistedRun.isError ? "error" : "latest"}</span> : null}
+          />
+          {runResult || runError ? (
+            <>
+              <ModuleRunSummary result={runResult} error={runError} />
+              <DataPanel title={runError ? "Run Error" : "Run Result"} data={runError ?? runResult} />
+            </>
+          ) : (
+            <EmptyState text="Run a selected module to see results here." />
+          )}
+        </section>
+      )}
     </Page>
   );
 }
@@ -913,6 +1200,7 @@ function ReportsPage() {
   const [format, setFormat] = useSessionState("ares.dashboard.reports.format", "html");
   const [warning, setWarning] = useState("");
   const [lastGenerateResult, setLastGenerateResult] = useSessionState<PersistedResult | null>("ares.dashboard.reports.lastGenerate", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.reports.tab", "Generate");
   const queryClient = useQueryClient();
   const reports = useQuery({
     queryKey: ["reports", campaignId],
@@ -924,9 +1212,13 @@ function ReportsPage() {
     mutationFn: () => api.generateReport(campaignId, format),
     onSuccess: (payload) => {
       setLastGenerateResult({ key: reportResultKey, payload });
+      setActiveTab("Library");
       void queryClient.invalidateQueries({ queryKey: ["reports", campaignId] });
     },
-    onError: (error) => setLastGenerateResult({ key: reportResultKey, payload: serializeError(error), isError: true })
+    onError: (error) => {
+      setLastGenerateResult({ key: reportResultKey, payload: serializeError(error), isError: true });
+      setActiveTab("Generate");
+    }
   });
   const persistedGenerateResult = lastGenerateResult?.key === reportResultKey ? lastGenerateResult : null;
   const download = useMutation({
@@ -947,8 +1239,11 @@ function ReportsPage() {
       title="Reports"
       actions={<span className="status-pill">{reports.data?.reports?.length ?? 0} artifacts</span>}
       tabs={["Generate", "Library"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="panel p-4">
+      {activeTab === "Generate" && (
+      <section className="panel p-4">
         <SectionHeader
           title="Generate Report"
           description="Export findings, scope, and remediation."
@@ -986,7 +1281,9 @@ function ReportsPage() {
           title={(generate.error ?? (persistedGenerateResult?.isError ? persistedGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
           data={generate.error ?? generate.data ?? persistedGenerateResult?.payload}
         />
-      </div>
+      </section>
+      )}
+      {activeTab === "Library" && (
       <section className="panel table-panel">
         <SectionHeader title="Report Library" />
         <div className="table-scroll">
@@ -1015,6 +1312,7 @@ function ReportsPage() {
         {!campaignId && <EmptyState text="Select a campaign to list reports." />}
         <DataPanel title="Download Result" data={download.error} />
       </section>
+      )}
     </Page>
   );
 }
@@ -1025,6 +1323,7 @@ function GraphPage() {
   const [jsonPath, setJsonPath] = useSessionState("ares.dashboard.graph.jsonPath", "");
   const [warning, setWarning] = useState("");
   const [lastIngestResult, setLastIngestResult] = useSessionState<PersistedResult | null>("ares.dashboard.graph.lastIngest", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.graph.tab", "Entities");
   const graph = useQuery({ queryKey: ["graph", campaignId], queryFn: () => api.graph(campaignId), enabled: Boolean(campaignId) });
   const paths = useQuery({ queryKey: ["attack-paths", campaignId], queryFn: () => api.attackPaths(campaignId), enabled: Boolean(campaignId) });
   const ingestResultKey = `${campaignId}:${jsonPath.trim()}`;
@@ -1041,8 +1340,10 @@ function GraphPage() {
       title="Graph"
       actions={<span className="status-pill">{nodes.length} nodes / {links.length} links</span>}
       tabs={["Entities", "Attack Paths", "Ingest"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="graph-layout">
+      {activeTab === "Entities" && (
         <section className="panel min-h-[360px] p-4">
           <SectionHeader
             title="Attack Graph"
@@ -1071,11 +1372,34 @@ function GraphPage() {
             <EmptyState text={campaignId ? "No graph nodes yet. Run discovery modules or ingest BloodHound JSON." : "Select a campaign to load graph data."} />
           )}
         </section>
+      )}
+      {activeTab === "Attack Paths" && (
+        <section className="panel p-4">
+          <SectionHeader
+            title="Attack Paths"
+            description="Calculated paths for the selected campaign."
+          />
+          <div className="mb-4 max-w-sm">
+            <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
+          </div>
+          {!campaignId ? (
+            <EmptyState text="Select a campaign to load attack paths." />
+          ) : paths.data ? (
+            <DataPanel title="Attack Paths" data={paths.data} />
+          ) : (
+            <EmptyState text="No attack paths available for this campaign yet." />
+          )}
+        </section>
+      )}
+      {activeTab === "Ingest" && (
         <section className="panel p-4">
           <SectionHeader
             title="BloodHound Ingest"
             description="Import a server-local JSON path."
           />
+          <div className="mb-3 max-w-sm">
+            <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
+          </div>
           <form className="grid gap-2" onSubmit={(e) => {
             e.preventDefault();
             if (!campaignId) {
@@ -1109,7 +1433,7 @@ function GraphPage() {
             data={ingest.data ?? ingest.error ?? persistedIngestResult?.payload}
           />
         </section>
-      </div>
+      )}
     </Page>
   );
 }
@@ -1120,6 +1444,7 @@ function TemplatesPage() {
   const [params, setParams] = useSessionState("ares.dashboard.templates.params", "{}");
   const [warning, setWarning] = useState("");
   const [lastPlanResult, setLastPlanResult] = useSessionState<PersistedResult | null>("ares.dashboard.templates.lastPlan", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.templates.tab", "Templates");
   const templatePlanKey = `${name.trim()}:${params}`;
   const plan = useMutation({
     mutationFn: () => api.templatePlan(name, safeJson(params)),
@@ -1135,8 +1460,10 @@ function TemplatesPage() {
       title="Templates"
       actions={<span className="status-pill">{templates.data?.length ?? 0} templates</span>}
       tabs={["Templates", "Plan Builder"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="two-column-grid">
+      {activeTab === "Templates" && (
         <section className="panel p-4">
           <SectionHeader
             title="Campaign Templates"
@@ -1154,6 +1481,7 @@ function TemplatesPage() {
                     setWarning("");
                     setLastPlanResult(null);
                     plan.reset();
+                    setActiveTab("Plan Builder");
                   }}
                 >
                   <span className="font-bold">{templateName}</span>
@@ -1167,6 +1495,8 @@ function TemplatesPage() {
             })}
           </div>
         </section>
+      )}
+      {activeTab === "Plan Builder" && (
         <section className="panel p-4">
           <SectionHeader title="Plan Builder" action={name ? <span className="badge">{name}</span> : null} />
           <input className="field" placeholder="Template name" value={name} onChange={(e) => {
@@ -1236,7 +1566,7 @@ function TemplatesPage() {
             data={plan.error ?? plan.data ?? persistedPlanResult?.payload}
           />
         </section>
-      </div>
+      )}
     </Page>
   );
 }
@@ -1250,6 +1580,7 @@ function StrategyPage() {
   const [llmBackend, setLlmBackend] = useSessionState("ares.dashboard.strategy.llmBackend", "claude");
   const [authorizations, setAuthorizations] = useSessionState("ares.dashboard.strategy.authorizations", "");
   const [lastEngageResult, setLastEngageResult] = useSessionState<PersistedResult | null>("ares.dashboard.strategy.lastEngage", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.strategy.tab", "Objective");
   const strategyResultKey = `${campaignId}:${goal}:${llmBackend}:${authorizations}`;
   const engage = useMutation({
     mutationFn: () =>
@@ -1260,8 +1591,14 @@ function StrategyPage() {
         max_rounds: 5,
         authorizations: splitLines(authorizations)
       }),
-    onSuccess: (payload) => setLastEngageResult({ key: strategyResultKey, payload }),
-    onError: (error) => setLastEngageResult({ key: strategyResultKey, payload: serializeError(error), isError: true })
+    onSuccess: (payload) => {
+      setLastEngageResult({ key: strategyResultKey, payload });
+      setActiveTab("Result");
+    },
+    onError: (error) => {
+      setLastEngageResult({ key: strategyResultKey, payload: serializeError(error), isError: true });
+      setActiveTab("Result");
+    }
   });
   const persistedEngageResult = lastEngageResult?.key === strategyResultKey ? lastEngageResult : null;
   const allowed = user?.role === "team_lead" || user?.role === "operator";
@@ -1270,8 +1607,10 @@ function StrategyPage() {
       title="Strategy"
       actions={<span className={allowed ? "status-pill status-low" : "status-pill status-high"}>{allowed ? "Authorized" : "Restricted"}</span>}
       tabs={["Objective", "Active", "Result"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="two-column-grid">
+      {activeTab === "Objective" && (
         <section className="panel p-4">
           <SectionHeader title="Objective Builder" />
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
@@ -1314,6 +1653,8 @@ function StrategyPage() {
             )}
           </button>
         </section>
+      )}
+      {activeTab === "Active" && (
         <section className="grid gap-4">
           <section className="panel p-4">
             <SectionHeader title="Planning Snapshot" />
@@ -1323,13 +1664,22 @@ function StrategyPage() {
               <MiniStat title="Authorization" value={allowed ? "ready" : "restricted"} />
             </div>
           </section>
-          <DataPanel title="Active" data={active.data} />
-          <DataPanel
-            title={(engage.error ?? (persistedEngageResult?.isError ? persistedEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
-            data={engage.data ?? engage.error ?? persistedEngageResult?.payload}
-          />
+          {active.data ? <DataPanel title="Active" data={active.data} /> : <EmptyState text="No active strategy state is available yet." />}
         </section>
-      </div>
+      )}
+      {activeTab === "Result" && (
+        <section className="panel p-4">
+          <SectionHeader title="Engagement Result" />
+          {(engage.data ?? engage.error ?? persistedEngageResult?.payload) ? (
+            <DataPanel
+              title={(engage.error ?? (persistedEngageResult?.isError ? persistedEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
+              data={engage.data ?? engage.error ?? persistedEngageResult?.payload}
+            />
+          ) : (
+            <EmptyState text="Engage a strategy objective to see results here." />
+          )}
+        </section>
+      )}
     </Page>
   );
 }
@@ -1368,6 +1718,7 @@ function SecurityPage() {
   const [generatedApiKey, setGeneratedApiKey] = useState<GeneratedApiKey | null>(null);
   const [apiKeyError, setApiKeyError] = useState<unknown>(null);
   const [copyStatus, setCopyStatus] = useState<ApiKeyCopyStatus>("idle");
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.security.tab", "Account");
   const change = useMutation({
     mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }),
     onSuccess: () => {
@@ -1451,8 +1802,10 @@ function SecurityPage() {
       title="Security"
       actions={<span className="status-pill">{formatRole(user?.role)}</span>}
       tabs={["Account", "API Keys", "Audit"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
-      <div className="grid gap-4 xl:grid-cols-2">
+      {activeTab === "Account" && (
         <section className="panel p-4">
           <SectionHeader title="Account" />
           <div className="profile-row mb-3">
@@ -1476,6 +1829,8 @@ function SecurityPage() {
           </form>
           <DataPanel title="Password Result" data={change.data ?? change.error} />
         </section>
+      )}
+      {activeTab === "API Keys" && (
         <section className="panel p-4">
           <SectionHeader
             title="API Keys"
@@ -1514,7 +1869,19 @@ function SecurityPage() {
           {(keys.data ?? []).length === 0 && <EmptyState text="No API keys yet." />}
           <DataPanel title="API Key Error" data={apiKeyError ?? remove.error} />
         </section>
-      </div>
+      )}
+      {activeTab === "Audit" && (
+        <section className="grid gap-4">
+          {user?.role === "team_lead" ? (
+            <>
+              {audit.data ? <DataPanel title="Security Audit" data={audit.data} /> : <EmptyState text="No security audit data loaded yet." />}
+              {users.data ? <DataPanel title="Users" data={users.data} /> : <EmptyState text="No user records loaded yet." />}
+            </>
+          ) : (
+            <EmptyState text="Audit data is available to team leads." />
+          )}
+        </section>
+      )}
       {generatedApiKey && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
           <section
@@ -1562,8 +1929,6 @@ function SecurityPage() {
           </section>
         </div>
       )}
-      <DataPanel title="Security Audit" data={audit.data} />
-      <DataPanel title="Users" data={users.data} />
     </Page>
   );
 }
@@ -1576,6 +1941,7 @@ function EdrPage() {
   const [success, setSuccess] = useSessionState("ares.dashboard.edr.success", false);
   const [notes, setNotes] = useSessionState("ares.dashboard.edr.notes", "");
   const [lastReportResult, setLastReportResult] = useSessionState<PersistedResult | null>("ares.dashboard.edr.lastReport", null);
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.edr.tab", "Knowledge Base");
   const edrReportKey = `${techniqueId.trim()}:${vendor.trim()}:${version.trim()}:${success}:${notes.trim()}`;
   const report = useMutation({
     mutationFn: () =>
@@ -1595,7 +1961,11 @@ function EdrPage() {
       title="EDR/OPSEC"
       actions={<span className={success ? "status-pill status-low" : "status-pill status-medium"}>{success ? "Successful" : "Blocked / detected"}</span>}
       tabs={["Knowledge Base", "Report Outcome"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
+      {activeTab === "Knowledge Base" && (
+      <>
       <section className="panel p-4">
         <SectionHeader
           title="Bypass Knowledge Base"
@@ -1617,6 +1987,11 @@ function EdrPage() {
         </div>
         <p className="mt-3 text-sm text-slate-600">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
       </section>
+      <DataPanel title="Stats Details" data={stats.data} />
+      </>
+      )}
+      {activeTab === "Report Outcome" && (
+      <>
       <section className="panel p-4">
         <SectionHeader title="Report Outcome" />
         <form className="grid gap-3" onSubmit={(event) => {
@@ -1666,7 +2041,8 @@ function EdrPage() {
         title={(report.error ?? (persistedReportResult?.isError ? persistedReportResult.payload : undefined)) ? "Outcome Error" : "Outcome Result"}
         data={report.data ?? report.error ?? persistedReportResult?.payload}
       />
-      <DataPanel title="Stats Details" data={stats.data} />
+      </>
+      )}
     </Page>
   );
 }
@@ -1684,13 +2060,19 @@ function LivePage() {
   } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const campaignId = liveCampaignId || selectedCampaignId;
+  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.live.tab", "Stream");
+  const streamEvents = liveEvents.slice(0, 10);
 
   return (
     <Page
       title="Live Events"
       actions={<span className={liveConnected ? "status-pill status-low" : "status-pill"}>{liveConnected ? "Listening" : "Offline"}</span>}
       tabs={["Stream", "Buffer"]}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
     >
+      {activeTab === "Stream" && (
+      <>
       <div className="panel p-4">
         <SectionHeader
           title="Campaign Event Stream"
@@ -1719,19 +2101,14 @@ function LivePage() {
               Disconnect
             </button>
           )}
-          {liveEvents.length > 0 && (
-            <button className="btn" onClick={clearLiveEvents}>
-              Clear Events
-            </button>
-          )}
           <span className={liveConnected ? "badge badge-low" : "badge"}>{liveConnected ? "listening" : "offline"}</span>
         </div>
       </div>
       <section className="panel p-4">
-        <SectionHeader title="Event Stream" />
-        {liveEvents.length > 0 ? (
+        <SectionHeader title="Current Stream" action={<span className="badge">{streamEvents.length} newest</span>} />
+        {streamEvents.length > 0 ? (
           <div className="grid gap-2">
-            {liveEvents.map((event, index) => (
+            {streamEvents.map((event, index) => (
               <LiveEventCard event={event} index={index} key={index} />
             ))}
           </div>
@@ -1739,6 +2116,25 @@ function LivePage() {
           <EmptyState text={liveConnected ? "Connected. Waiting for events." : "Select a campaign and connect."} />
         )}
       </section>
+      </>
+      )}
+      {activeTab === "Buffer" && (
+        <section className="panel p-4">
+          <SectionHeader
+            title="Buffered Events"
+            action={liveEvents.length > 0 ? <button className="btn" onClick={clearLiveEvents}>Clear Events</button> : <span className="badge">0 retained</span>}
+          />
+          {liveEvents.length > 0 ? (
+            <div className="grid gap-2">
+              {liveEvents.map((event, index) => (
+                <LiveEventCard event={event} index={index} key={index} />
+              ))}
+            </div>
+          ) : (
+            <EmptyState text="No events retained in the buffer." />
+          )}
+        </section>
+      )}
     </Page>
   );
 }
@@ -1747,19 +2143,46 @@ function Page({
   title,
   actions,
   tabs,
+  activeTab,
+  onTabChange,
   children
 }: {
   title: string;
   actions?: ReactNode;
   tabs?: string[];
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
   children: ReactNode;
 }) {
+  const [fallbackTab, setFallbackTab] = useState(tabs?.[0] ?? "");
   const meta = pageMeta[title] ?? {
     icon: LayoutDashboard,
     eyebrow: "ARES",
     description: "Security dashboard workspace."
   };
   const Icon = meta.icon;
+  const selectedTab = activeTab ?? fallbackTab;
+  const setTab = onTabChange ?? setFallbackTab;
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!tabs || tabs.length === 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = Math.max(0, tabs.indexOf(selectedTab));
+    if (event.key === "Home") {
+      setTab(tabs[0]);
+      return;
+    }
+    if (event.key === "End") {
+      setTab(tabs[tabs.length - 1]);
+      return;
+    }
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (currentIndex + offset + tabs.length) % tabs.length;
+    setTab(tabs[nextIndex]);
+  }
+
   return (
     <div className="page">
       <section className="page-header">
@@ -1776,9 +2199,17 @@ function Page({
         {actions ? <div className="page-actions">{actions}</div> : null}
       </section>
       {tabs ? (
-        <div className="page-tabs" aria-label={`${title} sections`}>
-          {tabs.map((tab, index) => (
-            <button className={index === 0 ? "active" : ""} key={tab} type="button">
+        <div className="page-tabs" aria-label={`${title} sections`} onKeyDown={handleTabKeyDown} role="tablist">
+          {tabs.map((tab) => (
+            <button
+              aria-selected={tab === selectedTab}
+              className={tab === selectedTab ? "active" : ""}
+              key={tab}
+              onClick={() => setTab(tab)}
+              role="tab"
+              tabIndex={tab === selectedTab ? 0 : -1}
+              type="button"
+            >
               {tab}
             </button>
           ))}

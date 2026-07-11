@@ -43,6 +43,31 @@ button:disabled {
   background: #edf2f7;
 }
 
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 74px minmax(0, 1fr);
+}
+
+.sidebar-collapsed .sidebar-brand {
+  justify-content: center;
+  padding-inline: 0.65rem;
+}
+
+.sidebar-collapsed .sidebar-title,
+.sidebar-collapsed .sidebar-subtitle,
+.sidebar-collapsed .nav-group-label,
+.sidebar-collapsed .nav-link span {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-nav {
+  padding-inline: 0.65rem;
+}
+
+.sidebar-collapsed .nav-link {
+  justify-content: center;
+  padding-inline: 0;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -196,7 +221,72 @@ button:disabled {
   font-weight: 550;
 }
 
+.topbar-search-wrap {
+  position: relative;
+}
+
+.topbar-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #1f2937;
+  outline: none;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 35;
+  display: grid;
+  width: min(520px, 76vw);
+  overflow: hidden;
+  border: 1px solid #cfd8e5;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.14);
+}
+
+.search-results button {
+  display: grid;
+  gap: 0.16rem;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: #ffffff;
+  padding: 0.62rem 0.75rem;
+  color: #1f2937;
+  text-align: left;
+}
+
+.search-results button:hover,
+.search-results button:focus {
+  background: #fff8f1;
+  outline: none;
+}
+
+.search-results button:last-child {
+  border-bottom: 0;
+}
+
+.search-results strong {
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.search-results span,
+.search-empty {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.search-empty {
+  padding: 0.72rem 0.78rem;
+}
+
 .icon-button {
+  position: relative;
   display: inline-flex;
   height: 36px;
   width: 36px;
@@ -210,6 +300,71 @@ button:disabled {
 
 .icon-button:hover {
   background: #f1f5f9;
+}
+
+.icon-button.has-badge > span {
+  position: absolute;
+  right: -0.32rem;
+  top: -0.32rem;
+  display: inline-flex;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.notification-drawer {
+  position: absolute;
+  right: 1.2rem;
+  top: calc(100% + 0.45rem);
+  z-index: 40;
+  width: min(360px, calc(100vw - 1.8rem));
+  border: 1px solid #cfd8e5;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 0.85rem;
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.16);
+}
+
+.notification-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.notification-item {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fbfdff;
+  padding: 0.62rem;
+}
+
+.notification-item strong {
+  color: #1f2937;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.notification-item span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.notification-warn {
+  border-color: #fed7aa;
+  background: #fff8f1;
+}
+
+.notification-danger {
+  border-color: #fecaca;
+  background: #fff1f2;
 }
 
 .user-chip {
@@ -346,6 +501,11 @@ button:disabled {
 .page-tabs button.active {
   border-bottom-color: #dc2626;
   color: #991b1b;
+}
+
+.page-tabs button:focus-visible {
+  outline: 2px solid rgba(249, 115, 22, 0.35);
+  outline-offset: 2px;
 }
 
 .page-content {
@@ -1103,6 +1263,10 @@ textarea.field {
     display: block;
   }
 
+  .app-shell.sidebar-collapsed .sidebar {
+    display: none;
+  }
+
   .sidebar {
     position: static;
     height: auto;
@@ -1126,6 +1290,10 @@ textarea.field {
   .topbar-search {
     min-width: 0;
     width: 100%;
+  }
+
+  .topbar-search-wrap {
+    flex: 1 1 260px;
   }
 
   .topbar-right {
