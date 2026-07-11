@@ -1,22 +1,35 @@
 import {
   Activity,
+  AlertTriangle,
   BarChart3,
+  Bell,
   Boxes,
   CheckCircle2,
+  CircleDot,
   Copy,
+  Database,
+  Download,
+  Eye,
   FileText,
   GitGraph,
   KeyRound,
+  Layers,
   LayoutDashboard,
   ListChecks,
   Loader2,
   LogOut,
+  Menu,
   Play,
   Radio,
+  Search,
+  Server,
   ShieldAlert,
   ShieldCheck,
+  Target,
   Trash2,
+  TrendingUp,
   UserCog,
+  type LucideIcon,
   Workflow
 } from "lucide-react";
 import {
@@ -243,6 +256,66 @@ const navItems = [
   { to: "/live", label: "Live", icon: Radio }
 ];
 
+const navGroups = [
+  { label: "Core", items: navItems.slice(0, 1) },
+  { label: "Operations", items: navItems.slice(1, 4) },
+  { label: "Intelligence", items: navItems.slice(4, 7) },
+  { label: "Control", items: navItems.slice(7) }
+];
+
+const pageMeta: Record<string, { icon: LucideIcon; eyebrow: string; description: string }> = {
+  Overview: {
+    icon: LayoutDashboard,
+    eyebrow: "Dashboard",
+    description: "Health, telemetry, campaigns, and activity."
+  },
+  Campaigns: {
+    icon: ListChecks,
+    eyebrow: "Operations",
+    description: "Scopes, status, findings, and comparisons."
+  },
+  Modules: {
+    icon: Boxes,
+    eyebrow: "Operations",
+    description: "Catalog, OPSEC, and authorized runs."
+  },
+  Reports: {
+    icon: FileText,
+    eyebrow: "Operations",
+    description: "Evidence packages and artifacts."
+  },
+  Graph: {
+    icon: GitGraph,
+    eyebrow: "Intelligence",
+    description: "Entities, relationships, and attack paths."
+  },
+  Templates: {
+    icon: Workflow,
+    eyebrow: "Intelligence",
+    description: "Reusable campaign plans."
+  },
+  Strategy: {
+    icon: ShieldCheck,
+    eyebrow: "Intelligence",
+    description: "Authorized objective planning."
+  },
+  Security: {
+    icon: UserCog,
+    eyebrow: "Control",
+    description: "Account, API keys, audit, and users."
+  },
+  "EDR/OPSEC": {
+    icon: ShieldAlert,
+    eyebrow: "Control",
+    description: "Detection outcomes and OPSEC feedback."
+  },
+  "Live Events": {
+    icon: Radio,
+    eyebrow: "Control",
+    description: "Campaign events as they arrive."
+  }
+};
+
 const brandLogoPath = "/dashboard/brand/ares-logo.png";
 const brandMarkPath = "/dashboard/brand/ares-mark.png";
 
@@ -345,49 +418,78 @@ function ProtectedShell() {
   }
   return (
     <DashboardUiContext.Provider value={dashboardUi}>
-      <div className="app-shell grid min-h-screen grid-cols-1 lg:grid-cols-[240px_1fr]">
-        <aside className="sidebar p-4">
-          <div className="mb-6 flex items-center gap-3">
-            <img className="h-11 w-11 shrink-0 object-contain" src={brandMarkPath} alt="" aria-hidden="true" />
-            <div>
-              <div className="text-base font-bold">ARES</div>
-              <div className="text-xs text-slate-300">{user.username} &middot; {formatRole(user.role)}</div>
+      <div className="app-shell">
+        <aside className="sidebar">
+          <div className="sidebar-brand">
+            <img className="sidebar-mark" src={brandMarkPath} alt="" aria-hidden="true" />
+            <div className="min-w-0">
+              <div className="sidebar-title">ARES</div>
+              <div className="sidebar-subtitle">Security dashboard</div>
             </div>
           </div>
-          <nav className="grid gap-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link">
-                  <Icon size={17} />
-                  <span>{item.label}</span>
-                </NavLink>
-              );
-            })}
+          <nav className="sidebar-nav" aria-label="Dashboard navigation">
+            {navGroups.map((group) => (
+              <div className="nav-group" key={group.label}>
+                <div className="nav-group-label">{group.label}</div>
+                <div className="grid gap-1">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link">
+                        <Icon size={16} />
+                        <span>{item.label}</span>
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </nav>
         </aside>
-        <main className="min-w-0 p-4 lg:p-6">
-          <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-950">Operator Dashboard</h1>
-              <p className="text-sm text-slate-600">{user.username}</p>
+        <main className="main-shell">
+          <header className="topbar">
+            <div className="topbar-left">
+              <button className="icon-button" aria-label="Menu" type="button">
+                <Menu size={17} />
+              </button>
+              <div className="topbar-search" aria-label="Dashboard search">
+                <Search size={16} />
+                <span>Search campaigns, modules, reports</span>
+              </div>
             </div>
-            <button className="btn" onClick={() => void logout()}>
-              <LogOut size={16} /> Logout
-            </button>
+            <div className="topbar-right">
+              <span className={liveConnected ? "status-pill status-low" : "status-pill"}>
+                <CircleDot size={11} /> {liveConnected ? "Live" : "Offline"}
+              </span>
+              <button className="icon-button" aria-label="Notifications" type="button">
+                <Bell size={16} />
+              </button>
+              <span className="user-chip">
+                <span className="user-chip-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
+                <span className="user-chip-copy">
+                  <strong>{user.username}</strong>
+                  <small>{formatRole(user.role)}</small>
+                </span>
+              </span>
+              <button className="btn btn-topbar" onClick={() => void logout()}>
+                <LogOut size={16} /> Logout
+              </button>
+            </div>
           </header>
-          <Routes>
-            <Route path="/" element={<OverviewPage />} />
-            <Route path="/campaigns" element={<CampaignsPage />} />
-            <Route path="/modules" element={<ModulesPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/graph" element={<GraphPage />} />
-            <Route path="/templates" element={<TemplatesPage />} />
-            <Route path="/strategy" element={<StrategyPage />} />
-            <Route path="/security" element={<SecurityPage />} />
-            <Route path="/edr" element={<EdrPage />} />
-            <Route path="/live" element={<LivePage />} />
-          </Routes>
+          <div className="content-shell">
+            <Routes>
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/modules" element={<ModulesPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/graph" element={<GraphPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/strategy" element={<StrategyPage />} />
+              <Route path="/security" element={<SecurityPage />} />
+              <Route path="/edr" element={<EdrPage />} />
+              <Route path="/live" element={<LivePage />} />
+            </Routes>
+          </div>
         </main>
       </div>
     </DashboardUiContext.Provider>
@@ -451,15 +553,46 @@ function OverviewPage() {
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const snapshot = telemetry.data as TelemetrySnapshot | undefined;
+  const campaignList = campaigns.data ?? [];
+  const activeCampaigns = campaignList.filter((campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted").length;
+  const findings = typeof snapshot?.findings === "number" ? snapshot.findings : 0;
   return (
-    <Page title="Overview">
-      <div className="grid gap-4 md:grid-cols-3">
-        <Stat title="Health" value={String(health.data?.status ?? "unknown")} icon={<Activity size={18} />} />
-        <Stat title="Campaigns" value={String(campaigns.data?.length ?? 0)} icon={<ListChecks size={18} />} />
-        <Stat title="Telemetry" value={telemetry.isSuccess ? "online" : "pending"} icon={<BarChart3 size={18} />} />
+    <Page
+      title="Overview"
+      actions={(
+        <>
+          <span className={health.isSuccess ? "status-pill status-low" : "status-pill status-medium"}>
+            <Activity size={13} /> {String(health.data?.status ?? "checking")}
+          </span>
+          <span className={telemetry.isSuccess ? "status-pill status-low" : "status-pill"}>
+            <BarChart3 size={13} /> {telemetry.isSuccess ? "Telemetry online" : "Telemetry pending"}
+          </span>
+        </>
+      )}
+      tabs={["Variation 1", "Variation 2"]}
+    >
+      <div className="dashboard-grid">
+        <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
+        <div className="side-stack">
+          <section className="panel p-4">
+            <SectionHeader title="Highlights" />
+            <div className="highlight-list">
+              <HighlightRow label="Active campaigns" value={String(activeCampaigns)} tone="low" detail="available engagements" />
+              <HighlightRow label="Findings" value={String(findings)} tone={findings > 0 ? "medium" : "low"} detail="confirmed observations" />
+              <HighlightRow label="Runtime" value={telemetry.isSuccess ? "Online" : "Pending"} tone={telemetry.isSuccess ? "low" : "medium"} detail="telemetry feed" />
+            </div>
+          </section>
+          <section className="panel p-4">
+            <SectionHeader title="Monthly Statistics" />
+            <div className="monthly-stat">
+              <span>+ {formatMetric(findings + activeCampaigns)}</span>
+              <small>Security signals this cycle</small>
+            </div>
+            <SparklineBars values={[32, 44, 28, 52, 46, 62, 39, 48, 58, 42, 51, 67]} />
+          </section>
+        </div>
       </div>
-      <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
-      <CampaignTable campaigns={campaigns.data ?? []} />
+      <CampaignTable campaigns={campaignList} />
     </Page>
   );
 }
@@ -529,11 +662,17 @@ function CampaignsPage() {
     }
   });
 
+  const campaignList = campaigns.data ?? [];
+
   return (
-    <Page title="Campaigns">
-      <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+    <Page
+      title="Campaigns"
+      actions={<span className="status-pill">{campaignList.length} campaigns</span>}
+      tabs={["List", "Scope", "Findings"]}
+    >
+      <div className="two-column-grid">
         <section className="panel p-4">
-          <h2 className="mb-3 text-base font-bold">Create Campaign</h2>
+          <SectionHeader title="Create Campaign" />
           <form className="grid gap-3" onSubmit={(e) => {
             e.preventDefault();
             if (!e.currentTarget.reportValidity()) return;
@@ -545,21 +684,24 @@ function CampaignsPage() {
             setCreateWarning("");
             create.mutate();
           }}>
-            <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
-            <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
-            <textarea className="field min-h-24" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
-            <textarea className="field min-h-24" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
-            {createWarning && <p className="text-sm font-semibold text-red-700">{createWarning}</p>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
+              <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
+            </div>
+            <textarea className="field min-h-20" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
+            <textarea className="field min-h-20" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
+            {createWarning && <p className="notice notice-danger">{createWarning}</p>}
             <button className="btn btn-primary" disabled={create.isPending} type="submit">
               <ListChecks size={16} /> Create
             </button>
           </form>
           <DataPanel title="Create Error" data={create.error} />
         </section>
-        <section className="grid gap-4">
-          <CampaignPicker campaigns={campaigns.data ?? []} value={selected} onChange={setSelected} />
+        <section className="panel p-4">
+          <SectionHeader title="Campaign Detail" />
+          <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
           <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
-          <div className="flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
               <ShieldCheck size={16} /> Restore Vault
             </button>
@@ -579,13 +721,14 @@ function CampaignsPage() {
             </button>
             <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
           </div>
-          <DataPanel title="Delete Error" data={remove.error} />
-          <DataPanel title="Campaign Detail" data={detail.data} />
-          <DataPanel title="CVSS Summary" data={cvss.data} />
-          <DataPanel title="Diff" data={diff.data} />
-          <FindingsTable findings={findings.data ?? []} />
         </section>
       </div>
+      <CampaignTable campaigns={campaignList} />
+      <FindingsTable findings={findings.data ?? []} />
+      <DataPanel title="Delete Error" data={remove.error} />
+      <DataPanel title="Campaign Detail" data={detail.data} />
+      <DataPanel title="CVSS Summary" data={cvss.data} />
+      <DataPanel title="Diff" data={diff.data} />
     </Page>
   );
 }
@@ -645,11 +788,19 @@ function ModulesPage() {
   }, [selectedId, setConfirmed, setDryRun, setParams]);
 
   return (
-    <Page title="Modules">
-      <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+    <Page
+      title="Modules"
+      actions={<span className="status-pill">{visible.length} shown</span>}
+      tabs={["Catalog", "Run Panel", "Results"]}
+    >
+      <div className="module-layout">
         <section className="panel p-4">
+          <SectionHeader title="Module Catalog" />
           <div className="mb-3 grid gap-2 sm:grid-cols-3">
-            <input className="field sm:col-span-3" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <label className="field-with-icon sm:col-span-3">
+              <Search size={15} />
+              <input placeholder="Search modules, MITRE, descriptions" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </label>
             <select className="field" value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">Category</option>
               {categories.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -662,7 +813,7 @@ function ModulesPage() {
           <div className="grid max-h-[640px] gap-2 overflow-auto">
             {visible.map((item) => (
               <button
-                className={`panel p-3 text-left ${selectedId === item.id ? "ring-2 ring-red-700" : ""}`}
+                className={`catalog-card ${selectedId === item.id ? "active" : ""}`}
                 key={item.id}
                 onClick={() => setSelectedId(item.id)}
               >
@@ -684,10 +835,14 @@ function ModulesPage() {
           </div>
         </section>
         <section className="panel p-4">
-          <h2 className="mb-3 text-base font-bold">Run Module</h2>
+          <SectionHeader
+            title="Run Panel"
+            eyebrow={selected ? selected.id : "Select module"}
+            action={selected ? <span className={opsecBadge(selected.opsec_level)}>{selected.opsec_level || "n/a"}</span> : null}
+          />
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
           {campaignId && campaignDetail.isFetching && (
-            <div className="mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+            <div className="notice mt-3">
               <Loader2 className="spin" size={16} /> Loading campaign scope...
             </div>
           )}
@@ -705,21 +860,21 @@ function ModulesPage() {
             >
               <ParamForm schema={selected.param_schema} values={params} onChange={setParams} />
               {runHint && (
-                <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+                <p className="notice">
                   {runHint}
                 </p>
               )}
               {scopeWarning && (
-                <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+                <p className="notice notice-danger">
                   {scopeWarning}
                 </p>
               )}
-              <label className="flex items-center gap-2 text-sm font-semibold">
+              <label className="toggle-row">
                 <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
                 Dry run
               </label>
               {sensitive && (
-                <label className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">
+                <label className="notice notice-danger">
                   <input className="mr-2" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
                   Confirm authorized high-noise or sensitive execution
                 </label>
@@ -736,7 +891,7 @@ function ModulesPage() {
                 )}
               </button>
               {run.isPending && (
-                <div className="flex items-center gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900" role="status" aria-live="polite">
+                <div className="notice notice-danger" role="status" aria-live="polite">
                   <Loader2 className="spin shrink-0" size={18} />
                   Module execution in progress. Keep this page open while ARES validates the target and collects results.
                 </div>
@@ -746,7 +901,7 @@ function ModulesPage() {
             <EmptyState text="Select a module" />
           )}
           <ModuleRunSummary result={runResult} error={runError} />
-          <DataPanel title={runError ? "Run Error" : "Raw Run Result"} data={runError ?? runResult} />
+          <DataPanel title={runError ? "Run Error" : "Run Result"} data={runError ?? runResult} />
         </section>
       </div>
     </Page>
@@ -789,25 +944,33 @@ function ReportsPage() {
     }
   });
   return (
-    <Page title="Reports">
+    <Page
+      title="Reports"
+      actions={<span className="status-pill">{reports.data?.reports?.length ?? 0} artifacts</span>}
+      tabs={["Generate", "Library"]}
+    >
       <div className="panel p-4">
-        <h2 className="mb-2 text-base font-bold">Generate Report</h2>
-        <p className="mb-3 text-sm text-slate-600">
-          Choose a campaign and export the current findings, scope, and remediation notes. PDF is for sharing, HTML is for browser review, JSON/Markdown are for downstream workflows.
-        </p>
-        <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <select className="field max-w-40" value={format} onChange={(e) => setFormat(e.target.value)}>
+        <SectionHeader
+          title="Generate Report"
+          description="Export findings, scope, and remediation."
+        />
+        <div className="compact-form-row">
+          <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
+          <select className="field" value={format} onChange={(e) => setFormat(e.target.value)}>
             {["html", "pdf", "markdown", "json"].map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
-          <button className="btn btn-primary" disabled={generate.isPending} onClick={() => {
-            if (!campaignId) {
-              setWarning("Campaign is required.");
-              return;
-            }
-            setWarning("");
-            generate.mutate();
-          }}>
+          <button
+            className="btn btn-primary"
+            disabled={generate.isPending}
+            onClick={() => {
+              if (!campaignId) {
+                setWarning("Campaign is required.");
+                return;
+              }
+              setWarning("");
+              generate.mutate();
+            }}
+          >
             {generate.isPending ? (
               <>
                 <Loader2 className="spin" size={16} /> Generating...
@@ -819,32 +982,38 @@ function ReportsPage() {
             )}
           </button>
         </div>
-        {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
+        {warning && <p className="notice notice-danger mt-3">{warning}</p>}
         <DataPanel
           title={(generate.error ?? (persistedGenerateResult?.isError ? persistedGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
           data={generate.error ?? generate.data ?? persistedGenerateResult?.payload}
         />
       </div>
-      <section className="panel mt-4 overflow-auto p-4">
-        <table className="table">
-          <thead><tr><th>Filename</th><th>Format</th><th>Size</th><th></th></tr></thead>
-          <tbody>
-            {(reports.data?.reports ?? []).map((item) => (
-              <tr key={item.filename}>
-                <td>{item.filename}</td>
-                <td>{item.format}</td>
-                <td>{item.size_bytes}</td>
-                <td>
-                  <button className="btn" disabled={download.isPending} onClick={() => download.mutate(item)}>Download</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <section className="panel table-panel">
+        <SectionHeader title="Report Library" />
+        <div className="table-scroll">
+          <table className="table">
+            <thead><tr><th>Filename</th><th>Format</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(reports.data?.reports ?? []).map((item) => (
+                <tr key={item.filename}>
+                  <td className="font-medium text-slate-900">{item.filename}</td>
+                  <td><span className="badge">{item.format}</span></td>
+                  <td>{formatBytes(item.size_bytes)}</td>
+                  <td>{formatReportDate(item.modified_at)}</td>
+                  <td>
+                    <button className="btn" disabled={download.isPending} onClick={() => download.mutate(item)}>
+                      <Download size={15} /> Download
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
         {campaignId && (reports.data?.reports ?? []).length === 0 && (
           <EmptyState text="No reports generated for this campaign yet." />
         )}
-        {!campaignId && <EmptyState text="Select a campaign to list generated reports." />}
+        {!campaignId && <EmptyState text="Select a campaign to list reports." />}
         <DataPanel title="Download Result" data={download.error} />
       </section>
     </Page>
@@ -869,38 +1038,45 @@ function GraphPage() {
   const nodes = Array.isArray(graph.data?.nodes) ? graph.data.nodes : [];
   const links = Array.isArray(graph.data?.links) ? graph.data.links : [];
   return (
-    <Page title="Graph">
-      <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_360px]">
+    <Page
+      title="Graph"
+      actions={<span className="status-pill">{nodes.length} nodes / {links.length} links</span>}
+      tabs={["Entities", "Attack Paths", "Ingest"]}
+    >
+      <div className="graph-layout">
         <section className="panel min-h-[360px] p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-bold">Attack Graph</h2>
-              <p className="text-sm text-slate-600">Hosts, identities, and BloodHound relationships linked to the selected campaign.</p>
-            </div>
-            <div className="flex gap-2">
-              <span className="badge">{nodes.length} nodes</span>
-              <span className="badge">{links.length} links</span>
-            </div>
+          <SectionHeader
+            title="Attack Graph"
+            description="Hosts, identities, and relationships."
+            action={(
+              <div className="flex gap-2">
+                <span className="badge">{nodes.length} nodes</span>
+                <span className="badge">{links.length} links</span>
+              </div>
+            )}
+          />
+          <div className="mb-4 max-w-sm">
+            <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
           </div>
           {nodes.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {nodes.slice(0, 24).map((node: any, index) => (
-                <div className="rounded-md border border-slate-300 bg-slate-50 p-3" key={node.id ?? index}>
+                <div className="entity-card" key={node.id ?? index}>
+                  <Server size={16} />
                   <div className="font-bold">{node.label ?? node.id ?? `Node ${index + 1}`}</div>
                   <div className="text-sm text-slate-600">{node.type ?? "artifact"}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <EmptyState text={campaignId ? "No graph nodes yet. Run modules that discover hosts or ingest BloodHound JSON." : "Select a campaign to load graph data."} />
+            <EmptyState text={campaignId ? "No graph nodes yet. Run discovery modules or ingest BloodHound JSON." : "Select a campaign to load graph data."} />
           )}
         </section>
         <section className="panel p-4">
-          <h2 className="mb-2 text-base font-bold">BloodHound Ingest</h2>
-          <p className="mb-3 text-sm text-slate-600">
-            Paste a server-local JSON file or directory path produced by BloodHound/SharpHound. ARES imports it into the selected campaign graph.
-          </p>
+          <SectionHeader
+            title="BloodHound Ingest"
+            description="Import a server-local JSON path."
+          />
           <form className="grid gap-2" onSubmit={(e) => {
             e.preventDefault();
             if (!campaignId) {
@@ -927,7 +1103,7 @@ function GraphPage() {
               )}
             </button>
           </form>
-          {warning && <p className="mt-2 text-sm font-semibold text-red-700">{warning}</p>}
+          {warning && <p className="notice notice-danger mt-3">{warning}</p>}
           <DataPanel title="Attack Paths" data={paths.data} />
           <DataPanel
             title={(ingest.error ?? (persistedIngestResult?.isError ? persistedIngestResult.payload : undefined)) ? "Ingest Error" : "Ingest Result"}
@@ -956,13 +1132,17 @@ function TemplatesPage() {
   const generated = (plan.data ?? (!persistedPlanResult?.isError ? persistedPlanResult?.payload : undefined)) as TemplatePlanResponse | undefined;
   const paramsValid = isJsonObject(params);
   return (
-    <Page title="Templates">
-      <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+    <Page
+      title="Templates"
+      actions={<span className="status-pill">{templates.data?.length ?? 0} templates</span>}
+      tabs={["Templates", "Plan Builder"]}
+    >
+      <div className="two-column-grid">
         <section className="panel p-4">
-          <h2 className="mb-2 text-base font-bold">Campaign Templates</h2>
-          <p className="mb-3 text-sm text-slate-600">
-            Pick a built-in engagement shape, add optional global values, then generate a run plan for a campaign dry-run.
-          </p>
+          <SectionHeader
+            title="Campaign Templates"
+            description="Pick a template and generate a plan."
+          />
           <div className="grid gap-2">
             {(templates.data ?? []).map((item, index) => {
               const templateName = String(item.name ?? item.id ?? index);
@@ -989,14 +1169,14 @@ function TemplatesPage() {
           </div>
         </section>
         <section className="panel p-4">
-          <h2 className="mb-2 text-base font-bold">Plan Builder</h2>
+          <SectionHeader title="Plan Builder" action={name ? <span className="badge">{name}</span> : null} />
           <input className="field" placeholder="Template name" value={name} onChange={(e) => {
             setName(e.target.value);
             setWarning("");
             setLastPlanResult(null);
           }} />
           {selected ? (
-            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <div className="preview-card mt-3">
               <div className="font-bold">{selected.name}</div>
               <p className="mt-1 text-sm text-slate-600">{selected.description}</p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -1019,11 +1199,9 @@ function TemplatesPage() {
               }}
             />
           </label>
-          <p className="mt-1 text-xs text-slate-600">
-            Optional JSON object. Leave as {"{}"} when the template should use module defaults or campaign-level values.
-          </p>
+          <p className="mt-1 text-xs text-slate-500">JSON object. Leave {"{}"} for defaults.</p>
           {(warning || !paramsValid) && (
-            <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+            <p className="notice notice-danger mt-2">
               {warning || "Global parameters must be a valid JSON object."}
             </p>
           )}
@@ -1089,9 +1267,14 @@ function StrategyPage() {
   const persistedEngageResult = lastEngageResult?.key === strategyResultKey ? lastEngageResult : null;
   const allowed = user?.role === "team_lead" || user?.role === "operator";
   return (
-    <Page title="Strategy">
-      <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
+    <Page
+      title="Strategy"
+      actions={<span className={allowed ? "status-pill status-low" : "status-pill status-high"}>{allowed ? "Authorized" : "Restricted"}</span>}
+      tabs={["Objective", "Active", "Result"]}
+    >
+      <div className="two-column-grid">
         <section className="panel p-4">
+          <SectionHeader title="Objective Builder" />
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
           <select className="field mt-3" value={goal} onChange={(e) => setGoal(e.target.value)}>
             {["domain_admin", "enterprise_admin", "cloud_admin", "data_exfil", "persistence", "full_compromise"].map((item) => <option key={item} value={item}>{item}</option>)}
@@ -1101,7 +1284,7 @@ function StrategyPage() {
             <option value="openai">OpenAI / OPENAI_API_KEY</option>
             <option value="local">Local Ollama</option>
           </select>
-          <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          <p className="notice mt-2">
             {strategyBackendHint(llmBackend)}
           </p>
           <textarea
@@ -1111,12 +1294,12 @@ function StrategyPage() {
             onChange={(e) => setAuthorizations(e.target.value)}
           />
           {!allowed && (
-            <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+            <p className="notice notice-danger mt-2">
               Strategy engagement requires operator or team lead role.
             </p>
           )}
           {!campaignId && (
-            <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700">
+            <p className="notice mt-2">
               Select a scoped campaign before starting Strategy.
             </p>
           )}
@@ -1132,7 +1315,15 @@ function StrategyPage() {
             )}
           </button>
         </section>
-        <section>
+        <section className="grid gap-4">
+          <section className="panel p-4">
+            <SectionHeader title="Planning Snapshot" />
+            <div className="mini-stat-grid">
+              <MiniStat title="Goal" value={goal} />
+              <MiniStat title="Backend" value={llmBackend} />
+              <MiniStat title="Authorization" value={allowed ? "ready" : "restricted"} />
+            </div>
+          </section>
           <DataPanel title="Active" data={active.data} />
           <DataPanel
             title={(engage.error ?? (persistedEngageResult?.isError ? persistedEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
@@ -1257,11 +1448,21 @@ function SecurityPage() {
   }
 
   return (
-    <Page title="Security">
+    <Page
+      title="Security"
+      actions={<span className="status-pill">{formatRole(user?.role)}</span>}
+      tabs={["Account", "API Keys", "Audit"]}
+    >
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="panel p-4">
-          <h2 className="mb-3 font-bold">Account</h2>
-          <div className="mb-3 text-sm">{user?.username} &middot; {formatRole(user?.role)}</div>
+          <SectionHeader title="Account" />
+          <div className="profile-row mb-3">
+            <span className="profile-avatar-light">{user?.username?.slice(0, 1).toUpperCase() ?? "A"}</span>
+            <div>
+              <div className="font-semibold text-slate-950">{user?.username}</div>
+              <div className="text-xs text-slate-500">{formatRole(user?.role)}</div>
+            </div>
+          </div>
           <form className="grid gap-2" onSubmit={(event) => {
             event.preventDefault();
             if (!event.currentTarget.reportValidity()) return;
@@ -1277,10 +1478,11 @@ function SecurityPage() {
           <DataPanel title="Password Result" data={change.data ?? change.error} />
         </section>
         <section className="panel p-4">
-          <h2 className="mb-3 font-bold">API Keys</h2>
-          <p className="mb-3 text-sm text-slate-600">
-            Use ARES API keys for scripts, integrations, or CI jobs that call ARES. They are not LLM provider keys for Strategy.
-          </p>
+          <SectionHeader
+            title="API Keys"
+            action={<span className="badge">{keys.data?.length ?? 0} active</span>}
+            description="Metadata only; new secrets are shown once."
+          />
           <form className="mb-3 grid gap-2 sm:grid-cols-[1fr_120px_auto]" onSubmit={(event) => void handleCreateApiKey(event)}>
             <input className="field" required placeholder="Name" value={keyName} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setKeyName(e.target.value); }} />
             <select className="field" value={scopes} onChange={(e) => setScopes(e.target.value)}>
@@ -1294,12 +1496,12 @@ function SecurityPage() {
             </button>
           </form>
           {(keys.data ?? []).map((key) => (
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 p-3" key={key.id}>
+            <div className="key-row" key={key.id}>
               <div className="min-w-0">
                 <div className="font-semibold text-slate-950">{key.name ?? "Unnamed API key"}</div>
                 <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
                   <span className="font-mono">{apiKeyVisibleIdentifier(key)}</span>
-                  {key.scopes ? <span>Scope: {key.scopes}</span> : null}
+                  {key.scopes ? <span className="badge">Scope: {key.scopes}</span> : null}
                   {apiKeyOwnerLabel(key) ? <span>Owner: {apiKeyOwnerLabel(key)}</span> : null}
                 </div>
                 <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
@@ -1310,7 +1512,7 @@ function SecurityPage() {
               <button className="btn btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(key.id)}>Delete</button>
             </div>
           ))}
-          {(keys.data ?? []).length === 0 && <EmptyState text="No API keys have been created yet." />}
+          {(keys.data ?? []).length === 0 && <EmptyState text="No API keys yet." />}
           <DataPanel title="API Key Error" data={apiKeyError ?? remove.error} />
         </section>
       </div>
@@ -1390,12 +1592,16 @@ function EdrPage() {
   });
   const persistedReportResult = lastReportResult?.key === edrReportKey ? lastReportResult : null;
   return (
-    <Page title="EDR/OPSEC">
+    <Page
+      title="EDR/OPSEC"
+      actions={<span className={success ? "status-pill status-low" : "status-pill status-medium"}>{success ? "Successful" : "Blocked / detected"}</span>}
+      tabs={["Knowledge Base", "Report Outcome"]}
+    >
       <section className="panel p-4">
-        <h2 className="mb-2 text-base font-bold">Bypass Knowledge Base</h2>
-        <p className="text-sm text-slate-600">
-          Record whether an approved technique was blocked or successful so future Strategy runs can avoid weak options.
-        </p>
+        <SectionHeader
+          title="Bypass Knowledge Base"
+          description="Track outcomes by technique and vendor."
+        />
         <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div className="telemetry-strip">
             <span>Technique</span>
@@ -1413,7 +1619,7 @@ function EdrPage() {
         <p className="mt-3 text-sm text-slate-600">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
       </section>
       <section className="panel p-4">
-        <h2 className="mb-3 text-base font-bold">Report Outcome</h2>
+        <SectionHeader title="Report Outcome" />
         <form className="grid gap-3" onSubmit={(event) => {
           event.preventDefault();
           if (!event.currentTarget.reportValidity()) return;
@@ -1461,7 +1667,7 @@ function EdrPage() {
         title={(report.error ?? (persistedReportResult?.isError ? persistedReportResult.payload : undefined)) ? "Outcome Error" : "Outcome Result"}
         data={report.data ?? report.error ?? persistedReportResult?.payload}
       />
-      <DataPanel title="Raw Stats" data={stats.data} />
+      <DataPanel title="Stats Details" data={stats.data} />
     </Page>
   );
 }
@@ -1481,12 +1687,17 @@ function LivePage() {
   const campaignId = liveCampaignId || selectedCampaignId;
 
   return (
-    <Page title="Live Events">
+    <Page
+      title="Live Events"
+      actions={<span className={liveConnected ? "status-pill status-low" : "status-pill"}>{liveConnected ? "Listening" : "Offline"}</span>}
+      tabs={["Stream", "Buffer"]}
+    >
       <div className="panel p-4">
-        <h2 className="mb-2 text-base font-bold">Campaign Event Stream</h2>
-        <p className="mb-3 text-sm text-slate-600">
-          Connect to a campaign to watch module runs, findings, and audit events as they are emitted.
-        </p>
+        <SectionHeader
+          title="Campaign Event Stream"
+          action={<span className="badge">{liveEvents.length} buffered</span>}
+          description="Watch selected campaign events."
+        />
         <CampaignPicker
           campaigns={campaigns.data ?? []}
           value={campaignId}
@@ -1518,38 +1729,132 @@ function LivePage() {
         </div>
       </div>
       <section className="panel p-4">
-        <h3 className="mb-2 font-bold">Event Stream</h3>
+        <SectionHeader title="Event Stream" />
         {liveEvents.length > 0 ? (
           <div className="grid gap-2">
             {liveEvents.map((event, index) => (
-              <pre className="json-box max-h-48" key={index}>{JSON.stringify(event, null, 2)}</pre>
+              <LiveEventCard event={event} index={index} key={index} />
             ))}
           </div>
         ) : (
-          <EmptyState text={liveConnected ? "Connected. Waiting for campaign events." : "Select a campaign and connect to start listening."} />
+          <EmptyState text={liveConnected ? "Connected. Waiting for events." : "Select a campaign and connect."} />
         )}
       </section>
     </Page>
   );
 }
 
-function Page({ title, children }: { title: string; children: ReactNode }) {
+function Page({
+  title,
+  actions,
+  tabs,
+  children
+}: {
+  title: string;
+  actions?: ReactNode;
+  tabs?: string[];
+  children: ReactNode;
+}) {
+  const meta = pageMeta[title] ?? {
+    icon: LayoutDashboard,
+    eyebrow: "ARES",
+    description: "Security dashboard workspace."
+  };
+  const Icon = meta.icon;
   return (
-    <div>
-      <h2 className="mb-4 text-xl font-bold text-slate-950">{title}</h2>
-      <div className="grid gap-4">{children}</div>
+    <div className="page">
+      <section className="page-header">
+        <div className="page-heading">
+          <span className="page-icon">
+            <Icon size={19} />
+          </span>
+          <div>
+            <p className="page-eyebrow">{meta.eyebrow}</p>
+            <h1>{title}</h1>
+            <p>{meta.description}</p>
+          </div>
+        </div>
+        {actions ? <div className="page-actions">{actions}</div> : null}
+      </section>
+      {tabs ? (
+        <div className="page-tabs" aria-label={`${title} sections`}>
+          {tabs.map((tab, index) => (
+            <button className={index === 0 ? "active" : ""} key={tab} type="button">
+              {tab}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="page-content">{children}</div>
     </div>
   );
 }
 
-function Stat({ title, value, icon }: { title: string; value: string; icon: ReactNode }) {
+function SectionHeader({
+  title,
+  eyebrow,
+  description,
+  action
+}: {
+  title: string;
+  eyebrow?: string;
+  description?: string;
+  action?: ReactNode;
+}) {
   return (
-    <div className="stat flex items-center justify-between p-4">
+    <div className="section-header">
       <div>
-        <div className="text-sm font-semibold text-slate-600">{title}</div>
-        <div className="mt-1 text-2xl font-bold">{value}</div>
+        {eyebrow ? <p className="section-eyebrow">{eyebrow}</p> : null}
+        <h2>{title}</h2>
+        {description ? <p>{description}</p> : null}
       </div>
-      <div className="text-red-700">{icon}</div>
+      {action ? <div className="section-action">{action}</div> : null}
+    </div>
+  );
+}
+
+function MiniStat({ title, value, detail, icon }: { title: string; value: string; detail?: string; icon?: ReactNode }) {
+  return (
+    <div className="mini-stat">
+      <div>
+        <span>{title}</span>
+        <strong>{value}</strong>
+        {detail ? <small>{detail}</small> : null}
+      </div>
+      {icon ? <div className="mini-stat-icon">{icon}</div> : null}
+    </div>
+  );
+}
+
+function HighlightRow({
+  label,
+  value,
+  detail,
+  tone = "neutral"
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "low" | "medium" | "high" | "neutral";
+}) {
+  return (
+    <div className="highlight-row">
+      <div>
+        <strong>{label}</strong>
+        <span>{detail}</span>
+      </div>
+      <span className={`highlight-value highlight-${tone}`}>{value}</span>
+    </div>
+  );
+}
+
+function SparklineBars({ values }: { values: number[] }) {
+  const max = Math.max(...values, 1);
+  return (
+    <div className="sparkline" aria-hidden="true">
+      {values.map((value, index) => (
+        <span key={`${value}-${index}`} style={{ height: `${Math.max(12, (value / max) * 100)}%` }} />
+      ))}
     </div>
   );
 }
@@ -1583,6 +1888,25 @@ function formatTimestamp(value: number | undefined): string {
   return new Date(value * 1000).toLocaleString();
 }
 
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatReportDate(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  const timestamp = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(timestamp).toLocaleString();
+}
+
 function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; loading: boolean }) {
   const total = metricNumber(snapshot?.modules, "total");
   const success = metricNumber(snapshot?.modules, "success");
@@ -1599,63 +1923,38 @@ function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; l
   const tasksPerMin = metricNumber(snapshot?.throughput, "tasks_per_min");
 
   return (
-    <section className="panel p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-slate-800">Telemetry Snapshot</h3>
-          <p className="text-sm text-slate-500">
-            {loading ? "Waiting for runtime metrics" : `Last sample: ${formatTimestamp(snapshot?.timestamp)}`}
-          </p>
-        </div>
-        <span className="badge badge-low">{snapshot ? "online" : "pending"}</span>
-      </div>
+    <section className="panel telemetry-panel">
+      <SectionHeader
+        title="Telemetry Report"
+        description={loading ? "Waiting for metrics." : `Last sample: ${formatTimestamp(snapshot?.timestamp)}`}
+        action={<span className={snapshot ? "badge badge-low" : "badge badge-medium"}>{snapshot ? "online" : "pending"}</span>}
+      />
 
-      <div className="telemetry-grid">
-        <TelemetryMetric label="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} />
-        <TelemetryMetric label="Findings" value={formatMetric(findings)} detail="confirmed runtime observations" />
-        <TelemetryMetric label="Queue depth" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} />
-        <TelemetryMetric label="Hosts" value={`${hostsDiscovered} / ${hostsOwned}`} detail="discovered / owned" />
-      </div>
-
-      <div className="mt-5 grid gap-4 md:grid-cols-3">
+      <div className="telemetry-chart" aria-label="Runtime telemetry chart">
         <TelemetryBar label="Success rate" value={successRate} />
         <TelemetryBar label="Error rate" value={Math.min(100, Math.round(errorRate * 100))} tone="danger" />
-        <div className="telemetry-strip">
-          <span>P95 latency</span>
-          <strong>{formatMetric(p95, " ms")}</strong>
-        </div>
+        <TelemetryBar label="Worker capacity" value={activeWorkers + unhealthyWorkers > 0 ? Math.round((activeWorkers / (activeWorkers + unhealthyWorkers)) * 100) : 0} />
+        <TelemetryBar label="Host ownership" value={hostsDiscovered > 0 ? Math.round((hostsOwned / hostsDiscovered) * 100) : 0} tone={hostsOwned > 0 ? "danger" : "ok"} />
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <div className="telemetry-strip">
-          <span>Throughput</span>
-          <strong>{formatMetric(tasksPerMin)} tasks/min</strong>
-        </div>
-        <div className="telemetry-strip">
-          <span>Worker health</span>
-          <strong>{unhealthyWorkers === 0 ? "healthy" : `${unhealthyWorkers} unhealthy`}</strong>
-        </div>
-        <div className="telemetry-strip">
-          <span>Scope</span>
-          <strong>{snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</strong>
-        </div>
+      <div className="mini-stat-grid mt-4">
+        <MiniStat title="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} icon={<Database size={16} />} />
+        <MiniStat title="Findings" value={formatMetric(findings)} icon={<ShieldAlert size={16} />} />
+        <MiniStat title="Queue" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} icon={<Layers size={16} />} />
+        <MiniStat title="Throughput" value={`${formatMetric(tasksPerMin)}/min`} detail={`${formatMetric(p95, " ms")} p95`} icon={<TrendingUp size={16} />} />
       </div>
 
-      <details className="mt-4">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-600">Raw telemetry data</summary>
-        <pre className="json-box mt-2">{JSON.stringify(snapshot ?? {}, null, 2)}</pre>
+      <div className="telemetry-footer">
+        <span><Target size={14} /> Scope: {snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</span>
+        <span>{hostsDiscovered} discovered / {hostsOwned} owned hosts</span>
+        <span>{unhealthyWorkers === 0 ? "workers healthy" : `${unhealthyWorkers} unhealthy workers`}</span>
+      </div>
+
+      <details className="advanced-details">
+        <summary>Details</summary>
+        <pre className="json-box">{JSON.stringify(snapshot ?? {}, null, 2)}</pre>
       </details>
     </section>
-  );
-}
-
-function TelemetryMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return (
-    <div className="telemetry-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </div>
   );
 }
 
@@ -1663,13 +1962,11 @@ function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: num
   const clamped = Math.max(0, Math.min(100, value));
   return (
     <div className="telemetry-bar">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span>{label}</span>
-        <strong>{clamped}%</strong>
-      </div>
+      <span>{label}</span>
       <div className="telemetry-bar-track">
         <div className={tone === "danger" ? "telemetry-bar-fill danger" : "telemetry-bar-fill"} style={{ width: `${clamped}%` }} />
       </div>
+      <strong>{clamped}%</strong>
     </div>
   );
 }
@@ -1678,12 +1975,23 @@ function DataPanel({ title, data }: { title: string; data: unknown }) {
   if (!data) {
     return null;
   }
-  const shouldOpen = data instanceof Error || data instanceof ApiError;
+  const isError = data instanceof Error || data instanceof ApiError;
   return (
-    <section className="panel p-4">
-      <details open={shouldOpen}>
-        <summary className="cursor-pointer text-sm font-bold text-slate-700">{title}</summary>
-        <pre className="json-box mt-2">{JSON.stringify(serializeError(data), null, 2)}</pre>
+    <section className="panel detail-panel">
+      <SectionHeader
+        title={title}
+        eyebrow={isError ? "Needs attention" : undefined}
+        action={isError ? <span className="badge badge-high">error</span> : <span className="badge">details</span>}
+      />
+      {isError ? (
+        <p className="notice notice-danger">
+          <AlertTriangle size={16} />
+          {data instanceof ApiError ? String(data.detail) : data instanceof Error ? data.message : "The request failed."}
+        </p>
+      ) : null}
+      <details className="advanced-details">
+        <summary>Details</summary>
+        <pre className="json-box">{JSON.stringify(serializeError(data), null, 2)}</pre>
       </details>
     </section>
   );
@@ -1695,9 +2003,10 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
   }
   if (error) {
     return (
-      <section className="panel mt-4 p-4">
-        <h3 className="mb-2 text-base font-bold">Execution Summary</h3>
-        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+      <section className="inline-summary mt-4">
+        <SectionHeader title="Execution Summary" action={<span className="badge badge-high">failed</span>} />
+        <p className="notice notice-danger">
+          <AlertTriangle size={16} />
           {error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}
         </p>
       </section>
@@ -1712,31 +2021,32 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
   const runError = typeof result?.error === "string" ? result.error : "";
 
   return (
-    <section className="panel mt-4 p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-bold">Execution Summary</h3>
-          <p className="text-sm text-slate-600">{moduleId}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className={status === "done" ? "badge badge-low" : "badge badge-medium"}>{status}</span>
-          <span className="badge">{duration}</span>
-        </div>
-      </div>
+    <section className="inline-summary mt-4">
+      <SectionHeader
+        title="Execution Summary"
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <span className="badge">{moduleId}</span>
+            <span className={status === "done" ? "badge badge-low" : "badge badge-medium"}>{status}</span>
+            <span className="badge">{duration}</span>
+          </div>
+        )}
+      />
       {runError && (
-        <p className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-800">
+        <p className="notice notice-danger mb-3">
+          <AlertTriangle size={16} />
           {runError}
         </p>
       )}
-      <div className="telemetry-grid mb-3">
-        <TelemetryMetric label="Findings" value={String(findings.length)} detail="confirmed observations returned by the module" />
-        <TelemetryMetric label="Validation results" value={String(validationCount)} detail="post-run checks linked to findings" />
-        <TelemetryMetric label="Duration" value={duration} detail="server-side execution time" />
+      <div className="mini-stat-grid mb-3">
+        <MiniStat title="Findings" value={String(findings.length)} detail="returned observations" />
+        <MiniStat title="Validation" value={String(validationCount)} detail="post-run checks" />
+        <MiniStat title="Duration" value={duration} detail="server execution" />
       </div>
       {findings.length > 0 ? (
-        <div className="grid gap-2">
+        <div className="compact-list">
           {findings.map((finding, index) => (
-            <div className="rounded-md border border-slate-200 p-3" key={finding.id ?? index}>
+            <div className="compact-row" key={finding.id ?? index}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="font-bold">{finding.title ?? `Finding ${index + 1}`}</div>
@@ -1758,7 +2068,7 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
           ))}
         </div>
       ) : (
-        <EmptyState text={runError ? "No findings were recorded because the module stopped before producing observations." : "No findings returned for this run."} />
+        <EmptyState text={runError ? "No findings recorded." : "No findings returned."} />
       )}
     </section>
   );
@@ -1771,20 +2081,20 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
   }
   const moduleCount = stages.reduce((total, stage) => total + (stage.modules?.length ?? 0), 0);
   return (
-    <section className="panel mt-4 p-4">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-bold">{plan.template}</h3>
-          <p className="text-sm text-slate-600">{plan.description}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="badge">{stages.length} stages</span>
-          <span className="badge">{moduleCount} modules</span>
-        </div>
-      </div>
-      <div className="grid gap-2">
+    <section className="inline-summary mt-4">
+      <SectionHeader
+        title={plan.template ?? "Generated Plan"}
+        description={plan.description}
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <span className="badge">{stages.length} stages</span>
+            <span className="badge">{moduleCount} modules</span>
+          </div>
+        )}
+      />
+      <div className="compact-list">
         {stages.map((stage, index) => (
-          <div className="rounded-md border border-slate-200 p-3" key={`${stage.name ?? "stage"}-${index}`}>
+          <div className="compact-row" key={`${stage.name ?? "stage"}-${index}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold">{index + 1}. {stage.name ?? "stage"}</span>
               <span className="text-xs font-semibold text-slate-500">{stage.modules?.length ?? 0} modules</span>
@@ -1795,9 +2105,7 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-sm text-slate-600">
-        This generated plan is ready for campaign execution APIs and can be used as the structure for a campaign dry-run.
-      </p>
+      <p className="mt-3 text-sm text-slate-500">Ready for campaign dry-run structure.</p>
     </section>
   );
 }
@@ -1805,20 +2113,20 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
 function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; loading?: boolean }) {
   if (loading) {
     return (
-      <section className="panel p-4">
-        <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+      <div className="detail-summary mt-3">
+        <div className="loading-row">
           <Loader2 className="spin" size={16} /> Loading campaign...
         </div>
-      </section>
+      </div>
     );
   }
   if (!campaign) {
-    return <EmptyState text="Select a campaign to review its targets, scope, and stored findings." />;
+    return <EmptyState text="Select a campaign to review scope and findings." />;
   }
   const targets = campaignTargets(campaign);
   const scope = campaignScopeEntries(campaign);
   return (
-    <section className="panel p-4">
+    <div className="detail-summary mt-3">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-bold">{campaign.name}</h3>
@@ -1826,12 +2134,12 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
         </div>
         <span className="badge">{campaign.operator ?? "operator"}</span>
       </div>
-      <div className="telemetry-grid">
-        <TelemetryMetric label="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
-        <TelemetryMetric label="Scope CIDRs" value={String(scope.length)} detail={scope.slice(0, 3).join(", ") || "none declared"} />
-        <TelemetryMetric label="Campaign ID" value={campaign.id.slice(0, 8)} detail="used by API and reports" />
+      <div className="mini-stat-grid">
+        <MiniStat title="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
+        <MiniStat title="Scope CIDRs" value={String(scope.length)} detail={scope.slice(0, 3).join(", ") || "none declared"} />
+        <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -1858,21 +2166,31 @@ function CampaignPicker({
 
 function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
   return (
-    <section className="panel overflow-auto p-4">
+    <section className="panel table-panel">
+      <SectionHeader
+        title="Campaign Activity"
+        action={<span className="badge">{campaigns.length} records</span>}
+      />
       {campaigns.length > 0 ? (
-        <table className="table">
-          <thead><tr><th>Name</th><th>Client</th><th>Status</th><th>Operator</th></tr></thead>
-          <tbody>
-            {campaigns.map((campaign) => (
-              <tr key={campaign.id}>
-                <td>{campaign.name}</td>
-                <td>{campaign.client}</td>
-                <td>{campaign.status}</td>
-                <td>{campaign.operator}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="table">
+            <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Status</th><th>Operator</th></tr></thead>
+            <tbody>
+              {campaigns.map((campaign, index) => (
+                <tr key={campaign.id}>
+                  <td className="muted-cell">#{String(index + 1).padStart(2, "0")}</td>
+                  <td>
+                    <div className="font-medium text-slate-950">{campaign.name}</div>
+                    <div className="mt-1 flex items-center gap-1 text-xs text-slate-500"><Eye size={13} /> {campaign.id.slice(0, 12)}</div>
+                  </td>
+                  <td>{campaign.client || "Internal"}</td>
+                  <td><span className={statusBadge(campaign.status)}>{campaign.status ?? "created"}</span></td>
+                  <td>{campaign.operator || "operator"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <EmptyState text="No campaigns yet. Create one from the Campaigns page to unlock modules, reports, and graph views." />
       )}
@@ -1882,27 +2200,64 @@ function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
 
 function FindingsTable({ findings }: { findings: any[] }) {
   return (
-    <section className="panel overflow-auto p-4">
-      <h3 className="mb-2 font-bold">Findings</h3>
+    <section className="panel table-panel">
+      <SectionHeader
+        title="Findings"
+        action={<span className="badge">{findings.length} records</span>}
+      />
       {findings.length > 0 ? (
-        <table className="table">
-          <thead><tr><th>Severity</th><th>Title</th><th>Module</th><th>MITRE</th><th>Host</th></tr></thead>
-          <tbody>
-            {findings.map((finding, index) => (
-              <tr key={finding.id ?? index}>
-                <td>{finding.severity}</td>
-                <td>{finding.title}</td>
-                <td>{finding.module_id}</td>
-                <td>{finding.mitre_technique}</td>
-                <td>{finding.host}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table className="table">
+            <thead><tr><th>Severity</th><th>Title</th><th>Module</th><th>MITRE</th><th>Host</th></tr></thead>
+            <tbody>
+              {findings.map((finding, index) => (
+                <tr key={finding.id ?? index}>
+                  <td><span className={opsecBadge(finding.severity)}>{finding.severity ?? "info"}</span></td>
+                  <td className="font-medium text-slate-950">{finding.title ?? `Finding ${index + 1}`}</td>
+                  <td>{finding.module_id ?? "n/a"}</td>
+                  <td>{finding.mitre_technique ?? "n/a"}</td>
+                  <td>{finding.host ?? "n/a"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
-        <EmptyState text="No findings recorded for the selected campaign yet." />
+        <EmptyState text="No findings recorded for this campaign." />
       )}
     </section>
+  );
+}
+
+function LiveEventCard({ event, index }: { event: unknown; index: number }) {
+  const record = event && typeof event === "object" && !Array.isArray(event) ? event as Record<string, unknown> : null;
+  const type = String(record?.type ?? record?.event ?? record?.name ?? `event.${index + 1}`);
+  const message = String(record?.message ?? record?.status ?? record?.detail ?? "Campaign event received.");
+  const campaign = typeof record?.campaign_id === "string" ? record.campaign_id : "";
+  const moduleId = typeof record?.module_id === "string" ? record.module_id : "";
+  const created = typeof record?.timestamp === "number"
+    ? formatTimestamp(record.timestamp)
+    : typeof record?.created_at === "string"
+      ? formatDateTime(record.created_at)
+      : "";
+
+  return (
+    <article className="event-card">
+      <div className="event-marker" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <strong>{type}</strong>
+          {campaign ? <span className="badge">Campaign {campaign.slice(0, 8)}</span> : null}
+          {moduleId ? <span className="badge">{moduleId}</span> : null}
+        </div>
+        <p>{message}</p>
+        {created ? <small>{created}</small> : null}
+        <details className="advanced-details compact">
+          <summary>Details</summary>
+          <pre className="json-box">{JSON.stringify(serializeError(event), null, 2)}</pre>
+        </details>
+      </div>
+    </article>
   );
 }
 
@@ -2069,7 +2424,7 @@ function ScreenMessage({ title, body }: { title: string; body: string }) {
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-600">{text}</div>;
+  return <div className="empty-state">{text}</div>;
 }
 
 function strategyBackendHint(backend: string): string {
@@ -2299,11 +2654,26 @@ function isSensitiveModule(module?: ModuleMeta): boolean {
   );
 }
 
-function opsecBadge(level?: string): string {
-  if (level === "high_noise") {
+function statusBadge(status?: string): string {
+  const normalized = String(status ?? "").toLowerCase();
+  if (["active", "running", "ready", "restored", "complete", "completed"].some((item) => normalized.includes(item))) {
+    return "badge badge-low";
+  }
+  if (["failed", "deleted", "blocked", "error"].some((item) => normalized.includes(item))) {
     return "badge badge-high";
   }
-  if (level === "medium") {
+  if (["paused", "pending", "draft", "created"].some((item) => normalized.includes(item))) {
+    return "badge badge-medium";
+  }
+  return "badge";
+}
+
+function opsecBadge(level?: string): string {
+  const normalized = String(level ?? "").toLowerCase();
+  if (normalized.includes("high") || normalized.includes("critical")) {
+    return "badge badge-high";
+  }
+  if (normalized.includes("medium") || normalized.includes("moderate")) {
     return "badge badge-medium";
   }
   return "badge badge-low";
