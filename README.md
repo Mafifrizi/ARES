@@ -275,7 +275,7 @@ Create additional users through the API while logged in as `team_lead`:
 ```powershell
 $token = (Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/auth/token `
+  -Uri http://127.0.0.1:8080/auth/token `
   -ContentType "application/x-www-form-urlencoded" `
   -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
 
@@ -283,7 +283,7 @@ $headers = @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/auth/register `
+  -Uri http://127.0.0.1:8080/auth/register `
   -Headers $headers `
   -ContentType "application/json" `
   -Body (@{
@@ -352,7 +352,7 @@ $bytes = [byte[]]::new(32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
 $env:ARES_SECRET_KEY = -join ($bytes | ForEach-Object { $_.ToString("x2") })
 
-$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 $env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 ```
 
@@ -460,7 +460,7 @@ http://127.0.0.1:5173/dashboard/
 ### 3. Check Health
 
 ```powershell
-Invoke-RestMethod http://localhost:8080/health
+Invoke-RestMethod http://127.0.0.1:8080/health
 ```
 
 Expected:
@@ -492,6 +492,12 @@ configuration, settings loading, and database connectivity.
 
 ```bash
 ares doctor
+```
+
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe doctor
 ```
 
 A green check means the dependency is available. A yellow warning usually means

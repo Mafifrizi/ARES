@@ -285,7 +285,7 @@ Dashboard API keys authenticate scripts and integrations to ARES itself.
 Use them as:
 
 ```bash
-curl http://localhost:8080/campaigns \
+curl http://127.0.0.1:8080/campaigns \
   -H "X-API-Key: ares_YOUR_KEY"
 ```
 
