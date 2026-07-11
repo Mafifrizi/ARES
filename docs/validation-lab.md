@@ -37,6 +37,11 @@ $env:ARES_LAB_PASSWORD="replace-with-your-own-strong-admin-password"
 If the admin password has been changed, put the current password in
 `ARES_LAB_PASSWORD`.
 
+`ARES_DEFAULT_ADMIN_PASSWORD` is used only when ARES creates the first
+`admin` account in an empty user table. Changing that environment variable
+after a local admin already exists does not reset the password used by this
+lab.
+
 ## Direct Python
 
 ```powershell

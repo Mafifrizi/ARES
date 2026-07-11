@@ -89,20 +89,39 @@ Dashboard preview:
 
 ![ARES dashboard overview](docs/assets/screenshots/dashboard-overview.png)
 
+Dashboard shell:
+
+- The left sidebar routes between the major dashboard pages.
+- The topbar menu button collapses and expands the sidebar.
+- Topbar quick search is client-side navigation over the currently loaded
+  dashboard context: page names/routes, campaigns, modules, reports, and
+  templates. It is not a server-backed global search across unloaded historical
+  data.
+- The notification bell is the status surface. There is no separate topbar
+  status pill labeled `Offline` or `Live`.
+- The notification badge counts unread notifications only. Opening the drawer
+  marks visible notifications as read; individual dismiss and clear-all actions
+  remove notifications from the current session. The frontend stores only
+  notification state, not bodies, tokens, API keys, stack traces, or raw
+  payloads.
+- The topbar also shows the signed-in identity and logout action.
+- Page headers provide context, and page tabs switch the visible content for
+  the current section.
+
 Dashboard areas:
 
 | Page | Purpose |
 | --- | --- |
-| Overview | Health, operator telemetry metrics, and campaign summary. |
-| Campaigns | Create, inspect, compare, restore, dry-run, and delete campaigns. |
-| Modules | Browse the module catalog and run backend-generated parameter forms. |
-| Reports | Generate, list, and download authenticated campaign reports with readable evidence tables. |
-| Graph | Review graph data, attack paths, and BloodHound ingest. |
-| Templates | Generate repeatable execution plans. |
-| Strategy | Start or review authorized goal-based planning. |
-| Security | Change password, manage API keys, review audit and users. |
-| EDR/OPSEC | Record bypass outcomes and review EDR/OPSEC telemetry. |
-| Live | Watch campaign WebSocket events. |
+| Overview | Health, operator telemetry metrics, and campaign summary. Overview has no variation tabs. |
+| Campaigns | `List`, `Scope`, and `Findings` tabs for campaign creation, inspection, compare/restore/dry-run actions, and cleanup. |
+| Modules | `Catalog`, `Run Panel`, and `Results` tabs for browsing modules, filling backend-generated parameter forms, and reviewing execution output. |
+| Reports | `Generate` and `Library` tabs for authenticated campaign report creation, listing, and download. |
+| Graph | `Entities`, `Attack Paths`, and `Ingest` tabs for graph review and BloodHound/SharpHound import. |
+| Templates | `Templates` and `Plan Builder` tabs for selecting built-in plans and generating reviewable execution stages. |
+| Strategy | `Objective`, `Active`, and `Result` tabs for authorized goal-based planning and state review. |
+| Security | `Account`, `API Keys`, and `Audit` tabs for password changes, API key lifecycle, audit output, and user review. |
+| EDR/OPSEC | `Knowledge Base` and `Report Outcome` tabs for defensive telemetry and controlled outcome records. |
+| Live | `Stream` and `Buffer` tabs for campaign WebSocket feedback and buffered event review. |
 
 Recommended dashboard workflow:
 
@@ -124,7 +143,7 @@ Recommended dashboard workflow:
 6. Use `Reports` to generate HTML, PDF, Markdown, or JSON output for a campaign.
    PDF generation writes the PDF artifact directly; HTML is generated only when
    you choose the HTML format. Report evidence is rendered as readable tables
-   and key-value rows where possible instead of raw JSON blobs.
+   and key-value rows where possible instead of unformatted report objects.
 7. Use `Security` for account administration. API keys are for scripts and
    integrations; the Security Audit panel reports dependency-audit status for
    the ARES environment, not findings from a target network.
@@ -163,6 +182,10 @@ Planning modes:
 The ARES API key created in the `Security` page is not an OpenAI, Anthropic,
 or Ollama key. It authenticates scripts and integrations to the ARES API.
 LLM provider keys are configured separately in the ARES server environment.
+Creating an ARES API key opens the `Save your key` modal. The full secret is
+shown once, the `Copy` button changes to `Copied` after a successful copy, and
+`Done` closes the modal and clears the in-memory new-key state. The key list
+shows metadata and a prefix only; the full secret cannot be retrieved later.
 
 See [docs/dashboard-guide.md](docs/dashboard-guide.md).
 
@@ -182,6 +205,8 @@ See [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - Backend-driven module parameter schema.
 - Dry-run default in the dashboard.
 - OPSEC levels for module risk.
+- High-noise and sensitive modules remain guarded by authorization and
+  confirmation checks.
 - MITRE ATT&CK metadata for reporting.
 
 See [docs/modules.md](docs/modules.md).
@@ -205,6 +230,12 @@ ARES creates the first `admin` account automatically when the user table is
 empty. That bootstrap account is assigned the `team_lead` role and uses the
 password provided in `ARES_DEFAULT_ADMIN_PASSWORD`. Change that password after
 the first login.
+
+Bootstrap happens only when the user table is empty. Changing
+`ARES_DEFAULT_ADMIN_PASSWORD` after an `admin` user already exists does not
+reset that user's password. For local development, either change the password
+from the `Security` page after logging in or recreate the local database if you
+intend to discard existing local data.
 
 Roles are assigned when a `team_lead` creates a user:
 
@@ -288,7 +319,7 @@ The required values are:
 | --- | --- | --- |
 | `ARES_SECRET_KEY` | The deployer/client | Signs JWT/session security data. Generate a random high-entropy string. |
 | `ARES_ENCRYPTION_KEY` | The deployer/client | Encrypts sensitive stored data such as vault/checkpoint material. Generate a Fernet key and keep it stable. |
-| `ARES_DEFAULT_ADMIN_PASSWORD` | The deployer/client | Bootstrap password for the first `admin` account. Change it after first login. |
+| `ARES_DEFAULT_ADMIN_PASSWORD` | The deployer/client | Bootstrap password for the first `admin` account only when the user table is empty. Change it after first login. |
 
 PowerShell:
 
@@ -316,6 +347,8 @@ encrypted can make existing encrypted records unreadable.
 Dashboard API keys are separate from these startup secrets. Create API keys
 from the Security page only after login when you need scripts, integrations, or
 automation to call the API with `X-API-Key` instead of an interactive session.
+The dashboard shows a new API key secret once in the `Save your key` modal and
+then lists only key metadata and a prefix.
 
 Optional AI planner provider keys:
 
