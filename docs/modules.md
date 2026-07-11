@@ -53,7 +53,7 @@ authorization and a scoped campaign.
 ```powershell
 $token = (Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/auth/token `
+  -Uri http://127.0.0.1:8080/auth/token `
   -ContentType "application/x-www-form-urlencoded" `
   -Body "username=admin&password=YOUR_PASSWORD").access_token
 

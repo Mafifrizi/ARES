@@ -22,7 +22,7 @@ Start ARES first:
 $bytes = [byte[]]::new(32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
 $env:ARES_SECRET_KEY = -join ($bytes | ForEach-Object { $_.ToString("x2") })
-$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 $env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 .\.venv\Scripts\ares-api.exe
 ```

@@ -149,7 +149,7 @@ PowerShell example:
 ```powershell
 $token = (Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/auth/token `
+  -Uri http://127.0.0.1:8080/auth/token `
   -ContentType "application/x-www-form-urlencoded" `
   -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
 
@@ -157,7 +157,7 @@ $headers = @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/auth/register `
+  -Uri http://127.0.0.1:8080/auth/register `
   -Headers $headers `
   -ContentType "application/json" `
   -Body (@{
