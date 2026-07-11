@@ -3,10 +3,10 @@
 The dashboard is the operator UI for ARES. It turns the API, module catalog,
 campaign state, reports, graph data, and security controls into one workflow.
 
-Production URL:
+Production/static route after frontend assets are built:
 
 ```text
-http://localhost:8080/dashboard
+/dashboard
 ```
 
 ## Local Developer Startup
@@ -34,13 +34,14 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
+Set-Location C:\path\to\ARES
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-cd frontend
+Set-Location C:\path\to\ARES\frontend
 "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 

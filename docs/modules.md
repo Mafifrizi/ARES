@@ -25,7 +25,10 @@ layer; the backend remains the enforcement boundary.
 
 ### Dashboard Flow
 
-1. Open `http://localhost:8080/dashboard`.
+1. For local development, run `ares dashboard dev` from the repository root
+   and open `http://127.0.0.1:5173/dashboard/`. In production/static mode,
+   FastAPI serves the built dashboard at `/dashboard` after frontend assets are
+   built.
 2. Log in as an authorized operator.
 3. Go to `Campaigns`.
 4. Create or select a campaign.

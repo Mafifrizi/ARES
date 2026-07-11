@@ -79,10 +79,23 @@ ARES focuses on the operational layer:
 
 ### Operator Dashboard
 
-The React dashboard is served at:
+ARES has two dashboard serving modes:
 
-```text
-http://localhost:8080/dashboard
+- Local development: run the launcher from the repository root and open the
+  Vite dashboard at `http://127.0.0.1:5173/dashboard/`.
+- Production/static serving: after the frontend assets are built, FastAPI
+  serves the compiled dashboard at `/dashboard`.
+
+Recommended local development command:
+
+```bash
+ares dashboard dev
+```
+
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe dashboard dev
 ```
 
 Dashboard preview:
@@ -389,6 +402,12 @@ Recommended local dashboard startup from the repository root:
 ares dashboard dev
 ```
 
+Windows virtualenv example:
+
+```powershell
+.\.venv\Scripts\ares.exe dashboard dev
+```
+
 The launcher starts both services in one terminal:
 
 - Backend API: `http://127.0.0.1:8080`
@@ -415,13 +434,14 @@ Manual fallback for troubleshooting:
 Terminal 1:
 
 ```powershell
+Set-Location C:\path\to\ARES
 .\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
 ```
 
 Terminal 2:
 
 ```powershell
-cd frontend
+Set-Location C:\path\to\ARES\frontend
 "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
 ```
 
@@ -638,7 +658,8 @@ PDF report visual QA passed through browser fallback and Poppler render checks
 
 Runtime features confirmed locally:
 
-- Dashboard loads at `/dashboard`.
+- Production/static dashboard loads from FastAPI at `/dashboard` after frontend
+  assets are built; local Vite dev mode uses `http://127.0.0.1:5173/dashboard/`.
 - Health endpoint returns connected DB.
 - Login, password change, API key lifecycle, and campaign cleanup work.
 - Report generation and authenticated download work.
