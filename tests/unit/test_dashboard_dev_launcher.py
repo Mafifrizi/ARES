@@ -211,5 +211,8 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
     output = capsys.readouterr().out
     assert "Dashboard URL: http://127.0.0.1:5173/dashboard/" in output
     assert "Login username: admin" in output
-    assert "Login password: value of ARES_DEFAULT_ADMIN_PASSWORD in .env" in output
+    assert (
+        "Password source: ARES_DEFAULT_ADMIN_PASSWORD from current environment or .env"
+        in output
+    )
     assert "DoNotPrintThisSecret123!" not in output
