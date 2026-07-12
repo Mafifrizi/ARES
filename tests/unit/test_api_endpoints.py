@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -53,6 +54,27 @@ def _make_token(username: str, role: str) -> str:
 
 def _auth(username: str, role: str) -> dict:
     return {"Authorization": f"Bearer {_make_token(username, role)}"}
+
+
+def _api_key_headers(raw_key: str = "ares_test_api_key") -> dict:
+    return {"X-API-Key": raw_key}
+
+
+def _api_key_record(
+    scopes: str | list[str],
+    *,
+    username: str = "admin",
+    role: str = "team_lead",
+    key_id: str = "api-key-1",
+) -> dict[str, Any]:
+    scope_list = [scopes] if isinstance(scopes, str) else scopes
+    return {
+        "username": username,
+        "role": role,
+        "auth_type": "api_key",
+        "key_id": key_id,
+        "scopes": scope_list,
+    }
 
 
 def _make_mock_db():
@@ -271,6 +293,203 @@ class TestAuthFlow:
 
 
 # ── RBAC enforcement ──────────────────────────────────────────────────────────
+
+
+class TestAPIKeyScopeEnforcement:
+    def setup_method(self):
+        _reset_rate_limiter()
+
+    @pytest.mark.asyncio
+    async def test_api_key_identity_preserves_metadata(self, aclient):
+        _, db, _ = aclient
+        from ares.api.server import get_current_user_or_apikey
+
+        db.verify_api_key.return_value = _api_key_record(["read", "write"])
+        request = SimpleNamespace(
+            headers=_api_key_headers(),
+            app=SimpleNamespace(state=SimpleNamespace(db=db)),
+        )
+
+        actor = await get_current_user_or_apikey(request, bearer=None)
+
+        assert actor.username == "admin"
+        assert actor.role == "team_lead"
+        assert actor.auth_type == "api_key"
+        assert actor.is_api_key
+        assert actor.api_key_id == "api-key-1"
+        assert actor.api_key_scopes == ("read", "write")
+
+    @pytest.mark.asyncio
+    async def test_read_scoped_api_key_cannot_generate_report(self, aclient):
+        c, db, _ = aclient
+        db.verify_api_key.return_value = _api_key_record("read")
+        db.get_campaign.reset_mock()
+
+        r = await c.post("/reports/camp-api-key", headers=_api_key_headers())
+
+        assert r.status_code == 403
+        db.get_campaign.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_write_scoped_api_key_can_generate_report_when_campaign_access_allows(
+        self, aclient, tmp_path, monkeypatch
+    ):
+        c, db, _ = aclient
+        import ares.modules.reporting.report_gen as report_gen
+
+        db.verify_api_key.return_value = _api_key_record("write")
+        db.audit.reset_mock()
+        db.get_campaign.return_value = {
+            "id": "camp-api-key",
+            "name": "API Key Campaign",
+            "client": "Internal",
+            "operator": "admin",
+            "targets": [],
+            "scope": [],
+        }
+
+        class FakeReportGenerator:
+            def generate(self, campaign, fmt="html"):
+                path = tmp_path / f"{campaign.id}_report.{fmt}"
+                path.write_text("report", encoding="utf-8")
+                return path
+
+        monkeypatch.setattr(report_gen, "ReportGenerator", FakeReportGenerator)
+
+        r = await c.post(
+            "/reports/camp-api-key?fmt=html",
+            headers=_api_key_headers(),
+        )
+
+        assert r.status_code == 200
+        assert r.json()["filename"] == "camp-api-key_report.html"
+        db.audit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_write_scoped_api_key_does_not_bypass_campaign_access(self, aclient):
+        c, db, _ = aclient
+        db.verify_api_key.return_value = _api_key_record(
+            "write", username="reporter_user", role="reporter"
+        )
+        db.get_campaign.return_value = {
+            "id": "camp-api-key",
+            "name": "API Key Campaign",
+            "operator": "admin",
+        }
+
+        r = await c.post(
+            "/reports/camp-api-key?fmt=html",
+            headers=_api_key_headers(),
+        )
+
+        assert r.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_jwt_auth_generate_report_unchanged(
+        self, aclient, tmp_path, monkeypatch
+    ):
+        c, db, _ = aclient
+        import ares.modules.reporting.report_gen as report_gen
+
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": "camp-jwt",
+            "name": "JWT Campaign",
+            "client": "Internal",
+            "operator": "admin",
+            "targets": [],
+            "scope": [],
+        }
+
+        class FakeReportGenerator:
+            def generate(self, campaign, fmt="html"):
+                path = tmp_path / f"{campaign.id}_report.{fmt}"
+                path.write_text("report", encoding="utf-8")
+                return path
+
+        monkeypatch.setattr(report_gen, "ReportGenerator", FakeReportGenerator)
+
+        r = await c.post(
+            "/reports/camp-jwt?fmt=html",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 200
+        assert r.json()["filename"] == "camp-jwt_report.html"
+
+    @pytest.mark.parametrize(
+        ("method", "path", "kwargs"),
+        [
+            (
+                "post",
+                "/auth/change-password",
+                {
+                    "json": {
+                        "current_password": "CurrentPassword123!",
+                        "new_password": "NewPassword123!",
+                    }
+                },
+            ),
+            (
+                "post",
+                "/auth/api-keys",
+                {"json": {"name": "ci", "scopes": "admin"}},
+            ),
+            ("get", "/auth/api-keys", {}),
+            ("delete", "/auth/api-keys/api-key-1", {}),
+            ("post", "/auth/logout", {}),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_api_key_cannot_manage_account_or_api_key_lifecycle(
+        self, aclient, method, path, kwargs
+    ):
+        c, db, _ = aclient
+        db.verify_api_key.return_value = _api_key_record("admin")
+
+        r = await getattr(c, method)(path, headers=_api_key_headers(), **kwargs)
+
+        assert r.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_jwt_auth_can_create_list_and_delete_api_keys(self, aclient):
+        c, db, _ = aclient
+        db.is_access_token_revoked.return_value = False
+        db.get_user.return_value = {"id": "user-1", "username": "admin"}
+        db.create_api_key = AsyncMock(
+            return_value=("api-key-1", "ares_created_secret_value")
+        )
+        db.list_api_keys = AsyncMock(
+            return_value=[
+                {
+                    "id": "api-key-1",
+                    "name": "ci",
+                    "key_prefix": "ares_created",
+                    "scopes": "read",
+                }
+            ]
+        )
+        db.revoke_api_key = AsyncMock(return_value=True)
+
+        headers = _auth("admin", "team_lead")
+        create = await c.post(
+            "/auth/api-keys",
+            headers=headers,
+            json={"name": "ci", "scopes": "read"},
+        )
+        listed = await c.get("/auth/api-keys", headers=headers)
+        deleted = await c.delete("/auth/api-keys/api-key-1", headers=headers)
+
+        assert create.status_code == 200
+        assert create.json()["key"] == "ares_created_secret_value"
+        assert listed.status_code == 200
+        item = listed.json()[0]
+        assert item["key_prefix"] == "ares_created"
+        assert "key" not in item
+        assert "raw_key" not in item
+        assert "key_hash" not in item
+        assert deleted.status_code == 200
+        assert deleted.json() == {"status": "revoked"}
 
 
 class TestRBACEnforcement:

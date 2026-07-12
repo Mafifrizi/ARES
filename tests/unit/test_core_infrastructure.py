@@ -288,6 +288,9 @@ class TestAresDatabase:
         # List
         keys = await db.list_api_keys(uid)
         assert len(keys) >= 1
+        assert all("key_hash" not in key for key in keys)
+        assert all("key" not in key and "raw_key" not in key for key in keys)
+        assert raw_key not in repr(keys)
         # Revoke
         key_id = keys[0]["id"]
         revoked = await db.revoke_api_key(key_id, uid)
