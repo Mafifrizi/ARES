@@ -254,4 +254,5 @@ ARES_REDIS_URL=redis://redis:6379 ares worker start --capabilities cloud
 ```
 
 Workers auto-register and receive tasks matching their capability set.
-For Docker deployment, see `docker-compose.yml` in project root.
+For Docker deployment, see `docker/docker-compose.prod.yml`; for local Docker
+development, see `docker/docker-compose.dev.yml`.

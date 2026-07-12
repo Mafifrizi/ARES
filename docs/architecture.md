@@ -1,6 +1,6 @@
 # ARES Architecture
 
-**Version:** 0.9.0 | **Status:** Active Development
+**Version:** 6.0.0 | **Status:** Active Development
 
 ## Overview
 
@@ -302,5 +302,5 @@ ARES/
 ├── tests/
 │   ├── unit/           pytest unit tests (test_v5 through test_v9)
 │   └── integration/    End-to-end campaign tests
-└── docker/             Dockerfile, docker-compose.yml
+└── docker/             Dockerfiles, docker/docker-compose.dev.yml, docker/docker-compose.prod.yml
 ```
