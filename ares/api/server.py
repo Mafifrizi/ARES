@@ -10,7 +10,7 @@ v6.0.0 changes vs v1.0.0:
   ✓ WebSocket /ws/campaigns/{id}/events — real-time module progress
   ✓ Pagination on /campaigns, /campaigns/{id}/findings
   ✓ X-RateLimit-Remaining + X-Total-Count response headers
-  ✓ POST /auth/change-password, GET /auth/api-keys CRUD
+  ✓ JWT-only account management and API-key lifecycle endpoints
 """
 
 from __future__ import annotations
@@ -455,11 +455,48 @@ async def get_current_user_or_apikey(
         db = get_db(request)
         data = await db.verify_api_key(api_key)
         if data:
-            return AuthenticatedUser(username=data["username"], role=data["role"])
+            return AuthenticatedUser(
+                username=data["username"],
+                role=data["role"],
+                auth_type="api_key",
+                api_key_id=data.get("key_id") or data.get("id"),
+                api_key_scopes=_normalize_api_key_scopes(data.get("scopes")),
+            )
     raise HTTPException(401, "Not authenticated. Provide Bearer token or X-API-Key.")
 
 
-_current_user_or_apikey_dep = Depends(get_current_user_or_apikey)
+def _normalize_api_key_scopes(raw_scopes: Any) -> tuple[str, ...]:
+    if raw_scopes is None:
+        return ()
+    if isinstance(raw_scopes, str):
+        return tuple(
+            scope.strip()
+            for scope in raw_scopes.replace(",", " ").split()
+            if scope.strip()
+        )
+    if isinstance(raw_scopes, (list, tuple, set)):
+        return tuple(str(scope).strip() for scope in raw_scopes if str(scope).strip())
+    return ()
+
+
+def require_api_key_scope(*allowed_scopes: str) -> Any:
+    async def _check(
+        actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    ) -> AuthenticatedUser:
+        if actor.is_api_key and not actor.has_api_scope(*allowed_scopes):
+            raise HTTPException(
+                403,
+                "API key scope insufficient. "
+                f"Required one of: {', '.join(allowed_scopes)}",
+            )
+        return actor
+
+    return _check
+
+
+_api_key_read_dep = Depends(require_api_key_scope("read", "write", "admin"))
+_api_key_write_dep = Depends(require_api_key_scope("write", "admin"))
+_current_user_or_apikey_dep = _api_key_read_dep
 _db_dep = Depends(get_db)
 
 
@@ -597,7 +634,7 @@ async def refresh_access_token(
 @app.post("/auth/logout", tags=["auth"])
 async def logout(
     request: Request,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = Depends(require_any_auth()),
     settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
@@ -704,7 +741,7 @@ class ChangePasswordRequest(BaseModel):
 async def change_password(
     request: Request,
     body: ChangePasswordRequest,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = Depends(require_any_auth()),
     settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
@@ -744,7 +781,7 @@ async def change_password(
 
 @app.get("/auth/me", tags=["auth"])
 async def whoami(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
 ) -> dict:
     return {"username": actor.username, "role": actor.role}
 
@@ -761,7 +798,7 @@ class CreateAPIKeyRequest(BaseModel):
 @app.post("/auth/api-keys", tags=["auth"])
 async def create_api_key(
     body: CreateAPIKeyRequest,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = Depends(require_any_auth()),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
     """Create API key for CI/CD automation. Key is shown ONCE — save it."""
@@ -782,7 +819,7 @@ async def create_api_key(
 
 @app.get("/auth/api-keys", tags=["auth"])
 async def list_api_keys(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = Depends(require_any_auth()),
     db: AresDatabase = Depends(get_db),
 ) -> list[dict]:
     user = await db.get_user(actor.username)
@@ -794,7 +831,7 @@ async def list_api_keys(
 @app.delete("/auth/api-keys/{key_id}", tags=["auth"])
 async def revoke_api_key(
     key_id: str,
-    actor: AuthenticatedUser = Depends(get_current_user),
+    actor: AuthenticatedUser = Depends(require_any_auth()),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
     user = await db.get_user(actor.username)
@@ -935,7 +972,7 @@ async def create_campaign(
 async def list_campaigns(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> JSONResponse:
     """List campaigns with pagination. Returns X-Total-Count header.
@@ -957,7 +994,7 @@ async def list_campaigns(
 @app.get("/campaigns/{campaign_id}", tags=["campaigns"])
 async def get_campaign(
     campaign_id: str,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     c = await db.get_campaign(campaign_id)
@@ -1044,7 +1081,7 @@ async def list_findings(
     per_page: int = Query(50, ge=1, le=500),
     severity: str | None = Query(None, pattern="^(critical|high|medium|low|info)$"),
     false_positive: bool | None = None,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> JSONResponse:
     """Paginated findings. Filters: severity, false_positive."""
@@ -1070,7 +1107,7 @@ async def list_findings(
 
 @app.get("/modules", tags=["modules"])
 async def list_modules(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     engine: AresEngine = Depends(get_engine),
 ) -> list[dict]:
     from ares.modules.params import MODULE_PARAMS
@@ -1636,7 +1673,7 @@ async def _broadcast_event(campaign_id: str, event: dict[str, Any]) -> None:
 @app.get("/campaigns/{campaign_id}/cvss", tags=["campaigns"])
 async def get_cvss_summary(
     campaign_id: str,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """CVSS v3.1 score summary for a campaign — for compliance reports (PCI-DSS, ISO 27001)."""
@@ -1785,7 +1822,7 @@ def _delete_report_artifacts_for_campaign(campaign_id: str) -> int:
 async def generate_report(
     campaign_id: str,
     fmt: str = Query("html", pattern="^(html|pdf|markdown|json)$"),
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_write_dep,
     _rate: None = Depends(rate_limit("report")),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
@@ -1876,7 +1913,7 @@ async def download_report(
 
 @app.get("/telemetry", tags=["telemetry"])
 async def get_telemetry(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
 ) -> dict[str, Any]:
     from ares.telemetry.collector import get_collector
 
@@ -1885,7 +1922,7 @@ async def get_telemetry(
 
 @app.get("/telemetry/prometheus", tags=["telemetry"])
 async def get_prometheus(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
 ) -> Any:
     from fastapi.responses import PlainTextResponse
 
@@ -1903,7 +1940,7 @@ async def get_prometheus(
 @app.get("/graph/{campaign_id}", tags=["visualization"])
 async def campaign_graph(
     campaign_id: str,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     from ares.api.graph import build_campaign_graph
@@ -1924,7 +1961,7 @@ async def campaign_attack_paths(
     top_n: int = 5,
     source: str | None = None,
     target: str | None = None,
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -2222,7 +2259,7 @@ def _diff_findings(
 
 @app.get("/templates", tags=["campaigns"])
 async def list_templates(
-    actor: AuthenticatedUser = Depends(get_current_user_or_apikey),
+    actor: AuthenticatedUser = _api_key_read_dep,
 ) -> list[dict]:
     """List available campaign templates."""
     from ares.core.engine import list_campaign_templates
