@@ -1610,7 +1610,7 @@ def _run_dashboard_dev(
     console.print(f"Backend API URL: {backend_url}")
     console.print(f"Dashboard URL: {dashboard_url}")
     console.print("Login username: admin")
-    console.print("Login password: value of ARES_DEFAULT_ADMIN_PASSWORD in .env (not printed)")
+    console.print("Password source: ARES_DEFAULT_ADMIN_PASSWORD from current environment or .env")
     if not (root_path / ".env").exists():
         console.print("[yellow]Warning:[/yellow] .env was not found in the repo root.")
     console.print()
