@@ -126,9 +126,9 @@ class ServiceHijackModule(BaseModule):
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """
         from ares.modules.base import ModuleResult
-        host     = ctx.params.get("host") or getattr(ctx, "target", "localhost")
-        ssh_user = ctx.params.get("ssh_user")
-        ssh_key  = ctx.params.get("ssh_key")
+        host     = ctx.params.get("target") or ctx.params.get("host") or getattr(ctx, "target", "localhost")
+        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+        ssh_key  = ctx.params.get("key_path") or ctx.params.get("ssh_key")
         ssh_pass = ctx.params.get("ssh_pass") or ctx.params.get("password", "")
         ssh_port = ctx.params.get("ssh_port", 22)
         if getattr(ctx, "dry_run", False):

@@ -3,10 +3,20 @@ set -e
 
 echo "=== ARES Setup ==="
 
-# Check Python 3.10+
-python3 -c "import sys; assert sys.version_info >= (3,10), 'Python 3.10+ required'" 2>/dev/null \
-    || { echo "ERROR: Python 3.10+ required"; exit 1; }
+# Check Python 3.10-3.12. The tested release path is Python 3.12.x.
+python3 -c "import sys; assert (3,10) <= sys.version_info[:2] < (3,13), 'Python 3.10-3.12 required'" 2>/dev/null \
+    || { echo "ERROR: Python 3.10-3.12 required"; exit 1; }
 echo "[OK] Python $(python3 --version)"
+python3 - <<'PY'
+import sys
+
+if sys.version_info[:2] != (3, 12):
+    print("[!] Package metadata permits Python 3.10-3.12, but the tested")
+    print("    release path for the dashboard and Windows AD/Impacket modules")
+    print("    is Python 3.12.x")
+else:
+    print("[OK] Python 3.12.x detected for the tested release path")
+PY
 
 # Create virtual environment kalau belum ada
 if [ ! -d ".venv" ]; then
@@ -20,9 +30,9 @@ source .venv/bin/activate
 # Upgrade pip
 pip install --upgrade pip -q
 
-# Install ARES + dev deps
+# Install ARES + dev deps and PDF backend extras
 echo "[*] Installing dependencies..."
-pip install -e ".[dev]" -q
+pip install -e ".[dev,pdf]" -q
 
 # Generate .env kalau belum ada
 if [ ! -f ".env" ]; then

@@ -261,19 +261,15 @@ class LinuxPrivescParams(ModuleParams):
 class ADCSParams(DomainAuthParams):
     """ad.adcs — ADCS ESC1-ESC8 enumeration and exploitation."""
 
-    ca_server: str = param(
-        "CA server hostname or IP", required=False, default="", max_length=253
-    )
-    mode: str = param(
-        "Mode: enumerate|exploit",
+    exploit_esc1: bool = param(
+        "Attempt ESC1 certificate request if vulnerable",
         required=False,
-        default="enumerate",
-        pattern=r"^(enumerate|exploit)$",
+        default=False,
     )
-    template: str = param(
-        "Target certificate template (exploit mode)",
+    target_user: str = param(
+        "User to request a certificate for when exploiting ESC1",
         required=False,
-        default="",
+        default="Administrator",
         max_length=256,
     )
 
@@ -346,11 +342,23 @@ class DelegationAbuseParams(DomainAuthParams):
         default="enumerate",
         pattern=r"^(enumerate|unconstrained|constrained|rbcd)$",
     )
-    target_host: str = param(
-        "Target computer for delegation abuse",
+    target_computer: str = param(
+        "Target computer object for RBCD delegation abuse",
         required=False,
         default="",
         max_length=253,
+    )
+    impersonate_user: str = param(
+        "User to impersonate via S4U",
+        required=False,
+        default="Administrator",
+        max_length=256,
+    )
+    target_service: str = param(
+        "Service SPN prefix to request",
+        required=False,
+        default="cifs",
+        max_length=64,
     )
 
 
@@ -405,11 +413,20 @@ class AzureADParams(ModuleParams):
 
     tenant_id: str | None = param("Azure tenant ID", required=False, default=None)
     client_id: str | None = param("App client ID", required=False, default=None)
-    mode: str = param(
-        "Auth mode: device_code|client_credentials",
+    client_secret: SecretParam | None = param(
+        "App client secret", required=False, default=None, secret=True
+    )
+    access_token: SecretParam | None = param(
+        "Existing Microsoft Graph access token",
         required=False,
-        default="device_code",
-        pattern=r"^(device_code|client_credentials)$",
+        default=None,
+        secret=True,
+    )
+    technique: str = param(
+        "Technique: enumerate|device_code|sp_audit",
+        required=False,
+        default="enumerate",
+        pattern=r"^(enumerate|device_code|sp_audit)$",
     )
 
 

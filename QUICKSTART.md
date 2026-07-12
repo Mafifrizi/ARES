@@ -32,8 +32,11 @@ Notes:
 
 - The setup script is the Linux/macOS bootstrap path. On Windows, use the
   PowerShell commands above to create `.venv` and install the editable package.
+- Use Python 3.12.x for the release path. Package metadata allows Python
+  3.10-3.12, but the dashboard and Windows AD/Impacket lab validation are
+  tested on Python 3.12.x.
 - Some offensive-security integrations are optional. `ares doctor` will tell you which optional packages or native tools are missing for AD, cloud, container, or password-cracking workflows.
-- PDF support uses WeasyPrint when available and has a local browser fallback in the API.
+- PDF support uses WeasyPrint when available and has a local Edge/Chrome/Chromium browser fallback in the API. On Windows, use Python 3.12.x and run `ares doctor` if PDF export cannot find a backend or writable browser profile.
 
 ## 3. Configure Secrets
 
@@ -324,7 +327,7 @@ Windows virtualenv example:
 .\.venv\Scripts\ares.exe doctor
 ```
 
-`ares doctor` checks Python, key dependencies, optional module integrations, native tools, network socket support, environment configuration, and the local database.
+`ares doctor` checks Python, key dependencies, optional module integrations, native tools, PDF export capability, network socket support, environment configuration, and the local database.
 
 A yellow warning means an optional integration is missing. A red failure means a required dependency or configuration item needs attention.
 
@@ -333,6 +336,7 @@ Common examples:
 | Message | Meaning |
 | --- | --- |
 | `impacket` missing or old | AD/SMB modules need the optional impacket dependency. |
+| `Windows AD/Impacket Python` warning | Windows AD lab validation is tested on Python 3.12.x. |
 | `pip-audit not installed` | Dependency audit is unavailable; core API can still start. |
 | `hashcat not in PATH` | Password-cracking helpers cannot use hashcat until installed. |
 | `.env configured` failed | Required environment values are missing. |

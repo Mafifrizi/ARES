@@ -302,7 +302,7 @@ Security page, but role assignment is done at account creation time through
 ### Reporting
 
 - HTML, Markdown, and JSON report output.
-- PDF output through WeasyPrint when available, with a Chromium-compatible
+- PDF output through WeasyPrint when available, with an Edge/Chrome/Chromium
   browser fallback for local environments that do not have WeasyPrint native
   libraries installed.
 - ARES branding in generated reports with footer-safe page spacing.
@@ -487,8 +487,8 @@ Validation lab passed.
 ### 5. Check Prerequisites With Doctor
 
 `ares doctor` checks the runtime you are about to operate: Python, required
-packages, optional module dependencies, common service sockets, environment
-configuration, settings loading, and database connectivity.
+packages, optional module dependencies, PDF export capability, common service
+sockets, environment configuration, settings loading, and database connectivity.
 
 ```bash
 ares doctor
@@ -529,7 +529,7 @@ Backend:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,pdf]"
 pytest tests/unit -q
 ```
 
@@ -554,8 +554,10 @@ Platform notes:
 
 - Windows: use PowerShell and `.\.venv\Scripts\python.exe`.
 - Linux, Kali, and macOS: use `source .venv/bin/activate`.
-- The package targets Python 3.10+. Keep one project virtual environment per
-  OS instead of copying `.venv` directories between machines.
+- The package metadata allows Python 3.10-3.12, but the tested release path for
+  the dashboard and Windows AD/Impacket lab modules is Python 3.12.x.
+- Keep one project virtual environment per OS instead of copying `.venv`
+  directories between machines. Use Python 3.12.x for release validation.
 - Optional AD, cloud, container, Windows, and PDF dependencies are not required
   for the core dashboard to start.
 

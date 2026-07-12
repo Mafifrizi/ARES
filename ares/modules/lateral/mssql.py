@@ -86,11 +86,13 @@ class MSSQLModule(BaseModule):
         port      = int(ctx.params.get("port", 1433))
         command   = ctx.params.get("command", "whoami")
         technique = ctx.params.get("technique", "xp_cmdshell")  # xp_cmdshell|linked|unc_coerce
-        listener  = ctx.params.get("listener_ip", "")   # for UNC coercion
+        linked    = ctx.params.get("linked", "")
+        listener  = ctx.params.get("listener", "") or ctx.params.get("listener_ip", "")   # for UNC coercion
 
         findings, raw = await self.run(
             target=target, username=username, password=password,
-            port=port, command=command, technique=technique, listener=listener,
+            port=port, command=command, technique=technique,
+            linked=linked, listener=listener,
         )
         return ModuleResult(
             status="success" if findings else "partial",
@@ -101,7 +103,8 @@ class MSSQLModule(BaseModule):
     @trace_module("lateral.mssql")
     async def run(self, target: str, username: str, password: str,
                   port: int = 1433, command: str = "whoami",
-                  technique: str = "xp_cmdshell", listener: str = "",
+                  technique: str = "xp_cmdshell", linked: str = "",
+                  listener: str = "",
                   **kwargs: Any):
         await self.before_request(target, "default")
         logger.info("mssql_start", target=target, technique=technique)
@@ -198,25 +201,25 @@ class MSSQLModule(BaseModule):
                 )
 
         # Linked server hop
-        elif technique == "linked" and info.get("linked_servers"):
+        elif technique == "linked" and (linked or info.get("linked_servers")):
+            linked_server = linked or info["linked_servers"][0]
             linked_output = await loop.run_in_executor(
                 None,
                 lambda: self._linked_server_sync(
-                    target, username, password, port,
-                    info["linked_servers"][0], command,
+                    target, username, password, port, linked_server, command,
                 ),
             )
             if linked_output:
                 self.finding(
-                    title       = f"MSSQL Linked Server RCE: {info['linked_servers'][0]}",
+                    title       = f"MSSQL Linked Server RCE: {linked_server}",
                     description = (
-                        f"Executed command via linked server '{info['linked_servers'][0]}' "
+                        f"Executed command via linked server '{linked_server}' "
                         f"from {target}: '{command}'"
                     ),
                     severity    = Severity.CRITICAL,
                     mitre_technique = "T1505.001",
                     mitre_tactic    = "Lateral Movement",
-                    evidence    = {"linked_server": info["linked_servers"][0],
+                    evidence    = {"linked_server": linked_server,
                                    "output": linked_output[:300]},
                     host = target, confidence = 0.9,
                     remediation = "Remove unnecessary linked servers. Disable xp_cmdshell on linked servers.",

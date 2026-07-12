@@ -348,18 +348,22 @@ class PostgresDatabase:
             await conn.execute("""
                 INSERT INTO findings
                 (id,campaign_id,module_id,title,description,severity,cvss_score,cvss_vector,
-                 confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                 confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id,
+                 validated,false_positive)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                 ON CONFLICT(id) DO UPDATE SET
                   title=EXCLUDED.title, description=EXCLUDED.description,
-                  severity=EXCLUDED.severity, evidence_json=EXCLUDED.evidence_json
+                  severity=EXCLUDED.severity, evidence_json=EXCLUDED.evidence_json,
+                  validated=EXCLUDED.validated, false_positive=EXCLUDED.false_positive
             """, f.id, campaign_id, module_id or getattr(f, "module_id", ""),
                 f.title, f.description,
                 f.severity.value if hasattr(f.severity, "value") else str(f.severity),
                 getattr(f, "cvss_score", 0.0), getattr(f, "cvss_vector", ""),
                 f.confidence, f.mitre_technique, f.mitre_tactic,
                 json.dumps(f.evidence), f.remediation, f.host,
-                getattr(f, "trace_id", ""))
+                getattr(f, "trace_id", ""),
+                int(bool(getattr(f, "validated", False))),
+                int(bool(getattr(f, "false_positive", False))))
 
     async def list_findings(
         self,
@@ -394,7 +398,11 @@ class PostgresDatabase:
         return [self._row_to_dict(r) for r in rows], total or 0
 
     async def get_findings(self, campaign_id: str, confirmed_only: bool = False) -> list[dict]:
-        where = "campaign_id=$1" + (" AND validated=1" if confirmed_only else "")
+        where = (
+            "campaign_id=$1 AND validated=1 AND false_positive=0"
+            if confirmed_only
+            else "campaign_id=$1"
+        )
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC",

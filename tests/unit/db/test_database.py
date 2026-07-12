@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,6 +24,7 @@ from ares.db.database import AresDatabase, Credential, Host, Loot
 from ares.modules.base import BaseModule
 from ares.modules.reporting.report_gen import (
     BROWSER_PDF_TIMEOUT_SECONDS,
+    ReportDependencyError,
     ReportGenerator,
 )
 
@@ -256,6 +258,22 @@ class TestDatabase:
         assert "credential_count" in summary
         assert "loot_count" in summary
 
+    @pytest.mark.asyncio
+    async def test_save_finding_persists_validation_flags(
+        self, db: AresDatabase, campaign: Campaign, confirmed_finding: Finding
+    ) -> None:
+        await db.save_campaign(campaign)
+        confirmed_finding.validated = True
+        confirmed_finding.false_positive = False
+        await db.save_finding(campaign.id, confirmed_finding, confirmed_finding.module_id)
+
+        confirmed = await db.get_findings(campaign.id, confirmed_only=True)
+
+        assert len(confirmed) == 1
+        assert confirmed[0]["id"] == confirmed_finding.id
+        assert confirmed[0]["validated"] == 1
+        assert confirmed[0]["false_positive"] == 0
+
 
 # ── Reporting Tests ───────────────────────────────────────────────────────────
 
@@ -290,7 +308,18 @@ class TestReportGenerator:
         md = path.read_text()
         assert "# ARES Report" in md
 
-    def test_generate_all(self, campaign_with_findings: Campaign, tmp_path: Path) -> None:
+    def test_generate_all(
+        self,
+        campaign_with_findings: Campaign,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fake_pdf(self: ReportGenerator, campaign: Campaign, graph_json: dict[str, Any] | None) -> Path:
+            path = self._out(campaign, "pdf")
+            path.write_bytes(b"%PDF-1.4\n% unit fake\n")
+            return path
+
+        monkeypatch.setattr(ReportGenerator, "_gen_pdf", fake_pdf)
         gen = ReportGenerator(output_dir=str(tmp_path))
         paths = gen.generate_all(campaign_with_findings)
         assert "json" in paths
@@ -307,8 +336,9 @@ class TestReportGenerator:
 
         with (
             patch.object(gen, "_pdf_browser_candidates", return_value=[browser]),
-            patch(
-                "ares.modules.reporting.report_gen.subprocess.run",
+            patch.object(
+                gen,
+                "_run_pdf_browser",
                 side_effect=subprocess.TimeoutExpired(
                     cmd=[str(browser)], timeout=BROWSER_PDF_TIMEOUT_SECONDS
                 ),
@@ -316,7 +346,175 @@ class TestReportGenerator:
         ):
             assert gen._write_pdf_with_browser("<html></html>", pdf_path) is False
 
-        assert run_browser.call_args.kwargs["timeout"] == BROWSER_PDF_TIMEOUT_SECONDS
+        assert run_browser.call_args.args[0][0] == str(browser)
+        assert f"{BROWSER_PDF_TIMEOUT_SECONDS}s" in gen._last_pdf_browser_error
+        assert not pdf_path.exists()
+
+    def test_pdf_browser_workspace_falls_back_when_first_root_unwritable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        bad_root = tmp_path / "bad-runtime-root"
+        good_root = tmp_path / "good-runtime-root"
+
+        def fake_probe(path: Path) -> None:
+            if path == bad_root:
+                raise OSError("not writable")
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+
+        monkeypatch.setattr(
+            gen, "_pdf_browser_workspace_roots", lambda: [bad_root, good_root]
+        )
+        monkeypatch.setattr(gen, "_probe_writable_dir", fake_probe)
+
+        work_path, profile_dir, html_path = gen._create_pdf_browser_workspace()
+
+        assert work_path.parent == good_root
+        assert profile_dir == work_path / "profile"
+        assert profile_dir.is_dir()
+        assert html_path == work_path / "report.html"
+        writable_probe = profile_dir / "writable.txt"
+        writable_probe.write_text("ok", encoding="utf-8")
+        assert writable_probe.read_text(encoding="utf-8") == "ok"
+
+    def test_pdf_browser_fallback_keeps_stable_export_path(self, tmp_path: Path) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        browser = tmp_path / "chromium"
+        browser.write_text("", encoding="utf-8")
+        pdf_path = tmp_path / "stable-report.pdf"
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            assert "--headless=new" in command
+            assert "--disable-gpu" in command
+            assert "--no-first-run" in command
+            assert "--no-default-browser-check" in command
+            assert "--disable-extensions" in command
+            assert "--disable-background-networking" in command
+            assert "--disable-sync" in command
+            assert "--disable-crash-reporter" in command
+            assert "--disable-features=TranslateUI" in command
+            assert "--print-to-pdf-no-header" in command
+            profile_arg = next(arg for arg in command if arg.startswith("--user-data-dir="))
+            profile_path = Path(profile_arg.split("=", 1)[1])
+            profile_probe = profile_path / "probe.txt"
+            profile_probe.write_text("ok", encoding="utf-8")
+            profile_probe.unlink()
+            html_uri = command[-1]
+            parsed_html_path = unquote(urlparse(html_uri).path)
+            if len(parsed_html_path) >= 3 and parsed_html_path[0] == "/" and parsed_html_path[2] == ":":
+                parsed_html_path = parsed_html_path[1:]
+            assert Path(parsed_html_path).exists()
+            pdf_arg = next(arg for arg in command if arg.startswith("--print-to-pdf="))
+            Path(pdf_arg.split("=", 1)[1]).write_bytes(b"%PDF-1.4\n%stable\n")
+            assert "ares-pdf-browser-" in html_uri
+            assert Path(pdf_arg.split("=", 1)[1]) == pdf_path.resolve()
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            patch.object(gen, "_pdf_browser_candidates", return_value=[browser]),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+        ):
+            assert gen._write_pdf_with_browser("<html></html>", pdf_path) is True
+
+        assert pdf_path.exists()
+        assert pdf_path.stat().st_size > 0
+        assert "ares-pdf-browser-" not in str(pdf_path)
+
+    def test_pdf_browser_profile_unwritable_tries_next_browser(self, tmp_path: Path) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        edge = tmp_path / "msedge.exe"
+        chrome = tmp_path / "chrome.exe"
+        edge.write_text("", encoding="utf-8")
+        chrome.write_text("", encoding="utf-8")
+        pdf_path = tmp_path / "report.pdf"
+        work_path = tmp_path / "chrome-work"
+        profile_dir = work_path / "profile"
+        html_path = work_path / "report.html"
+        workspace_calls = 0
+        commands: list[list[str]] = []
+
+        def fake_workspace() -> tuple[Path, Path, Path]:
+            nonlocal workspace_calls
+            workspace_calls += 1
+            if workspace_calls == 1:
+                raise OSError("profile not writable")
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            return work_path, profile_dir, html_path
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            commands.append(command)
+            pdf_arg = next(arg for arg in command if arg.startswith("--print-to-pdf="))
+            Path(pdf_arg.split("=", 1)[1]).write_bytes(b"%PDF-1.4\n%chrome\n")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            patch.object(gen, "_pdf_browser_candidates", return_value=[edge, chrome]),
+            patch.object(gen, "_create_pdf_browser_workspace", side_effect=fake_workspace),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+        ):
+            assert gen._write_pdf_with_browser("<html></html>", pdf_path) is True
+
+        assert workspace_calls == 2
+        assert len(commands) == 1
+        assert commands[0][0] == str(chrome)
+        assert pdf_path.exists()
+
+    def test_pdf_browser_skips_edge_in_elevated_windows_session(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ares.modules.reporting.report_gen as report_gen_module
+
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        edge = tmp_path / "msedge.exe"
+        chrome = tmp_path / "chrome.exe"
+        monkeypatch.setattr(report_gen_module.os, "name", "nt")
+        monkeypatch.setattr(gen, "_windows_session_is_elevated", lambda: True)
+
+        assert "Microsoft Edge" in gen._pdf_browser_skip_reason(edge)
+        assert gen._pdf_browser_skip_reason(chrome) == ""
+
+    def test_pdf_browser_success_without_artifact_raises_actionable_error(
+        self, campaign_with_findings: Campaign, tmp_path: Path
+    ) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        browser = tmp_path / "msedge"
+        browser.write_text("", encoding="utf-8")
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            patch.dict("sys.modules", {"weasyprint": None}),
+            patch.object(gen, "_pdf_browser_candidates", return_value=[browser]),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+        ):
+            with pytest.raises(ReportDependencyError) as exc_info:
+                gen.generate(campaign_with_findings, fmt="pdf")
+
+        message = str(exc_info.value)
+        assert str(browser) in message
+        assert str(tmp_path.resolve()) in message
+        assert "User data dir" in message
+        assert "HTML input" in message
+        assert "Command was:" in message
+        assert "no downloadable PDF was created" in message
+        assert "ARES_PDF_BROWSER" in message
+
+    def test_unit_guard_blocks_unmocked_real_pdf_browser_launch(
+        self, tmp_path: Path
+    ) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        browser = tmp_path / "chrome.exe"
+        browser.write_text("", encoding="utf-8")
+        pdf_path = tmp_path / "report.pdf"
+
+        with patch.object(gen, "_pdf_browser_candidates", return_value=[browser]):
+            with pytest.raises(AssertionError, match="must mock PDF browser execution"):
+                gen._write_pdf_with_browser("<html></html>", pdf_path)
+
         assert not pdf_path.exists()
 
     def test_json_structure_valid(self, campaign_with_findings: Campaign, tmp_path: Path) -> None:
@@ -329,6 +527,70 @@ class TestReportGenerator:
             assert "severity" in f
             assert "confidence" in f
             assert "mitre_technique" in f
+
+    def test_default_reports_redact_full_kerberos_hash_evidence(
+        self, campaign: Campaign, tmp_path: Path
+    ) -> None:
+        full_asrep = "$krb5asrep$23$user@LAB.LOCAL:abcdef0123456789"
+        full_tgs = "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef0123456789"
+        campaign.add_finding(
+            Finding(
+                title="ASREPRoast Hashes Captured (1)",
+                description="Captured one AS-REP hash.",
+                severity=Severity.HIGH,
+                validated=True,
+                module_id="ad.asreproast",
+                evidence={"hash_count": 1, "sample_hash": full_asrep},
+            )
+        )
+        campaign.add_finding(
+            Finding(
+                title="Kerberoast Hashes Captured (1)",
+                description="Captured one TGS hash.",
+                severity=Severity.CRITICAL,
+                validated=True,
+                module_id="ad.kerberoast",
+                evidence={"hash_count": 1, "accounts": ["svc-sql"], "sample_hash": full_tgs},
+            )
+        )
+
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        json_path = gen.generate(campaign, fmt="json")
+        html_path = gen.generate(campaign, fmt="html")
+
+        json_text = json_path.read_text(encoding="utf-8")
+        html_text = html_path.read_text(encoding="utf-8")
+        assert full_asrep not in json_text
+        assert full_tgs not in json_text
+        assert full_asrep not in html_text
+        assert full_tgs not in html_text
+        assert "ASREPRoast Hashes Captured" in json_text
+        assert "Kerberoast Hashes Captured" in json_text
+        assert "svc-sql" in json_text
+        assert "[REDACTED sensitive evidence]" in json_text
+
+    def test_explicit_sensitive_report_option_preserves_hash_evidence(
+        self, campaign: Campaign, tmp_path: Path
+    ) -> None:
+        full_tgs = "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef0123456789"
+        campaign.add_finding(
+            Finding(
+                title="Kerberoast Hashes Captured (1)",
+                description="Captured one TGS hash.",
+                severity=Severity.CRITICAL,
+                validated=True,
+                module_id="ad.kerberoast",
+                evidence={"sample_hash": full_tgs},
+            )
+        )
+
+        gen = ReportGenerator(
+            output_dir=str(tmp_path),
+            include_sensitive_evidence=True,
+        )
+        path = gen.generate(campaign, fmt="json")
+
+        assert full_tgs in path.read_text(encoding="utf-8")
 
     def test_invalid_format_raises(self, campaign: Campaign) -> None:
         gen = ReportGenerator()

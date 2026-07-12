@@ -112,6 +112,25 @@ class BaseModule(abc.ABC):
             if ctx.target:                 available.add("target")
             if ctx.domain:                 available.add("domain")
             if getattr(ctx, "vault", None): available.add("vault")
+            params = getattr(ctx, "params", {}) or {}
+
+            def _present(*names: str) -> bool:
+                return any(params.get(name) not in (None, "", []) for name in names)
+
+            has_username = _present("username", "ssh_user", "sql_user")
+            has_secret = _present(
+                "password", "secret", "nt_hash", "lm_hash",
+                "krbtgt_hash", "key_path", "ssh_key", "ssh_pass",
+            )
+            has_domain = bool(ctx.domain) or _present("domain")
+            if has_username and has_secret:
+                available.add("credentials")
+                if has_domain:
+                    available.add("domain_creds")
+                    # Privilege level cannot be proven before the remote auth
+                    # attempt; explicit domain credentials satisfy the input
+                    # contract, while the module/runtime enforces real access.
+                    available.add("domain_admin_creds")
             # credentials/domain_creds: available if vault has entries
             vault = getattr(ctx, "vault", None)
             if vault and hasattr(vault, "_store") and vault._store:

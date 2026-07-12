@@ -52,7 +52,7 @@ from ares.api.rbac import (
     require_operator,
     require_team_lead,
 )
-from ares.core.campaign import Campaign
+from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
 from ares.core.logger import get_logger
@@ -84,6 +84,61 @@ def _campaign_from_db_row(row: dict[str, Any]) -> Campaign:
         except (TypeError, ValueError):
             data["targets"] = []
     return Campaign(**data)
+
+
+def _finding_from_db_row(row: dict[str, Any], *, report_confirmed: bool = False) -> Finding:
+    import json as _json
+
+    evidence: dict[str, Any] = {}
+    raw_evidence = row.get("evidence_json")
+    if isinstance(raw_evidence, str) and raw_evidence.strip():
+        try:
+            parsed = _json.loads(raw_evidence)
+            evidence = parsed if isinstance(parsed, dict) else {"raw": parsed}
+        except (TypeError, ValueError):
+            evidence = {"raw": raw_evidence}
+    elif isinstance(raw_evidence, dict):
+        evidence = raw_evidence
+
+    data = {
+        "id": row.get("id", ""),
+        "title": row.get("title", ""),
+        "description": row.get("description", ""),
+        "severity": row.get("severity", "info"),
+        "confidence": row.get("confidence", 1.0) or 1.0,
+        "mitre_technique": row.get("mitre_technique"),
+        "mitre_tactic": row.get("mitre_tactic"),
+        "evidence": evidence,
+        "remediation": row.get("remediation") or "",
+        "false_positive": bool(row.get("false_positive", False)),
+        "validated": bool(row.get("validated", False)) or report_confirmed,
+        "host": row.get("host"),
+        "module_id": row.get("module_id") or "",
+        "cvss_score": row.get("cvss_score", 0.0) or 0.0,
+        "cvss_vector": row.get("cvss_vector") or "",
+        "trace_id": row.get("trace_id") or "",
+    }
+    if row.get("discovered_at"):
+        data["discovered_at"] = row["discovered_at"]
+    return Finding(**data)
+
+
+async def _campaign_for_report(db: AresDatabase, row: dict[str, Any]) -> Campaign:
+    campaign = _campaign_from_db_row(row)
+    # Reports must use the same persisted findings visible in the dashboard. Older
+    # DB rows and some module-run paths may not have the validated flag populated,
+    # but API-triggered module results are already confirmed before persistence.
+    rows, _ = await db.list_findings(
+        campaign.id,
+        page=1,
+        per_page=10000,
+        false_positive=False,
+    )
+    campaign.findings = [
+        _finding_from_db_row(finding_row, report_confirmed=True)
+        for finding_row in rows
+    ]
+    return campaign
 
 
 def _setup_otel(app: FastAPI, settings: Any) -> None:
@@ -850,6 +905,14 @@ class CampaignCreate(BaseModel):
     client: str = Field("Internal", max_length=128)
     targets: list[str] = Field(default_factory=list, max_length=256)
     scope_cidrs: list[str] = Field(default_factory=list, max_length=256)
+    noise_profile: str = Field("stealth", pattern=r"^(stealth|normal|aggressive)$")
+
+    @field_validator("noise_profile", mode="before")
+    @classmethod
+    def normalize_noise_profile(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
     @field_validator("name")
     @classmethod
@@ -962,6 +1025,7 @@ async def create_campaign(
         targets=body.targets,
         scope=scope,
         operator=actor.username,
+        noise_profile=body.noise_profile,
     )
     await db.save_campaign(c)
     await db.audit(actor.username, "campaign_created", f"id={c.id} name={c.name}", c.id)
@@ -1822,6 +1886,7 @@ def _delete_report_artifacts_for_campaign(campaign_id: str) -> int:
 async def generate_report(
     campaign_id: str,
     fmt: str = Query("html", pattern="^(html|pdf|markdown|json)$"),
+    include_sensitive_evidence: bool = Query(False),
     actor: AuthenticatedUser = _api_key_write_dep,
     _rate: None = Depends(rate_limit("report")),
     db: AresDatabase = Depends(get_db),
@@ -1832,10 +1897,13 @@ async def generate_report(
     if not campaign:
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(campaign, actor)
-    from ares.core.campaign import Campaign as CM
-
-    c_obj = CM(**{k: v for k, v in campaign.items() if k in CM.model_fields})
-    gen = ReportGenerator()
+    if include_sensitive_evidence and actor.role != "team_lead":
+        raise HTTPException(
+            status_code=403,
+            detail="Including sensitive report evidence requires team_lead role.",
+        )
+    c_obj = await _campaign_for_report(db, campaign)
+    gen = ReportGenerator(include_sensitive_evidence=include_sensitive_evidence)
     valid_fmts = {"html", "pdf", "markdown", "json"}
     if fmt not in valid_fmts:
         raise HTTPException(

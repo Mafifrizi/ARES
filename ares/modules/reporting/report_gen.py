@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -59,6 +61,32 @@ REMEDIATION_SLA = {
 }
 
 BROWSER_PDF_TIMEOUT_SECONDS = 15
+PDF_ARTIFACT_WAIT_SECONDS = 3.0
+_REDACTED_EVIDENCE = "[REDACTED sensitive evidence]"
+_SENSITIVE_EVIDENCE_KEYS = {
+    "hash",
+    "hashes",
+    "sample_hash",
+    "raw_hash",
+    "kerberos_hashes",
+    "asrep_hashes",
+    "ntlm_hashes",
+    "nt_hash",
+    "lm_hash",
+    "krbtgt_hash",
+    "password",
+    "secret",
+    "token",
+    "access_token",
+    "refresh_token",
+    "private_key",
+    "key_material",
+    "ccache",
+    "ticket",
+}
+_SAFE_HASH_METADATA_KEYS = {"hash_count", "hashcat_cmd", "hashcat_mode"}
+_KERBEROS_HASH_RE = re.compile(r"\$krb5(?:asrep|tgs)\$", re.IGNORECASE)
+_NTLM_HASH_RE = re.compile(r"\b[a-fA-F0-9]{32}\b")
 
 
 # ── Context builder ───────────────────────────────────────────────────────────
@@ -278,7 +306,65 @@ def _build_remediation_roadmap(findings: list[Any]) -> list[dict[str, Any]]:
     return roadmap
 
 
-def _evidence_rows(evidence: Any) -> list[dict[str, str]]:
+def _is_sensitive_evidence_key(key: Any) -> bool:
+    normalized = str(key).strip().lower()
+    if normalized in _SAFE_HASH_METADATA_KEYS:
+        return False
+    return (
+        normalized in _SENSITIVE_EVIDENCE_KEYS
+        or normalized.endswith("_hash")
+        or normalized.endswith("_hashes")
+    )
+
+
+def _redact_sensitive_evidence(
+    value: Any,
+    *,
+    include_sensitive_evidence: bool = False,
+    key: Any = "",
+) -> Any:
+    if include_sensitive_evidence:
+        return value
+    if _is_sensitive_evidence_key(key):
+        return _REDACTED_EVIDENCE
+    if isinstance(value, dict):
+        return {
+            item_key: _redact_sensitive_evidence(
+                item_value,
+                include_sensitive_evidence=include_sensitive_evidence,
+                key=item_key,
+            )
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _redact_sensitive_evidence(
+                item,
+                include_sensitive_evidence=include_sensitive_evidence,
+                key=key,
+            )
+            for item in value
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _redact_sensitive_evidence(
+                item,
+                include_sensitive_evidence=include_sensitive_evidence,
+                key=key,
+            )
+            for item in value
+        )
+    if isinstance(value, str) and (
+        _KERBEROS_HASH_RE.search(value) or _NTLM_HASH_RE.search(value)
+    ):
+        return _REDACTED_EVIDENCE
+    return value
+
+
+def _evidence_rows(
+    evidence: Any,
+    include_sensitive_evidence: bool = False,
+) -> list[dict[str, str]]:
     """Normalize finding evidence into report-friendly key/value rows."""
     if isinstance(evidence, dict):
         items = evidence.items()
@@ -289,7 +375,12 @@ def _evidence_rows(evidence: Any) -> list[dict[str, str]]:
 
     rows: list[dict[str, str]] = []
     for key, value in items:
-        rendered = _format_evidence_value(value)
+        safe_value = _redact_sensitive_evidence(
+            value,
+            include_sensitive_evidence=include_sensitive_evidence,
+            key=key,
+        )
+        rendered = _format_evidence_value(safe_value)
         rows.append({"key": str(key).replace("_", " ").title(), "value": rendered})
     return rows
 
@@ -497,7 +588,11 @@ def _render_markdown_report(campaign: Campaign, ctx: dict[str, Any]) -> list[str
             "",
         ]
         if finding.evidence:
-            lines += ["**Evidence:**", "", "```json", json.dumps(finding.evidence, indent=2, default=str), "```", ""]
+            evidence = _redact_sensitive_evidence(
+                finding.evidence,
+                include_sensitive_evidence=ctx.get("include_sensitive_evidence", False),
+            )
+            lines += ["**Evidence:**", "", "```json", json.dumps(evidence, indent=2, default=str), "```", ""]
         if finding.remediation:
             lines += [
                 f"**Remediation (SLA: {REMEDIATION_SLA.get(finding.severity.value, 365)} days):**",
@@ -1616,9 +1711,16 @@ class ReportGenerator:
     FORMATS = ("json", "html", "markdown", "pdf")
     _FMT_ALIASES = {"md": "markdown"}
 
-    def __init__(self, output_dir: str = "~/.ares/reports") -> None:
+    def __init__(
+        self,
+        output_dir: str = "~/.ares/reports",
+        *,
+        include_sensitive_evidence: bool = False,
+    ) -> None:
         self.output_dir = Path(output_dir).expanduser()
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.include_sensitive_evidence = include_sensitive_evidence
+        self._last_pdf_browser_error = ""
 
     def generate(
         self,
@@ -1642,6 +1744,8 @@ class ReportGenerator:
                 # Also expose under short alias
                 if fmt == "markdown":
                     results["md"] = path
+            except AssertionError:
+                raise
             except Exception as e:
                 logger.warning("report_format_failed", fmt=fmt, error=str(e))
         return results
@@ -1650,6 +1754,7 @@ class ReportGenerator:
 
     def _gen_json(self, campaign: Campaign, graph_json: dict[str, Any] | None) -> Path:
         ctx = build_report_context(campaign, graph_json)
+        ctx["include_sensitive_evidence"] = self.include_sensitive_evidence
         findings = ctx["findings"]
 
         from ares.__version__ import __version__ as _ares_ver
@@ -1715,7 +1820,10 @@ class ReportGenerator:
                     "confidence": round(f.confidence, 3),
                     "mitre_technique": f.mitre_technique,
                     "mitre_tactic": f.mitre_tactic,
-                    "evidence": f.evidence,
+                    "evidence": _redact_sensitive_evidence(
+                        f.evidence,
+                        include_sensitive_evidence=self.include_sensitive_evidence,
+                    ),
                     "remediation": f.remediation,
                     "remediation_sla_days": REMEDIATION_SLA.get(f.severity.value, 365),
                     "module_id": f.module_id,
@@ -1741,7 +1849,10 @@ class ReportGenerator:
     ) -> str:
         env = Environment(loader=BaseLoader(), autoescape=True)
         env.filters["tojson"] = lambda v: json.dumps(v, indent=2, default=str)
-        env.filters["evidence_rows"] = _evidence_rows
+        env.filters["evidence_rows"] = lambda v: _evidence_rows(
+            v,
+            include_sensitive_evidence=self.include_sensitive_evidence,
+        )
         return env.from_string(template).render(
             **build_report_context(campaign, graph_json)
         )
@@ -1759,6 +1870,7 @@ class ReportGenerator:
         self, campaign: Campaign, graph_json: dict[str, Any] | None
     ) -> Path:
         ctx = build_report_context(campaign, graph_json)
+        ctx["include_sensitive_evidence"] = self.include_sensitive_evidence
         lines = _render_markdown_report(campaign, ctx)
         out = self._out(campaign, "md")
         out.write_text("\n".join(lines), encoding="utf-8")
@@ -1840,12 +1952,19 @@ class ReportGenerator:
             if self._write_pdf_with_browser(html, pdf_path):
                 logger.info("report_generated", fmt="pdf", path=str(pdf_path))
                 return pdf_path
+            detail = self._last_pdf_browser_error
+            if detail:
+                raise ReportDependencyError(detail) from exc
             raise ReportDependencyError(
                 "PDF generation requires the optional WeasyPrint backend or a "
                 "local Chromium-compatible browser. Install the PDF extra/native "
                 "runtime, set ARES_PDF_BROWSER, or generate HTML, JSON, or "
                 "Markdown instead."
             ) from exc
+        if not pdf_path.exists() or pdf_path.stat().st_size <= 0:
+            raise ReportDependencyError(
+                f"PDF backend did not create a downloadable artifact at {pdf_path}"
+            )
         logger.info("report_generated", fmt="pdf", path=str(pdf_path))
         return pdf_path
 
@@ -1853,59 +1972,216 @@ class ReportGenerator:
 
     def _write_pdf_with_browser(self, html: str, pdf_path: Path) -> bool:
         """Use a local Chromium-compatible browser when WeasyPrint is unavailable."""
+        self._last_pdf_browser_error = ""
         for browser in self._pdf_browser_candidates():
-            with tempfile.TemporaryDirectory(prefix="ares-pdf-browser-") as work_dir:
-                work_path = Path(work_dir)
-                html_path = work_path / "report.html"
-                profile_dir = work_path / "profile"
+            work_path: Path | None = None
+            try:
+                work_path, profile_dir, html_path = self._create_pdf_browser_workspace()
                 html_path.write_text(html, encoding="utf-8")
-                cmd = [
-                    str(browser),
-                    "--headless",
-                    "--disable-gpu",
-                    "--disable-extensions",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--print-to-pdf-no-header",
-                    "--no-pdf-header-footer",
-                    f"--user-data-dir={profile_dir}",
-                    f"--print-to-pdf={str(pdf_path.resolve())}",
-                    html_path.resolve().as_uri(),
-                ]
-                try:
-                    completed = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        check=False,
-                        text=True,
-                        timeout=BROWSER_PDF_TIMEOUT_SECONDS,
-                    )
-                except subprocess.TimeoutExpired as exc:
-                    logger.warning(
-                        "pdf_browser_failed",
-                        browser=str(browser),
-                        error=str(exc),
-                        timeout_s=BROWSER_PDF_TIMEOUT_SECONDS,
-                    )
-                    continue
-                except (OSError, subprocess.SubprocessError) as exc:
-                    logger.warning(
-                        "pdf_browser_failed", browser=str(browser), error=str(exc)
-                    )
-                    continue
-                if (
-                    completed.returncode == 0
-                    and pdf_path.exists()
-                    and pdf_path.stat().st_size > 0
-                ):
+            except OSError as exc:
+                self._last_pdf_browser_error = (
+                    f"PDF browser profile directory was not writable for {browser}: "
+                    f"{exc}. Output path was {pdf_path.resolve()}. Set "
+                    "ARES_PDF_BROWSER to a working Chromium/Edge/Chrome executable "
+                    "or install ARES with the PDF extra/native WeasyPrint dependencies."
+                )
+                logger.warning(
+                    "pdf_browser_profile_unusable",
+                    browser=str(browser),
+                    error=str(exc),
+                )
+                if work_path is not None:
+                    shutil.rmtree(work_path, ignore_errors=True)
+                continue
+
+            skip_reason = self._pdf_browser_skip_reason(browser)
+            if skip_reason:
+                self._last_pdf_browser_error = (
+                    f"PDF browser fallback skipped {browser}: {skip_reason}. "
+                    f"User data dir was {profile_dir}. Output path was "
+                    f"{pdf_path.resolve()}. Set ARES_PDF_BROWSER to a working "
+                    "Chromium/Edge/Chrome executable or install ARES with the "
+                    "PDF extra/native WeasyPrint dependencies."
+                )
+                logger.warning(
+                    "pdf_browser_skipped",
+                    browser=str(browser),
+                    user_data_dir=str(profile_dir),
+                    reason=skip_reason,
+                )
+                if work_path is not None:
+                    shutil.rmtree(work_path, ignore_errors=True)
+                continue
+
+            cmd = [
+                str(browser),
+                "--headless=new",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--disable-crash-reporter",
+                "--disable-features=TranslateUI",
+                "--print-to-pdf-no-header",
+                "--no-pdf-header-footer",
+                f"--user-data-dir={str(profile_dir.resolve())}",
+                f"--print-to-pdf={str(pdf_path.resolve())}",
+                html_path.resolve().as_uri(),
+            ]
+            try:
+                completed = self._run_pdf_browser(cmd)
+                if completed.returncode == 0 and self._pdf_artifact_ready(pdf_path):
                     logger.info("pdf_browser_fallback_used", browser=str(browser))
                     return True
+                self._last_pdf_browser_error = (
+                    f"PDF browser fallback exited with return code "
+                    f"{completed.returncode} using {browser}, but no downloadable "
+                    f"PDF was created at {pdf_path.resolve()}. User data dir was "
+                    f"{profile_dir}. HTML input was {html_path}. Command was: "
+                    f"{' '.join(cmd)}. Set ARES_PDF_BROWSER to a working "
+                    "Chromium/Edge/Chrome executable or install ARES with the "
+                    "PDF extra/native WeasyPrint dependencies."
+                )
                 logger.warning(
                     "pdf_browser_failed",
                     browser=str(browser),
+                    user_data_dir=str(profile_dir),
+                    html_input=str(html_path),
+                    output_path=str(pdf_path.resolve()),
                     returncode=completed.returncode,
                     stderr=completed.stderr[-500:],
                 )
+            except subprocess.TimeoutExpired as exc:
+                self._last_pdf_browser_error = (
+                    f"PDF browser fallback timed out after "
+                    f"{BROWSER_PDF_TIMEOUT_SECONDS}s using {browser}. "
+                    f"User data dir was {profile_dir}. HTML input was {html_path}. "
+                    f"Output path was {pdf_path.resolve()}. Set ARES_PDF_BROWSER "
+                    "to a working Chromium/Edge/Chrome executable or install "
+                    "ARES with the PDF extra/native WeasyPrint dependencies."
+                )
+                logger.warning(
+                    "pdf_browser_failed",
+                    browser=str(browser),
+                    error=str(exc),
+                    timeout_s=BROWSER_PDF_TIMEOUT_SECONDS,
+                )
+                continue
+            except (OSError, subprocess.SubprocessError) as exc:
+                self._last_pdf_browser_error = (
+                    f"PDF browser fallback failed using {browser}: {exc}. "
+                    f"User data dir was {profile_dir}. HTML input was {html_path}. "
+                    f"Output path was {pdf_path.resolve()}. Set ARES_PDF_BROWSER "
+                    "to a working Chromium/Edge/Chrome executable or install "
+                    "ARES with the PDF extra/native WeasyPrint dependencies."
+                )
+                logger.warning(
+                    "pdf_browser_failed", browser=str(browser), error=str(exc)
+                )
+            finally:
+                if work_path is not None:
+                    shutil.rmtree(work_path, ignore_errors=True)
+        if not self._last_pdf_browser_error:
+            self._last_pdf_browser_error = (
+                "PDF generation requires the optional WeasyPrint backend or a "
+                "local Chromium-compatible browser. Install the PDF extra/native "
+                "runtime, set ARES_PDF_BROWSER, or generate HTML, JSON, or "
+                "Markdown instead."
+            )
+        return False
+
+    def _run_pdf_browser(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=BROWSER_PDF_TIMEOUT_SECONDS,
+        )
+
+    def _pdf_browser_skip_reason(self, browser: Path) -> str:
+        if (
+            os.name == "nt"
+            and browser.name.lower() == "msedge.exe"
+            and self._windows_session_is_elevated()
+        ):
+            return (
+                "Microsoft Edge can reject dedicated --user-data-dir profiles "
+                "from elevated Windows sessions; use Chrome or set "
+                "ARES_PDF_BROWSER to a non-Edge Chromium executable"
+            )
+        return ""
+
+    @staticmethod
+    def _windows_session_is_elevated() -> bool:
+        if os.name != "nt":
+            return False
+        try:
+            import ctypes
+
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
+
+    def _create_pdf_browser_workspace(self) -> tuple[Path, Path, Path]:
+        """Create a browser workspace with a probed writable profile directory."""
+        last_error: OSError | None = None
+        for root in self._pdf_browser_workspace_roots():
+            work_path: Path | None = None
+            cleanup_work_path = False
+            try:
+                root.mkdir(parents=True, exist_ok=True)
+                self._probe_writable_dir(root)
+                work_path = Path(
+                    tempfile.mkdtemp(prefix="ares-pdf-browser-", dir=str(root))
+                )
+                profile_dir = work_path / "profile"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                self._probe_writable_dir(profile_dir)
+                return work_path, profile_dir, work_path / "report.html"
+            except OSError as exc:
+                last_error = exc
+                cleanup_work_path = True
+                logger.warning(
+                    "pdf_browser_workspace_unusable",
+                    root=str(root),
+                    error=str(exc),
+                )
+                continue
+            finally:
+                if cleanup_work_path and work_path is not None:
+                    shutil.rmtree(work_path, ignore_errors=True)
+        raise OSError(
+            f"No writable PDF browser profile directory was available: {last_error}"
+        )
+
+    def _pdf_browser_workspace_roots(self) -> list[Path]:
+        primary = Path.home() / ".ares" / "runtime" / "pdf-browser"
+        fallback = Path(tempfile.gettempdir()) / "ares" / "pdf-browser"
+        roots = [primary]
+        if fallback != primary:
+            roots.append(fallback)
+        return roots
+
+    @staticmethod
+    def _probe_writable_dir(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".ares-write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+
+    @staticmethod
+    def _pdf_artifact_ready(pdf_path: Path) -> bool:
+        deadline = time.monotonic() + PDF_ARTIFACT_WAIT_SECONDS
+        while time.monotonic() <= deadline:
+            try:
+                if pdf_path.exists() and pdf_path.stat().st_size > 0:
+                    return True
+            except OSError:
+                pass
+            time.sleep(0.15)
         return False
 
     @staticmethod

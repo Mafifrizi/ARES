@@ -21,6 +21,7 @@ export interface Campaign {
   targets?: string[];
   scope_cidrs?: string[];
   scope_json?: string;
+  noise_profile?: string;
   status?: string;
   created_at?: string;
   [key: string]: unknown;

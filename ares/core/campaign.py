@@ -145,6 +145,14 @@ class Campaign(BaseModel):
     scope: list[ScopeEntry] = Field(default_factory=list)
     status: CampaignStatus = CampaignStatus.CREATED
     noise_profile: NoiseProfile = NoiseProfile.STEALTH
+
+    @field_validator("noise_profile", mode="before")
+    @classmethod
+    def normalize_noise_profile(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
     findings: list[Finding] = Field(default_factory=list)
     audit_log: list[AuditEntry] = Field(default_factory=list)
     notes: str = ""

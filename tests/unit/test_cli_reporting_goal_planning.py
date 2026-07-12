@@ -212,8 +212,15 @@ class TestReportGenerator:
             for i in range(1, 4):
                 assert f"Test Finding {i}" in md
 
-    def test_generate_all_formats(self):
+    def test_generate_all_formats(self, monkeypatch):
         from ares.modules.reporting.report_gen import ReportGenerator
+
+        def fake_pdf(self, campaign, graph_json):
+            path = self._out(campaign, "pdf")
+            path.write_bytes(b"%PDF-1.4\n% unit fake\n")
+            return path
+
+        monkeypatch.setattr(ReportGenerator, "_gen_pdf", fake_pdf)
         campaign = _make_campaign(n_findings=1)
         with tempfile.TemporaryDirectory() as tmpdir:
             gen = ReportGenerator(output_dir=tmpdir)
