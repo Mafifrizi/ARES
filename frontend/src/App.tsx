@@ -1255,6 +1255,7 @@ function ReportsPage() {
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const [format, setFormat] = useSessionState("ares.dashboard.reports.format", "html");
   const [warning, setWarning] = useState("");
+  const [libraryError, setLibraryError] = useState("");
   const [lastGenerateResult, setLastGenerateResult] = useSessionState<PersistedResult | null>("ares.dashboard.reports.lastGenerate", null);
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.reports.tab", "Generate");
   const queryClient = useQueryClient();
@@ -1263,6 +1264,7 @@ function ReportsPage() {
     queryFn: () => api.reports(campaignId),
     enabled: Boolean(campaignId)
   });
+  const reportItems = reports.data?.reports ?? [];
   const reportResultKey = `${campaignId}:${format}`;
   const generate = useMutation({
     mutationFn: () => api.generateReport(campaignId, format),
@@ -1292,6 +1294,38 @@ function ReportsPage() {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
   });
+  const deleteReport = useMutation({
+    mutationFn: (item: ReportItem) => api.deleteReport(campaignId, item.filename),
+    onSuccess: (_payload, item) => {
+      queryClient.setQueryData<{ campaign_id: string; reports: ReportItem[] }>(
+        ["reports", campaignId],
+        (current) => current
+          ? {
+              ...current,
+              reports: current.reports.filter((report) => report.filename !== item.filename)
+            }
+          : current
+      );
+      setLibraryError("");
+    },
+    onError: (error) => {
+      setLibraryError(readableError(error, "Report could not be deleted."));
+    }
+  });
+  const clearReports = useMutation({
+    mutationFn: () => api.clearReports(campaignId),
+    onSuccess: () => {
+      queryClient.setQueryData<{ campaign_id: string; reports: ReportItem[] }>(
+        ["reports", campaignId],
+        (current) => current ? { ...current, reports: [] } : current
+      );
+      setLibraryError("");
+    },
+    onError: (error) => {
+      setLibraryError(readableError(error, "Report library could not be cleared."));
+    }
+  });
+  const deleteDisabled = deleteReport.isPending || clearReports.isPending;
   return (
     <Page
       title="Reports"
@@ -1349,20 +1383,55 @@ function ReportsPage() {
       )}
       {activeTab === "Library" && (
       <section className="panel table-panel">
-        <SectionHeader title="Report Library" />
+        <SectionHeader
+          title="Report Library"
+          action={campaignId && reportItems.length > 0 ? (
+            <button
+              className="btn btn-danger"
+              disabled={deleteDisabled}
+              onClick={() => {
+                if (!window.confirm(`Delete all ${reportItems.length} report artifacts for this campaign? This cannot be undone.`)) {
+                  return;
+                }
+                setLibraryError("");
+                clearReports.mutate();
+              }}
+            >
+              {clearReports.isPending ? (
+                <Loader2 className="spin" size={15} />
+              ) : (
+                <Trash2 size={15} />
+              )}
+              Delete all
+            </button>
+          ) : null}
+        />
         <div className="table-scroll">
           <table className="table">
             <thead><tr><th>Filename</th><th>Format</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
             <tbody>
-              {(reports.data?.reports ?? []).map((item) => (
+              {reportItems.map((item) => (
                 <tr key={item.filename}>
                   <td className="font-medium text-slate-900">{item.filename}</td>
                   <td><span className="badge">{item.format}</span></td>
                   <td>{formatBytes(item.size_bytes)}</td>
                   <td>{formatReportDate(item.modified_at)}</td>
                   <td>
-                    <button className="btn" disabled={download.isPending} onClick={() => download.mutate(item)}>
+                    <button className="btn" disabled={download.isPending || deleteDisabled} onClick={() => download.mutate(item)}>
                       <Download size={15} /> Download
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      disabled={deleteDisabled}
+                      onClick={() => {
+                        if (!window.confirm(`Delete report artifact "${item.filename}"? This cannot be undone.`)) {
+                          return;
+                        }
+                        setLibraryError("");
+                        deleteReport.mutate(item);
+                      }}
+                    >
+                      <Trash2 size={15} /> Delete
                     </button>
                   </td>
                 </tr>
@@ -1370,7 +1439,13 @@ function ReportsPage() {
             </tbody>
           </table>
         </div>
-        {campaignId && (reports.data?.reports ?? []).length === 0 && (
+        {libraryError && (
+          <p className="notice notice-danger mt-3">
+            <AlertTriangle size={16} />
+            {libraryError}
+          </p>
+        )}
+        {campaignId && reportItems.length === 0 && (
           <EmptyState text="No reports generated for this campaign yet." />
         )}
         {!campaignId && <EmptyState text="Select a campaign to list reports." />}
@@ -3183,6 +3258,22 @@ function serializeError(value: unknown): unknown {
     return { name: value.name, message: value.message };
   }
   return value;
+}
+
+function readableError(value: unknown, fallback: string): string {
+  if (value instanceof ApiError) {
+    if (typeof value.detail === "string") {
+      return value.detail;
+    }
+    return value.message || fallback;
+  }
+  if (value instanceof Error) {
+    return value.message || fallback;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return fallback;
 }
 
 function pdfFailureHint(value: unknown): string {
