@@ -26,6 +26,8 @@ from ares.modules.reporting.report_gen import (
     BROWSER_PDF_TIMEOUT_SECONDS,
     ReportDependencyError,
     ReportGenerator,
+    WINDOWS_EDGE_ELEVATED_PDF_MESSAGE,
+    WINDOWS_WEASYPRINT_NATIVE_HINT,
 )
 
 
@@ -423,6 +425,113 @@ class TestReportGenerator:
         assert pdf_path.stat().st_size > 0
         assert "ares-pdf-browser-" not in str(pdf_path)
 
+    def test_windows_pdf_browser_order_prefers_edge_before_chrome(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import ares.modules.reporting.report_gen as report_gen_module
+
+        edge = tmp_path / "msedge.exe"
+        chrome = tmp_path / "chrome.exe"
+        edge.write_text("", encoding="utf-8")
+        chrome.write_text("", encoding="utf-8")
+        monkeypatch.delenv("ARES_PDF_BROWSER", raising=False)
+        monkeypatch.setattr(ReportGenerator, "_is_windows_host", staticmethod(lambda: True))
+        monkeypatch.setattr(
+            ReportGenerator,
+            "_windows_browser_default_paths",
+            staticmethod(lambda: [edge, chrome]),
+        )
+        monkeypatch.setattr(report_gen_module.shutil, "which", lambda name: None)
+
+        candidates = ReportGenerator._pdf_browser_candidates()
+
+        assert candidates[:2] == [edge.resolve(), chrome.resolve()]
+
+    def test_pdf_browser_uses_configured_path_first_and_falls_back(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        configured = tmp_path / "configured-chrome.exe"
+        fallback = tmp_path / "msedge.exe"
+        configured.write_text("", encoding="utf-8")
+        fallback.write_text("", encoding="utf-8")
+        monkeypatch.setenv("ARES_PDF_BROWSER", str(configured))
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        pdf_path = tmp_path / "report.pdf"
+        calls: list[Path] = []
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(Path(command[0]))
+            if Path(command[0]) == fallback:
+                pdf_arg = next(arg for arg in command if arg.startswith("--print-to-pdf="))
+                Path(pdf_arg.split("=", 1)[1]).write_bytes(b"%PDF-1.4\n%fallback\n")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        def fast_artifact_ready(path: Path) -> bool:
+            return path.exists() and path.read_bytes().startswith(b"%PDF-")
+
+        with (
+            patch.object(gen, "_pdf_browser_candidates", return_value=[configured, fallback]),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+            patch.object(gen, "_pdf_artifact_ready", side_effect=fast_artifact_ready),
+        ):
+            assert gen._write_pdf_with_browser("<html></html>", pdf_path) is True
+
+        assert calls == [configured, fallback]
+        assert pdf_path.read_bytes().startswith(b"%PDF-")
+        assert "configured-chrome.exe" in gen._last_pdf_browser_error
+        assert "no downloadable PDF was created" in gen._last_pdf_browser_error
+
+    def test_strict_configured_pdf_browser_does_not_fall_back(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        configured = tmp_path / "configured-chrome.exe"
+        fallback = tmp_path / "msedge.exe"
+        configured.write_text("", encoding="utf-8")
+        fallback.write_text("", encoding="utf-8")
+        monkeypatch.setenv("ARES_PDF_BROWSER", str(configured))
+        gen = ReportGenerator(output_dir=str(tmp_path), strict_pdf_browser=True)
+        pdf_path = tmp_path / "report.pdf"
+        calls: list[Path] = []
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(Path(command[0]))
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            patch.object(gen, "_pdf_browser_candidates", return_value=[configured, fallback]),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+            patch.object(gen, "_pdf_artifact_ready", return_value=False),
+        ):
+            assert gen._write_pdf_with_browser("<html></html>", pdf_path) is False
+
+        assert calls == [configured]
+        assert not pdf_path.exists()
+
+    def test_pdf_smoke_uses_browser_runtime_and_requires_pdf_header(
+        self, tmp_path: Path
+    ) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        browser = tmp_path / "msedge.exe"
+        browser.write_text("", encoding="utf-8")
+        commands: list[list[str]] = []
+
+        def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            commands.append(command)
+            pdf_arg = next(arg for arg in command if arg.startswith("--print-to-pdf="))
+            Path(pdf_arg.split("=", 1)[1]).write_bytes(b"%PDF-1.4\n%smoke\n")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with (
+            patch.dict("sys.modules", {"weasyprint": None}),
+            patch.object(gen, "_pdf_browser_candidates", return_value=[browser]),
+            patch.object(gen, "_run_pdf_browser", side_effect=fake_run),
+        ):
+            smoke_path = gen.generate_pdf_smoke()
+
+        assert smoke_path == tmp_path / "ares_pdf_smoke.pdf"
+        assert smoke_path.read_bytes().startswith(b"%PDF-")
+        assert commands
+
     def test_pdf_browser_profile_unwritable_tries_next_browser(self, tmp_path: Path) -> None:
         gen = ReportGenerator(output_dir=str(tmp_path))
         edge = tmp_path / "msedge.exe"
@@ -465,16 +574,36 @@ class TestReportGenerator:
     def test_pdf_browser_skips_edge_in_elevated_windows_session(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import ares.modules.reporting.report_gen as report_gen_module
-
         gen = ReportGenerator(output_dir=str(tmp_path))
         edge = tmp_path / "msedge.exe"
         chrome = tmp_path / "chrome.exe"
-        monkeypatch.setattr(report_gen_module.os, "name", "nt")
+        monkeypatch.setattr(ReportGenerator, "_is_windows_host", staticmethod(lambda: True))
         monkeypatch.setattr(gen, "_windows_session_is_elevated", lambda: True)
 
-        assert "Microsoft Edge" in gen._pdf_browser_skip_reason(edge)
+        assert gen._pdf_browser_skip_reason(edge) == WINDOWS_EDGE_ELEVATED_PDF_MESSAGE
         assert gen._pdf_browser_skip_reason(chrome) == ""
+
+    def test_pdf_browser_does_not_skip_edge_in_normal_windows_session(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gen = ReportGenerator(output_dir=str(tmp_path))
+        edge = tmp_path / "msedge.exe"
+        monkeypatch.setattr(ReportGenerator, "_is_windows_host", staticmethod(lambda: True))
+        monkeypatch.setattr(gen, "_windows_session_is_elevated", lambda: False)
+
+        assert gen._pdf_browser_skip_reason(edge) == ""
+
+    def test_windows_weasyprint_native_failure_is_actionable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ReportGenerator, "_is_windows_host", staticmethod(lambda: True))
+
+        message = ReportGenerator._pdf_backend_failure_detail(
+            OSError("cannot load library 'libgobject-2.0-0'")
+        )
+
+        assert WINDOWS_WEASYPRINT_NATIVE_HINT in message
+        assert "libgobject-2.0-0" in message
 
     def test_pdf_browser_success_without_artifact_raises_actionable_error(
         self, campaign_with_findings: Campaign, tmp_path: Path

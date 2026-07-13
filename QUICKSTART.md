@@ -36,7 +36,7 @@ Notes:
   3.10-3.12, but the dashboard and Windows AD/Impacket lab validation are
   tested on Python 3.12.x.
 - Some offensive-security integrations are optional. `ares doctor` will tell you which optional packages or native tools are missing for AD, cloud, container, or password-cracking workflows.
-- PDF support uses WeasyPrint when available and has a local Edge/Chrome/Chromium browser fallback in the API. On Windows, use Python 3.12.x and run `ares doctor` if PDF export cannot find a backend or writable browser profile.
+- PDF support uses WeasyPrint when available and has a local Edge/Chrome/Chromium browser fallback in the API. On Windows, use Python 3.12.x from normal non-Administrator PowerShell. If needed, set `ARES_PDF_BROWSER=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` for the current user or shell. WeasyPrint on Windows needs native GTK/Pango libraries in addition to the pip package.
 
 ## 3. Configure Secrets
 
@@ -337,6 +337,7 @@ Common examples:
 | --- | --- |
 | `impacket` missing or old | AD/SMB modules need the optional impacket dependency. |
 | `Windows AD/Impacket Python` warning | Windows AD lab validation is tested on Python 3.12.x. |
+| `PDF smoke` failed | Run `ares doctor --pdf-smoke` from normal non-Administrator PowerShell and check the WeasyPrint GTK/Pango or Edge/Chrome fallback guidance. |
 | `pip-audit not installed` | Dependency audit is unavailable; core API can still start. |
 | `hashcat not in PATH` | Password-cracking helpers cannot use hashcat until installed. |
 | `.env configured` failed | Required environment values are missing. |

@@ -305,6 +305,12 @@ Security page, but role assignment is done at account creation time through
 - PDF output through WeasyPrint when available, with an Edge/Chrome/Chromium
   browser fallback for local environments that do not have WeasyPrint native
   libraries installed.
+- On Windows, use Python 3.12.x from a normal non-Administrator PowerShell for
+  dashboard PDF export. If auto-detection needs help, set
+  `ARES_PDF_BROWSER=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+  for the current user or shell.
+- WeasyPrint on Windows needs native GTK/Pango libraries in addition to the pip
+  package; run `ares doctor --pdf-smoke` to verify the active PDF backend.
 - ARES branding in generated reports with footer-safe page spacing.
 - Findings, readable evidence tables, severity, timeline, MITRE, and
   remediation-oriented sections.
@@ -552,7 +558,9 @@ Production build assets are served by FastAPI from `frontend/dist` at
 
 Platform notes:
 
-- Windows: use PowerShell and `.\.venv\Scripts\python.exe`.
+- Windows: use normal non-Administrator PowerShell and
+  `.\.venv\Scripts\python.exe`. The Windows release path for the dashboard,
+  PDF browser fallback, and Windows AD/Impacket lab modules is Python 3.12.x.
 - Linux, Kali, and macOS: use `source .venv/bin/activate`.
 - The package metadata allows Python 3.10-3.12, but the tested release path for
   the dashboard and Windows AD/Impacket lab modules is Python 3.12.x.

@@ -342,9 +342,12 @@ Supported formats: `html` | `pdf` | `json` | `markdown`
 PDF generation uses the report renderer internally and returns a PDF artifact
 for `format: "pdf"`. The server uses WeasyPrint when available and can fall
 back to a local Chromium-compatible browser in local environments where
-WeasyPrint native libraries are not installed. HTML and PDF reports render
-finding evidence as readable tables and key-value rows where possible. Use
-`json` output when you need raw machine-readable report data.
+WeasyPrint native libraries are not installed. On Windows, use Python 3.12.x
+from normal non-Administrator PowerShell; WeasyPrint needs native GTK/Pango
+libraries in addition to the pip package. Use `ares doctor --pdf-smoke` to
+validate the active PDF backend. HTML and PDF reports render finding evidence
+as readable tables and key-value rows where possible. Use `json` output when
+you need raw machine-readable report data.
 
 **Response:** `200 OK`
 ```json

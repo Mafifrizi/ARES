@@ -33,7 +33,7 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import typer
 from rich.console import Console
@@ -1081,8 +1081,37 @@ def _display_result(module_id: str, result: dict) -> None:
 
 # ── doctor command ────────────────────────────────────────────────────────────
 
+def _run_pdf_smoke_check(
+    pdf_generator: Any,
+    check: Callable[[str, str, str], None],
+) -> None:
+    """Run the PDF smoke generator and report the result through doctor output."""
+    from ares.modules.reporting.report_gen import ReportDependencyError
+
+    try:
+        smoke_path = pdf_generator.generate_pdf_smoke()
+        if smoke_path.read_bytes()[:5] == b"%PDF-":
+            check(
+                "PDF smoke",
+                "ok",
+                f"{smoke_path} bytes={smoke_path.stat().st_size}",
+            )
+        else:
+            check("PDF smoke", "fail", f"{smoke_path} is not a PDF")
+    except ReportDependencyError as exc:
+        check("PDF smoke", "fail", str(exc))
+    except OSError as exc:
+        check("PDF smoke", "fail", str(exc))
+
+
 @app.command("doctor")
-def doctor() -> None:
+def doctor(
+    pdf_smoke: bool = typer.Option(
+        False,
+        "--pdf-smoke",
+        help="Render a tiny PDF through the same runtime path used by dashboard export.",
+    ),
+) -> None:
     """Check all prerequisites and configuration. Run this first."""
     import importlib, shutil, os, re
     from importlib import metadata as importlib_metadata
@@ -1234,51 +1263,71 @@ def doctor() -> None:
 
     # PDF export capability
     try:
-        weasyprint = importlib.import_module("weasyprint")
-        check(
-            "PDF WeasyPrint",
-            "ok",
-            getattr(weasyprint, "__version__", "") or "available",
-        )
-    except Exception as exc:
-        check(
-            "PDF WeasyPrint",
-            "warn",
-            import_failure_detail(
-                "weasyprint",
-                exc,
-                "pip install ares-redteam[pdf] or use Chromium browser fallback",
-            ),
-        )
-
-    configured_pdf_browser = os.environ.get("ARES_PDF_BROWSER")
-    if configured_pdf_browser:
-        configured_pdf_browser_path = Path(configured_pdf_browser).expanduser()
-        check(
-            "PDF ARES_PDF_BROWSER",
-            "ok" if configured_pdf_browser_path.exists() else "warn",
-            f"{configured_pdf_browser_path} exists={configured_pdf_browser_path.exists()}",
-        )
-    else:
-        check(
-            "PDF ARES_PDF_BROWSER",
-            "warn",
-            "not set; auto-detecting Edge/Chrome/Chromium",
-        )
-
-    try:
         from ares.modules.reporting.report_gen import ReportGenerator
+        import ares.modules.reporting.report_gen as report_gen_module
 
         pdf_generator = ReportGenerator()
+        try:
+            weasyprint = importlib.import_module("weasyprint")
+            check(
+                "PDF WeasyPrint",
+                "ok",
+                getattr(weasyprint, "__version__", "") or "available",
+            )
+        except Exception as exc:
+            check(
+                "PDF WeasyPrint",
+                "warn",
+                report_gen_module.ReportGenerator._pdf_backend_failure_detail(exc),
+            )
+
+        configured_pdf_browser = os.environ.get("ARES_PDF_BROWSER")
+        if configured_pdf_browser:
+            configured_pdf_browser_path = Path(configured_pdf_browser).expanduser()
+            check(
+                "PDF ARES_PDF_BROWSER",
+                "ok" if configured_pdf_browser_path.exists() else "warn",
+                f"{configured_pdf_browser_path} exists={configured_pdf_browser_path.exists()}",
+            )
+        else:
+            check(
+                "PDF ARES_PDF_BROWSER",
+                "warn",
+                "not set; auto-detecting Edge/Chrome/Chromium",
+            )
+
         pdf_browsers = ReportGenerator._pdf_browser_candidates()
         if pdf_browsers:
             check("PDF browser detected", "ok", str(pdf_browsers[0]))
+            browser_order = " -> ".join(path.name for path in pdf_browsers)
+            check("PDF browser order", "ok", browser_order)
         else:
             check(
                 "PDF browser detected",
                 "warn",
                 "No Edge/Chrome/Chromium found; set ARES_PDF_BROWSER",
             )
+
+        if os.name == "nt":
+            elevated = pdf_generator._windows_session_is_elevated()
+            check(
+                "PDF Windows elevated session",
+                "warn" if elevated else "ok",
+                f"elevated={elevated}",
+            )
+            edge = next(
+                (path for path in pdf_browsers if path.name.lower() == "msedge.exe"),
+                None,
+            )
+            if edge is None:
+                check("PDF Edge current session", "warn", "Edge not detected")
+            else:
+                edge_skip_reason = pdf_generator._pdf_browser_skip_reason(edge)
+                check(
+                    "PDF Edge current session",
+                    "warn" if edge_skip_reason else "ok",
+                    edge_skip_reason or "Edge is usable in this session",
+                )
 
         pdf_work_path: Path | None = None
         try:
@@ -1305,6 +1354,9 @@ def doctor() -> None:
             )
         except OSError as exc:
             check("PDF report output dir writable", "warn", str(exc))
+
+        if pdf_smoke:
+            _run_pdf_smoke_check(pdf_generator, check)
     except Exception as exc:
         check("PDF browser fallback", "warn", str(exc)[:80])
 
