@@ -44,6 +44,35 @@ def set_test_env():
 
 # ── Temporary directories ─────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def forbid_unmocked_pdf_browser_launch(monkeypatch: pytest.MonkeyPatch):
+    """Unit tests must mock PDF browser execution instead of launching Chrome/Edge."""
+    from ares.modules.reporting.report_gen import ReportGenerator
+
+    real_runner = ReportGenerator._run_pdf_browser
+    browser_names = {
+        "chrome",
+        "chrome.exe",
+        "chromium",
+        "chromium-browser",
+        "chromium.exe",
+        "google-chrome",
+        "msedge",
+        "msedge.exe",
+    }
+
+    def guarded_runner(self: Any, cmd: list[str]):
+        executable = Path(str(cmd[0]))
+        if executable.name.lower() in browser_names:
+            raise AssertionError(
+                "Unit tests must mock PDF browser execution; attempted to launch "
+                f"{executable}"
+            )
+        return real_runner(self, cmd)
+
+    monkeypatch.setattr(ReportGenerator, "_run_pdf_browser", guarded_runner)
+
+
 @pytest.fixture
 def tmp_dir(tmp_path: Path) -> Path:
     """Isolated temp directory (alias for tmp_path)."""

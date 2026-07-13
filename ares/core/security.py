@@ -523,8 +523,10 @@ def secure_mkstemp(
     import tempfile
 
     fd, path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
-    os.fchmod(fd, 0o600)  # owner read/write only — BEFORE any data written
-    os.chmod(path, 0o600)  # Windows reflects file modes through chmod(path)
+    if hasattr(os, "fchmod"):
+        os.fchmod(fd, 0o600)  # owner read/write only — BEFORE any data written
+    else:
+        os.chmod(path, 0o600)  # Windows reflects file modes through chmod(path)
     _restrict_windows_acl(path)
     scope = campaign_id or _GLOBAL_SCOPE
     with _ARTIFACT_LOCK:

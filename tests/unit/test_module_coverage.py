@@ -491,3 +491,157 @@ class TestLocalAdminCredsConsistency:
                 )
             except ImportError:
                 pass   # optional deps not installed — skip
+
+
+class TestDashboardModuleSchemaContracts:
+    CONTRACT_MODULES = [
+        "ad.asreproast",
+        "ad.kerberoast",
+        "ad.adcs",
+        "ad.delegation_abuse",
+        "cloud.azure_ad",
+        "lateral.mssql",
+        "lateral.ntlm_relay",
+        "lateral.wmiexec",
+        "lateral.winrm",
+        "lateral.rdp",
+        "credential.golden_ticket",
+        "linux.ld_preload",
+        "linux.nfs_escape",
+        "linux.service_hijack",
+    ]
+
+    def test_required_module_schemas_are_renderable_by_dashboard_form(self):
+        from pathlib import Path
+
+        from ares.modules.params import MODULE_PARAMS
+
+        frontend = Path("frontend/src/App.tsx").read_text(encoding="utf-8")
+        assert "Object.entries(schema ?? {})" in frontend
+        assert "field.required" in frontend
+        assert "required={field.required}" in frontend
+        assert "buildModuleRunPayload(campaignId, params, dryRun)" in frontend
+
+        missing = [module_id for module_id in self.CONTRACT_MODULES if module_id not in MODULE_PARAMS]
+        assert not missing
+
+        for module_id in self.CONTRACT_MODULES:
+            schema = MODULE_PARAMS[module_id].schema_for_api()
+            assert schema, f"{module_id} must expose dashboard param_schema"
+            for name, field in schema.items():
+                assert "required" in field, f"{module_id}.{name} missing required flag"
+                assert "type" in field, f"{module_id}.{name} missing renderable type"
+
+            required_fields = {
+                name for name, field in schema.items() if field.get("required") is True
+            }
+            assert required_fields <= set(schema), module_id
+
+    def test_confirmed_schema_keys_match_runtime_contracts(self):
+        from ares.modules.params import MODULE_PARAMS
+
+        adcs_schema = MODULE_PARAMS["ad.adcs"].schema_for_api()
+        assert {"exploit_esc1", "target_user"} <= set(adcs_schema)
+        assert {"ca_server", "mode", "template"}.isdisjoint(adcs_schema)
+
+        delegation_schema = MODULE_PARAMS["ad.delegation_abuse"].schema_for_api()
+        assert {"target_computer", "impersonate_user", "target_service"} <= set(
+            delegation_schema
+        )
+        assert "target_host" not in delegation_schema
+
+        azure_ad_schema = MODULE_PARAMS["cloud.azure_ad"].schema_for_api()
+        assert {"client_secret", "access_token", "technique"} <= set(
+            azure_ad_schema
+        )
+        assert "mode" not in azure_ad_schema
+
+    def test_mssql_execute_uses_dashboard_schema_field_names(self):
+        from ares.modules.lateral.mssql import MSSQLModule
+
+        mod, _ = _make_module(MSSQLModule)
+        captured = {}
+
+        async def fake_run(**kwargs):
+            captured.update(kwargs)
+            return [], {"ok": True}
+
+        mod.run = fake_run
+        _run(
+            mod.execute(
+                _ctx(
+                    params={
+                        "target": "10.0.0.25",
+                        "username": "sa",
+                        "password": "Passw0rd!",
+                        "technique": "linked",
+                        "linked": "SQL-LINK-01",
+                        "listener": "10.0.0.10",
+                    }
+                )
+            )
+        )
+
+        assert captured["linked"] == "SQL-LINK-01"
+        assert captured["listener"] == "10.0.0.10"
+
+    def test_golden_ticket_form_fields_satisfy_shared_credential_requires(self):
+        from ares.modules.credential.golden_ticket import GoldenTicketModule
+
+        mod, _ = _make_module(GoldenTicketModule)
+        _run(
+            mod.validate(
+                _ctx(
+                    params={
+                        "target": "10.0.0.5",
+                        "domain": "corp.local",
+                        "username": "Administrator",
+                        "krbtgt_hash": "0123456789abcdef0123456789abcdef",
+                        "domain_sid": "S-1-5-21-1111111111-2222222222-3333333333",
+                    }
+                )
+            )
+        )
+
+    @pytest.mark.parametrize(
+        "module_path,class_name",
+        [
+            ("ares.modules.linux.ld_preload", "LDPreloadModule"),
+            ("ares.modules.linux.nfs_escape", "NFSEscapeModule"),
+            ("ares.modules.linux.service_hijack", "ServiceHijackModule"),
+        ],
+    )
+    def test_linux_ssh_modules_use_dashboard_schema_field_names(
+        self, module_path, class_name
+    ):
+        import importlib
+
+        module = importlib.import_module(module_path)
+        cls = getattr(module, class_name)
+        mod, _ = _make_module(cls)
+        captured = {}
+
+        async def fake_run(**kwargs):
+            captured.update(kwargs)
+            return [], {"ok": True}
+
+        mod.run = fake_run
+        _run(
+            mod.execute(
+                _ctx(
+                    params={
+                        "target": "10.0.0.30",
+                        "username": "ubuntu",
+                        "password": "Passw0rd!",
+                        "key_path": "C:/keys/id_rsa",
+                        "ssh_port": 2222,
+                    }
+                )
+            )
+        )
+
+        assert captured["host"] == "10.0.0.30"
+        assert captured["ssh_user"] == "ubuntu"
+        assert captured["ssh_key"] == "C:/keys/id_rsa"
+        assert captured["ssh_pass"] == "Passw0rd!"
+        assert captured["ssh_port"] == 2222

@@ -139,6 +139,23 @@ class TestCleanupGuarantee:
         finally:
             cleanup_credential_artifacts("reopen-test")
 
+    def test_secure_mkstemp_falls_back_when_fchmod_unavailable(self, monkeypatch):
+        """Windows/Python builds without os.fchmod must still create secure temp files."""
+        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        self._reset_tracking()
+        monkeypatch.delattr(os, "fchmod", raising=False)
+
+        p, fd = secure_mkstemp(suffix=".ccache", campaign_id="no-fchmod-test")
+        os.close(fd)
+        try:
+            assert os.path.exists(p)
+            if os.name != "nt":
+                assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+            else:
+                assert os.access(p, os.R_OK | os.W_OK)
+        finally:
+            cleanup_credential_artifacts("no-fchmod-test")
+
     def test_cleanup_always_runs_on_success(self):
         """Cleanup works after successful operation."""
         from ares.core.security import secure_mkstemp, cleanup_credential_artifacts

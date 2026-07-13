@@ -299,7 +299,7 @@ Formats:
 - HTML.
 - Markdown.
 - JSON.
-- PDF through WeasyPrint when available, with a Chromium-compatible browser
+- PDF through WeasyPrint when available, with an Edge/Chrome/Chromium browser
   fallback for local environments that do not have WeasyPrint native libraries.
 
 HTML and PDF reports render finding evidence as readable tables and key-value
@@ -487,7 +487,7 @@ Use it for:
 | Campaign remains after delete | Browser cache or old server process. | Restart ARES and press `Ctrl+F5`. |
 | Module says target is not in scope | Selected campaign has no matching scope CIDR. | Create or select a campaign whose scope includes the target, such as `127.0.0.1/32` for local testing. |
 | Telemetry looks empty after restart | Telemetry is an in-memory runtime snapshot. | Run modules in the current API process, or use Reports/Campaigns for durable history. |
-| PDF generation fails | No PDF backend or browser fallback is available. | Install the PDF extra/native libraries or run on a machine with an available Chromium-compatible browser; use HTML, Markdown, or JSON meanwhile. |
+| PDF generation fails | No PDF backend or browser fallback is available. | Run `ares doctor` to check WeasyPrint, `ARES_PDF_BROWSER`, browser profile writability, and report output writability; install the PDF extra/native libraries or set `ARES_PDF_BROWSER` to Edge/Chrome/Chromium. |
 ## Cross-Platform Notes
 
-The core API, dashboard, database migrations, SDK imports, and unit suite are designed to run on Windows, Linux, and macOS. Optional module dependencies can vary by operating system. Use `ares doctor` on each host to see which optional integrations are available before running modules that need AD, cloud, container, PDF, or native password-cracking tooling.
+The core API, dashboard, database migrations, SDK imports, and unit suite are designed to run on Windows, Linux, and macOS. Package metadata allows Python 3.10-3.12, but the tested release path for the dashboard and Windows AD/Impacket lab modules is Python 3.12.x. Optional module dependencies can vary by operating system. Use `ares doctor` on each host to see which optional integrations are available before running modules that need AD, cloud, container, PDF, or native password-cracking tooling.

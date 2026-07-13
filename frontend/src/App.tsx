@@ -891,6 +891,7 @@ function CampaignsPage() {
   const [client, setClient] = useSessionState("ares.dashboard.campaigns.create.client", "Internal");
   const [targets, setTargets] = useSessionState("ares.dashboard.campaigns.create.targets", "");
   const [scope, setScope] = useSessionState("ares.dashboard.campaigns.create.scope", "");
+  const [noiseProfile, setNoiseProfile] = useSessionState("ares.dashboard.campaigns.create.noiseProfile", "stealth");
   const [createWarning, setCreateWarning] = useState("");
   const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.campaigns.tab", "List");
@@ -920,13 +921,15 @@ function CampaignsPage() {
         name: name.trim(),
         client: client.trim(),
         targets: splitLines(targets),
-        scope_cidrs: splitLines(scope)
+        scope_cidrs: splitLines(scope),
+        noise_profile: noiseProfile
       }),
     onSuccess: (campaign) => {
       setSelected(campaign.id);
       setName("");
       setTargets("");
       setScope("");
+      setNoiseProfile("stealth");
       setCreateWarning("");
       setActiveTab("Scope");
       void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
@@ -979,6 +982,11 @@ function CampaignsPage() {
                 <input className="field" required placeholder="Name" value={name} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setName(e.target.value); }} />
                 <input className="field" required placeholder="Client" value={client} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setClient(e.target.value); }} />
               </div>
+              <select className="field" value={noiseProfile} onChange={(e) => { setCreateWarning(""); setNoiseProfile(e.target.value); }}>
+                <option value="stealth">Stealth</option>
+                <option value="normal">Normal</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
               <textarea className="field min-h-20" required placeholder="Targets" value={targets} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setTargets(e.target.value); }} />
               <textarea className="field min-h-20" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
               {createWarning && <p className="notice notice-danger">{createWarning}</p>}
@@ -2615,6 +2623,7 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
       <div className="mini-stat-grid">
         <MiniStat title="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
         <MiniStat title="Scope CIDRs" value={String(scope.length)} detail={scope.slice(0, 3).join(", ") || "none declared"} />
+        <MiniStat title="Noise Profile" value={String(campaign.noise_profile ?? "stealth")} detail="OPSEC guardrail" />
         <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
     </div>
@@ -2652,7 +2661,7 @@ function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
       {campaigns.length > 0 ? (
         <div className="table-scroll">
           <table className="table">
-            <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Status</th><th>Operator</th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Status</th><th>Noise</th><th>Operator</th></tr></thead>
             <tbody>
               {campaigns.map((campaign, index) => (
                 <tr key={campaign.id}>
@@ -2663,6 +2672,7 @@ function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
                   </td>
                   <td>{campaign.client || "Internal"}</td>
                   <td><span className={statusBadge(campaign.status)}>{campaign.status ?? "created"}</span></td>
+                  <td><span className={opsecBadge(campaign.noise_profile)}>{campaign.noise_profile ?? "stealth"}</span></td>
                   <td>{campaign.operator || "operator"}</td>
                 </tr>
               ))}

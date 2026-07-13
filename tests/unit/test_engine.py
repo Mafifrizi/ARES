@@ -74,6 +74,78 @@ class TestAsyncEngine:
         assert "not found" in (result.error or "")
 
     @pytest.mark.asyncio
+    async def test_kerberoast_flat_dashboard_params_reach_execution(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        """Flat dashboard fields must satisfy Kerberoast's credential contract."""
+        from ares.modules.ad.kerberoast import KerberoastModule
+        from ares.modules.base import ModuleResult
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        captured: dict[str, Any] = {}
+
+        async def fake_execute(self_unused: Any, ctx: Any) -> ModuleResult:
+            captured["params"] = dict(ctx.params)
+            return ModuleResult(
+                status="success",
+                raw={"reached": True},
+                module_id="ad.kerberoast",
+            )
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "svc-roast",
+            "password": "Passw0rd!",
+            "use_ldaps": False,
+            "target_user": "sqlsvc",
+        }
+        with patch.object(KerberoastModule, "execute", fake_execute):
+            result = await engine.run_module(
+                "ad.kerberoast",
+                campaign,
+                params,
+                actor_role="team_lead",
+            )
+
+        assert result.status == ModuleStatus.DONE
+        assert captured["params"] == params
+
+    @pytest.mark.asyncio
+    async def test_kerberoast_still_blocks_stealth_profile(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        from ares.core.campaign import NoiseProfile
+        from ares.modules.ad.kerberoast import KerberoastModule
+
+        campaign.noise_profile = NoiseProfile.STEALTH
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+
+        async def unexpected_execute(self_unused: Any, ctx: Any) -> Any:
+            raise AssertionError("stealth profile must block before execution")
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "svc-roast",
+            "password": "Passw0rd!",
+            "use_ldaps": False,
+            "target_user": "sqlsvc",
+        }
+        with patch.object(KerberoastModule, "execute", unexpected_execute):
+            result = await engine.run_module(
+                "ad.kerberoast",
+                campaign,
+                params,
+                actor_role="team_lead",
+            )
+
+        assert result.status == ModuleStatus.FAILED
+        assert "blocked in STEALTH profile" in (result.error or "")
+
+    @pytest.mark.asyncio
     async def test_run_module_timeout(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:

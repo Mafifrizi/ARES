@@ -165,7 +165,7 @@ export const api = {
   health: () => apiRequest<Record<string, unknown>>("/health"),
   telemetry: () => apiRequest<Record<string, unknown>>("/telemetry"),
   campaigns: () => apiRequest<Campaign[]>("/campaigns"),
-  createCampaign: (body: { name: string; client: string; targets: string[]; scope_cidrs: string[] }) =>
+  createCampaign: (body: { name: string; client: string; targets: string[]; scope_cidrs: string[]; noise_profile: string }) =>
     apiRequest<Campaign>("/campaigns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

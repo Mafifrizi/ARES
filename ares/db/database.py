@@ -356,15 +356,17 @@ class AresDatabase:
         await self._conn.execute("""
             INSERT OR REPLACE INTO findings
             (id,campaign_id,module_id,title,description,severity,cvss_score,cvss_vector,
-             confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id,
+             validated,false_positive)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (f.id, campaign_id, module_id or getattr(f, "module_id", ""),
               f.title, f.description,
               f.severity.value if hasattr(f.severity, "value") else str(f.severity),
               getattr(f, "cvss_score", 0.0), getattr(f, "cvss_vector", ""),
               f.confidence, f.mitre_technique, f.mitre_tactic,
               json.dumps(f.evidence), f.remediation, f.host,
-              getattr(f, "trace_id", "")))
+              getattr(f, "trace_id", ""), int(bool(getattr(f, "validated", False))),
+              int(bool(getattr(f, "false_positive", False)))))
         await self._conn.commit()
 
     async def list_findings(
@@ -410,6 +412,7 @@ class AresDatabase:
         params_list: list[Any] = [campaign_id]
         if confirmed_only:
             conditions.append("validated=1")
+            conditions.append("false_positive=0")
         where = " AND ".join(conditions)
         async with self._conn.execute(
             f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC",

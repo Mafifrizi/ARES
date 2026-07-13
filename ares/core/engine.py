@@ -387,6 +387,7 @@ class AresEngine:
         confirmed: list[Finding] = []
         for f in findings:
             if not f.false_positive:
+                f.validated = True
                 campaign.add_finding(f)
                 confirmed.append(f)
                 if self.db:

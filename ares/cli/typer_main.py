@@ -58,6 +58,21 @@ app     = typer.Typer(
 )
 console = Console()
 
+PYTHON_MIN_VERSION = (3, 10)
+PYTHON_MAX_VERSION_EXCLUSIVE = (3, 13)
+AD_IMPACKET_TESTED_PYTHON = (3, 12)
+
+
+def _python_minor(version_info: object | None = None) -> tuple[int, int]:
+    info = sys.version_info if version_info is None else version_info
+    try:
+        major = getattr(info, "major")
+        minor = getattr(info, "minor")
+    except AttributeError:
+        major = info[0]  # type: ignore[index]
+        minor = info[1]  # type: ignore[index]
+    return int(major), int(minor)
+
 # ── Subcommand groups ──────────────────────────────────────────────────────────
 
 campaign_app = typer.Typer(help="Manage red team campaigns", no_args_is_help=True)
@@ -1100,12 +1115,38 @@ def doctor() -> None:
     # Python version
     import sys
     pv = sys.version_info
-    if pv >= (3, 10):
-        check(f"Python {pv.major}.{pv.minor}.{pv.micro}", "ok")
+    python_minor = _python_minor(pv)
+    py_major, py_minor = python_minor
+    py_micro = int(getattr(pv, "micro", 0))
+    python_label = f"{py_major}.{py_minor}.{py_micro}"
+    if PYTHON_MIN_VERSION <= python_minor < PYTHON_MAX_VERSION_EXCLUSIVE:
+        if python_minor == AD_IMPACKET_TESTED_PYTHON:
+            check(
+                f"Python {python_label}",
+                "ok",
+                "Python 3.12.x is the tested release runtime",
+            )
+        else:
+            check(
+                f"Python {python_label}",
+                "warn",
+                "Package metadata permits Python 3.10-3.12, but the full "
+                "dashboard + Windows AD/Impacket release path is tested on "
+                "Python 3.12.x",
+            )
+            check(
+                "Windows AD/Impacket Python",
+                "warn",
+                "Windows AD lab modules are tested on Python 3.12.x; "
+                "use 3.12.x if Kerberos/Impacket errors appear",
+            )
     else:
-        check(f"Python {pv.major}.{pv.minor}", "fail",
-              f"3.10+ required — current: {pv.major}.{pv.minor}. "
-              "Install via pyenv: pyenv install 3.11.9 && pyenv local 3.11.9")
+        check(
+            f"Python {py_major}.{py_minor}",
+            "fail",
+            "Python 3.13 is not supported for this release path; use Python "
+            "3.12.x for the full dashboard + Windows AD/Impacket workflow",
+        )
 
     # Core packages
     for pkg, import_name, label in [
@@ -1190,6 +1231,82 @@ def doctor() -> None:
         except Exception as exc:
             check(f"{import_name.split('.')[0]}  ({module_label})", "warn",
                   import_failure_detail(import_name, exc, "pip install ares-redteam[cloud]"))
+
+    # PDF export capability
+    try:
+        weasyprint = importlib.import_module("weasyprint")
+        check(
+            "PDF WeasyPrint",
+            "ok",
+            getattr(weasyprint, "__version__", "") or "available",
+        )
+    except Exception as exc:
+        check(
+            "PDF WeasyPrint",
+            "warn",
+            import_failure_detail(
+                "weasyprint",
+                exc,
+                "pip install ares-redteam[pdf] or use Chromium browser fallback",
+            ),
+        )
+
+    configured_pdf_browser = os.environ.get("ARES_PDF_BROWSER")
+    if configured_pdf_browser:
+        configured_pdf_browser_path = Path(configured_pdf_browser).expanduser()
+        check(
+            "PDF ARES_PDF_BROWSER",
+            "ok" if configured_pdf_browser_path.exists() else "warn",
+            f"{configured_pdf_browser_path} exists={configured_pdf_browser_path.exists()}",
+        )
+    else:
+        check(
+            "PDF ARES_PDF_BROWSER",
+            "warn",
+            "not set; auto-detecting Edge/Chrome/Chromium",
+        )
+
+    try:
+        from ares.modules.reporting.report_gen import ReportGenerator
+
+        pdf_generator = ReportGenerator()
+        pdf_browsers = ReportGenerator._pdf_browser_candidates()
+        if pdf_browsers:
+            check("PDF browser detected", "ok", str(pdf_browsers[0]))
+        else:
+            check(
+                "PDF browser detected",
+                "warn",
+                "No Edge/Chrome/Chromium found; set ARES_PDF_BROWSER",
+            )
+
+        pdf_work_path: Path | None = None
+        try:
+            pdf_work_path, pdf_profile_dir, _pdf_html_path = (
+                pdf_generator._create_pdf_browser_workspace()
+            )
+            check(
+                "PDF browser profile temp dir writable",
+                "ok",
+                str(pdf_profile_dir),
+            )
+        except OSError as exc:
+            check("PDF browser profile temp dir writable", "warn", str(exc))
+        finally:
+            if pdf_work_path is not None:
+                shutil.rmtree(pdf_work_path, ignore_errors=True)
+
+        try:
+            pdf_generator._probe_writable_dir(pdf_generator.output_dir)
+            check(
+                "PDF report output dir writable",
+                "ok",
+                str(pdf_generator.output_dir),
+            )
+        except OSError as exc:
+            check("PDF report output dir writable", "warn", str(exc))
+    except Exception as exc:
+        check("PDF browser fallback", "warn", str(exc)[:80])
 
     # ── cracking tools ────────────────────────────────────────────────────────
     for tool, desc in [("hashcat", "GPU cracking"), ("john", "CPU cracking")]:
@@ -1796,6 +1913,7 @@ def _run_python_setup(
     root: Path | None = None,
     platform_name: str | None = None,
     os_name: str | None = None,
+    version_info: object | None = None,
 ) -> None:
     import os
     import secrets
@@ -1804,14 +1922,34 @@ def _run_python_setup(
     platform_value = sys.platform if platform_name is None else platform_name
     os_value = os.name if os_name is None else os_name
     platform_label = _setup_platform_label(platform_value, os_value)
+    python_version_info = sys.version_info if version_info is None else version_info
+    python_minor = _python_minor(python_version_info)
+    py_major, py_minor = python_minor
+    py_micro = int(getattr(python_version_info, "micro", 0))
+    runtime_version = (
+        sys.version.split()[0]
+        if version_info is None
+        else f"{py_major}.{py_minor}.{py_micro}"
+    )
 
     console.print("\n[bold]ARES Setup[/bold]")
     console.print(f"Platform: {platform_label} ({platform_value}/{os_value})")
-    console.print(f"Python: {sys.version.split()[0]} ({sys.executable})")
+    console.print(f"Python: {runtime_version} ({sys.executable})")
 
-    if sys.version_info < (3, 10):
-        console.print("[red]ERROR[/red] Python 3.10+ is required.")
+    if not (PYTHON_MIN_VERSION <= python_minor < PYTHON_MAX_VERSION_EXCLUSIVE):
+        console.print("[red]ERROR[/red] Python 3.10-3.12 is required.")
+        console.print("Windows AD/Impacket modules are tested on Python 3.12.x.")
         raise SystemExit(1)
+    if python_minor != AD_IMPACKET_TESTED_PYTHON:
+        console.print(
+            "[yellow]Warning[/yellow] Package metadata permits Python 3.10-3.12, "
+            "but the tested release path for the dashboard and Windows "
+            "AD/Impacket modules is Python 3.12.x."
+        )
+    else:
+        console.print(
+            "[green]OK[/green] Python 3.12.x detected for the tested release path."
+        )
 
     env_path = root_path / ".env"
     example_path = root_path / ".env.example"

@@ -92,6 +92,7 @@ def _make_mock_db():
     db.purge_expired_tokens = AsyncMock(return_value=0)
     db.list_campaigns = AsyncMock(return_value=([], 0))
     db.get_campaign = AsyncMock(return_value=None)
+    db.list_findings = AsyncMock(return_value=([], 0))
     db.delete_campaign = AsyncMock(return_value=False)
     db.verify_api_key = AsyncMock(return_value=None)
     return db
@@ -349,6 +350,9 @@ class TestAPIKeyScopeEnforcement:
         }
 
         class FakeReportGenerator:
+            def __init__(self, *args, **kwargs):
+                pass
+
             def generate(self, campaign, fmt="html"):
                 path = tmp_path / f"{campaign.id}_report.{fmt}"
                 path.write_text("report", encoding="utf-8")
@@ -402,6 +406,9 @@ class TestAPIKeyScopeEnforcement:
         }
 
         class FakeReportGenerator:
+            def __init__(self, *args, **kwargs):
+                pass
+
             def generate(self, campaign, fmt="html"):
                 path = tmp_path / f"{campaign.id}_report.{fmt}"
                 path.write_text("report", encoding="utf-8")
@@ -558,6 +565,36 @@ class TestRBACEnforcement:
         assert r.status_code == 422
         assert "scope_cidrs" in r.text
         db.save_campaign.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_campaign_normalizes_uppercase_noise_profile(self, aclient):
+        c, db, _ = aclient
+        db.is_access_token_revoked.return_value = False
+        captured: dict[str, Any] = {}
+
+        async def capture_campaign(campaign: Any) -> None:
+            captured["campaign"] = campaign
+
+        db.save_campaign.side_effect = capture_campaign
+
+        try:
+            r = await c.post(
+                "/campaigns",
+                json={
+                    "name": "AD Lab Attack Simulation",
+                    "client": "Internal",
+                    "targets": ["10.10.10.20"],
+                    "scope_cidrs": ["10.10.10.0/24"],
+                    "noise_profile": "NORMAL",
+                },
+                headers=_auth("op_user", "operator"),
+            )
+        finally:
+            db.save_campaign.side_effect = None
+
+        assert r.status_code == 200
+        assert r.json()["noise_profile"] == "normal"
+        assert captured["campaign"].noise_profile.value == "normal"
 
     @pytest.mark.asyncio
     async def test_delete_campaign_requires_team_lead(self, aclient):
@@ -851,6 +888,97 @@ class TestModuleRunEndpoint:
         assert campaign.targets == ["127.0.0.1"]
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_kerberoast_dashboard_payload_passes_api_validation(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+        from ares.modules.ad.kerberoast import KerberoastModule
+
+        captured: dict[str, Any] = {}
+
+        class FakeRegistry:
+            def get(self, module_id: str) -> Any:
+                return KerberoastModule if module_id == "ad.kerberoast" else None
+
+        class FakeResult:
+            findings: list[Any] = []
+            status = "success"
+
+            def model_dump(self) -> dict[str, Any]:
+                return {
+                    "module_id": "ad.kerberoast",
+                    "status": "success",
+                    "findings": [],
+                    "validation_results": [],
+                    "raw_output": {"reached": True},
+                    "error": "",
+                    "duration_ms": 0,
+                }
+
+        class FakeEngine:
+            registry = FakeRegistry()
+
+            async def run_module(
+                self,
+                module_id: str,
+                campaign: Any,
+                params: dict[str, Any],
+                actor_role: str = "",
+            ) -> FakeResult:
+                captured["module_id"] = module_id
+                captured["params"] = params
+                captured["actor_role"] = actor_role
+                return FakeResult()
+
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": "camp-kerberoast",
+            "name": "Kerberoast API",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "normal",
+            "status": "created",
+            "scope_json": '[{"cidr": "10.0.0.0/8", "description": ""}]',
+            "targets_json": '["10.0.0.5"]',
+            "notes": "",
+            "created_at": "2026-06-27 02:15:19",
+            "updated_at": "2026-06-27 02:15:19",
+        }
+        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        try:
+            r = await c.post(
+                "/modules/ad.kerberoast/run",
+                json={
+                    "campaign_id": "camp-kerberoast",
+                    "params": {
+                        "dc": "10.0.0.5",
+                        "domain": "corp.local",
+                        "username": "svc-roast",
+                        "password": "Passw0rd!",
+                        "use_ldaps": False,
+                        "target_user": "sqlsvc",
+                    },
+                    "dry_run": False,
+                },
+                headers=_auth("admin", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert r.status_code == 200
+        assert captured["module_id"] == "ad.kerberoast"
+        assert captured["actor_role"] == "team_lead"
+        assert captured["params"] == {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "svc-roast",
+            "password": "Passw0rd!",
+            "use_ldaps": False,
+            "target_user": "sqlsvc",
+        }
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_module_run_updates_telemetry_snapshot(
         self, aclient: Any, monkeypatch: Any
     ) -> None:
@@ -971,6 +1099,253 @@ class TestReportEndpoints:
         assert r.status_code == 200
         filenames = [item["filename"] for item in r.json()["reports"]]
         assert filenames == [owned.name]
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_generate_json_report_hydrates_confirmed_db_findings(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.modules.reporting.report_gen as report_gen
+
+        real_report_generator = report_gen.ReportGenerator
+        campaign_id = "camp-ad-lab"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "AD Lab Attack Simulation",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "normal",
+            "status": "created",
+            "scope_json": '[{"cidr": "10.10.10.0/24", "description": "AD lab"}]',
+            "targets_json": '["10.10.10.20"]',
+            "notes": "",
+        }
+        db.list_findings.return_value = (
+            [
+                {
+                    "id": "finding-asrep",
+                    "campaign_id": campaign_id,
+                    "module_id": "ad.asreproast",
+                    "title": "ASREPRoast Hashes Captured (1)",
+                    "description": "Captured one AS-REP hash.",
+                    "severity": "high",
+                    "confidence": 1.0,
+                    "mitre_technique": "T1558.004",
+                    "mitre_tactic": "Credential Access",
+                    "evidence_json": '{"hash_count": 1, "sample_hash": "$krb5asrep$23$user@LAB.LOCAL:abcdef"}',
+                    "remediation": "Require Kerberos pre-authentication.",
+                    "host": "10.10.10.20",
+                    "validated": 0,
+                    "false_positive": 0,
+                    "discovered_at": "2026-07-12T01:00:00+00:00",
+                },
+                {
+                    "id": "finding-kerb",
+                    "campaign_id": campaign_id,
+                    "module_id": "ad.kerberoast",
+                    "title": "Kerberoast Hashes Captured (1)",
+                    "description": "Captured one TGS hash.",
+                    "severity": "critical",
+                    "confidence": 1.0,
+                    "mitre_technique": "T1558.003",
+                    "mitre_tactic": "Credential Access",
+                    "evidence_json": '{"hash_count": 1, "accounts": ["svc-sql"], "sample_hash": "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef"}',
+                    "remediation": "Rotate service account credentials.",
+                    "host": "10.10.10.20",
+                    "validated": 0,
+                    "false_positive": 0,
+                    "discovered_at": "2026-07-12T01:01:00+00:00",
+                },
+            ],
+            2,
+        )
+
+        def generator_factory(*args: Any, **kwargs: Any) -> Any:
+            return real_report_generator(output_dir=str(tmp_path), **kwargs)
+
+        monkeypatch.setattr(report_gen, "ReportGenerator", generator_factory)
+
+        r = await c.post(
+            f"/reports/{campaign_id}?fmt=json",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 200
+        path = tmp_path / r.json()["filename"]
+        assert path.exists()
+        data = __import__("json").loads(path.read_text(encoding="utf-8"))
+        assert data["summary"]["total_confirmed"] == 2
+        assert data["summary"]["by_severity"]["high"] == 1
+        assert data["summary"]["by_severity"]["critical"] == 1
+        assert data["summary"]["by_module"]["ad.asreproast"] == 1
+        assert data["summary"]["by_module"]["ad.kerberoast"] == 1
+        assert data["findings"]
+        assert data["key_findings"]
+        assert data["campaign"]["targets"] == ["10.10.10.20"]
+        assert data["campaign"]["scope"][0]["cidr"] == "10.10.10.0/24"
+        assert "$krb5asrep$" not in path.read_text(encoding="utf-8")
+        assert "$krb5tgs$" not in path.read_text(encoding="utf-8")
+        assert "validated" not in db.list_findings.await_args.kwargs
+        assert db.list_findings.await_args.kwargs["false_positive"] is False
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_dashboard_run_findings_and_report_use_same_persisted_db_path(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, _, app = aclient
+        import ares.modules.reporting.report_gen as report_gen
+        from ares.api.server import get_db, get_engine
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
+        from ares.core.engine import EngineModuleResult, ModuleStatus
+        from ares.db.database import AresDatabase
+
+        real_report_generator = report_gen.ReportGenerator
+        real_db = await AresDatabase.create(tmp_path / "ares.db")
+        original_db = getattr(app.state, "db", None)
+        campaign = Campaign(
+            name="AD Lab Attack Simulation",
+            client="Internal",
+            operator="admin",
+            targets=["10.10.10.20"],
+            scope=[ScopeEntry(cidr="10.10.10.0/24")],
+            noise_profile=NoiseProfile.NORMAL,
+        )
+        await real_db.save_campaign(campaign)
+
+        class FakeRegistry:
+            def get(self, module_id: str) -> Any:
+                return None
+
+        class FakeEngine:
+            registry = FakeRegistry()
+
+            async def run_module(
+                self,
+                module_id: str,
+                campaign: Any,
+                params: dict[str, Any],
+                actor_role: str = "",
+            ) -> EngineModuleResult:
+                if module_id == "ad.asreproast":
+                    finding = Finding(
+                        title="ASREPRoast Hashes Captured (1)",
+                        description="Captured one AS-REP hash.",
+                        severity=Severity.HIGH,
+                        validated=True,
+                        module_id=module_id,
+                        mitre_technique="T1558.004",
+                        mitre_tactic="Credential Access",
+                        evidence={
+                            "hash_count": 1,
+                            "sample_hash": "$krb5asrep$23$user@LAB.LOCAL:abcdef",
+                        },
+                        remediation="Require Kerberos pre-authentication.",
+                        host="10.10.10.20",
+                    )
+                else:
+                    finding = Finding(
+                        title="Kerberoast Hashes Captured (1)",
+                        description="Captured one TGS hash.",
+                        severity=Severity.CRITICAL,
+                        validated=True,
+                        module_id=module_id,
+                        mitre_technique="T1558.003",
+                        mitre_tactic="Credential Access",
+                        evidence={
+                            "hash_count": 1,
+                            "accounts": ["svc-sql"],
+                            "sample_hash": "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef",
+                        },
+                        remediation="Rotate service account credentials.",
+                        host="10.10.10.20",
+                    )
+                return EngineModuleResult(
+                    module_id=module_id,
+                    status=ModuleStatus.DONE,
+                    findings=[finding],
+                    raw_output={"confirmed": 1},
+                    duration_ms=12.0,
+                )
+
+        def generator_factory(*args: Any, **kwargs: Any) -> Any:
+            return real_report_generator(output_dir=str(tmp_path / "reports"), **kwargs)
+
+        app.state.db = real_db
+        app.dependency_overrides[get_db] = lambda: real_db
+        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        monkeypatch.setattr(report_gen, "ReportGenerator", generator_factory)
+        try:
+            common_params = {
+                "dc": "10.10.10.20",
+                "domain": "lab.local",
+                "username": "lab\\operator",
+                "password": "CorrectHorseBatteryStaple!",
+                "use_ldaps": False,
+            }
+            asrep = await c.post(
+                f"/modules/ad.asreproast/run",
+                headers=_auth("admin", "team_lead"),
+                json={
+                    "campaign_id": campaign.id,
+                    "params": common_params,
+                    "dry_run": False,
+                },
+            )
+            kerb = await c.post(
+                f"/modules/ad.kerberoast/run",
+                headers=_auth("admin", "team_lead"),
+                json={
+                    "campaign_id": campaign.id,
+                    "params": {**common_params, "target_user": "svc-sql"},
+                    "dry_run": False,
+                },
+            )
+            assert asrep.status_code == 200
+            assert kerb.status_code == 200
+
+            # Legacy/current dashboard rows may be visible even if the validated
+            # flag is not populated; report hydration must not use a stricter
+            # finder than the dashboard list.
+            await real_db.conn.execute(
+                "UPDATE findings SET validated=0 WHERE campaign_id=?",
+                (campaign.id,),
+            )
+            await real_db.conn.commit()
+
+            findings_response = await c.get(
+                f"/campaigns/{campaign.id}/findings",
+                headers=_auth("admin", "team_lead"),
+            )
+            assert findings_response.status_code == 200
+            assert len(findings_response.json()) == 2
+
+            report_response = await c.post(
+                f"/reports/{campaign.id}?fmt=json",
+                headers=_auth("admin", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_engine, None)
+            app.state.db = original_db
+            await real_db.close()
+
+        assert report_response.status_code == 200
+        path = tmp_path / "reports" / report_response.json()["filename"]
+        data = __import__("json").loads(path.read_text(encoding="utf-8"))
+        assert data["summary"]["total_confirmed"] == 2
+        assert data["summary"]["by_module"]["ad.asreproast"] == 1
+        assert data["summary"]["by_module"]["ad.kerberoast"] == 1
+        assert data["summary"]["by_severity"]["high"] == 1
+        assert data["summary"]["by_severity"]["critical"] == 1
+        assert len(data["findings"]) >= 2
+        assert len(data["key_findings"]) >= 2
+        assert data["campaign"]["targets"] == ["10.10.10.20"]
+        assert data["campaign"]["scope"][0]["cidr"] == "10.10.10.0/24"
+        assert "T1558.003" in path.read_text(encoding="utf-8")
+        assert "T1558.004" in path.read_text(encoding="utf-8")
+        assert "$krb5asrep$" not in path.read_text(encoding="utf-8")
+        assert "$krb5tgs$" not in path.read_text(encoding="utf-8")
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_report_download_rejects_encoded_traversal(

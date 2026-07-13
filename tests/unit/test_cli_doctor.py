@@ -4,8 +4,14 @@ import importlib.metadata
 import os
 import sys
 import types
+from collections import namedtuple
+from pathlib import Path
 
+import pytest
 import typer
+
+
+VersionInfo = namedtuple("version_info", "major minor micro releaselevel serial")
 
 
 def test_doctor_uses_distribution_metadata_for_impacket(monkeypatch, tmp_path, capsys):
@@ -74,6 +80,84 @@ def test_doctor_reports_broken_optional_import_and_continues(monkeypatch, tmp_pa
     assert "socket AF_INET/389" in output
 
 
+def test_doctor_guides_windows_ad_impacket_to_python_312(monkeypatch, tmp_path, capsys):
+    from ares.cli.typer_main import doctor
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("ARES_SECRET_KEY=test\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "version_info", VersionInfo(3, 11, 9, "final", 0))
+
+    try:
+        doctor()
+    except typer.Exit:
+        pass
+
+    output = capsys.readouterr().out
+    assert "Python 3.11.9" in output
+    assert "Package metadata permits Python 3.10-3.12" in output
+    normalized = " ".join(output.split())
+    assert "Windows AD/Impacket" in normalized
+    assert "Python 3.12" in normalized
+    assert "Windows AD/Impacket Python" in output
+    assert "Python 3.12.x" in output
+
+
+def test_doctor_reports_pdf_capability(monkeypatch, tmp_path, capsys):
+    from ares.cli.typer_main import doctor
+    from ares.modules.reporting import report_gen
+
+    browser = tmp_path / "chrome.exe"
+    browser.write_text("", encoding="utf-8")
+    fake_weasyprint = types.ModuleType("weasyprint")
+    fake_weasyprint.__version__ = "test-pdf"
+
+    class FakeReportGenerator:
+        def __init__(self) -> None:
+            self.output_dir = tmp_path / "reports"
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        @staticmethod
+        def _pdf_browser_candidates() -> list[Path]:
+            return [browser]
+
+        @staticmethod
+        def _probe_writable_dir(path: Path) -> None:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+
+        def _create_pdf_browser_workspace(self) -> tuple[Path, Path, Path]:
+            work_path = tmp_path / "pdf-work"
+            profile_dir = work_path / "profile"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            return work_path, profile_dir, work_path / "report.html"
+
+        def _run_pdf_browser(self, cmd: list[str]):  # pragma: no cover - must not run
+            raise AssertionError("doctor must not launch a PDF browser")
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("ARES_SECRET_KEY=test\n", encoding="utf-8")
+    monkeypatch.setenv("ARES_PDF_BROWSER", str(browser))
+    monkeypatch.setitem(sys.modules, "weasyprint", fake_weasyprint)
+    monkeypatch.setattr(report_gen, "ReportGenerator", FakeReportGenerator)
+
+    try:
+        doctor()
+    except typer.Exit:
+        pass
+
+    output = capsys.readouterr().out
+    assert "PDF WeasyPrint" in output
+    assert "test-pdf" in output
+    assert "PDF ARES_PDF_BROWSER" in output
+    assert "chrome.exe" in output
+    assert "exists=True" in output
+    assert "PDF browser detected" in output
+    assert "PDF browser profile temp dir writable" in output
+    assert "PDF report output dir writable" in output
+
+
 def test_setup_entrypoint_routes_to_python_native_setup(monkeypatch):
     from ares.cli import typer_main
 
@@ -128,3 +212,26 @@ def test_python_setup_posix_keeps_shell_helper_optional(tmp_path, capsys):
     assert "Developer helper available: scripts/setup.sh (optional)." in output
     assert "/bin/bash" not in output
     assert (tmp_path / ".env").exists()
+
+
+def test_python_setup_rejects_python_313_before_writing_env(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    (tmp_path / ".env.example").write_text(
+        "ARES_SECRET_KEY=\nARES_ENCRYPTION_KEY=\nARES_DEFAULT_ADMIN_PASSWORD=\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit):
+        _run_python_setup(
+            root=tmp_path,
+            platform_name="win32",
+            os_name="nt",
+            version_info=VersionInfo(3, 13, 0, "final", 0),
+        )
+
+    output = capsys.readouterr().out
+    assert "Python: 3.13.0" in output
+    assert "Python 3.10-3.12 is required" in output
+    assert "Python 3.12.x" in output
+    assert not (tmp_path / ".env").exists()
