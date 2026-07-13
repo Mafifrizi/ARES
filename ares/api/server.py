@@ -1785,6 +1785,7 @@ async def get_cvss_summary(
 # ── Reports ───────────────────────────────────────────────────────────────────
 
 _REPORT_EXTENSIONS = {"html", "pdf", "markdown", "json", "md"}
+_REPORT_BULK_DELETE_EXTENSIONS = {"html", "pdf", "json", "md"}
 
 
 def _report_slug(name: str) -> str:
@@ -1847,7 +1848,7 @@ def _safe_report_file_path(
         campaign_id=campaign_id,
         campaign=campaign,
     )
-    root = _report_root()
+    root = _report_root().resolve()
     candidate = (root / safe_filename).resolve()
     try:
         candidate.relative_to(root)
@@ -1858,8 +1859,36 @@ def _safe_report_file_path(
     return candidate
 
 
+def _iter_report_files_for_campaign(
+    *,
+    campaign_id: str,
+    campaign: dict[str, Any],
+    extensions: set[str] | None = None,
+) -> list[Path]:
+    root = _report_root().resolve()
+    if not root.exists():
+        return []
+    prefixes = _report_prefixes(campaign_id, campaign)
+    allowed_extensions = extensions or _REPORT_EXTENSIONS
+    files: list[Path] = []
+    for path in sorted(root.glob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lstrip(".").lower() not in allowed_extensions:
+            continue
+        if not any(path.name.startswith(prefix) for prefix in prefixes):
+            continue
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        files.append(resolved)
+    return files
+
+
 def _delete_report_artifacts_for_campaign(campaign_id: str) -> int:
-    root = _report_root()
+    root = _report_root().resolve()
     if not root.exists():
         return 0
     prefix = f"{_report_slug(campaign_id)}_"
@@ -1934,31 +1963,54 @@ async def list_reports(
     if not campaign:
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(campaign, actor)
-    root = _report_root()
-    prefixes = _report_prefixes(campaign_id, campaign)
     reports: list[dict[str, Any]] = []
-    for path in sorted(root.glob("*")):
-        if not path.is_file():
-            continue
-        if path.suffix.lstrip(".").lower() not in _REPORT_EXTENSIONS:
-            continue
-        if not any(path.name.startswith(prefix) for prefix in prefixes):
-            continue
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            continue
+    for resolved in _iter_report_files_for_campaign(
+        campaign_id=campaign_id,
+        campaign=campaign,
+    ):
         stat = resolved.stat()
         reports.append(
             {
-                "filename": path.name,
-                "format": path.suffix.lstrip(".").lower(),
+                "filename": resolved.name,
+                "format": resolved.suffix.lstrip(".").lower(),
                 "size_bytes": stat.st_size,
                 "modified_at": stat.st_mtime,
             }
         )
     return {"campaign_id": campaign_id, "reports": reports}
+
+
+@app.delete("/reports/{campaign_id}", tags=["reports"])
+async def delete_reports(
+    campaign_id: str,
+    actor: AuthenticatedUser = _api_key_write_dep,
+    db: AresDatabase = _db_dep,
+) -> dict[str, Any]:
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    await _require_campaign_access(campaign, actor)
+    deleted = 0
+    for path in _iter_report_files_for_campaign(
+        campaign_id=campaign_id,
+        campaign=campaign,
+        extensions=_REPORT_BULK_DELETE_EXTENSIONS,
+    ):
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning(
+                "report_artifact_delete_failed", path=str(path), error=str(exc)
+            )
+            continue
+        deleted += 1
+    await db.audit(
+        actor.username,
+        "reports_deleted",
+        f"count={deleted}",
+        campaign_id,
+    )
+    return {"status": "deleted", "campaign_id": campaign_id, "deleted": deleted}
 
 
 @app.get("/reports/{campaign_id}/files/{filename}", tags=["reports"])
@@ -1974,6 +2026,34 @@ async def download_report(
     await _require_campaign_access(campaign, actor)
     path = _safe_report_file_path(filename, campaign_id=campaign_id, campaign=campaign)
     return FileResponse(path, filename=path.name)
+
+
+@app.delete("/reports/{campaign_id}/files/{filename}", tags=["reports"])
+async def delete_report(
+    campaign_id: str,
+    filename: str,
+    actor: AuthenticatedUser = _api_key_write_dep,
+    db: AresDatabase = _db_dep,
+) -> dict[str, str]:
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    await _require_campaign_access(campaign, actor)
+    path = _safe_report_file_path(filename, campaign_id=campaign_id, campaign=campaign)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        raise HTTPException(404, "Report not found") from None
+    except OSError as exc:
+        logger.warning("report_artifact_delete_failed", path=str(path), error=str(exc))
+        raise HTTPException(500, "Report could not be deleted") from exc
+    await db.audit(
+        actor.username,
+        "report_deleted",
+        f"filename={path.name}",
+        campaign_id,
+    )
+    return {"status": "deleted", "campaign_id": campaign_id, "filename": path.name}
 
 
 # ── Telemetry ─────────────────────────────────────────────────────────────────

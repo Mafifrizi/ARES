@@ -1391,3 +1391,163 @@ class TestReportEndpoints:
         )
         assert r.status_code == 200
         assert r.text == "owned report"
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_existing_file_succeeds(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+        report = tmp_path / f"{campaign_id}_Acme_20260101_0000.pdf"
+        report.write_bytes(b"%PDF-1.4\n")
+
+        r = await c.delete(
+            f"/reports/{campaign_id}/files/{report.name}",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 200
+        assert r.json()["filename"] == report.name
+        assert not report.exists()
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_missing_file_returns_404(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+
+        r = await c.delete(
+            f"/reports/{campaign_id}/files/{campaign_id}_Acme_missing.pdf",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 404
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_rejects_path_traversal(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+
+        r = await c.delete(
+            f"/reports/{campaign_id}/files/%2e%2e%5csecret.pdf",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_rejects_absolute_path(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+
+        r = await c.delete(
+            f"/reports/{campaign_id}/files/C%3A%5Csecret.pdf",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_rejects_nested_path(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+
+        r = await c.delete(
+            f"/reports/{campaign_id}/files/nested%5Creport.pdf",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 400
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_report_delete_bulk_deletes_only_allowed_campaign_artifacts(
+        self, aclient: Any, tmp_path: Any, monkeypatch: Any
+    ) -> None:
+        c, db, _ = aclient
+        import ares.api.server as server
+
+        campaign_id = "camp-123"
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": campaign_id,
+            "name": "Acme",
+            "operator": "admin",
+        }
+        monkeypatch.setattr(server, "_report_root", lambda: tmp_path.resolve())
+        owned_pdf = tmp_path / f"{campaign_id}_Acme_20260101_0000.pdf"
+        owned_json = tmp_path / f"{campaign_id}_Acme_20260101_0000.json"
+        owned_html = tmp_path / f"{campaign_id}_Acme_20260101_0000.html"
+        owned_md = tmp_path / f"{campaign_id}_Acme_20260101_0000.md"
+        owned_txt = tmp_path / f"{campaign_id}_Acme_20260101_0000.txt"
+        other = tmp_path / "other_Acme_20260101_0000.pdf"
+        report_dir = tmp_path / f"{campaign_id}_Acme_20260101_0000.pdf.dir"
+        report_dir.mkdir()
+        for path in (owned_pdf, owned_json, owned_html, owned_md, owned_txt, other):
+            path.write_text("artifact", encoding="utf-8")
+
+        r = await c.delete(
+            f"/reports/{campaign_id}",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert r.status_code == 200
+        assert r.json()["deleted"] == 4
+        assert not owned_pdf.exists()
+        assert not owned_json.exists()
+        assert not owned_html.exists()
+        assert not owned_md.exists()
+        assert owned_txt.exists()
+        assert other.exists()
+        assert report_dir.exists()

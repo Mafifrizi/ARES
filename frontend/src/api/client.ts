@@ -206,6 +206,16 @@ export const api = {
     `/reports/${encodeURIComponent(campaignId)}/files/${encodeURIComponent(filename)}`,
   downloadReport: (campaignId: string, filename: string) =>
     apiBlobRequest(`/reports/${encodeURIComponent(campaignId)}/files/${encodeURIComponent(filename)}`),
+  deleteReport: (campaignId: string, filename: string) =>
+    apiRequest<Record<string, string>>(
+      `/reports/${encodeURIComponent(campaignId)}/files/${encodeURIComponent(filename)}`,
+      { method: "DELETE" }
+    ),
+  clearReports: (campaignId: string) =>
+    apiRequest<{ status: string; campaign_id: string; deleted: number }>(
+      `/reports/${encodeURIComponent(campaignId)}`,
+      { method: "DELETE" }
+    ),
   graph: (campaignId: string) => apiRequest<Record<string, any>>(`/graph/${encodeURIComponent(campaignId)}`),
   attackPaths: (campaignId: string) =>
     apiRequest<Record<string, any>>(`/graph/${encodeURIComponent(campaignId)}/attack-paths`),
