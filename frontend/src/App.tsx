@@ -1277,6 +1277,8 @@ function ReportsPage() {
     }
   });
   const persistedGenerateResult = lastGenerateResult?.key === reportResultKey ? lastGenerateResult : null;
+  const generateIssue = generate.error ?? (persistedGenerateResult?.isError ? persistedGenerateResult.payload : undefined);
+  const pdfIssueHint = format === "pdf" ? pdfFailureHint(generateIssue) : "";
   const download = useMutation({
     mutationFn: async (item: ReportItem) => {
       const blob = await api.downloadReport(campaignId, item.filename);
@@ -1333,8 +1335,14 @@ function ReportsPage() {
           </button>
         </div>
         {warning && <p className="notice notice-danger mt-3">{warning}</p>}
+        {pdfIssueHint && (
+          <p className="notice notice-danger mt-3">
+            <AlertTriangle size={16} />
+            {pdfIssueHint}
+          </p>
+        )}
         <DataPanel
-          title={(generate.error ?? (persistedGenerateResult?.isError ? persistedGenerateResult.payload : undefined)) ? "Generate Error" : "Generate Result"}
+          title={generateIssue ? "Generate Error" : "Generate Result"}
           data={generate.error ?? generate.data ?? persistedGenerateResult?.payload}
         />
       </section>
@@ -3175,6 +3183,29 @@ function serializeError(value: unknown): unknown {
     return { name: value.name, message: value.message };
   }
   return value;
+}
+
+function pdfFailureHint(value: unknown): string {
+  if (!value) return "";
+  const serialized = serializeError(value);
+  const text = typeof serialized === "string"
+    ? serialized
+    : JSON.stringify(serialized);
+  const normalized = text.toLowerCase();
+  if (normalized.includes("elevated windows") || normalized.includes("administrator powershell")) {
+    return "PDF export is blocked from this elevated Windows session. Run PowerShell normally, or set ARES_PDF_BROWSER to a working non-Edge browser.";
+  }
+  if (
+    normalized.includes("gtk")
+    || normalized.includes("pango")
+    || normalized.includes("libgobject")
+  ) {
+    return "WeasyPrint needs native GTK/Pango libraries on Windows. Use the browser fallback from normal PowerShell or install those native libraries.";
+  }
+  if (normalized.includes("no downloadable pdf") || normalized.includes("pdf smoke")) {
+    return "PDF export did not create a valid artifact. Run ares doctor --pdf-smoke to verify the local PDF backend and browser fallback.";
+  }
+  return "";
 }
 
 export default App;

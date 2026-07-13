@@ -62,6 +62,19 @@ REMEDIATION_SLA = {
 
 BROWSER_PDF_TIMEOUT_SECONDS = 15
 PDF_ARTIFACT_WAIT_SECONDS = 3.0
+WINDOWS_EDGE_ELEVATED_PDF_MESSAGE = (
+    "PDF browser fallback is not supported from elevated Windows sessions with "
+    "Edge. Run PowerShell normally, set ARES_PDF_BROWSER to a working browser, "
+    "or install WeasyPrint native GTK/Pango dependencies."
+)
+WINDOWS_WEASYPRINT_NATIVE_HINT = (
+    "WeasyPrint imported from pip, but Windows native GTK/Pango libraries are "
+    "missing. Install the native GTK/Pango runtime or use the Edge/Chrome "
+    "browser fallback from normal non-Administrator PowerShell."
+)
+_PDF_SMOKE_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>ARES PDF smoke</title></head>
+<body><h1>ARES PDF smoke</h1><p>PDF export preflight.</p></body></html>"""
 _REDACTED_EVIDENCE = "[REDACTED sensitive evidence]"
 _SENSITIVE_EVIDENCE_KEYS = {
     "hash",
@@ -1716,10 +1729,18 @@ class ReportGenerator:
         output_dir: str = "~/.ares/reports",
         *,
         include_sensitive_evidence: bool = False,
+        strict_pdf_browser: bool | None = None,
     ) -> None:
         self.output_dir = Path(output_dir).expanduser()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.include_sensitive_evidence = include_sensitive_evidence
+        if strict_pdf_browser is None:
+            strict_pdf_browser = os.environ.get("ARES_PDF_BROWSER_STRICT", "").lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+        self.strict_pdf_browser = strict_pdf_browser
         self._last_pdf_browser_error = ""
 
     def generate(
@@ -1749,6 +1770,33 @@ class ReportGenerator:
             except Exception as e:
                 logger.warning("report_format_failed", fmt=fmt, error=str(e))
         return results
+
+    def generate_pdf_smoke(self) -> Path:
+        """Render a tiny PDF through the same backends used by dashboard export."""
+        smoke_path = self.output_dir / "ares_pdf_smoke.pdf"
+        smoke_path.unlink(missing_ok=True)
+        backend_error = ""
+        try:
+            from weasyprint import HTML as WP
+
+            WP(string=_PDF_SMOKE_HTML, base_url=str(self.output_dir.resolve())).write_pdf(
+                str(smoke_path)
+            )
+            if self._pdf_artifact_ready(smoke_path):
+                return smoke_path
+            backend_error = (
+                f"WeasyPrint did not create a valid PDF artifact at {smoke_path}."
+            )
+        except (ImportError, OSError) as exc:
+            backend_error = self._pdf_backend_failure_detail(exc)
+            logger.warning("pdf_smoke_backend_unavailable", error=backend_error)
+
+        if self._write_pdf_with_browser(_PDF_SMOKE_HTML, smoke_path):
+            return smoke_path
+        detail = self._last_pdf_browser_error or (
+            "No local Chromium-compatible PDF browser was available."
+        )
+        raise ReportDependencyError(f"{backend_error} {detail}".strip())
 
     # ── JSON ──────────────────────────────────────────────────────────────
 
@@ -1948,20 +1996,21 @@ class ReportGenerator:
                 str(pdf_path)
             )
         except (ImportError, OSError) as exc:
-            logger.warning("pdf_backend_unavailable", error=str(exc))
+            backend_detail = self._pdf_backend_failure_detail(exc)
+            logger.warning("pdf_backend_unavailable", error=backend_detail)
             if self._write_pdf_with_browser(html, pdf_path):
                 logger.info("report_generated", fmt="pdf", path=str(pdf_path))
                 return pdf_path
             detail = self._last_pdf_browser_error
             if detail:
-                raise ReportDependencyError(detail) from exc
+                raise ReportDependencyError(f"{backend_detail} {detail}") from exc
             raise ReportDependencyError(
                 "PDF generation requires the optional WeasyPrint backend or a "
                 "local Chromium-compatible browser. Install the PDF extra/native "
                 "runtime, set ARES_PDF_BROWSER, or generate HTML, JSON, or "
                 "Markdown instead."
             ) from exc
-        if not pdf_path.exists() or pdf_path.stat().st_size <= 0:
+        if not self._pdf_artifact_ready(pdf_path):
             raise ReportDependencyError(
                 f"PDF backend did not create a downloadable artifact at {pdf_path}"
             )
@@ -1973,18 +2022,22 @@ class ReportGenerator:
     def _write_pdf_with_browser(self, html: str, pdf_path: Path) -> bool:
         """Use a local Chromium-compatible browser when WeasyPrint is unavailable."""
         self._last_pdf_browser_error = ""
+        errors: list[str] = []
         for browser in self._pdf_browser_candidates():
+            strict_current = self._is_strict_configured_pdf_browser(browser)
             work_path: Path | None = None
             try:
                 work_path, profile_dir, html_path = self._create_pdf_browser_workspace()
                 html_path.write_text(html, encoding="utf-8")
             except OSError as exc:
-                self._last_pdf_browser_error = (
+                message = (
                     f"PDF browser profile directory was not writable for {browser}: "
                     f"{exc}. Output path was {pdf_path.resolve()}. Set "
                     "ARES_PDF_BROWSER to a working Chromium/Edge/Chrome executable "
                     "or install ARES with the PDF extra/native WeasyPrint dependencies."
                 )
+                errors.append(message)
+                self._last_pdf_browser_error = "\n".join(errors)
                 logger.warning(
                     "pdf_browser_profile_unusable",
                     browser=str(browser),
@@ -1992,17 +2045,21 @@ class ReportGenerator:
                 )
                 if work_path is not None:
                     shutil.rmtree(work_path, ignore_errors=True)
+                if strict_current:
+                    break
                 continue
 
             skip_reason = self._pdf_browser_skip_reason(browser)
             if skip_reason:
-                self._last_pdf_browser_error = (
+                message = (
                     f"PDF browser fallback skipped {browser}: {skip_reason}. "
                     f"User data dir was {profile_dir}. Output path was "
                     f"{pdf_path.resolve()}. Set ARES_PDF_BROWSER to a working "
                     "Chromium/Edge/Chrome executable or install ARES with the "
                     "PDF extra/native WeasyPrint dependencies."
                 )
+                errors.append(message)
+                self._last_pdf_browser_error = "\n".join(errors)
                 logger.warning(
                     "pdf_browser_skipped",
                     browser=str(browser),
@@ -2011,6 +2068,8 @@ class ReportGenerator:
                 )
                 if work_path is not None:
                     shutil.rmtree(work_path, ignore_errors=True)
+                if strict_current:
+                    break
                 continue
 
             cmd = [
@@ -2035,7 +2094,7 @@ class ReportGenerator:
                 if completed.returncode == 0 and self._pdf_artifact_ready(pdf_path):
                     logger.info("pdf_browser_fallback_used", browser=str(browser))
                     return True
-                self._last_pdf_browser_error = (
+                message = (
                     f"PDF browser fallback exited with return code "
                     f"{completed.returncode} using {browser}, but no downloadable "
                     f"PDF was created at {pdf_path.resolve()}. User data dir was "
@@ -2044,6 +2103,8 @@ class ReportGenerator:
                     "Chromium/Edge/Chrome executable or install ARES with the "
                     "PDF extra/native WeasyPrint dependencies."
                 )
+                errors.append(message)
+                self._last_pdf_browser_error = "\n".join(errors)
                 logger.warning(
                     "pdf_browser_failed",
                     browser=str(browser),
@@ -2054,7 +2115,7 @@ class ReportGenerator:
                     stderr=completed.stderr[-500:],
                 )
             except subprocess.TimeoutExpired as exc:
-                self._last_pdf_browser_error = (
+                message = (
                     f"PDF browser fallback timed out after "
                     f"{BROWSER_PDF_TIMEOUT_SECONDS}s using {browser}. "
                     f"User data dir was {profile_dir}. HTML input was {html_path}. "
@@ -2062,27 +2123,32 @@ class ReportGenerator:
                     "to a working Chromium/Edge/Chrome executable or install "
                     "ARES with the PDF extra/native WeasyPrint dependencies."
                 )
+                errors.append(message)
+                self._last_pdf_browser_error = "\n".join(errors)
                 logger.warning(
                     "pdf_browser_failed",
                     browser=str(browser),
                     error=str(exc),
                     timeout_s=BROWSER_PDF_TIMEOUT_SECONDS,
                 )
-                continue
             except (OSError, subprocess.SubprocessError) as exc:
-                self._last_pdf_browser_error = (
+                message = (
                     f"PDF browser fallback failed using {browser}: {exc}. "
                     f"User data dir was {profile_dir}. HTML input was {html_path}. "
                     f"Output path was {pdf_path.resolve()}. Set ARES_PDF_BROWSER "
                     "to a working Chromium/Edge/Chrome executable or install "
                     "ARES with the PDF extra/native WeasyPrint dependencies."
                 )
+                errors.append(message)
+                self._last_pdf_browser_error = "\n".join(errors)
                 logger.warning(
                     "pdf_browser_failed", browser=str(browser), error=str(exc)
                 )
             finally:
                 if work_path is not None:
                     shutil.rmtree(work_path, ignore_errors=True)
+            if strict_current:
+                break
         if not self._last_pdf_browser_error:
             self._last_pdf_browser_error = (
                 "PDF generation requires the optional WeasyPrint backend or a "
@@ -2101,22 +2167,47 @@ class ReportGenerator:
             timeout=BROWSER_PDF_TIMEOUT_SECONDS,
         )
 
+    def _is_strict_configured_pdf_browser(self, browser: Path) -> bool:
+        if not self.strict_pdf_browser:
+            return False
+        configured = os.environ.get("ARES_PDF_BROWSER")
+        if not configured:
+            return False
+        try:
+            return browser.resolve() == Path(configured).expanduser().resolve()
+        except OSError:
+            return False
+
     def _pdf_browser_skip_reason(self, browser: Path) -> str:
         if (
-            os.name == "nt"
+            self._is_windows_host()
             and browser.name.lower() == "msedge.exe"
             and self._windows_session_is_elevated()
         ):
-            return (
-                "Microsoft Edge can reject dedicated --user-data-dir profiles "
-                "from elevated Windows sessions; use Chrome or set "
-                "ARES_PDF_BROWSER to a non-Edge Chromium executable"
-            )
+            return WINDOWS_EDGE_ELEVATED_PDF_MESSAGE
         return ""
 
     @staticmethod
+    def _pdf_backend_failure_detail(exc: BaseException) -> str:
+        message = str(exc) or repr(exc)
+        lowered = message.lower()
+        native_markers = ("libgobject", "pango", "gtk", "gdk", "cairo")
+        if ReportGenerator._is_windows_host() and any(
+            marker in lowered for marker in native_markers
+        ):
+            return f"{WINDOWS_WEASYPRINT_NATIVE_HINT} Original error: {message}"
+        return (
+            "WeasyPrint PDF backend is unavailable. Install the PDF extra/native "
+            f"runtime or use browser fallback. Original error: {exc.__class__.__name__}: {message}"
+        )
+
+    @staticmethod
+    def _is_windows_host() -> bool:
+        return os.name == "nt"
+
+    @staticmethod
     def _windows_session_is_elevated() -> bool:
-        if os.name != "nt":
+        if not ReportGenerator._is_windows_host():
             return False
         try:
             import ctypes
@@ -2177,7 +2268,11 @@ class ReportGenerator:
         deadline = time.monotonic() + PDF_ARTIFACT_WAIT_SECONDS
         while time.monotonic() <= deadline:
             try:
-                if pdf_path.exists() and pdf_path.stat().st_size > 0:
+                if (
+                    pdf_path.exists()
+                    and pdf_path.stat().st_size > 0
+                    and pdf_path.read_bytes()[:5] == b"%PDF-"
+                ):
                     return True
             except OSError:
                 pass
@@ -2189,30 +2284,24 @@ class ReportGenerator:
         configured = os.environ.get("ARES_PDF_BROWSER")
         raw: list[Path] = []
         if configured:
-            raw.append(Path(configured))
-        for name in (
-            "msedge",
-            "chrome",
-            "chromium",
-            "google-chrome",
-            "chromium-browser",
-        ):
-            found = shutil.which(name)
-            if found:
-                raw.append(Path(found))
-        if os.name == "nt":
-            raw.extend(
-                [
-                    Path(
-                        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-                    ),
-                    Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
-                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-                    Path(
-                        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-                    ),
-                ]
-            )
+            raw.append(Path(configured).expanduser())
+        if ReportGenerator._is_windows_host():
+            raw.extend(ReportGenerator._windows_browser_default_paths())
+            for name in ("msedge", "chrome", "chromium"):
+                found = shutil.which(name)
+                if found:
+                    raw.append(Path(found))
+        else:
+            for name in (
+                "chrome",
+                "chromium",
+                "google-chrome",
+                "chromium-browser",
+                "msedge",
+            ):
+                found = shutil.which(name)
+                if found:
+                    raw.append(Path(found))
 
         candidates: list[Path] = []
         seen: set[str] = set()
@@ -2226,6 +2315,15 @@ class ReportGenerator:
                 seen.add(key)
                 candidates.append(resolved)
         return candidates
+
+    @staticmethod
+    def _windows_browser_default_paths() -> list[Path]:
+        return [
+            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+            Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        ]
 
     def _out(self, campaign: Campaign, ext: str) -> Path:
         import re as _re
