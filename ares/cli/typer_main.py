@@ -1081,6 +1081,50 @@ def _display_result(module_id: str, result: dict) -> None:
 
 # ── doctor command ────────────────────────────────────────────────────────────
 
+def _parse_impacket_version(value: object) -> tuple[str, tuple[int, int]] | None:
+    """Extract an Impacket semantic version from metadata or banner text."""
+    import re
+
+    if not value:
+        return None
+    match = re.search(r"\bv?(\d+)\.(\d+)(?:\.(\d+))?\b", str(value), re.IGNORECASE)
+    if match is None:
+        return None
+    version_parts = [match.group(1), match.group(2)]
+    if match.group(3) is not None:
+        version_parts.append(match.group(3))
+    return ".".join(version_parts), (int(match.group(1)), int(match.group(2)))
+
+
+def _impacket_fallback_version(impacket_module: Any) -> str | None:
+    """Read safe Impacket source-install version hints when package metadata is absent."""
+    import importlib
+
+    for attr in ("__version__", "VERSION", "BANNER"):
+        parsed = _parse_impacket_version(getattr(impacket_module, attr, ""))
+        if parsed is not None:
+            return parsed[0]
+
+    version_obj = getattr(impacket_module, "version", None)
+    parsed = _parse_impacket_version(version_obj)
+    if parsed is not None:
+        return parsed[0]
+
+    if version_obj is None:
+        try:
+            version_obj = importlib.import_module("impacket.version")
+        except Exception:
+            version_obj = None
+
+    if version_obj is not None:
+        for attr in ("__version__", "VERSION", "BANNER"):
+            parsed = _parse_impacket_version(getattr(version_obj, attr, ""))
+            if parsed is not None:
+                return parsed[0]
+
+    return None
+
+
 def _run_pdf_smoke_check(
     pdf_generator: Any,
     check: Callable[[str, str, str], None],
@@ -1113,7 +1157,7 @@ def doctor(
     ),
 ) -> None:
     """Check all prerequisites and configuration. Run this first."""
-    import importlib, shutil, os, re
+    import importlib, shutil, os
     from importlib import metadata as importlib_metadata
     from pathlib import Path
 
@@ -1192,7 +1236,13 @@ def doctor(
             ver = getattr(mod, "__version__", "")
             check(label, "ok", ver)
         except Exception as exc:
-            if pkg in ("impacket", "paramiko"):
+            if pkg == "impacket":
+                check(
+                    label,
+                    "warn",
+                    import_failure_detail(import_name, exc, "pip install ares-redteam[ad]"),
+                )
+            elif pkg == "paramiko":
                 check(
                     label,
                     "fail",
@@ -1207,21 +1257,21 @@ def doctor(
         try:
             ver_str = importlib_metadata.version("impacket")
         except importlib_metadata.PackageNotFoundError:
-            ver_str = getattr(impacket, "__version__", "")
+            ver_str = _impacket_fallback_version(impacket) or ""
 
-        version_match = re.search(r"(\d+)\.(\d+)", ver_str)
-        if version_match and [int(version_match.group(1)), int(version_match.group(2))] >= [0, 11]:
-            check(f"impacket {ver_str}", "ok", ">= 0.11 required")
+        version_match = _parse_impacket_version(ver_str)
+        if version_match and version_match[1] >= (0, 11):
+            check(f"impacket {version_match[0]}", "ok", ">= 0.11 required")
         elif version_match:
-            check(f"impacket {ver_str}", "fail",
-                  f"too old ({ver_str}) — upgrade: pip install --upgrade impacket")
+            check(f"impacket {version_match[0]}", "warn",
+                  f"too old ({version_match[0]}); expected >= 0.11 — upgrade: pip install --upgrade impacket")
         else:
-            check("impacket", "warn",
-                  "installed, but version could not be detected — expected >= 0.11")
+            check("impacket  (AD/SMB modules)", "ok",
+                  "importable; version unknown from source/local install")
     except Exception as exc:
         check(
             "impacket",
-            "fail",
+            "warn",
             import_failure_detail("impacket", exc, "pip install ares-redteam[ad]"),
         )
 
