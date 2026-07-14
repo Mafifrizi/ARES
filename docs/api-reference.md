@@ -1,6 +1,6 @@
 # ARES API Reference
 
-> **Base URL:** `http://localhost:8080`  
+> **Base URL:** `http://127.0.0.1:8080`
 > API endpoints require authentication unless noted otherwise. Automation
 > endpoints may accept `X-API-Key`; account/security management endpoints use
 > JWT/browser sessions only. `POST /auth/token` and `GET /health` are
@@ -55,6 +55,17 @@ Revoke current access token (adds JTI to blacklist).
 ### `GET /auth/me`
 
 Return current authenticated user info.
+
+This endpoint accepts either a JWT bearer token or an ARES API key with a
+compatible read scope. Example:
+
+```powershell
+$headers = @{ "X-API-Key" = "YOUR_ARES_API_KEY" }
+
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8080/auth/me" `
+  -Headers $headers
+```
 
 ---
 
@@ -112,7 +123,7 @@ created.
 Change password for the authenticated user.
 
 ```json
-{ "current_password": "old", "new_password": "NewPass1!" }
+{ "current_password": "old-password", "new_password": "NewStrongPass1!" }
 ```
 
 ---
@@ -182,9 +193,9 @@ Create a new campaign. Requires `operator` role or higher.
 {
   "name":          "Corp Red Team Q1",
   "client":        "ACME Corp",
-  "scope":         ["10.0.0.0/8", "192.168.1.0/24"],
-  "noise_profile": "normal",
-  "operator":      "alice"
+  "targets":       ["10.0.0.10"],
+  "scope_cidrs":   ["10.0.0.0/8", "192.168.1.0/24"],
+  "noise_profile": "normal"
 }
 ```
 
@@ -586,9 +597,11 @@ dashboard at `GET /dashboard/`, with SPA fallback for routes like
 screen works; all sensitive data is fetched from the main authenticated API
 routes above.
 
-For local development, run `ares dashboard dev` from the repository root and
-open the Vite-served dashboard at `http://127.0.0.1:5173/dashboard/`. The
-backend API remains on `http://127.0.0.1:8080` by default.
+For local development, run `ares dashboard dev --no-reload` from the
+repository root, or `.\.venv\Scripts\ares.exe dashboard dev --no-reload` on
+Windows, and open the Vite-served dashboard at
+`http://127.0.0.1:5173/dashboard/`. The backend API remains on
+`http://127.0.0.1:8080` by default.
 
 The dashboard uses `POST /auth/token`, `POST /auth/refresh`, the main REST API,
 and `WS /ws/campaigns/{campaign_id}/events?token=<token>`. Legacy
