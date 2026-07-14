@@ -23,6 +23,7 @@ from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
 from ares.core.errors import ModuleValidationError
+from ares.modules.ad.dependencies import ensure_ad_dependencies
 
 
 def _capture_asrep_raw(dc: str, domain: str, username: str) -> bytes | None:
@@ -189,6 +190,10 @@ class ASREPRoastModule(BaseModule):
     @trace_module("ad.asreproast")
     async def run(self, dc, domain, username=None, password=None,
                   userfile=None, usernames=None, **kwargs):
+        ensure_ad_dependencies(
+            ("impacket", "pyasn1", "pyasn1_modules"),
+            module_id=self.MODULE_ID,
+        )
         dc, domain = sanitize_hostname(dc), sanitize_ldap(domain)
         if username:
             username = sanitize_ldap(username)
@@ -210,6 +215,8 @@ class ASREPRoastModule(BaseModule):
             hashes, accounts = await self._get_asrep_hashes(
                 dc, domain, username, password, userfile, usernames or [], mode
             )
+        except ModuleValidationError:
+            raise
         except Exception as exc:
             from ares.core.errors import NetworkError
             raise NetworkError(f"ASREPRoast failed: {exc}") from exc
@@ -229,6 +236,10 @@ class ASREPRoastModule(BaseModule):
           KDC_ERR_C_PRINCIPAL_UNKNOWN -> username does not exist
           Success (returns AS-REP)  -> account IS vulnerable, hash captured
         """
+        ensure_ad_dependencies(
+            ("impacket", "pyasn1", "pyasn1_modules"),
+            module_id=self.MODULE_ID,
+        )
         from impacket.krb5.kerberosv5 import getKerberosTGT
         from impacket.krb5.types import Principal
         from impacket.krb5 import constants
@@ -289,6 +300,7 @@ class ASREPRoastModule(BaseModule):
 
     async def _ldap_get_nopreauth(self, dc, domain, username, password):
         """Query LDAP for accounts with DONT_REQUIRE_PREAUTH enabled."""
+        ensure_ad_dependencies(("ldap3",), module_id=self.MODULE_ID)
         import ssl
         import ldap3
         from ldap3 import Server, Connection, NTLM, SUBTREE, Tls, ALL

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import os
 import sys
+import tomllib
 import types
 from collections import namedtuple
 from pathlib import Path
@@ -51,7 +52,7 @@ def test_doctor_uses_distribution_metadata_for_impacket(monkeypatch, tmp_path, c
     assert "impacket 0.13.1" in output
     assert "[WARN]  impacket" not in output
     assert "too old (0.0.0)" not in output
-    assert "ares-redteam[ad]" in output
+    assert "ad-support" in output
 
 
 def test_doctor_accepts_supported_impacket_metadata_version(monkeypatch, tmp_path, capsys):
@@ -159,8 +160,58 @@ def test_doctor_warns_when_impacket_import_fails(monkeypatch, tmp_path, capsys):
     output = _run_doctor(monkeypatch, tmp_path, capsys)
 
     assert "[WARN]  impacket" in output
-    assert "pip install ares-redteam[ad]" in output
+    assert '".[ad]"' in output
     assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_warns_for_missing_direct_ad_support_dependencies(
+    monkeypatch, tmp_path, capsys
+):
+    fake_impacket = types.ModuleType("impacket")
+
+    def fake_version(package_name: str) -> str:
+        if package_name == "impacket":
+            return "0.13.1"
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+    for import_name in ("pyasn1", "pyasn1_modules", "ldap3", "httpx_ntlm"):
+        monkeypatch.setitem(sys.modules, import_name, None)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+    normalized = " ".join(output.split())
+
+    assert "[WARN]  pyasn1 (AD Kerberos helpers)" in output
+    assert "[WARN]  pyasn1_modules (AD Kerberos helpers)" in output
+    assert "[WARN]  ldap3" in output
+    assert "[WARN]  httpx-ntlm  (ad.adcs ESC1)" in output
+    assert "install -e \".[ad]\"" in normalized
+    assert "install -e \".[ad-support]\"" in normalized
+    assert "restart the dashboard" in normalized
+
+
+def test_pyproject_exposes_ad_support_extra_for_source_impacket_users():
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+
+    assert "ad-support" in extras
+    assert {"pyasn1>=0.5", "pyasn1-modules>=0.3", "ldap3>=2.9", "httpx-ntlm>=1.4"} <= set(
+        extras["ad-support"]
+    )
+    assert {"pyasn1>=0.5", "pyasn1-modules>=0.3"} <= set(extras["ad"])
+
+
+def test_docs_mention_ad_support_extra_for_source_impacket_users():
+    docs = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in ("README.md", "QUICKSTART.md", "docs/modules.md")
+    )
+
+    assert ".[ad-support]" in docs
+    assert "source/local" in docs
+    assert "Impacket" in docs
+    assert "pyasn1_modules" in docs
 
 
 def test_doctor_reports_broken_optional_import_and_continues(monkeypatch, tmp_path, capsys):

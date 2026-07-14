@@ -67,6 +67,7 @@ Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e ".[ad]"
+.\.venv\Scripts\python.exe -m pip install -e ".[ad-support]"
 .\.venv\Scripts\python.exe -m pip install -e ".[cloud]"
 .\.venv\Scripts\python.exe -m pip install -e ".[windows]"
 .\.venv\Scripts\python.exe -m pip install -e ".[full]"
@@ -76,10 +77,19 @@ Linux/macOS:
 
 ```bash
 python -m pip install -e ".[ad]"
+python -m pip install -e ".[ad-support]"
 python -m pip install -e ".[cloud]"
 python -m pip install -e ".[windows]"
 python -m pip install -e ".[full]"
 ```
+
+For AD modules, use `.[ad]` for a normal full AD install. If `ares doctor`
+already reports `impacket` as importable from a source/local install, use
+`.[ad-support]` to install the remaining direct AD support libraries
+(`pyasn1`, `pyasn1_modules`, `ldap3`, and `httpx_ntlm`) without forcing another
+PyPI Impacket wheel install. After installing AD dependencies, restart
+`ares dashboard dev --no-reload`, rerun `ares doctor --pdf-smoke`, and confirm
+`pyasn1`, `pyasn1_modules`, `ldap3`, and `httpx_ntlm` are no longer missing.
 
 ### D. Install frontend dependencies
 
@@ -359,8 +369,8 @@ yet.`
 | `ares` command not found on Windows | Use `.\.venv\Scripts\ares.exe ...` from the repository root. |
 | `frontend/node_modules` missing | Run `npm ci` in `frontend/`, or start with `ares dashboard dev --install`. |
 | PDF smoke warning on Windows | Use normal non-Administrator PowerShell, set `$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`, then run `.\.venv\Scripts\ares.exe doctor --pdf-smoke`. |
-| Optional module dependency warning | Install the relevant extra only when that module family is needed, for example `.[ad]`, `.[cloud]`, `.[windows]`, or `.[full]`. |
-| Impacket source/local install version unknown | OK if Impacket is importable; missing or too-old Impacket still warns. |
+| Optional module dependency warning | Install the relevant extra only when that module family is needed, for example `.[ad]`, `.[cloud]`, `.[windows]`, or `.[full]`. For source/local Impacket AD setups, use `.[ad-support]` for the remaining direct AD support libraries. |
+| Impacket source/local install version unknown | OK if Impacket is importable; install `.[ad-support]` if `pyasn1`, `pyasn1_modules`, `ldap3`, or `httpx_ntlm` still warn. Missing or too-old Impacket still warns. |
 | `Invalid credentials` | Use the current admin password. Updating `ARES_DEFAULT_ADMIN_PASSWORD` after admin exists does not reset that password. |
 | `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32` for local testing. |
 | Report direct URL returns `401` | Use the authenticated dashboard Download button. |

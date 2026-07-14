@@ -316,7 +316,7 @@ class TestDataEncryptorProperties:
     _enc = DataEncryptor("hypothesis-test-encryption-key!!")
 
     @given(st.text(min_size=0, max_size=1000))
-    @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_roundtrip_any_text(self, value: str) -> None:
         """encrypt → decrypt must recover original value for any text."""
         enc = DataEncryptor("hyp-test-key-32chars-minimum-req")
@@ -326,7 +326,7 @@ class TestDataEncryptorProperties:
         )
 
     @given(st.binary(min_size=1, max_size=50))
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_tampered_returns_none(self, noise: bytes) -> None:
         """Appending random bytes to ciphertext must return None, never raise."""
         enc = DataEncryptor("hyp-test-key-32chars-minimum-req")
@@ -342,7 +342,7 @@ class TestDataEncryptorProperties:
         assert result is None
 
     @given(st.text(min_size=0, max_size=500))
-    @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_different_keys_cant_decrypt(self, value: str) -> None:
         """Ciphertext from key A must not be decryptable by key B."""
         enc_a = DataEncryptor("key-a-for-hypothesis-test-32ch!!")

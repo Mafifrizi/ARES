@@ -92,6 +92,10 @@ Invoke-RestMethod `
 Optional extras and native tools depend on the module family. The base
 dashboard/reporting workflow uses the `dev,pdf` baseline; install `.[ad]`,
 `.[cloud]`, `.[windows]`, or `.[full]` only when those modules are needed.
+For AD modules, `.[ad]` is the normal full install. If `ares doctor` already
+shows Impacket as importable from a source/local install, use `.[ad-support]`
+to install the direct AD support libraries (`pyasn1`, `pyasn1_modules`,
+`ldap3`, and `httpx_ntlm`) without forcing another Impacket wheel install.
 
 ## Module Categories
 
