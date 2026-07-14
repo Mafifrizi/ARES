@@ -236,11 +236,20 @@ Port behavior is module-specific. Some modules require explicit ports because th
 Open `Reports`:
 
 1. Select a campaign.
-2. Choose HTML, PDF, Markdown, or JSON.
+2. Choose `json`.
 3. Click `Generate`.
-4. Use the dashboard `Download` button.
+4. Switch to `Library` and use `Download` to save/open the JSON artifact.
+5. Return to `Generate`, choose `pdf`, and click `Generate`.
+6. Switch to `Library` and use `Download` to save/open the PDF artifact.
+7. Use a row's `Delete` action to remove one artifact after confirming.
+8. Use `Delete all` / Clear library to remove the campaign's generated report
+   artifacts after confirming.
 
 Do not open report file URLs directly in the browser address bar. Report downloads are authenticated, so direct unauthenticated URLs return `401`.
+
+Report evidence is redacted by default. Do not expose raw Kerberoast,
+ASREPRoast, password, token, or other secret material in demos or public
+reports; include sensitive evidence only for authorized internal review.
 
 ## 8. Use Templates
 

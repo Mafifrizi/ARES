@@ -290,7 +290,7 @@ Scope behavior:
 
 ### Reports
 
-Purpose: generate and download campaign reports.
+Purpose: generate, download, and manage campaign report artifacts.
 
 ![Report generation workflow](assets/screenshots/dashboard-reports.png)
 
@@ -312,6 +312,14 @@ rows where possible. Use JSON output when you need raw machine-readable data.
 
 Use the dashboard Download button. Directly opening the file URL in the address
 bar will return `401` because report files require an authenticated request.
+
+The Library tab lists generated artifacts for the selected campaign. Each row
+supports authenticated Download and per-report Delete. The Library header also
+offers Delete all / Clear library when artifacts exist. Delete actions require
+confirmation, remove the row or clear the table after success, and update the
+artifact count without a full page reload. If deletion fails, the page keeps
+the row and shows an error notice. When no reports remain, the Library shows
+the clean empty state: `No reports generated for this campaign yet.`
 
 ### Graph
 

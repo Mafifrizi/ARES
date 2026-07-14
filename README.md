@@ -128,7 +128,7 @@ Dashboard areas:
 | Overview | Health, operator telemetry metrics, and campaign summary. Overview has no variation tabs. |
 | Campaigns | `List`, `Scope`, and `Findings` tabs for campaign creation, inspection, compare/restore/dry-run actions, and cleanup. |
 | Modules | `Catalog`, `Run Panel`, and `Results` tabs for browsing modules, filling backend-generated parameter forms, and reviewing execution output. |
-| Reports | `Generate` and `Library` tabs for authenticated campaign report creation, listing, and download. |
+| Reports | `Generate` and `Library` tabs for authenticated campaign report creation, listing, download, per-report delete, and Delete all / Clear library cleanup. |
 | Graph | `Entities`, `Attack Paths`, and `Ingest` tabs for graph review and BloodHound/SharpHound import. |
 | Templates | `Templates` and `Plan Builder` tabs for selecting built-in plans and generating reviewable execution stages. |
 | Strategy | `Objective`, `Active`, and `Result` tabs for authorized goal-based planning and state review. |
@@ -157,6 +157,11 @@ Recommended dashboard workflow:
    PDF generation writes the PDF artifact directly; HTML is generated only when
    you choose the HTML format. Report evidence is rendered as readable tables
    and key-value rows where possible instead of unformatted report objects.
+   Report evidence is redacted by default; include sensitive evidence only
+   intentionally and only with authorized access. The Library tab supports
+   Download, per-report Delete, and Delete all / Clear library cleanup.
+   Successful deletes remove rows and update the artifact count without a page
+   reload.
 7. Use `Security` for account administration. API keys are for scripts and
    integrations; the Security Audit panel reports dependency-audit status for
    the ARES environment, not findings from a target network.
@@ -315,6 +320,11 @@ Security page, but role assignment is done at account creation time through
 - Findings, readable evidence tables, severity, timeline, MITRE, and
   remediation-oriented sections.
 - Authenticated report download through the dashboard.
+- Report Library cleanup through per-report Delete and Delete all / Clear
+  library actions.
+- Sensitive report evidence is redacted by default. Include raw hashes,
+  secrets, or other sensitive evidence only for authorized internal review,
+  never in public demos or shared reports.
 
 ### Validation Lab
 
@@ -642,6 +652,8 @@ Important design boundaries:
 - Module forms are generated from backend metadata.
 - Sensitive data stays behind authentication.
 - Reports require authenticated download through the dashboard or API.
+- Report Library delete actions are authenticated and update visible rows and
+  artifact counts after success.
 - Local validation flows use localhost by default.
 
 See [docs/architecture.md](docs/architecture.md) and
@@ -684,7 +696,8 @@ Runtime features confirmed locally:
   assets are built; local Vite dev mode uses `http://127.0.0.1:5173/dashboard/`.
 - Health endpoint returns connected DB.
 - Login, password change, API key lifecycle, and campaign cleanup work.
-- Report generation and authenticated download work.
+- Report generation, authenticated download, and Report Library delete/Delete
+  all cleanup work.
 - PDF report layout, footer branding, and evidence rendering work.
 - Overview telemetry records API-triggered module runs in the current process.
 - Campaign delete removes stored child data and updates the UI immediately.

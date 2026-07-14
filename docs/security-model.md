@@ -233,7 +233,8 @@ All sensitive operations are written to the NDJSON audit log:
 {"event": "operator_joined", "actor": "bob", "role": "recon", "campaign_id": "..."}
 ```
 
-Log location: `~/.ares/audit.ndjson` (configurable via `ARES_AUDIT_LOG`).
+Audit log location follows the supported logging configuration: ARES writes
+`audit.ndjson` next to `ARES_LOG_FILE` (default: `logs/audit.ndjson`).
 
 ### Sensitive field masking
 
