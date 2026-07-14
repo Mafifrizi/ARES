@@ -5,6 +5,13 @@ buttons. They are building blocks for an authorized engagement: create a
 campaign, define scope, run safe validation first, collect findings, then
 generate a report.
 
+The core workflow is universal across module families: create a campaign,
+define targets and scope CIDRs, select a module from the backend catalog, fill
+the generated parameters, dry-run where supported, execute only inside
+authorized scope, review findings, and generate a report. AD/Kerberos, cloud,
+network, credential, Windows, Linux, and other modules differ only in optional
+extras/tools and parameter values.
+
 ## Safety Model
 
 Only run ARES in systems you own or have written permission to test.
@@ -25,10 +32,11 @@ layer; the backend remains the enforcement boundary.
 
 ### Dashboard Flow
 
-1. For local development, run `ares dashboard dev` from the repository root
-   and open `http://127.0.0.1:5173/dashboard/`. In production/static mode,
-   FastAPI serves the built dashboard at `/dashboard` after frontend assets are
-   built.
+1. For local development, run `ares dashboard dev --no-reload` from the
+   repository root and open `http://127.0.0.1:5173/dashboard/`. On Windows,
+   use `.\.venv\Scripts\ares.exe dashboard dev --no-reload`. In
+   production/static mode, FastAPI serves the built dashboard at `/dashboard`
+   after frontend assets are built.
 2. Log in as an authorized operator.
 3. Go to `Campaigns`.
 4. Create or select a campaign.
@@ -61,7 +69,7 @@ $headers = @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod `
   -Method Get `
-  -Uri http://localhost:8080/modules `
+  -Uri http://127.0.0.1:8080/modules `
   -Headers $headers
 ```
 
@@ -70,15 +78,20 @@ Run a module in dry-run mode:
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri http://localhost:8080/modules/recon.fingerprint/run `
+  -Uri http://127.0.0.1:8080/modules/recon.fingerprint/run `
   -Headers $headers `
   -ContentType "application/json" `
   -Body '{
     "campaign_id": "CAMPAIGN_ID",
-    "params": { "target": "127.0.0.1" },
+    "target": "127.0.0.1",
+    "params": {},
     "dry_run": true
   }'
 ```
+
+Optional extras and native tools depend on the module family. The base
+dashboard/reporting workflow uses the `dev,pdf` baseline; install `.[ad]`,
+`.[cloud]`, `.[windows]`, or `.[full]` only when those modules are needed.
 
 ## Module Categories
 

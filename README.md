@@ -55,6 +55,38 @@ assess.
 
 ---
 
+## Start Here: Fast Path
+
+For the complete first-run walkthrough, use [QUICKSTART.md](QUICKSTART.md).
+The short Windows PowerShell path is:
+
+```powershell
+git clone https://github.com/Mafifrizi/ARES.git
+Set-Location .\ARES
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
+
+Set-Location frontend
+& "C:\Program Files\nodejs\npm.cmd" ci
+Set-Location ..
+
+$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+.\.venv\Scripts\ares.exe doctor --pdf-smoke
+
+.\.venv\Scripts\ares.exe dashboard dev --no-reload
+```
+
+Configure `ARES_SECRET_KEY`, `ARES_ENCRYPTION_KEY`, and
+`ARES_DEFAULT_ADMIN_PASSWORD` before first login. Open
+`http://127.0.0.1:5173/dashboard/`, log in as `admin` with the
+`ARES_DEFAULT_ADMIN_PASSWORD` value, create a campaign/scope, run a module,
+review findings, then generate, download, or delete reports from the Report
+Library.
+
+---
+
 ## Why It Exists
 
 Offensive security work can become messy fast: scattered scripts, loose notes,
@@ -89,13 +121,13 @@ ARES has two dashboard serving modes:
 Recommended local development command:
 
 ```bash
-ares dashboard dev
+ares dashboard dev --no-reload
 ```
 
 Windows virtualenv example:
 
 ```powershell
-.\.venv\Scripts\ares.exe dashboard dev
+.\.venv\Scripts\ares.exe dashboard dev --no-reload
 ```
 
 Dashboard preview:
@@ -311,9 +343,14 @@ Security page, but role assignment is done at account creation time through
   browser fallback for local environments that do not have WeasyPrint native
   libraries installed.
 - On Windows, use Python 3.12.x from a normal non-Administrator PowerShell for
-  dashboard PDF export. If auto-detection needs help, set
-  `ARES_PDF_BROWSER=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
-  for the current user or shell.
+  dashboard PDF export. If auto-detection needs help, set the fallback for the
+  current PowerShell session:
+
+  ```powershell
+  $env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+  .\.venv\Scripts\ares.exe doctor --pdf-smoke
+  ```
+
 - WeasyPrint on Windows needs native GTK/Pango libraries in addition to the pip
   package; run `ares doctor --pdf-smoke` to verify the active PDF backend.
 - ARES branding in generated reports with footer-safe page spacing.
@@ -347,194 +384,24 @@ See [docs/validation-lab.md](docs/validation-lab.md).
 
 ## Quickstart
 
-### 1. Configure Required Secrets
+Use [QUICKSTART.md](QUICKSTART.md) as the complete source of truth for the
+first-run path from clone to report. The universal order is:
 
-ARES does not ship deployment secrets. The operator or organization deploying
-ARES must generate these values and provide them through environment variables
-or a private `.env` file.
+1. Clone the repo.
+2. Create `.venv`.
+3. Install `.[dev,pdf]`.
+4. Run `npm ci` in `frontend/`.
+5. Configure `ARES_SECRET_KEY`, `ARES_ENCRYPTION_KEY`, and
+   `ARES_DEFAULT_ADMIN_PASSWORD`.
+6. Set `$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`
+   on Windows when using Edge PDF fallback.
+7. Run `.\.venv\Scripts\ares.exe doctor --pdf-smoke`.
+8. Start `.\.venv\Scripts\ares.exe dashboard dev --no-reload`.
+9. Log in, create a campaign/scope, run a module, review findings, and manage
+   reports from the Report Library.
 
-The required values are:
-
-| Variable | Who creates it? | Purpose |
-| --- | --- | --- |
-| `ARES_SECRET_KEY` | The deployer/client | Signs JWT/session security data. Generate a random high-entropy string. |
-| `ARES_ENCRYPTION_KEY` | The deployer/client | Encrypts sensitive stored data such as vault/checkpoint material. Generate a Fernet key and keep it stable. |
-| `ARES_DEFAULT_ADMIN_PASSWORD` | The deployer/client | Bootstrap password for the first `admin` account only when the user table is empty. Change it after first login. |
-
-PowerShell:
-
-```powershell
-$bytes = [byte[]]::new(32)
-[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-$env:ARES_SECRET_KEY = -join ($bytes | ForEach-Object { $_.ToString("x2") })
-
-$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-$env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
-```
-
-Bash:
-
-```bash
-export ARES_SECRET_KEY="$(openssl rand -hex 32)"
-export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
-```
-
-Do not commit these values. Do not reuse the example password. Keep
-`ARES_ENCRYPTION_KEY` backed up securely; changing it after data has been
-encrypted can make existing encrypted records unreadable.
-
-Dashboard API keys are separate from these startup secrets. Create API keys
-from the Security page only after login when you need scripts, integrations, or
-automation to call the API with `X-API-Key` instead of an interactive session.
-The dashboard shows a new API key secret once in the `Save your key` modal and
-then lists only key metadata and a prefix.
-
-Optional AI planner provider keys:
-
-| Variable | Used by | Notes |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | `ai.autonomous_planner` with `llm_backend=claude`; Strategy default path. | Required when using Claude-backed planning. |
-| `OPENAI_API_KEY` | `ai.autonomous_planner` with `llm_backend=openai`. | Required when using OpenAI-backed planning. |
-| Local Ollama at `http://localhost:11434` | `ai.autonomous_planner` with `llm_backend=local`. | No cloud key required, but Ollama and the selected model must already be running. |
-
-Example:
-
-```powershell
-$env:OPENAI_API_KEY="sk-..."
-```
-
-or:
-
-```powershell
-$env:ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### 2. Start the API and Dashboard
-
-Recommended local dashboard startup from the repository root:
-
-```bash
-ares dashboard dev
-```
-
-Windows virtualenv example:
-
-```powershell
-.\.venv\Scripts\ares.exe dashboard dev
-```
-
-The launcher starts both services in one terminal:
-
-- Backend API: `http://127.0.0.1:8080`
-- Dashboard dev server: `http://127.0.0.1:5173/dashboard/`
-
-It prints both URLs, opens the dashboard by default, prefixes backend/frontend
-logs, and shuts both child processes down when you press `Ctrl+C`. Login with:
-
-- Username: `admin`
-- Password: the value of `ARES_DEFAULT_ADMIN_PASSWORD` in the current
-  environment or `.env` file
-
-The command does not print the password value. If `frontend/node_modules` is
-missing, run `npm ci` in `frontend/` or start with:
-
-```bash
-ares dashboard dev --install
-```
-
-Useful launcher options:
-
-- `--no-open`: print the URL without opening a browser.
-- `--no-reload`: start uvicorn without reload.
-- `--api-host` / `--api-port`: change the backend bind address.
-- `--ui-host` / `--ui-port`: change the Vite bind address.
-- `--install`: run `npm ci` in `frontend/` if `node_modules` is missing.
-
-Manual fallback for troubleshooting:
-
-Terminal 1:
-
-```powershell
-Set-Location "<ARES repo root>"
-.\.venv\Scripts\python.exe -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload
-```
-
-Terminal 2:
-
-```powershell
-Set-Location "<ARES repo root>\frontend"
-& "C:\Program Files\nodejs\npm.cmd" run dev -- --host 127.0.0.1 --port 5173
-```
-
-Open:
-
-```text
-http://127.0.0.1:5173/dashboard/
-```
-
-### 3. Check Health
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8080/health
-```
-
-Expected:
-
-```text
-status version db
------- ------- --
-ok     6.0.0   connected
-```
-
-### 4. Run the Local Validation Lab
-
-```powershell
-$env:ARES_LAB_PASSWORD="replace-with-your-current-admin-password"
-.\scripts\run_validation_lab.ps1
-```
-
-Expected ending:
-
-```text
-Validation lab passed.
-```
-
-### 5. Check Prerequisites With Doctor
-
-`ares doctor` checks the runtime you are about to operate: Python, required
-packages, optional module dependencies, PDF export capability, common service
-sockets, environment configuration, settings loading, and database connectivity.
-
-```bash
-ares doctor
-```
-
-Windows virtualenv example:
-
-```powershell
-.\.venv\Scripts\ares.exe doctor
-```
-
-A green check means the dependency is available. A yellow warning usually means
-an optional module family or external OS tool is not installed. It does not
-block the base dashboard, API, validation lab, or unit suite. A red failure
-means a required runtime check should be fixed before running that workflow.
-
-Optional module families can be installed only when you need them:
-
-```bash
-pip install -e ".[ad]"
-pip install -e ".[cloud]"
-pip install -e ".[container]"
-pip install -e ".[windows]"
-pip install -e ".[pdf]"
-pip install -e ".[full]"
-```
-
-External tools such as `hashcat` and `john` are operating-system packages, not
-Python extras. Install them with your platform package manager if you want the
-related modules to use them.
+Optional module families are installed only when needed, for example `.[ad]`,
+`.[cloud]`, `.[windows]`, or `.[full]`.
 
 ---
 
@@ -543,15 +410,17 @@ related modules to use them.
 Backend:
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,pdf]"
-pytest tests/unit -q
+python -m pip install -e ".[dev,pdf]"
+python -m pytest tests/unit -q
 ```
 
 Windows PowerShell:
 
 ```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
 .\.venv\Scripts\python.exe -m pytest tests/unit -q --tb=short --timeout=60 --timeout-method=thread
 ```
 

@@ -14,13 +14,13 @@ Production/static route after frontend assets are built:
 Recommended local dashboard startup from the repository root:
 
 ```bash
-ares dashboard dev
+ares dashboard dev --no-reload
 ```
 
 Windows virtualenv example:
 
 ```powershell
-.\.venv\Scripts\ares.exe dashboard dev
+.\.venv\Scripts\ares.exe dashboard dev --no-reload
 ```
 
 This one-terminal launcher starts:
@@ -34,7 +34,7 @@ the value of `ARES_DEFAULT_ADMIN_PASSWORD` from the current environment or
 `.env` file; the launcher does not print that password. Use
 `ares dashboard dev --no-open` to skip browser open, or
 `ares dashboard dev --install` to run `npm ci` if `frontend/node_modules` is
-missing.
+missing. Use `--no-reload` for stable demos and recording.
 
 Options: `--api-host`, `--api-port`, `--ui-host`, `--ui-port`, `--no-open`,
 `--no-reload`, and `--install`.
@@ -303,7 +303,13 @@ Formats:
   fallback for local environments that do not have WeasyPrint native libraries.
 - On Windows, run the dashboard from normal non-Administrator PowerShell with
   Python 3.12.x. If browser auto-detection needs help, set
-  `ARES_PDF_BROWSER=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`.
+  the session fallback before running doctor or starting the dashboard:
+
+  ```powershell
+  $env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+  .\.venv\Scripts\ares.exe doctor --pdf-smoke
+  ```
+
 - WeasyPrint on Windows requires native GTK/Pango libraries in addition to the
   pip package; use `ares doctor --pdf-smoke` to validate the active backend.
 

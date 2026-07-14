@@ -1,7 +1,8 @@
 # ARES Local Validation Lab
 
 This lab is a safe local harness for checking ARES after UI or backend changes.
-It does not attack external systems. By default it only talks to `localhost:8080`.
+It does not attack external systems. By default it only talks to
+`127.0.0.1:8080`.
 
 ## What It Checks
 
@@ -46,13 +47,13 @@ lab.
 
 ```powershell
 $env:ARES_LAB_PASSWORD="your-current-admin-password"
-.\.venv\Scripts\python.exe .\scripts\validation_lab.py --base-url http://localhost:8080 --username admin
+.\.venv\Scripts\python.exe .\scripts\validation_lab.py --base-url http://127.0.0.1:8080 --username admin
 ```
 
 ## Safety Guard
 
-The script refuses non-localhost URLs by default. For an explicitly authorized
-lab host only:
+The script refuses non-local URLs by default. For an explicitly authorized lab
+host only:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\validation_lab.py --base-url http://127.0.0.1:8080

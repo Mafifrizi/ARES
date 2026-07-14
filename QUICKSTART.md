@@ -1,124 +1,210 @@
 # ARES Quickstart
 
-ARES is an operator dashboard and automation framework for authorized red-team validation, lab workflows, campaign orchestration, module execution, telemetry, reporting, RBAC, and security checks.
+ARES is an operator dashboard and automation framework for authorized red-team
+validation, lab workflows, campaign orchestration, module execution, telemetry,
+reporting, RBAC, and security checks.
 
 Use it only on systems you own or have written permission to assess.
 
-## 1. Clone And Enter The Project
+## Universal first-run workflow
+
+This is the supported path from a fresh clone to a first campaign report. It is
+not AD-specific. AD/Kerberos, cloud, Windows, Linux, credential, network, and
+other module families all start with the same campaign, module, findings, and
+report workflow. Module-specific differences begin at module selection,
+required optional extras/tools, and parameter values.
+
+### A. Prerequisites
+
+- Git.
+- Python 3.12.x for the recommended/tested release path.
+- Node.js/npm for dashboard development mode.
+- Normal non-Administrator PowerShell on Windows.
+- Written authorization, an owned lab, or an approved engagement scope.
+
+### B. Clone and enter repo
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/Mafifrizi/ARES.git
+Set-Location .\ARES
+```
+
+Linux/macOS:
 
 ```bash
 git clone https://github.com/Mafifrizi/ARES.git
 cd ARES
 ```
 
-## 2. Install The Local Environment
-
-Linux/macOS:
-
-```bash
-bash scripts/setup.sh
-source .venv/bin/activate
-```
+### C. Create virtualenv and install ARES baseline
 
 Windows PowerShell:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
+```
+
+Linux/macOS:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
 python -m pip install -e ".[dev,pdf]"
 ```
 
-Notes:
+`dev,pdf` is the local dashboard/reporting baseline. The base dashboard does
+not require every optional module family. Install optional extras only when you
+need that module family.
 
-- The setup script is the Linux/macOS bootstrap path. On Windows, use the
-  PowerShell commands above to create `.venv` and install the editable package.
-- Use Python 3.12.x for the release path. Package metadata allows Python
-  3.10-3.12, but the dashboard and Windows AD/Impacket lab validation are
-  tested on Python 3.12.x.
-- Some offensive-security integrations are optional. `ares doctor` will tell you which optional packages or native tools are missing for AD, cloud, container, or password-cracking workflows.
-- PDF support uses WeasyPrint when available and has a local Edge/Chrome/Chromium browser fallback in the API. On Windows, use Python 3.12.x from normal non-Administrator PowerShell. If needed, set `ARES_PDF_BROWSER=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` for the current user or shell. WeasyPrint on Windows needs native GTK/Pango libraries in addition to the pip package.
+Optional extras examples:
 
-## 3. Configure Secrets
-
-ARES requires three local environment values before the API starts.
-
-These values are created by the operator or deployment owner. ARES does not provide shared public secrets.
-
-### Linux/macOS
-
-```bash
-export ARES_SECRET_KEY="$(python - <<'PY'
-import secrets
-print(secrets.token_urlsafe(48))
-PY
-)"
-
-export ARES_ENCRYPTION_KEY="$(python - <<'PY'
-from cryptography.fernet import Fernet
-print(Fernet.generate_key().decode())
-PY
-)"
-
-export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
-```
-
-### Windows PowerShell
+Windows PowerShell:
 
 ```powershell
-$env:ARES_SECRET_KEY = python -c "import secrets; print(secrets.token_urlsafe(48))"
-$env:ARES_ENCRYPTION_KEY = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+.\.venv\Scripts\python.exe -m pip install -e ".[ad]"
+.\.venv\Scripts\python.exe -m pip install -e ".[cloud]"
+.\.venv\Scripts\python.exe -m pip install -e ".[windows]"
+.\.venv\Scripts\python.exe -m pip install -e ".[full]"
+```
+
+Linux/macOS:
+
+```bash
+python -m pip install -e ".[ad]"
+python -m pip install -e ".[cloud]"
+python -m pip install -e ".[windows]"
+python -m pip install -e ".[full]"
+```
+
+### D. Install frontend dependencies
+
+Windows PowerShell:
+
+```powershell
+Set-Location frontend
+& "C:\Program Files\nodejs\npm.cmd" ci
+Set-Location ..
+```
+
+Linux/macOS:
+
+```bash
+cd frontend
+npm ci
+cd ..
+```
+
+`ares dashboard dev --install` can run `npm ci` for you when
+`frontend/node_modules` is missing.
+
+### E. Configure required secrets
+
+ARES requires these values before the first dashboard login:
+
+| Variable | Purpose |
+| --- | --- |
+| `ARES_SECRET_KEY` | Signs API sessions and tokens. Generate a random high-entropy value. |
+| `ARES_ENCRYPTION_KEY` | Encrypts sensitive stored data such as vault/checkpoint material. Keep it stable and backed up. |
+| `ARES_DEFAULT_ADMIN_PASSWORD` | Bootstrap password for the first `admin` account only when the user table is empty. |
+
+Windows PowerShell:
+
+```powershell
+$env:ARES_SECRET_KEY = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 $env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 ```
 
-What each value does:
-
-| Variable | Purpose | Keep Stable? |
-| --- | --- | --- |
-| `ARES_SECRET_KEY` | Signs API sessions and tokens. | Yes, for a deployed instance. Rotating it invalidates sessions. |
-| `ARES_ENCRYPTION_KEY` | Encrypts sensitive local data such as credential vault material. | Yes. Losing or changing it can make existing encrypted data unreadable. |
-| `ARES_DEFAULT_ADMIN_PASSWORD` | Password for the first bootstrap `admin` account when the user table is empty. | Change after first login. Updating this value later does not reset an existing admin. |
-
-For repeated local use, copy `.env.example` to `.env`, fill these values once, and start ARES from the same project directory.
-
-## 4. Start The API And Dashboard
-
-Recommended local startup from the repository root:
+Linux/macOS:
 
 ```bash
-ares dashboard dev
+export ARES_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
 ```
 
-Windows virtualenv example:
+For repeated local use, copy `.env.example` to `.env` and fill these values
+there instead of setting session variables each time.
+
+Important:
+
+- The first admin bootstrap password comes from `ARES_DEFAULT_ADMIN_PASSWORD`
+  in the current environment or `.env` file.
+- Changing `ARES_DEFAULT_ADMIN_PASSWORD` after `admin` already exists does not
+  reset that user's password.
+- Change the admin password after first login.
+- Do not commit, print, record, or share secrets.
+- ARES API keys created later in the dashboard are separate from these startup
+  secrets and from LLM provider keys.
+
+### F. Run doctor/pdf smoke before starting dashboard
+
+Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\ares.exe dashboard dev
+$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+.\.venv\Scripts\ares.exe doctor --pdf-smoke
 ```
 
-This starts the FastAPI backend and the Vite dashboard dev server in one
-terminal. It prints:
+`ARES_PDF_BROWSER` points ARES PDF export to Microsoft Edge for the current
+PowerShell session. This is recommended on Windows when WeasyPrint native
+GTK/Pango libraries are not installed. Use normal non-Administrator
+PowerShell.
 
-- Backend API URL: `http://127.0.0.1:8080`
-- Dashboard URL: `http://127.0.0.1:5173/dashboard/`
-- Login username: `admin`
-- Login password: value of `ARES_DEFAULT_ADMIN_PASSWORD` in the current
-  environment or `.env` file
+Expected successful fallback lines include:
 
-The launcher opens the dashboard by default and does not print the password
-value.
+```text
+[OK] PDF ARES_PDF_BROWSER ... exists=True
+[OK] PDF browser detected ... msedge.exe
+[OK] PDF smoke ... bytes=...
+```
+
+A WeasyPrint GTK/Pango warning on Windows is acceptable when Edge/Chrome
+fallback and PDF smoke succeed. Importable Impacket from a source/local install
+can show OK with an unknown version. Missing optional module families/tools may
+warn until installed. Optional hashcat, john, cloud, Windows, or AD warnings do
+not block base dashboard/reporting.
+
+Linux/macOS:
+
+```bash
+ares doctor --pdf-smoke
+```
+
+### G. Start dashboard
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\ares.exe dashboard dev --no-reload
+```
+
+Linux/macOS:
+
+```bash
+ares dashboard dev --no-reload
+```
+
+URLs:
+
+- Backend API: `http://127.0.0.1:8080`
+- Dashboard: `http://127.0.0.1:5173/dashboard/`
+
+The `dashboard dev` command is the normal local launcher. `--no-reload` is
+recommended for stable demos and recording.
 
 Useful launcher options:
 
 - `--no-open`: print the URL without opening a browser.
 - `--no-reload`: start uvicorn without reload.
+- `--install`: run `npm ci` in `frontend/` if `node_modules` is missing.
 - `--api-host` / `--api-port`: change the backend bind address.
 - `--ui-host` / `--ui-port`: change the Vite bind address.
-- `--install`: run `npm ci` in `frontend/` if `node_modules` is missing.
-
-For example:
-
-```bash
-ares dashboard dev --install
-```
 
 Manual fallback for troubleshooting:
 
@@ -142,139 +228,157 @@ Then open:
 http://127.0.0.1:5173/dashboard/
 ```
 
-Health check:
-
-```bash
-curl http://127.0.0.1:8080/health
-```
-
-Expected result:
-
-```json
-{"status":"ok","version":"6.0.0","db":"connected"}
-```
-
-Login with:
+### H. Login
 
 - Username: `admin`
-- Password: your `ARES_DEFAULT_ADMIN_PASSWORD`
+- Password: value of `ARES_DEFAULT_ADMIN_PASSWORD`
 
-Then change the admin password from the `Security` page.
+The launcher prints the username and dashboard URL, but it does not print the
+password value. Change the admin password from `Security` after first login.
+Do not show passwords in videos or screenshots.
 
-The first `admin` user is created only when the user table is empty. If you
-already have a local database, use the current admin password. Changing
-`ARES_DEFAULT_ADMIN_PASSWORD` after the account exists will not update that
-password. For disposable local data, recreate the local `ares.db`; otherwise,
-change the password from the dashboard after login.
+### I. Create users and assign roles
 
-Local development reset warning: this deletes local dashboard data in
-`ares.db`. Do not use it on real or shared deployments.
+The first account is created automatically:
+
+- Username: `admin`
+- Role: `team_lead`
+- Password source: `ARES_DEFAULT_ADMIN_PASSWORD`
+
+The dashboard `Security` page lists users for review, but the current release
+does not include a role editor. Additional users are created by a `team_lead`
+through `POST /auth/register`, and the role is assigned at account creation.
+
+Valid roles:
+
+| Role | Purpose |
+| --- | --- |
+| `team_lead` | Full local admin/operator lead. Can create users, delete campaigns, view security audit, authorize restricted workflows, and run normal operator work. |
+| `operator` | Daily operator. Can run normal campaign/module/report workflows. |
+| `recon` | Read-heavy recon identity. Main dashboard execution endpoints remain operator-gated. |
+| `reporter` | Read-only reporting and review. No module execution or user administration. |
+
+PowerShell example:
 
 ```powershell
-New-Item -ItemType Directory -Force ".\_db_backup" | Out-Null
-if (Test-Path ".\ares.db") {
-  Copy-Item ".\ares.db" ".\_db_backup\ares.db.before-reset" -Force
-}
-Remove-Item ".\ares.db" -Force -ErrorAction SilentlyContinue
+$token = (Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8080/auth/token `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
+
+$headers = @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8080/auth/register `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body (@{
+    username = "alice"
+    password = "StrongPass1!"
+    role = "operator"
+  } | ConvertTo-Json)
 ```
 
-Dashboard shell:
+Passwords must be at least 12 characters and include uppercase, lowercase,
+number, and special-character content.
 
-- The left sidebar routes between Overview, Campaigns, Modules, Reports, Graph,
-  Templates, Strategy, Security, EDR/OPSEC, and Live.
-- The topbar menu button collapses or expands the sidebar.
-- Topbar quick search navigates over currently loaded page names/routes,
-  campaigns, modules, reports, and templates. It is not a backend global search
-  over unloaded history.
-- The notification bell is the only topbar status surface. Its badge counts
-  unread notifications; opening the drawer marks visible items as read, and the
-  drawer supports individual dismiss plus clear-all.
-- The topbar also provides signed-in identity and logout.
-- Current tabs are: Campaigns `List`/`Scope`/`Findings`, Modules
-  `Catalog`/`Run Panel`/`Results`, Reports `Generate`/`Library`, Graph
-  `Entities`/`Attack Paths`/`Ingest`, Templates `Templates`/`Plan Builder`,
-  Strategy `Objective`/`Active`/`Result`, Security `Account`/`API Keys`/`Audit`,
-  EDR/OPSEC `Knowledge Base`/`Report Outcome`, and Live `Stream`/`Buffer`.
-  Overview has no variation tabs.
+### J. Create and use an ARES API key
 
-## 5. Create A Campaign
+API keys are created from the `Security` page after login. They are ARES
+automation credentials, not OpenAI, Anthropic, or Ollama keys.
 
-Open `Campaigns` and create a scoped campaign.
+When you create a key:
 
-Example local demo values:
+- The `Save your key` modal shows the full secret once.
+- After the modal closes, only prefix/metadata are visible.
+- Store the secret securely outside ARES if you need it later.
+- Scripts use the `X-API-Key` header.
 
-| Field | Example |
-| --- | --- |
-| Name | `ARES Local Finding Demo` |
-| Client | `Internal` |
-| Targets | `127.0.0.1` |
-| Scope CIDRs | `127.0.0.1/32` |
+Example against a real authenticated endpoint that accepts API keys:
 
-Scope matters. Targeted modules will refuse to run if the target is outside the selected campaign scope.
+```powershell
+$headers = @{ "X-API-Key" = "YOUR_ARES_API_KEY" }
 
-## 6. Run A Module Safely
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8080/auth/me" `
+  -Headers $headers
+```
 
-Open `Modules`:
+### K. Universal campaign workflow
 
-1. Select the campaign.
-2. Search for a module.
-3. Fill the generated parameter fields.
-4. Run with `Dry run` first when available.
-5. Run live only when the target and scope are authorized.
+1. Open `Campaigns`.
+2. Create a campaign.
+3. Define campaign name, client, targets, and scope CIDRs.
+4. Open `Modules`.
+5. Choose any module from the catalog.
+6. Select the campaign.
+7. Fill backend-generated parameters.
+8. Run dry-run first where supported.
+9. Execute only inside authorized scope.
+10. Review module output in `Results`.
+11. Review persisted findings in `Campaigns` / `Findings` or the relevant
+    findings view.
+12. Open `Reports`.
+13. Generate JSON, PDF, HTML, or Markdown.
+14. Open `Library`.
+15. Download artifacts.
+16. Delete one artifact or use `Delete all` / Clear library.
 
-The dashboard catalog loads the built-in module metadata from the backend.
-Module IDs, names, categories, OPSEC labels, and parameter schemas come from
-that catalog. High-noise or sensitive modules remain guarded by authorization
-and confirmation checks; do not run destructive, credential, lateral movement,
-exfiltration, persistence, or bypass workflows outside an approved lab or
-engagement.
+Module-specific differences begin at module selection, optional extras/tools,
+and parameter values. AD/Kerberos, cloud, network, credential, Windows, Linux,
+and other modules follow the same campaign/module/report flow.
 
-Port behavior is module-specific. Some modules require explicit ports because they fingerprint a service. Broader discovery belongs in enumeration modules such as port scanning, then the discovered services can be used by more specific modules.
-
-## 7. Generate Reports
+### L. Reports and Library
 
 Open `Reports`:
 
 1. Select a campaign.
-2. Choose `json`.
-3. Click `Generate`.
-4. Switch to `Library` and use `Download` to save/open the JSON artifact.
-5. Return to `Generate`, choose `pdf`, and click `Generate`.
-6. Switch to `Library` and use `Download` to save/open the PDF artifact.
+2. Generate `json`.
+3. Switch to `Library` and download the JSON artifact.
+4. Generate `pdf`.
+5. Switch to `Library` and download the PDF artifact.
+6. Generate `html` or `markdown` where supported.
 7. Use a row's `Delete` action to remove one artifact after confirming.
 8. Use `Delete all` / Clear library to remove the campaign's generated report
    artifacts after confirming.
 
-Do not open report file URLs directly in the browser address bar. Report downloads are authenticated, so direct unauthenticated URLs return `401`.
+Report evidence is redacted by default. Raw hashes, passwords, tokens, and
+other secrets should appear only in authorized internal review paths. Do not
+publish them in public demos or shared reports.
 
-Report evidence is redacted by default. Do not expose raw Kerberoast,
-ASREPRoast, password, token, or other secret material in demos or public
-reports; include sensitive evidence only for authorized internal review.
+Successful report library delete actions update rows and artifact counts. When
+no reports remain, the Library shows `No reports generated for this campaign
+yet.`
 
-## 8. Use Templates
+### M. Troubleshooting
 
-Open `Templates` when you want a repeatable plan.
+| Symptom | Fix |
+| --- | --- |
+| `ares` command not found on Windows | Use `.\.venv\Scripts\ares.exe ...` from the repository root. |
+| `frontend/node_modules` missing | Run `npm ci` in `frontend/`, or start with `ares dashboard dev --install`. |
+| PDF smoke warning on Windows | Use normal non-Administrator PowerShell, set `$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`, then run `.\.venv\Scripts\ares.exe doctor --pdf-smoke`. |
+| Optional module dependency warning | Install the relevant extra only when that module family is needed, for example `.[ad]`, `.[cloud]`, `.[windows]`, or `.[full]`. |
+| Impacket source/local install version unknown | OK if Impacket is importable; missing or too-old Impacket still warns. |
+| `Invalid credentials` | Use the current admin password. Updating `ARES_DEFAULT_ADMIN_PASSWORD` after admin exists does not reset that password. |
+| `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32` for local testing. |
+| Report direct URL returns `401` | Use the authenticated dashboard Download button. |
+| Pytest on Windows fails before tests with temp ACL errors | Developer validation only: use a writable temp root or fix the stale `%TEMP%\pytest-of-<user>` permissions. This is not part of normal first-run use. |
 
-Templates:
+## Optional planning and module notes
 
-- Generate deterministic plan stages.
-- Do not call an LLM.
-- Do not execute modules by themselves.
-- Are useful as a checklist before running campaign modules.
+### Templates
 
-Typical flow:
+Open `Templates` when you want a repeatable plan. Templates produce
+deterministic plan stages, do not call an LLM, and do not execute modules by
+themselves.
 
-1. Select a built-in template such as `internal_pentest`.
-2. Optionally provide JSON parameters.
-3. Click `Generate Plan`.
-4. Review the returned stages and module IDs.
-5. Execute approved modules manually from the campaign workflow.
+### Strategy and AI planning
 
-## 9. Use Strategy And AI Planning
-
-Strategy is for goal-based planning against an existing campaign.
-
-The default strategy path expects an LLM provider key unless you configure a local backend. ARES API keys from the `Security` page are not LLM keys.
+Strategy is for goal-based planning against an existing campaign. The default
+strategy path expects an LLM provider key unless you configure a local backend.
+ARES API keys from the `Security` page are not LLM keys.
 
 Common LLM environment variables:
 
@@ -283,75 +387,10 @@ export ANTHROPIC_API_KEY="..."
 export OPENAI_API_KEY="..."
 ```
 
-Use Strategy only after:
+Use Strategy only after a campaign exists, scope is correct, authorization
+notes are clear, and the selected LLM backend is configured.
 
-- A campaign exists.
-- Scope is correct.
-- Authorization notes are clear.
-- The required LLM provider key is configured, or a supported local backend is selected through the API.
-
-## 10. API Keys In The Security Page
-
-Dashboard API keys authenticate scripts and integrations to ARES itself.
-
-Use them as:
-
-```bash
-curl http://127.0.0.1:8080/campaigns \
-  -H "X-API-Key: ares_YOUR_KEY"
-```
-
-They are not OpenAI, Anthropic, or Ollama keys.
-
-When you create a key, the dashboard opens the `Save your key` modal and shows
-the full secret once. Use `Copy`; after a successful copy the button changes to
-`Copied`. `Done` closes the modal and clears the in-memory new-key state. The
-API key list shows metadata and a prefix only, so the full secret cannot be
-retrieved later.
-
-## 11. Roles
-
-The first user is `admin` with the `team_lead` role.
-
-| Role | Purpose |
-| --- | --- |
-| `team_lead` | Full local admin/operator lead. Can create users, delete campaigns, view security audit, and authorize higher-risk workflows. |
-| `operator` | Daily operator. Can run normal campaign/module/report workflows. |
-| `recon` | Read-heavy recon identity. Main dashboard execution endpoints remain operator-gated. |
-| `reporter` | Read-only reporting and review. |
-
-Create users through `POST /auth/register` with a team-lead token. See `docs/dashboard-guide.md` for a PowerShell example.
-
-## 12. Doctor And Optional Dependencies
-
-Run:
-
-```bash
-ares doctor
-```
-
-Windows virtualenv example:
-
-```powershell
-.\.venv\Scripts\ares.exe doctor
-```
-
-`ares doctor` checks Python, key dependencies, optional module integrations, native tools, PDF export capability, network socket support, environment configuration, and the local database.
-
-A yellow warning means an optional integration is missing. A red failure means a required dependency or configuration item needs attention.
-
-Common examples:
-
-| Message | Meaning |
-| --- | --- |
-| `impacket` missing or old | AD/SMB modules need the optional impacket dependency. |
-| `Windows AD/Impacket Python` warning | Windows AD lab validation is tested on Python 3.12.x. |
-| `PDF smoke` failed | Run `ares doctor --pdf-smoke` from normal non-Administrator PowerShell and check the WeasyPrint GTK/Pango or Edge/Chrome fallback guidance. |
-| `pip-audit not installed` | Dependency audit is unavailable; core API can still start. |
-| `hashcat not in PATH` | Password-cracking helpers cannot use hashcat until installed. |
-| `.env configured` failed | Required environment values are missing. |
-
-## 13. Public SDK
+### Public SDK
 
 Use the public SDK import path for custom modules:
 
@@ -359,7 +398,8 @@ Use the public SDK import path for custom modules:
 from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult
 ```
 
-`ares.modules.sdk` remains as a compatibility shim, but new code should use `ares.sdk`.
+`ares.modules.sdk` remains as a compatibility shim, but new code should use
+`ares.sdk`.
 
 See:
 
@@ -367,7 +407,7 @@ See:
 - `docs/module_sdk.md`
 - `docs/examples/example_http_enum.py`
 
-## 14. Validation Lab
+### Validation lab
 
 Run the validation lab after changing API or dashboard behavior:
 
@@ -376,20 +416,10 @@ $env:ARES_LAB_PASSWORD="YOUR_CURRENT_ADMIN_PASSWORD"
 .\scripts\run_validation_lab.ps1
 ```
 
-The lab checks login, profile, campaign validation, dry-run validation, reports, and API key lifecycle.
+The lab checks login, profile, campaign validation, dry-run validation,
+reports, and API key lifecycle.
 
-## Troubleshooting
+## Safety reminder
 
-| Symptom | Check |
-| --- | --- |
-| `ARES not configured` | Set `ARES_SECRET_KEY`, `ARES_ENCRYPTION_KEY`, and `ARES_DEFAULT_ADMIN_PASSWORD`. |
-| `Invalid credentials` | Use the current admin password, not the placeholder or a newly changed `ARES_DEFAULT_ADMIN_PASSWORD` value after the admin already exists. |
-| `Request failed with 422` | A required field is missing or a target/scope value is invalid. |
-| `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32`. |
-| `Global rate limit exceeded` | Wait briefly, then retry. Avoid repeatedly clicking actions while a request is pending. |
-| Report direct URL returns `401` | Use the authenticated dashboard Download button. |
-| Strategy does nothing useful | Confirm the campaign, authorization notes, and LLM provider key. |
-
-## Safety Reminder
-
-ARES is intended for authorized security testing, lab use, and defensive validation only.
+ARES is intended for authorized security testing, lab use, and defensive
+validation only.

@@ -5,10 +5,10 @@ for the FastAPI backend.
 
 ## Runtime
 
-- Development: run `ares dashboard dev` from the repository root. It starts
-  the FastAPI API on `http://127.0.0.1:8080` and the Vite dashboard on
-  `http://127.0.0.1:5173/dashboard/` in one terminal.
-- Windows virtualenv: `.\.venv\Scripts\ares.exe dashboard dev`.
+- Development: run `ares dashboard dev --no-reload` from the repository root.
+  It starts the FastAPI API on `http://127.0.0.1:8080` and the Vite dashboard
+  on `http://127.0.0.1:5173/dashboard/` in one terminal.
+- Windows virtualenv: `.\.venv\Scripts\ares.exe dashboard dev --no-reload`.
 - Browser open can be skipped with `ares dashboard dev --no-open`.
 - Backend and UI bind addresses can be changed with `--api-host`,
   `--api-port`, `--ui-host`, and `--ui-port`.

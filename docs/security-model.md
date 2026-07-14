@@ -118,6 +118,12 @@ and `Done` closes the modal and clears the in-memory new-key state. The key
 list shows metadata and a prefix only; the full secret cannot be retrieved
 later.
 
+API-key scopes are `read`, `write`, and `admin`. They are an additional
+restriction on API-key-compatible automation routes and do not replace RBAC.
+Use `X-API-Key` for automation endpoints such as `GET /auth/me`; account
+credential management, user registration, and API-key lifecycle operations are
+performed from an authenticated browser/JWT session.
+
 **Unauthenticated endpoints** (by design):
 - `POST /auth/token` — login (takes credentials, returns token)
 - `GET /health` — health check (no sensitive data)
