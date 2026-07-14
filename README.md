@@ -404,7 +404,8 @@ Optional module families are installed only when needed, for example `.[ad]`,
 `.[cloud]`, `.[windows]`, or `.[full]`. For AD users with source/local
 Impacket already importable, use `.[ad-support]` for the remaining direct AD
 support libraries; see [QUICKSTART.md](QUICKSTART.md) for the full decision
-path.
+path. For AD usernames on Windows, prefer UPN format such as
+`alice@lab.local`; avoid `LAB\alice` unless NTLM/MD4 support is known to work.
 
 ---
 

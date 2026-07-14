@@ -12,8 +12,13 @@ from ares.core.campaign import Finding, Severity, NoiseProfile
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
-from ares.modules.ad.dependencies import ensure_ad_dependencies
+from ares.core.errors import AresError, ModuleValidationError
+from ares.modules.ad.dependencies import (
+    ad_bind_dry_run_metadata,
+    ensure_ad_dependencies,
+    nonretryable_ad_auth_error,
+    sanitize_ad_username,
+)
 
 
 def _format_krb5tgs_hash(tgs: bytes, cipher: "Any", spn: str, domain: str) -> str:
@@ -107,7 +112,13 @@ class KerberoastModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(
                 status="dry_run", module_id=self.MODULE_ID,
-                raw={"dry_run": True, "dc": dc, "domain": domain},
+                raw={
+                    "dry_run": True,
+                    "dc": dc,
+                    "domain": domain,
+                    "target_user": target_user,
+                    **ad_bind_dry_run_metadata(username, domain),
+                },
             )
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain, target_user=target_user,
@@ -125,7 +136,11 @@ class KerberoastModule(BaseModule):
             ("impacket", "pyasn1", "pyasn1_modules"),
             module_id=self.MODULE_ID,
         )
-        dc, username, domain = sanitize_hostname(dc), sanitize_ldap(username), sanitize_ldap(domain)
+        dc, username, domain = (
+            sanitize_hostname(dc),
+            sanitize_ad_username(username),
+            sanitize_ldap(domain),
+        )
         if self.campaign.noise_profile == NoiseProfile.STEALTH:
             logger.warning("kerberoast_skipped", reason="stealth_profile")
             return [], {"skipped": True, "reason": "stealth_profile_too_noisy"}
@@ -133,13 +148,19 @@ class KerberoastModule(BaseModule):
         logger.info("kerberoast_start", dc=dc, domain=domain, target=target_user)
         try:
             hashes, accounts = await self._request_tickets(dc, username, password, domain, target_user)
-        except ModuleValidationError:
+        except AresError:
             raise
         except Exception as exc:
-            from ares.core.errors import AuthenticationFailed, NetworkError
+            from ares.core.errors import NetworkError
             err = str(exc).lower()
             if "invalid credentials" in err or "logon failure" in err:
-                raise AuthenticationFailed(f"Kerberoast auth failed on {dc}", username=username, module_id=self.MODULE_ID, target=dc) from exc
+                raise nonretryable_ad_auth_error(
+                    module_id=self.MODULE_ID,
+                    dc=dc,
+                    username=username,
+                    domain=domain,
+                    service="Kerberos",
+                ) from exc
             raise NetworkError(f"Kerberoast failed: {exc}") from exc
         raw = {"kerberos_hashes": hashes, "accounts": accounts, "noise_level": self.campaign.noise_profile.value}
         self._analyze(raw)
@@ -190,10 +211,12 @@ class KerberoastModule(BaseModule):
             err = str(exc).lower()
             if "invalid credentials" in err or "logon failure" in err or \
                "kdc_err_preauth_failed" in err:
-                from ares.core.errors import AuthenticationFailed
-                raise AuthenticationFailed(
-                    f"Kerberoast TGT failed on {dc}",
-                    username=username, module_id=self.MODULE_ID, target=dc,
+                raise nonretryable_ad_auth_error(
+                    module_id=self.MODULE_ID,
+                    dc=dc,
+                    username=username,
+                    domain=domain,
+                    service="Kerberos",
                 ) from exc
             raise
 
@@ -211,8 +234,9 @@ class KerberoastModule(BaseModule):
                     noise=self.noise,
                 ).run(dc=dc, username=username, password=password, domain=domain)
                 _, spn_raw = spn_data
-                for acct in spn_raw.get("spns", []):
-                    spn_list.extend(acct.get("spns", []))
+                for acct in spn_raw.get("spn_list", spn_raw.get("spns", [])):
+                    spn_values = acct.get("spn_list") or acct.get("spns") or []
+                    spn_list.extend(spn_values)
             except Exception as exc:
                 logger.warning("kerberoast_spn_lookup_failed", error=str(exc)[:80])
 

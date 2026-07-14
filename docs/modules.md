@@ -96,6 +96,12 @@ For AD modules, `.[ad]` is the normal full install. If `ares doctor` already
 shows Impacket as importable from a source/local install, use `.[ad-support]`
 to install the direct AD support libraries (`pyasn1`, `pyasn1_modules`,
 `ldap3`, and `httpx_ntlm`) without forcing another Impacket wheel install.
+On Windows, if `.[ad]` fails while importing Impacket example scripts such as
+`GetNPUsers.py`, restore the known-good source/local Impacket checkout and use
+`.[ad-support]` for the direct support libraries. For dashboard module
+parameters, prefer UPN usernames such as `alice@lab.local`; use `LAB\alice`
+only when NTLM/MD4 support is known to work in the active Python/OpenSSL
+environment.
 
 ## Module Categories
 
