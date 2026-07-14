@@ -329,25 +329,34 @@ Run a single module directly.
 
 Generate a campaign report.
 
-```json
-{
-  "format":               "html",
-  "include_timeline":     true,
-  "include_mitre_heatmap": true
-}
+Query parameters:
+
+| Parameter | Values | Default | Notes |
+| --- | --- | --- | --- |
+| `fmt` | `html`, `pdf`, `markdown`, `json` | `html` | Report artifact format. |
+| `include_sensitive_evidence` | `true`, `false` | `false` | Includes raw sensitive evidence only when the caller is authorized as `team_lead`. |
+
+Example:
+
+```text
+POST /reports/{campaign_id}?fmt=json&include_sensitive_evidence=false
 ```
 
-Supported formats: `html` | `pdf` | `json` | `markdown`
-
 PDF generation uses the report renderer internally and returns a PDF artifact
-for `format: "pdf"`. The server uses WeasyPrint when available and can fall
+for `fmt=pdf`. The server uses WeasyPrint when available and can fall
 back to a local Chromium-compatible browser in local environments where
 WeasyPrint native libraries are not installed. On Windows, use Python 3.12.x
 from normal non-Administrator PowerShell; WeasyPrint needs native GTK/Pango
 libraries in addition to the pip package. Use `ares doctor --pdf-smoke` to
 validate the active PDF backend. HTML and PDF reports render finding evidence
-as readable tables and key-value rows where possible. Use `json` output when
-you need raw machine-readable report data.
+as readable tables and key-value rows where possible.
+
+Report evidence is redacted by default. Do not include raw Kerberoast,
+ASREPRoast, password, token, or other secret material in public demos or shared
+reports. Use `include_sensitive_evidence=true` only for intentional,
+authorized internal review; non-`team_lead` callers receive `403`.
+
+Use `fmt=json` when you need machine-readable report data.
 
 **Response:** `200 OK`
 ```json
@@ -363,6 +372,37 @@ that belong to the campaign and resolve inside the report directory.
 
 Download a generated report file. Filename traversal, absolute paths, encoded
 traversal, and symlink escapes are rejected.
+
+### `DELETE /reports/{campaign_id}/files/{filename}`
+
+Delete one generated report artifact for the campaign.
+
+- Requires report/campaign authorization.
+- Rejects unsafe filenames: traversal, absolute paths, nested paths, path
+  separators, empty filenames, and symlink escapes outside the report
+  directory.
+- Returns `404` when the report artifact is missing.
+
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted", "campaign_id": "abc12345", "filename": "abc12345_Corp_20260714_1200.pdf" }
+```
+
+### `DELETE /reports/{campaign_id}`
+
+Clear generated report artifacts for the campaign.
+
+- Requires report/campaign authorization.
+- Deletes only generated report artifact extensions: `.pdf`, `.json`, `.html`,
+  and `.md`.
+- Ignores directories and unrelated files.
+
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted", "campaign_id": "abc12345", "deleted": 3 }
+```
 
 ---
 

@@ -321,7 +321,7 @@ def test_module_metadata():
   "author":      "Your Name",
   "description": "Enumerate MSSQL instances",
   "requires":    ["pymssql"],
-  "ares_min":    "0.9.0",
+  "ares_min":    "6.0.0",
   "signature":   "sha256:abc123..."
 }
 ```
