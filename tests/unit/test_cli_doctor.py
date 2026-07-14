@@ -14,6 +14,18 @@ import typer
 VersionInfo = namedtuple("version_info", "major minor micro releaselevel serial")
 
 
+def _run_doctor(monkeypatch, tmp_path, capsys) -> str:
+    from ares.cli.typer_main import doctor
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("ARES_SECRET_KEY=test\n", encoding="utf-8")
+    try:
+        doctor(pdf_smoke=False)
+    except typer.Exit:
+        pass
+    return capsys.readouterr().out
+
+
 def test_doctor_uses_distribution_metadata_for_impacket(monkeypatch, tmp_path, capsys):
     from ares.cli.typer_main import doctor
 
@@ -33,12 +45,122 @@ def test_doctor_uses_distribution_metadata_for_impacket(monkeypatch, tmp_path, c
     monkeypatch.setitem(sys.modules, "paramiko", fake_paramiko)
     monkeypatch.setitem(sys.modules, "ldap3", None)
 
-    doctor()
+    doctor(pdf_smoke=False)
 
     output = capsys.readouterr().out
     assert "impacket 0.13.1" in output
+    assert "[WARN]  impacket" not in output
     assert "too old (0.0.0)" not in output
     assert "ares-redteam[ad]" in output
+
+
+def test_doctor_accepts_supported_impacket_metadata_version(monkeypatch, tmp_path, capsys):
+    fake_impacket = types.ModuleType("impacket")
+
+    def fake_version(package_name: str) -> str:
+        if package_name == "impacket":
+            return "0.12.0"
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+
+    assert "impacket 0.12.0" in output
+    assert ">= 0.11 required" in output
+    assert "[WARN]  impacket" not in output
+    assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_warns_for_too_old_impacket_metadata_version(monkeypatch, tmp_path, capsys):
+    fake_impacket = types.ModuleType("impacket")
+
+    def fake_version(package_name: str) -> str:
+        if package_name == "impacket":
+            return "0.10.0"
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+
+    assert "[WARN]  impacket 0.10.0" in output
+    assert ">= 0.11" in output
+    assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_accepts_impacket_source_version_attribute(monkeypatch, tmp_path, capsys):
+    fake_impacket = types.ModuleType("impacket")
+    fake_impacket.__version__ = "0.12.0"
+
+    def fake_version(package_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+    monkeypatch.delitem(sys.modules, "impacket.version", raising=False)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+
+    assert "impacket 0.12.0" in output
+    assert "[WARN]  impacket" not in output
+    assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_accepts_impacket_version_banner(monkeypatch, tmp_path, capsys):
+    fake_impacket = types.ModuleType("impacket")
+    fake_version_module = types.ModuleType("impacket.version")
+    fake_version_module.BANNER = "Impacket v0.12.0"
+    fake_impacket.version = fake_version_module
+
+    def fake_version(package_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+    monkeypatch.setitem(sys.modules, "impacket.version", fake_version_module)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+
+    assert "impacket 0.12.0" in output
+    assert "[WARN]  impacket" not in output
+    assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_accepts_importable_impacket_with_unknown_version(monkeypatch, tmp_path, capsys):
+    fake_impacket = types.ModuleType("impacket")
+
+    def fake_version(package_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", fake_impacket)
+    monkeypatch.delitem(sys.modules, "impacket.version", raising=False)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+    normalized = " ".join(output.split())
+
+    assert "[OK]  impacket  (AD/SMB modules)" in output
+    assert "version unknown from source/local install" in normalized
+    assert "[WARN]  impacket" not in output
+    assert "installed, but version could not be detected" not in output
+
+
+def test_doctor_warns_when_impacket_import_fails(monkeypatch, tmp_path, capsys):
+    def fake_version(package_name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(package_name)
+
+    monkeypatch.setattr(importlib.metadata, "version", fake_version)
+    monkeypatch.setitem(sys.modules, "impacket", None)
+    monkeypatch.delitem(sys.modules, "impacket.version", raising=False)
+
+    output = _run_doctor(monkeypatch, tmp_path, capsys)
+
+    assert "[WARN]  impacket" in output
+    assert "pip install ares-redteam[ad]" in output
+    assert "installed, but version could not be detected" not in output
 
 
 def test_doctor_reports_broken_optional_import_and_continues(monkeypatch, tmp_path, capsys):
@@ -67,7 +189,7 @@ def test_doctor_reports_broken_optional_import_and_continues(monkeypatch, tmp_pa
     monkeypatch.setattr(importlib, "import_module", fake_import_module)
 
     try:
-        doctor()
+        doctor(pdf_smoke=False)
     except typer.Exit:
         pass
 
@@ -88,7 +210,7 @@ def test_doctor_guides_windows_ad_impacket_to_python_312(monkeypatch, tmp_path, 
     monkeypatch.setattr(sys, "version_info", VersionInfo(3, 11, 9, "final", 0))
 
     try:
-        doctor()
+        doctor(pdf_smoke=False)
     except typer.Exit:
         pass
 
@@ -150,7 +272,7 @@ def test_doctor_reports_pdf_capability(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(report_gen, "ReportGenerator", FakeReportGenerator)
 
     try:
-        doctor()
+        doctor(pdf_smoke=False)
     except typer.Exit:
         pass
 
@@ -222,7 +344,7 @@ def test_doctor_reports_windows_weasyprint_native_dependency_hint(
     monkeypatch.setattr(importlib, "import_module", fake_import_module)
 
     try:
-        doctor()
+        doctor(pdf_smoke=False)
     except typer.Exit:
         pass
 
