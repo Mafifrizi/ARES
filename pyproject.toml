@@ -66,10 +66,18 @@ postgres = [
 ]
 ad = [
     "impacket>=0.11",
+    "pyasn1>=0.5",
+    "pyasn1-modules>=0.3",
     "ldap3>=2.9",
     "pywinrm>=0.4",
     "asyncssh>=2.14",
     "httpx-ntlm>=1.4",  # ADCS ESC1 HTTP enrollment (ad.adcs exploit_esc1)
+]
+ad-support = [
+    "pyasn1>=0.5",
+    "pyasn1-modules>=0.3",
+    "ldap3>=2.9",
+    "httpx-ntlm>=1.4",
 ]
 cloud = [
     "boto3>=1.34",

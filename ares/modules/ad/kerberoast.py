@@ -12,6 +12,8 @@ from ares.core.campaign import Finding, Severity, NoiseProfile
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import ModuleValidationError
+from ares.modules.ad.dependencies import ensure_ad_dependencies
 
 
 def _format_krb5tgs_hash(tgs: bytes, cipher: "Any", spn: str, domain: str) -> str:
@@ -119,6 +121,10 @@ class KerberoastModule(BaseModule):
 
     @trace_module("ad.kerberoast")
     async def run(self, dc, username, password, domain, target_user=None, **kwargs):
+        ensure_ad_dependencies(
+            ("impacket", "pyasn1", "pyasn1_modules"),
+            module_id=self.MODULE_ID,
+        )
         dc, username, domain = sanitize_hostname(dc), sanitize_ldap(username), sanitize_ldap(domain)
         if self.campaign.noise_profile == NoiseProfile.STEALTH:
             logger.warning("kerberoast_skipped", reason="stealth_profile")
@@ -127,6 +133,8 @@ class KerberoastModule(BaseModule):
         logger.info("kerberoast_start", dc=dc, domain=domain, target=target_user)
         try:
             hashes, accounts = await self._request_tickets(dc, username, password, domain, target_user)
+        except ModuleValidationError:
+            raise
         except Exception as exc:
             from ares.core.errors import AuthenticationFailed, NetworkError
             err = str(exc).lower()
@@ -144,6 +152,10 @@ class KerberoastModule(BaseModule):
         Fix Bug 2: Jitter after every single TGS request — not burst then sleep.
         Fix Bug 3: Explicit per-noise-profile rate limit (10/min NORMAL, 50/min AGGRESSIVE).
         """
+        ensure_ad_dependencies(
+            ("impacket", "pyasn1", "pyasn1_modules"),
+            module_id=self.MODULE_ID,
+        )
         from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
         from impacket.krb5.types import Principal
         from impacket.krb5 import constants

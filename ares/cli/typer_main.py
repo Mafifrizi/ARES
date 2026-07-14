@@ -1160,6 +1160,7 @@ def doctor(
     import importlib, shutil, os
     from importlib import metadata as importlib_metadata
     from pathlib import Path
+    from ares.modules.ad.dependencies import AD_INSTALL_HINT, AD_SUPPORT_DEPENDENCIES
 
     console.print("\n[bold]ARES Doctor[/bold] — prerequisite check\n")
 
@@ -1240,7 +1241,7 @@ def doctor(
                 check(
                     label,
                     "warn",
-                    import_failure_detail(import_name, exc, "pip install ares-redteam[ad]"),
+                    import_failure_detail(import_name, exc, AD_INSTALL_HINT),
                 )
             elif pkg == "paramiko":
                 check(
@@ -1272,15 +1273,26 @@ def doctor(
         check(
             "impacket",
             "warn",
-            import_failure_detail("impacket", exc, "pip install ares-redteam[ad]"),
+            import_failure_detail("impacket", exc, AD_INSTALL_HINT),
         )
+
+    # Direct AD support dependencies used by AD modules before runtime.
+    for import_name, label in AD_SUPPORT_DEPENDENCIES:
+        if import_name in {"ldap3", "httpx_ntlm"}:
+            continue
+        try:
+            mod = importlib.import_module(import_name)
+            ver = getattr(mod, "__version__", "")
+            check(label, "ok", ver or "available")
+        except Exception as exc:
+            check(label, "warn", import_failure_detail(import_name, exc, AD_INSTALL_HINT))
 
     # ── ldap3 ─────────────────────────────────────────────────────────────────
     try:
         import ldap3
         check(f"ldap3 {ldap3.__version__}", "ok", "AD LDAP enumeration ready")
     except Exception as exc:
-        check("ldap3", "warn", import_failure_detail("ldap3", exc, "pip install ares-redteam[ad]"))
+        check("ldap3", "warn", import_failure_detail("ldap3", exc, AD_INSTALL_HINT))
 
     # ── optional Windows modules ───────────────────────────────────────────────
     try:
@@ -1295,7 +1307,7 @@ def doctor(
         check("httpx-ntlm  (ad.adcs ESC1)", "ok", "ADCS HTTP enrollment ready")
     except Exception as exc:
         check("httpx-ntlm  (ad.adcs ESC1)", "warn",
-              import_failure_detail("httpx_ntlm", exc, "pip install ares-redteam[ad]"))
+              import_failure_detail("httpx_ntlm", exc, AD_INSTALL_HINT))
 
     # ── cloud SDKs ────────────────────────────────────────────────────────────
     for import_name, module_label in [

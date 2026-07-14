@@ -68,9 +68,17 @@ paramiko>=3.4
 
 # [ad] extra - Active Directory + SMB
 impacket>=0.11
+pyasn1>=0.5
+pyasn1-modules>=0.3
 ldap3>=2.9
 pywinrm>=0.4
 asyncssh>=2.14
+httpx-ntlm>=1.4
+
+# [ad-support] extra - AD support deps for source/local Impacket users
+pyasn1>=0.5
+pyasn1-modules>=0.3
+ldap3>=2.9
 httpx-ntlm>=1.4
 
 # [cloud] extra

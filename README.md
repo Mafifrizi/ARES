@@ -401,7 +401,10 @@ first-run path from clone to report. The universal order is:
    reports from the Report Library.
 
 Optional module families are installed only when needed, for example `.[ad]`,
-`.[cloud]`, `.[windows]`, or `.[full]`.
+`.[cloud]`, `.[windows]`, or `.[full]`. For AD users with source/local
+Impacket already importable, use `.[ad-support]` for the remaining direct AD
+support libraries; see [QUICKSTART.md](QUICKSTART.md) for the full decision
+path.
 
 ---
 
