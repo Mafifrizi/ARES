@@ -9,6 +9,13 @@ from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import AresError, ModuleValidationError
+from ares.modules.ad.dependencies import (
+    ad_bind_dry_run_metadata,
+    build_ad_bind_plan,
+    classify_ad_ldap_bind_failure,
+    sanitize_ad_username,
+)
 
 def _dn_to_base(domain):
     return ",".join(f"DC={p}" for p in domain.upper().split("."))
@@ -67,7 +74,12 @@ class ADEnumSPNModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(
                 status="dry_run", module_id=self.MODULE_ID,
-                raw={"dry_run": True, "dc": dc, "domain": domain},
+                raw={
+                    "dry_run": True,
+                    "dc": dc,
+                    "domain": domain,
+                    **ad_bind_dry_run_metadata(username, domain),
+                },
             )
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain,
@@ -81,7 +93,11 @@ class ADEnumSPNModule(BaseModule):
 
     @trace_module("ad.enum_spn")
     async def run(self, dc, username, password, domain, **kwargs):
-        dc,username,domain = sanitize_hostname(dc),sanitize_ldap(username),sanitize_ldap(domain)
+        dc, username, domain = (
+            sanitize_hostname(dc),
+            sanitize_ad_username(username),
+            sanitize_ldap(domain),
+        )
         await self.before_request(dc,"ldap")
         logger.info("ad.enum_spn_start", dc=dc)
         try:
@@ -91,6 +107,8 @@ class ADEnumSPNModule(BaseModule):
                 None,
                 lambda: self._fetch_spns_sync(dc, username, password, domain),
             )
+        except AresError:
+            raise
         except Exception as exc:
             from ares.core.errors import NetworkError
             raise NetworkError(f"LDAP SPN failed: {exc}") from exc
@@ -125,34 +143,56 @@ class ADEnumSPNModule(BaseModule):
         """
         import ssl
         import ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+        from ldap3 import Server, Connection, ALL, SUBTREE, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         # Try LDAPS first, fallback to plain LDAP
+        bind_plan = build_ad_bind_plan(username, domain)
         conn = None
+        last_error = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL,
                                  connect_timeout=10)
-                conn = Connection(
-                    server,
-                    user=f"{domain.upper()}\\{username}",
+                conn_kwargs = dict(
+                    user=bind_plan.user,
                     password=password,
-                    authentication=NTLM,
                     auto_bind=ldap3.AUTO_BIND_NONE,
                     receive_timeout=30,
                 )
+                if bind_plan.mode == "ntlm":
+                    conn_kwargs["authentication"] = ldap3.NTLM
+                conn = Connection(server, **conn_kwargs)
                 result = conn.bind()
                 if not result:
-                    raise LDAPBindError(f"Bind failed: {conn.result}")
+                    ldap_result = getattr(conn, "result", {}) or {}
+                    raise classify_ad_ldap_bind_failure(
+                        LDAPBindError("LDAP bind returned false"),
+                        module_id=self.MODULE_ID,
+                        dc=dc,
+                        bind_plan=bind_plan,
+                        result=ldap_result,
+                    )
                 break
-            except Exception:
+            except AresError:
+                raise
+            except Exception as exc:
+                last_error = classify_ad_ldap_bind_failure(
+                    exc,
+                    module_id=self.MODULE_ID,
+                    dc=dc,
+                    bind_plan=bind_plan,
+                )
+                if isinstance(last_error, ModuleValidationError):
+                    raise last_error
                 conn = None
                 continue
 
         if conn is None:
+            if last_error is not None:
+                raise last_error
             raise ConnectionError(f"Could not bind to {dc} on ports 636 or 389")
 
         base       = _dn_to_base(domain)

@@ -90,6 +90,10 @@ already reports `impacket` as importable from a source/local install, use
 PyPI Impacket wheel install. After installing AD dependencies, restart
 `ares dashboard dev --no-reload`, rerun `ares doctor --pdf-smoke`, and confirm
 `pyasn1`, `pyasn1_modules`, `ldap3`, and `httpx_ntlm` are no longer missing.
+If `.[ad]` fails on Windows while importing Impacket example scripts such as
+`GetNPUsers.py`, restore the known-good source/local Impacket checkout and use
+`.[ad-support]` for the direct support libraries instead of repeatedly
+retrying the broken wheel install.
 
 ### D. Install frontend dependencies
 
@@ -371,6 +375,7 @@ yet.`
 | PDF smoke warning on Windows | Use normal non-Administrator PowerShell, set `$env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`, then run `.\.venv\Scripts\ares.exe doctor --pdf-smoke`. |
 | Optional module dependency warning | Install the relevant extra only when that module family is needed, for example `.[ad]`, `.[cloud]`, `.[windows]`, or `.[full]`. For source/local Impacket AD setups, use `.[ad-support]` for the remaining direct AD support libraries. |
 | Impacket source/local install version unknown | OK if Impacket is importable; install `.[ad-support]` if `pyasn1`, `pyasn1_modules`, `ldap3`, or `httpx_ntlm` still warn. Missing or too-old Impacket still warns. |
+| AD LDAP/Kerberos login fails on Windows | Prefer UPN usernames such as `alice@lab.local`. Avoid `LAB\alice` unless NTLM/MD4 support is known to work in the active Python/OpenSSL environment. |
 | `Invalid credentials` | Use the current admin password. Updating `ARES_DEFAULT_ADMIN_PASSWORD` after admin exists does not reset that password. |
 | `Target is not in campaign scope` | Add the target CIDR to the campaign scope, for example `127.0.0.1/32` for local testing. |
 | Report direct URL returns `401` | Use the authenticated dashboard Download button. |
