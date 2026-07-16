@@ -47,6 +47,28 @@ def _format_krb5tgs_hash(tgs: bytes, cipher: "Any", spn: str, domain: str) -> st
     except Exception:
         return ""
 
+
+def classify_kerberoast_outcome(
+    spn_count: int, hash_count: int, request_failures: int = 0
+) -> tuple[str, str]:
+    """Explain a Kerberoast run that did not produce a confirmed finding."""
+    if hash_count:
+        return "confirmed_findings", f"Captured {hash_count} TGS roastable result(s)."
+    if request_failures:
+        return (
+            "network_error",
+            f"Found {spn_count} SPN candidate(s), but TGS collection failed for {request_failures} request(s).",
+        )
+    if spn_count:
+        return (
+            "completed_no_findings",
+            f"Found {spn_count} SPN candidate(s), but no TGS roast material was obtained; the condition was not confirmed.",
+        )
+    return (
+        "completed_no_findings",
+        "LDAP completed successfully; no service principal candidates were found.",
+    )
+
 class KerberoastModule(BaseModule):
     """
     ad.kerberoast — Request TGS tickets for SPN accounts — hashcat-ready hashes
@@ -146,6 +168,8 @@ class KerberoastModule(BaseModule):
             return [], {"skipped": True, "reason": "stealth_profile_too_noisy"}
         await self.before_request(dc, "kerberos_tgs")
         logger.info("kerberoast_start", dc=dc, domain=domain, target=target_user)
+        self._last_spn_count = 0
+        self._last_tgs_failures = 0
         try:
             hashes, accounts = await self._request_tickets(dc, username, password, domain, target_user)
         except AresError:
@@ -162,7 +186,19 @@ class KerberoastModule(BaseModule):
                     service="Kerberos",
                 ) from exc
             raise NetworkError(f"Kerberoast failed: {exc}") from exc
-        raw = {"kerberos_hashes": hashes, "accounts": accounts, "noise_level": self.campaign.noise_profile.value}
+        raw = {
+            "kerberos_hashes": hashes,
+            "accounts": accounts,
+            "noise_level": self.campaign.noise_profile.value,
+        }
+        if not hashes:
+            category, message = classify_kerberoast_outcome(
+                self._last_spn_count,
+                len(hashes),
+                self._last_tgs_failures,
+            )
+            raw["outcome_category"] = category
+            raw["outcome_message"] = message
         self._analyze(raw)
         return self._findings, raw
 
@@ -240,6 +276,8 @@ class KerberoastModule(BaseModule):
             except Exception as exc:
                 logger.warning("kerberoast_spn_lookup_failed", error=str(exc)[:80])
 
+        self._last_spn_count = len(spn_list)
+
         if not spn_list:
             return [], []
 
@@ -276,6 +314,7 @@ class KerberoastModule(BaseModule):
                         "hash": hash_str[:60] + "...",
                     })
             except Exception as exc:
+                self._last_tgs_failures += 1
                 logger.debug("kerberoast_tgs_failed", spn=spn, error=str(exc)[:80])
 
             # Bug 2+3: jitter per-ticket + explicit rate-limit sleep

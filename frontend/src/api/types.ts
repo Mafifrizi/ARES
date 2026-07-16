@@ -64,6 +64,15 @@ export interface ModuleMeta {
   opsec_level?: string;
   mitre?: string;
   mitre_list?: string[];
+  required_params?: string[];
+  optional_params?: string[];
+  defaults?: Record<string, unknown>;
+  capability_flags?: string[];
+  dry_run_supported?: boolean;
+  supported_modes?: string[];
+  dependency_notes?: string[];
+  outcome_semantics?: string[];
+  safe_error_categories?: string[];
   param_schema: ParamSchema;
   [key: string]: unknown;
 }

@@ -5,6 +5,7 @@ Full async orchestration with parallel module execution.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,6 +36,131 @@ class ModuleStatus(str, Enum):
     TIMEOUT = "timeout"
 
 
+MODULE_OUTCOMES = (
+    "confirmed_findings",
+    "completed_no_findings",
+    "operator_error",
+    "dependency_error",
+    "network_error",
+    "unsupported",
+    "module_error",
+)
+_SECRET_ERROR_PATTERN = re.compile(
+    r"(?i)\b(password|passwd|secret|token|api[_-]?key|nt_hash|lm_hash|krbtgt_hash)\b\s*([:=])\s*([^\s,;]+)"
+)
+
+
+def redact_error_message(error: str | None) -> str | None:
+    """Bound and redact common secret key/value forms in engine errors."""
+    if not error:
+        return error
+    text = str(error)[:300]
+    return _SECRET_ERROR_PATTERN.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[redacted]", text
+    )
+
+
+def normalize_module_outcome(
+    status: ModuleStatus | str,
+    findings: list[Any] | None = None,
+    error: str | None = None,
+    raw_output: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Map engine results to a stable operator-facing outcome contract."""
+    findings = findings or []
+    raw = raw_output or {}
+    raw_outcome = str(raw.get("outcome_category", ""))
+    raw_message = str(raw.get("outcome_message", "")).strip()
+
+    if findings:
+        return "confirmed_findings", f"{len(findings)} confirmed finding(s) returned."
+    if raw_outcome in MODULE_OUTCOMES:
+        if raw_message:
+            return raw_outcome, raw_message
+        return raw_outcome, raw_outcome.replace("_", " ").capitalize() + "."
+
+    status_value = status.value if isinstance(status, ModuleStatus) else str(status)
+    error_text = str(error or "").strip()
+    lowered = error_text.lower()
+    if status_value == ModuleStatus.TIMEOUT.value or any(
+        marker in lowered
+        for marker in ("timed out", "timeout", "unreachable", "connection refused", "network")
+    ):
+        outcome = "network_error"
+        default_message = "The module could not complete because the target or network was unavailable."
+    elif any(
+        marker in lowered
+        for marker in (
+            "dependency",
+            "not installed",
+            "no module named",
+            "impacket",
+            "pyasn1",
+            "ldap3",
+        )
+    ):
+        outcome = "dependency_error"
+        default_message = "The module dependency check failed."
+    elif status_value == ModuleStatus.SKIPPED.value or any(
+        marker in lowered for marker in ("unsupported", "blocked", "not permitted")
+    ):
+        outcome = "unsupported"
+        default_message = "The module is unsupported or blocked for this run."
+    elif status_value == ModuleStatus.FAILED.value and any(
+        marker in lowered
+        for marker in ("validation", "required", "scope", "credential", "auth", "role")
+    ):
+        outcome = "operator_error"
+        default_message = "Review the module inputs, authorization, and campaign scope."
+    elif status_value == ModuleStatus.DONE.value:
+        outcome = "completed_no_findings"
+        default_message = (
+            "Module completed; no confirmed findings or exploitable condition was observed."
+        )
+    else:
+        outcome = "module_error"
+        default_message = "The module failed before producing a confirmed result."
+
+    if error_text:
+        return outcome, f"{default_message} Details: {error_text[:300]}"
+    return outcome, default_message
+
+
+def redact_module_params(module_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Return a JSON-safe parameter summary with credential material redacted."""
+    secret_fields: set[str] = set()
+    try:
+        from ares.modules.params import MODULE_PARAMS
+
+        model = MODULE_PARAMS.get(module_id)
+        if model:
+            secret_fields = {
+                name
+                for name, field in model.schema_for_api().items()
+                if field.get("secret")
+            }
+    except (ImportError, AttributeError):
+        pass
+
+    secret_names = secret_fields | {
+        "password", "secret", "token", "api_key", "private_key",
+        "nt_hash", "lm_hash", "krbtgt_hash", "ssh_pass", "access_key", "secret_key",
+    }
+
+    def _copy(name: str, value: Any) -> Any:
+        if name in secret_names:
+            return "[redacted]"
+        if isinstance(value, dict):
+            return {str(key): _copy(str(key), item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_copy(name, item) for item in value]
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
+
+    return {str(key): _copy(str(key), value) for key, value in params.items()}
+
+
 class EngineModuleResult(BaseModel):
     module_id:          str
     status:             ModuleStatus = ModuleStatus.DONE
@@ -43,6 +169,20 @@ class EngineModuleResult(BaseModel):
     raw_output:         dict[str, Any] = {}
     error:              str | None = None
     duration_ms:        float = 0.0
+    outcome:            str = ""
+    outcome_message:    str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        self.error = redact_error_message(self.error)
+        if not self.outcome or not self.outcome_message:
+            outcome, message = normalize_module_outcome(
+                self.status,
+                self.findings,
+                self.error,
+                self.raw_output,
+            )
+            self.outcome = self.outcome or outcome
+            self.outcome_message = self.outcome_message or message
 
     @property
     def confirmed_findings(self) -> list[Finding]:
@@ -647,7 +787,17 @@ class AresEngine:
                 if not cls:
                     param_errors.append({"module_id": mid, "field": "(module)",
                                          "error": f"Module '{mid}' not found in registry"})
-                    stage_info["modules"].append({"module_id": mid, "status": "not_found"})
+                    stage_info["modules"].append({
+                        "module_id": mid,
+                        "status": "not_found",
+                        "dry_run_status": "dry_run_unsupported",
+                        "validated_params_summary": redact_module_params(mid, {**gp, **sp.get(mid, {})}),
+                        "missing_params": [],
+                        "missing_dependencies": [],
+                        "would_execute": False,
+                        "warnings": ["The module is not present in the loaded registry."],
+                        "operator_next_steps": ["Refresh the module catalog or check module installation."],
+                    })
                     continue
 
                 merged = {**gp, **sp.get(mid, {})}
@@ -668,6 +818,12 @@ class AresEngine:
                     pass
 
                 opsec = getattr(cls, "OPSEC_LEVEL", "?")
+                dry_run_supported = bool(getattr(cls, "DRY_RUN_SUPPORTED", True))
+                module_dry_status = (
+                    "dry_run_blocked" if mod_errors
+                    else "dry_run_ok" if dry_run_supported
+                    else "dry_run_unsupported"
+                )
                 stage_info["modules"].append({
                     "module_id":      mid,
                     "opsec_level":    opsec.value if hasattr(opsec, "value") else str(opsec),
@@ -676,12 +832,23 @@ class AresEngine:
                     "mitre":          getattr(cls, "MITRE_TECHNIQUES", []),
                     "missing_params": mod_errors,
                     "status":         "error" if mod_errors else "ready",
+                    "dry_run_status": module_dry_status,
+                    "validated_params_summary": redact_module_params(mid, merged),
+                    "missing_dependencies": [],
+                    "would_execute": module_dry_status == "dry_run_ok",
+                    "warnings": [
+                        "Dry-run validates the plan only; no module code contacts a target."
+                    ],
+                    "operator_next_steps": [
+                        "Review parameters and campaign scope before live execution."
+                    ],
                 })
 
             stages_out.append(stage_info)
 
         return {
             "dry_run": True,
+            "status": "dry_run_blocked" if param_errors else "dry_run_ok",
             "plan":    stages_out,
             "param_validation": {
                 "ok":     len(param_errors) == 0,
@@ -696,6 +863,75 @@ class AresEngine:
                 "total_modules": len(plan.all_module_ids()),
                 "ready_to_run":  len(param_errors) == 0,
             },
+        }
+
+    def dry_run_module(
+        self,
+        module_id: str,
+        params: dict[str, Any] | None = None,
+        missing_params: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return a side-effect-free, stable preview for one module run."""
+        raw_params = params or {}
+        cls = self.registry.get(module_id)
+        summary = redact_module_params(module_id, raw_params)
+        if cls is None:
+            return {
+                "dry_run": True,
+                "status": "dry_run_unsupported",
+                "module_id": module_id,
+                "validated_params_summary": summary,
+                "missing_params": list(missing_params or []),
+                "missing_dependencies": [],
+                "would_execute": False,
+                "warnings": ["The module is not present in the loaded registry."],
+                "operator_next_steps": ["Refresh the module catalog or check module installation."],
+            }
+
+        supported = bool(getattr(cls, "DRY_RUN_SUPPORTED", True))
+        if not supported:
+            return {
+                "dry_run": True,
+                "status": "dry_run_unsupported",
+                "module_id": module_id,
+                "validated_params_summary": summary,
+                "missing_params": list(missing_params or []),
+                "missing_dependencies": [],
+                "would_execute": False,
+                "warnings": ["This module does not advertise a safe dry-run path."],
+                "operator_next_steps": ["Review the module documentation before an authorized live run."],
+            }
+
+        missing = list(missing_params or [])
+        if missing:
+            return {
+                "dry_run": True,
+                "status": "dry_run_blocked",
+                "module_id": module_id,
+                "validated_params_summary": summary,
+                "missing_params": missing,
+                "missing_dependencies": [],
+                "would_execute": False,
+                "warnings": ["Required parameters are missing; no module code was executed."],
+                "operator_next_steps": ["Provide the missing parameters and run dry-run again."],
+            }
+
+        warnings = ["Dry-run validates the request only; it does not contact the target."]
+        if getattr(getattr(cls, "OPSEC_LEVEL", None), "value", "") == "high_noise":
+            warnings.append("The selected module is high-noise and remains role/OPSEC guarded.")
+        return {
+            "dry_run": True,
+            "status": "dry_run_ok",
+            "module_id": module_id,
+            "validated_params_summary": summary,
+            "missing_params": [],
+            "missing_dependencies": [],
+            "would_execute": True,
+            "warnings": warnings,
+            "operator_next_steps": [
+                "Review the validated parameters and campaign scope.",
+                "Disable dry-run only after confirming authorization.",
+            ],
         }
 
     async def _persist_vault_credentials(self, campaign: "Campaign") -> int:

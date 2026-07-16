@@ -1090,7 +1090,8 @@ function ModulesPage() {
     );
   });
   const sensitive = isSensitiveModule(selected);
-  const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending;
+  const dryRunSupported = selected?.dry_run_supported !== false;
+  const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending && (!dryRun || dryRunSupported);
   const runBlocked = !canRun || Boolean(scopeWarning);
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
   const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
@@ -1167,6 +1168,19 @@ function ModulesPage() {
             eyebrow={selected ? selected.id : "Select module"}
             action={selected ? <span className={opsecBadge(selected.opsec_level)}>{selected.opsec_level || "n/a"}</span> : null}
           />
+          {selected?.description && <p className="text-sm text-slate-600">{selected.description}</p>}
+          {selected && (selected.capability_flags?.length || selected.supported_modes?.length) ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {(selected.capability_flags ?? []).map((flag) => <span className="badge" key={flag}>{flag}</span>)}
+              {(selected.supported_modes ?? []).map((mode) => <span className="badge" key={mode}>mode: {mode}</span>)}
+            </div>
+          ) : null}
+          {selected?.dependency_notes?.length ? (
+            <p className="notice mt-3">Dependencies: {selected.dependency_notes.join("; ")}</p>
+          ) : null}
+          {selected && !dryRunSupported && (
+            <p className="notice notice-danger mt-3">Dry-run is unavailable for this module. No preview will be generated.</p>
+          )}
           <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
           {campaignId && campaignDetail.isFetching && (
             <div className="notice mt-3">
@@ -1198,7 +1212,7 @@ function ModulesPage() {
               )}
               <label className="toggle-row">
                 <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-                Dry run
+                {dryRunSupported ? "Dry run" : "Dry run unavailable"}
               </label>
               {sensitive && (
                 <label className="notice notice-danger">
@@ -2588,6 +2602,20 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
   const status = String(result?.status ?? "unknown");
   const moduleId = String(result?.module_id ?? "module");
   const runError = typeof result?.error === "string" ? result.error : "";
+  const outcome = String(result?.outcome ?? "");
+  const outcomeMessage = String(result?.outcome_message ?? "");
+  const displayOutcome = outcome || status;
+  const dryRun = result?.dry_run === true || status.startsWith("dry_run_");
+  const warnings = Array.isArray(result?.warnings) ? result.warnings.map(String) : [];
+  const nextSteps = Array.isArray(result?.operator_next_steps) ? result.operator_next_steps.map(String) : [];
+  const hasOutcomeError = ["operator_error", "dependency_error", "network_error", "unsupported", "module_error", "failed", "timeout"].includes(displayOutcome);
+  const emptyText = dryRun
+    ? "No live execution was performed."
+    : outcome === "completed_no_findings"
+      ? "No confirmed findings. The module completed without observing an exploitable condition."
+      : runError
+        ? "No findings recorded because execution failed."
+        : "No findings returned.";
 
   return (
     <section className="inline-summary mt-4">
@@ -2596,16 +2624,28 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
         action={(
           <div className="flex flex-wrap gap-2">
             <span className="badge">{moduleId}</span>
-            <span className={status === "done" ? "badge badge-low" : "badge badge-medium"}>{status}</span>
+            <span className={hasOutcomeError ? "badge badge-high" : displayOutcome === "confirmed_findings" || displayOutcome === "completed_no_findings" || displayOutcome === "dry_run_ok" || displayOutcome === "done" ? "badge badge-low" : "badge badge-medium"}>{displayOutcome}</span>
             <span className="badge">{duration}</span>
           </div>
         )}
       />
-      {runError && (
-        <p className="notice notice-danger mb-3">
-          <AlertTriangle size={16} />
-          {runError}
+      {(outcomeMessage || runError) && (
+        <p className={`notice mb-3 ${hasOutcomeError || runError ? "notice-danger" : ""}`}>
+          {hasOutcomeError || runError ? <AlertTriangle size={16} /> : null}
+          {outcomeMessage || runError}
         </p>
+      )}
+      {warnings.length > 0 && (
+        <div className="notice mb-3">
+          <strong>{dryRun ? "Dry-run notes" : "Notes"}</strong>
+          <ul className="mt-1 list-disc pl-5">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+        </div>
+      )}
+      {nextSteps.length > 0 && (
+        <div className="notice mb-3">
+          <strong>Next steps</strong>
+          <ul className="mt-1 list-disc pl-5">{nextSteps.map((step) => <li key={step}>{step}</li>)}</ul>
+        </div>
       )}
       <div className="mini-stat-grid mb-3">
         <MiniStat title="Findings" value={String(findings.length)} detail="returned observations" />
@@ -2637,7 +2677,7 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
           ))}
         </div>
       ) : (
-        <EmptyState text={runError ? "No findings recorded." : "No findings returned."} />
+        <EmptyState text={emptyText} />
       )}
     </section>
   );

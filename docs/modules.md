@@ -28,6 +28,34 @@ The dashboard and API enforce authentication, RBAC, scope validation, parameter
 validation, rate limits, and token revocation. The frontend is a convenience
 layer; the backend remains the enforcement boundary.
 
+## Dry-Run and Outcomes
+
+The module catalog is the source of truth for required and optional parameters,
+defaults, capability labels, supported modes, dependency notes, and whether a
+safe dry-run is supported. A module dry-run validates the request and campaign
+context only; it does not contact a target or perform module actions. The API
+returns `dry_run_ok`, `dry_run_blocked`, or `dry_run_unsupported` with a
+redacted parameter summary, missing inputs, warnings, and next steps.
+
+Live results use these outcome labels:
+
+- `confirmed_findings`: confirmed observations were returned.
+- `completed_no_findings`: execution completed, but no exploitable condition was
+  confirmed. This is different from a failed run.
+- `operator_error`: review inputs, authorization, credentials, or scope.
+- `dependency_error`: an optional runtime dependency is unavailable.
+- `network_error`: the target or network could not be reached or completed.
+- `unsupported`: the module or requested mode is blocked or unavailable.
+- `module_error`: the module failed unexpectedly; preserve the displayed error
+  when troubleshooting.
+
+For AD modules, an LDAP-success result can still be `completed_no_findings`:
+`ad.asreproast` explains whether candidates were found without AS-REP material,
+`ad.enum_spn` reports when no SPN candidates matched, and `ad.kerberoast`
+distinguishes no SPNs, no TGS material, and TGS collection failures. On Windows
+with a source/local Impacket install, use `.[ad-support]` for the direct AD
+support libraries and follow the doctor/setup guidance for Python 3.12.x.
+
 ## How Modules Are Used
 
 ### Dashboard Flow

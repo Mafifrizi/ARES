@@ -57,6 +57,7 @@ from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
 from ares.core.logger import get_logger
 from ares.core.security import create_access_token
+from ares.modules.base import normalize_module_metadata
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
 
@@ -1188,10 +1189,13 @@ async def list_modules(
         )
         cls = engine.registry.get(str(module_id)) if module_id else None
         params_model = MODULE_PARAMS.get(str(module_id))
-        module_meta["param_schema"] = (
+        param_schema = (
             params_model.schema_for_api() if params_model else {}
         )
         if cls:
+            module_meta = normalize_module_metadata(
+                cls, param_schema=param_schema, base=module_meta
+            )
             module_meta.setdefault("category", getattr(cls, "MODULE_CATEGORY", ""))
             module_meta.setdefault(
                 "description", getattr(cls, "MODULE_DESCRIPTION", "")
@@ -1202,6 +1206,8 @@ async def list_modules(
             mitre = list(getattr(cls, "MITRE_TECHNIQUES", []))
             module_meta.setdefault("mitre_list", mitre)
             module_meta.setdefault("mitre", ", ".join(mitre))
+        else:
+            module_meta["param_schema"] = param_schema
         enriched.append(module_meta)
     return enriched
 
@@ -1252,6 +1258,13 @@ async def run_module(
             {"field": ".".join(str(x) for x in e["loc"]), "msg": e["msg"]}
             for e in exc.errors()
         ]
+        if body.dry_run:
+            missing = [item["field"] for item in errors]
+            return engine.dry_run_module(
+                module_id,
+                body.params,
+                missing_params=missing,
+            )
         raise HTTPException(
             status_code=422,
             detail={
@@ -1285,10 +1298,7 @@ async def run_module(
 
     # Dry-run: validate + preview without touching target
     if getattr(body, "dry_run", False):
-        from ares.core.engine import ExecutionPlan
-
-        p_plan = ExecutionPlan().add_stage("run", [module_id])
-        return engine.dry_run_plan(p_plan, safe_params)
+        return engine.dry_run_module(module_id, safe_params)
 
     result = await engine.run_module(
         module_id, c_obj, safe_params, actor_role=actor.role

@@ -802,6 +802,19 @@ class TestModuleSchemaEndpoint:
         assert module["mitre_list"] == ["T1558.003"]
         assert "dc" in module["param_schema"]
         assert module["param_schema"]["password"]["secret"] is True
+        for field in (
+            "required_params",
+            "optional_params",
+            "defaults",
+            "capability_flags",
+            "dry_run_supported",
+            "supported_modes",
+            "dependency_notes",
+            "outcome_semantics",
+            "safe_error_categories",
+        ):
+            assert field in module
+        assert module["dry_run_supported"] is True
 
 
 # ── Reports safety ───────────────────────────────────────────────────────────
@@ -810,6 +823,59 @@ class TestModuleSchemaEndpoint:
 class TestModuleRunEndpoint:
     def setup_method(self) -> None:
         _reset_rate_limiter()
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_module_dry_run_returns_redacted_stable_contract(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+        from ares.core.engine import AresEngine
+
+        engine = AresEngine(settings=_settings())
+        engine.load_modules()
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": "camp-dry-run-contract",
+            "name": "Dry Run Contract",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "normal",
+            "status": "created",
+            "scope_json": '[{"cidr": "10.0.0.0/8", "description": ""}]',
+            "targets_json": '["10.0.0.5"]',
+            "notes": "",
+            "created_at": "2026-06-27 02:15:19",
+            "updated_at": "2026-06-27 02:15:19",
+        }
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            r = await c.post(
+                "/modules/ad.kerberoast/run",
+                json={
+                    "campaign_id": "camp-dry-run-contract",
+                    "params": {
+                        "dc": "10.0.0.5",
+                        "domain": "corp.local",
+                        "username": "svc-roast",
+                        "password": "Passw0rd!",
+                        "target_user": "sqlsvc",
+                    },
+                    "dry_run": True,
+                },
+                headers=_auth("admin", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert r.status_code == 200
+        payload = r.json()
+        assert payload["status"] == "dry_run_ok"
+        assert payload["module_id"] == "ad.kerberoast"
+        assert payload["missing_params"] == []
+        assert payload["validated_params_summary"]["password"] == "[redacted]"
+        assert "Passw0rd!" not in r.text
+        assert payload["would_execute"] is True
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_module_run_uses_persisted_campaign_scope_json(
