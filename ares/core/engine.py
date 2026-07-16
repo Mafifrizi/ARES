@@ -74,6 +74,11 @@ def normalize_module_outcome(
 
     if findings:
         return "confirmed_findings", f"{len(findings)} confirmed finding(s) returned."
+    if "krb_ap_err_skew" in str(error or "").lower() or "clock skew too great" in str(error or "").lower():
+        return (
+            "operator_error",
+            "Kerberos clock skew too great; sync the operator host and domain controller time, then rerun.",
+        )
     if raw_outcome in MODULE_OUTCOMES:
         if raw_message:
             return raw_outcome, raw_message
@@ -171,6 +176,7 @@ class EngineModuleResult(BaseModel):
     duration_ms:        float = 0.0
     outcome:            str = ""
     outcome_message:    str = ""
+    operator_next_steps: list[str] = []
 
     def model_post_init(self, __context: Any) -> None:
         self.error = redact_error_message(self.error)
@@ -183,6 +189,10 @@ class EngineModuleResult(BaseModel):
             )
             self.outcome = self.outcome or outcome
             self.outcome_message = self.outcome_message or message
+        if self.outcome == "operator_error" and "clock skew" in self.outcome_message.lower():
+            self.operator_next_steps = [
+                "Synchronize the operator host and domain controller clocks, then rerun the module."
+            ]
 
     @property
     def confirmed_findings(self) -> list[Finding]:

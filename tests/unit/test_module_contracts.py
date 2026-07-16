@@ -207,6 +207,11 @@ def test_engine_done_without_findings_has_explicit_outcome():
         status=ModuleStatus.FAILED,
         error="AD dependency 'impacket' is unavailable",
     )
+    clock_skew = EngineModuleResult(
+        module_id="ad.kerberoast",
+        status=ModuleStatus.FAILED,
+        error="Kerberoast failed: Kerberos SessionError: KRB_AP_ERR_SKEW(Clock skew too great)",
+    )
     secret_error = EngineModuleResult(
         module_id="ad.kerberoast",
         status=ModuleStatus.FAILED,
@@ -215,6 +220,11 @@ def test_engine_done_without_findings_has_explicit_outcome():
     assert invalid.outcome == "operator_error"
     assert timeout.outcome == "network_error"
     assert dependency.outcome == "dependency_error"
+    assert clock_skew.outcome == "operator_error"
+    assert clock_skew.outcome_message == (
+        "Kerberos clock skew too great; sync the operator host and domain controller time, then rerun."
+    )
+    assert clock_skew.operator_next_steps
     assert "Passw0rd!" not in (secret_error.error or "")
     assert "secret-token" not in (secret_error.error or "")
 
