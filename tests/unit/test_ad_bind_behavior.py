@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import types
 
 import pytest
@@ -83,13 +84,15 @@ def _install_fake_ldap3(monkeypatch, *, bind_outcomes=None):
     return FakeConnection
 
 
-def _install_fake_kerberos(monkeypatch, *, tgt_error=None):
+def _install_fake_kerberos(monkeypatch, *, tgt_error=None, tgs_delay=0):
     def get_kerberos_tgt(**kwargs):
         if tgt_error is not None:
             raise tgt_error
         return b"tgt", "cipher", b"old_session", b"session"
 
     def get_kerberos_tgs(**kwargs):
+        if tgs_delay:
+            time.sleep(tgs_delay)
         return b"tgs", "tgs_cipher", b"old", b"tgs_session"
 
     class _PrincipalNameTypeValue:
@@ -333,3 +336,38 @@ async def test_kerberoast_spn_lookup_consumes_enum_spn_output_key(monkeypatch):
 
     assert hashes == ["$krb5tgs$23$fake"]
     assert accounts[0]["spn"] == "HTTP/web.lab.local"
+
+
+@pytest.mark.asyncio
+async def test_kerberoast_tgs_timeout_after_spn_enumeration_is_actionable(monkeypatch):
+    import ares.modules.ad.kerberoast as kerberoast_mod
+    from ares.modules.ad.enum_spn import ADEnumSPNModule
+    from ares.modules.ad.kerberoast import KerberoastModule
+
+    _install_fake_kerberos(monkeypatch, tgs_delay=0.05)
+    monkeypatch.setattr(kerberoast_mod, "KERBEROS_TGS_TIMEOUT_SECONDS", 0.01)
+
+    async def fake_enum_spn_run(*args, **kwargs):
+        return [], {
+            "spn_list": [
+                {"name": "svc-web", "spn_list": ["HTTP/web.lab.local"]},
+                {"name": "svc-sql", "spn_list": ["MSSQLSvc/sql.lab.local"]},
+            ]
+        }
+
+    monkeypatch.setattr(ADEnumSPNModule, "run", fake_enum_spn_run)
+    module, _ = _make_module(KerberoastModule)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module._request_tickets(
+            "10.0.0.5",
+            "alice@lab.local",
+            "Password1!",
+            "lab.local",
+            None,
+        )
+
+    assert exc_info.value.action == "abort"
+    assert "LDAP/SPN enumeration succeeded and found 2 Kerberoastable candidate account(s)" in str(exc_info.value)
+    assert "Kerberos TGS request timed out before a hash was confirmed" in str(exc_info.value)
+    assert "Password1!" not in str(exc_info.value)

@@ -230,9 +230,13 @@ def test_engine_done_without_findings_has_explicit_outcome():
 
 
 def test_ad_empty_results_have_operator_facing_classification():
+    from ares.core.engine import EngineModuleResult, ModuleStatus
     from ares.modules.ad.asreproast import classify_asrep_outcome
     from ares.modules.ad.enum_spn import classify_enum_spn_outcome
-    from ares.modules.ad.kerberoast import classify_kerberoast_outcome
+    from ares.modules.ad.kerberoast import (
+        classify_kerberoast_outcome,
+        format_kerberoast_tgs_timeout,
+    )
 
     assert classify_asrep_outcome("authenticated", 1, 0)[0] == "completed_no_findings"
     assert "candidate" in classify_asrep_outcome("authenticated", 1, 0)[1]
@@ -240,3 +244,16 @@ def test_ad_empty_results_have_operator_facing_classification():
     assert classify_kerberoast_outcome(1, 0, 1)[0] == "network_error"
     assert classify_kerberoast_outcome(1, 0, 0)[0] == "completed_no_findings"
     assert classify_enum_spn_outcome(0)[0] == "completed_no_findings"
+
+    timeout_message = format_kerberoast_tgs_timeout(2)
+    timeout = EngineModuleResult(
+        module_id="ad.kerberoast",
+        status=ModuleStatus.FAILED,
+        error=timeout_message,
+    )
+    assert timeout.outcome == "network_error"
+    assert timeout.outcome != "module_error"
+    assert timeout.outcome_message == timeout_message
+    assert timeout.operator_next_steps == [
+        "Verify DC/KDC reachability on port 88, clock synchronization, and Kerberos service health, then rerun."
+    ]

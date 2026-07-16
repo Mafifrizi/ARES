@@ -79,13 +79,18 @@ def normalize_module_outcome(
             "operator_error",
             "Kerberos clock skew too great; sync the operator host and domain controller time, then rerun.",
         )
+    error_text = str(error or "").strip()
+    if (
+        "ldap/spn enumeration succeeded and found" in error_text.lower()
+        and "before a hash was confirmed" in error_text.lower()
+    ):
+        return "network_error", error_text
     if raw_outcome in MODULE_OUTCOMES:
         if raw_message:
             return raw_outcome, raw_message
         return raw_outcome, raw_outcome.replace("_", " ").capitalize() + "."
 
     status_value = status.value if isinstance(status, ModuleStatus) else str(status)
-    error_text = str(error or "").strip()
     lowered = error_text.lower()
     if status_value == ModuleStatus.TIMEOUT.value or any(
         marker in lowered
@@ -192,6 +197,10 @@ class EngineModuleResult(BaseModel):
         if self.outcome == "operator_error" and "clock skew" in self.outcome_message.lower():
             self.operator_next_steps = [
                 "Synchronize the operator host and domain controller clocks, then rerun the module."
+            ]
+        elif self.outcome == "network_error" and "before a hash was confirmed" in self.outcome_message.lower():
+            self.operator_next_steps = [
+                "Verify DC/KDC reachability on port 88, clock synchronization, and Kerberos service health, then rerun."
             ]
 
     @property

