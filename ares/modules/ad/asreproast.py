@@ -123,6 +123,28 @@ def _format_krb5asrep_hash(raw_asrep: bytes, username: str, domain: str) -> str:
         return ""
 
 
+def classify_asrep_outcome(
+    mode: str, candidate_count: int, hash_count: int
+) -> tuple[str, str]:
+    """Explain an AS-REP run that did not produce a confirmed finding."""
+    if hash_count:
+        return "confirmed_findings", f"Captured {hash_count} AS-REP roastable result(s)."
+    if candidate_count:
+        return (
+            "completed_no_findings",
+            f"LDAP found {candidate_count} candidate account(s), but no AS-REP roast material was obtained; the condition was not confirmed.",
+        )
+    if mode == "authenticated":
+        return (
+            "completed_no_findings",
+            "LDAP completed successfully; no accounts without Kerberos pre-auth were found.",
+        )
+    return (
+        "completed_no_findings",
+        "The username input completed without AS-REP roast material; no condition was confirmed.",
+    )
+
+
 class ASREPRoastModule(BaseModule):
     """
     ad.asreproast — Capture AS-REP hashes from accounts without Kerberos pre-auth
@@ -230,6 +252,7 @@ class ASREPRoastModule(BaseModule):
 
         logger.info("asreproast_start", dc=dc, domain=domain, mode=mode)
 
+        self._last_candidate_count = 0
         try:
             hashes, accounts = await self._get_asrep_hashes(
                 dc, domain, username, password, userfile, usernames or [], mode
@@ -240,7 +263,17 @@ class ASREPRoastModule(BaseModule):
             from ares.core.errors import NetworkError
             raise NetworkError(f"ASREPRoast failed: {exc}") from exc
 
-        raw = {"asrep_hashes": hashes, "vulnerable_accounts": accounts, "mode": mode}
+        raw = {
+            "asrep_hashes": hashes,
+            "vulnerable_accounts": accounts,
+            "mode": mode,
+        }
+        if not hashes:
+            category, message = classify_asrep_outcome(
+                mode, self._last_candidate_count, len(hashes)
+            )
+            raw["outcome_category"] = category
+            raw["outcome_message"] = message
         self._analyze(raw)
         return self._findings, raw
 
@@ -276,6 +309,8 @@ class ASREPRoastModule(BaseModule):
                 raise ValueError(f"Cannot read userfile {userfile!r}: {exc}") from exc
         else:
             targets = list(usernames)
+
+        self._last_candidate_count = len(targets)
 
         if not targets:
             return [], []

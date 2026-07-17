@@ -27,6 +27,16 @@ def _days_since_ts(ts):
         return max(0,(datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-dt).days)
     except Exception: return None
 
+
+def classify_enum_spn_outcome(spn_count: int) -> tuple[str, str]:
+    """Explain whether LDAP found any service principal candidates."""
+    if spn_count:
+        return "confirmed_findings", f"Found {spn_count} service principal candidate(s)."
+    return (
+        "completed_no_findings",
+        "LDAP completed successfully; no enabled user accounts with service principals were found.",
+    )
+
 class ADEnumSPNModule(BaseModule):
     """
     ad.enum_spn — Find SPN accounts (Kerberoasting candidates)
@@ -112,7 +122,12 @@ class ADEnumSPNModule(BaseModule):
         except Exception as exc:
             from ares.core.errors import NetworkError
             raise NetworkError(f"LDAP SPN failed: {exc}") from exc
-        raw = {"spn_list": spns}
+        category, message = classify_enum_spn_outcome(len(spns))
+        raw = {
+            "spn_list": spns,
+            "outcome_category": category,
+            "outcome_message": message,
+        }
         # ISU-07: produce UserArtifact objects (is_kerberoastable=True)
         try:
             from ares.normalize.artifacts import UserArtifact, ArtifactStore

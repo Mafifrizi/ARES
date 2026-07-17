@@ -268,7 +268,7 @@ Use it for:
 - Run with `dry_run` enabled by default.
 - Confirm high-noise or sensitive execution when required.
 - Watch the run button/loading state while backend execution is in progress.
-- Review validation and scope errors without checking the terminal.
+- Review the backend outcome label and message without checking the terminal.
 
 Good habit:
 
@@ -278,6 +278,11 @@ Good habit:
 4. Run dry-run.
 5. Review validation output.
 6. Run live only if authorized.
+
+Results distinguish confirmed findings, completed runs with no confirmed
+findings, operator/dependency/network errors, unsupported runs, and unexpected
+module errors. A dry-run result is a validation preview only; it is not evidence
+that the target is vulnerable or reachable.
 
 Scope behavior:
 

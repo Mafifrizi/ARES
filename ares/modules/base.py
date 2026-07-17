@@ -43,6 +43,91 @@ if TYPE_CHECKING:
 logger = get_logger("ares.module")
 
 
+MODULE_OUTCOME_SEMANTICS = [
+    "confirmed_findings",
+    "completed_no_findings",
+    "operator_error",
+    "dependency_error",
+    "network_error",
+    "unsupported",
+    "module_error",
+]
+MODULE_SAFE_ERROR_CATEGORIES = [
+    "operator_error",
+    "dependency_error",
+    "network_error",
+    "unsupported",
+    "module_error",
+]
+
+
+def normalize_module_metadata(
+    cls: Any,
+    *,
+    param_schema: dict[str, Any] | None = None,
+    base: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the stable metadata contract exposed by the registry and API."""
+    metadata = dict(base or {})
+
+    if param_schema is None:
+        try:
+            from ares.modules.params import MODULE_PARAMS
+
+            params_model = MODULE_PARAMS.get(str(getattr(cls, "MODULE_ID", "")))
+            param_schema = params_model.schema_for_api() if params_model else {}
+        except (ImportError, AttributeError):
+            param_schema = {}
+
+    schema = param_schema or {}
+    required_params = [
+        name for name, field in schema.items() if bool(field.get("required"))
+    ]
+    optional_params = [
+        name for name, field in schema.items() if not bool(field.get("required"))
+    ]
+    defaults = {
+        name: field["default"]
+        for name, field in schema.items()
+        if "default" in field and field.get("default") is not None
+    }
+
+    def _list_attr(name: str, default: list[str]) -> list[str]:
+        value = getattr(cls, name, default)
+        if isinstance(value, str):
+            return [value]
+        return list(value or [])
+
+    for key, attr, fallback in (
+        ("id", "MODULE_ID", ""),
+        ("name", "MODULE_NAME", ""),
+        ("category", "MODULE_CATEGORY", ""),
+        ("description", "MODULE_DESCRIPTION", ""),
+    ):
+        if not metadata.get(key):
+            metadata[key] = getattr(cls, attr, fallback)
+
+    metadata.setdefault("required_params", required_params)
+    metadata.setdefault("optional_params", optional_params)
+    metadata.setdefault("defaults", defaults)
+    metadata.setdefault("capability_flags", _list_attr("CAPABILITIES", []))
+    metadata.setdefault(
+        "dry_run_supported", bool(getattr(cls, "DRY_RUN_SUPPORTED", True))
+    )
+    metadata.setdefault(
+        "supported_modes", _list_attr("SUPPORTED_MODES", ["standard"])
+    )
+    metadata.setdefault(
+        "dependency_notes", _list_attr("DEPENDENCY_NOTES", [])
+    )
+    metadata.setdefault("outcome_semantics", list(MODULE_OUTCOME_SEMANTICS))
+    metadata.setdefault(
+        "safe_error_categories", list(MODULE_SAFE_ERROR_CATEGORIES)
+    )
+    metadata["param_schema"] = schema
+    return metadata
+
+
 # ── OpSec level enum ──────────────────────────────────────────────────────────
 
 class OpsecLevel(str, Enum):
@@ -218,6 +303,10 @@ class BaseModule(abc.ABC):
     MITRE_TECHNIQUES:   list[str]   = []
     MODULE_AUTHOR:      str         = "ARES Team"
     MIN_NOISE_PROFILE:  str | None  = None  # None = runs in any profile
+    CAPABILITIES:       list[str]   = []
+    DRY_RUN_SUPPORTED:  bool        = True
+    SUPPORTED_MODES:    list[str]   = ["standard"]
+    DEPENDENCY_NOTES:   list[str]   = []
 
     # Per-module timeout override (seconds). None = use engine default (120s).
     # Set higher for slow ops: dcsync on WAN, lsass_dump transfer, crack jobs.
@@ -382,7 +471,7 @@ class BaseModule(abc.ABC):
     @classmethod
     def metadata(cls) -> dict[str, Any]:
         """Return full module metadata as a dict (used by registry + API)."""
-        return {
+        return normalize_module_metadata(cls, base={
             "id":               cls.MODULE_ID,
             "name":             cls.MODULE_NAME,
             "category":         cls.MODULE_CATEGORY,
@@ -395,7 +484,7 @@ class BaseModule(abc.ABC):
             "author":           cls.MODULE_AUTHOR,
             "min_noise_profile": cls.MIN_NOISE_PROFILE,
             "required_privilege": getattr(cls, "REQUIRED_PRIVILEGE", None),
-        }
+        })
 
     @classmethod
     def can_run_with_noise(cls, noise_profile: str) -> bool:

@@ -146,6 +146,102 @@ class TestAsyncEngine:
         assert "blocked in STEALTH profile" in (result.error or "")
 
     @pytest.mark.asyncio
+    async def test_kerberoast_classified_tgs_timeout_does_not_retry(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.kerberoast import (
+            KerberoastModule,
+            format_kerberoast_tgs_timeout,
+        )
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        calls = 0
+
+        async def classified_timeout(self_unused: Any, ctx: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise ModuleValidationError(
+                format_kerberoast_tgs_timeout(2),
+                module_id="ad.kerberoast",
+                field="kerberos_tgs",
+            )
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "svc-roast",
+            "password": "Passw0rd!",
+            "target_user": "sqlsvc",
+        }
+        with patch.object(KerberoastModule, "execute", classified_timeout), \
+             patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+            result = await engine.run_module(
+                "ad.kerberoast",
+                campaign,
+                params,
+                actor_role="team_lead",
+            )
+
+        assert calls == 1
+        assert retry_sleep.await_count == 0
+        assert result.outcome == "network_error"
+        assert "found 2 Kerberoastable candidate account(s)" in result.outcome_message
+        assert "Kerberos TGS request timed out" in result.outcome_message
+        assert "port 88" in result.operator_next_steps[0]
+        assert "clock synchronization" in result.operator_next_steps[0]
+        assert "Kerberos service health" in result.operator_next_steps[0]
+        assert "account/SPN validity" in result.operator_next_steps[0]
+
+    @pytest.mark.asyncio
+    async def test_retry_stops_when_retry_attempt_classifies_tgs_timeout(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        from ares.core.errors import ModuleValidationError, NetworkError
+        from ares.modules.ad.kerberoast import (
+            KerberoastModule,
+            format_kerberoast_tgs_timeout,
+        )
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        calls = 0
+
+        async def transient_then_classified(self_unused: Any, ctx: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise NetworkError("temporary KDC reachability failure")
+            raise ModuleValidationError(
+                format_kerberoast_tgs_timeout(2),
+                module_id="ad.kerberoast",
+                field="kerberos_tgs",
+            )
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "svc-roast",
+            "password": "Passw0rd!",
+            "target_user": "sqlsvc",
+        }
+        with patch.object(KerberoastModule, "execute", transient_then_classified), \
+             patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+            result = await engine.run_module(
+                "ad.kerberoast",
+                campaign,
+                params,
+                actor_role="team_lead",
+            )
+
+        assert calls == 2
+        assert retry_sleep.await_count == 1
+        assert result.outcome == "network_error"
+        assert "found 2 Kerberoastable candidate account(s)" in result.outcome_message
+        assert "Kerberos TGS request timed out" in result.outcome_message
+
+    @pytest.mark.asyncio
     async def test_run_module_timeout(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:
