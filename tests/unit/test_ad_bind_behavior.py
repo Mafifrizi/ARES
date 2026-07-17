@@ -532,6 +532,108 @@ async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monke
     assert validation.confidence >= 0.90
 
 
+def _install_fake_ldap3_ssl_close(monkeypatch):
+    class FakeTls:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+    class FakeServer:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+    class FakeConnection:
+        def __init__(self, *args, **kwargs):
+            raise OSError(
+                "socket ssl wrapping error: [WinError 10054] "
+                "An existing connection was forcibly closed by the remote host"
+            )
+
+    ldap3_mod = types.ModuleType("ldap3")
+    ldap3_mod.ALL = "ALL"
+    ldap3_mod.NTLM = "NTLM"
+    ldap3_mod.SUBTREE = "SUBTREE"
+    ldap3_mod.AUTO_BIND_NO_TLS = "AUTO_BIND_NO_TLS"
+    ldap3_mod.Connection = FakeConnection
+    ldap3_mod.Server = FakeServer
+    ldap3_mod.Tls = FakeTls
+    monkeypatch.setitem(sys.modules, "ldap3", ldap3_mod)
+
+
+@pytest.mark.asyncio
+async def test_enum_computers_ssl_close_is_actionable_operator_error(monkeypatch):
+    from ares.core.errors import ModuleValidationError
+    from ares.modules.ad.enum_computers import ADEnumComputersModule
+
+    _install_fake_ldap3_ssl_close(monkeypatch)
+    module, _ = _make_module(ADEnumComputersModule)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module.run(
+            dc="10.0.0.5",
+            domain="lab.local",
+            username="alice@lab.local",
+            password="Password1!",
+            use_ldaps=False,
+        )
+
+    message = str(exc_info.value)
+    assert exc_info.value.action == "abort"
+    assert "module_error" not in message
+    assert "use_ldaps=false" in message
+    assert "389" in message and "636" in message
+    assert "LDAP/LDAPS" in message
+    assert "firewall" in message
+    assert "certificate/LDAPS configuration" in message
+    assert module._findings == []
+    assert "Password1!" not in message
+
+
+@pytest.mark.asyncio
+async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_campaign):
+    from unittest.mock import AsyncMock, patch
+
+    from ares.core.engine import AresEngine
+    from ares.core.config import AresSettings
+    from ares.core.noise import JitterEngine
+    from ares.modules.ad.enum_computers import ADEnumComputersModule
+
+    engine = AresEngine(settings=AresSettings())
+    engine.load_modules()
+    _install_fake_ldap3_ssl_close(monkeypatch)
+    calls = 0
+
+    original_fetch = ADEnumComputersModule._fetch_computers
+
+    async def counted_fetch(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return await original_fetch(self, *args, **kwargs)
+
+    monkeypatch.setattr(ADEnumComputersModule, "_fetch_computers", counted_fetch)
+    async def no_noise_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(JitterEngine, "sleep", no_noise_sleep)
+    params = {
+        "dc": "10.0.0.5",
+        "domain": "lab.local",
+        "username": "alice@lab.local",
+        "password": "Password1!",
+        "use_ldaps": False,
+    }
+    with patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+        result = await engine.run_module("ad.enum_computers", minimal_campaign, params)
+
+    assert calls == 1
+    assert retry_sleep.await_count == 0
+    assert result.outcome == "operator_error"
+    assert result.findings == []
+    assert "use_ldaps=false" in result.outcome_message
+    assert "389" in result.outcome_message and "636" in result.outcome_message
+
+
 @pytest.mark.asyncio
 async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypatch):
     import ares.modules.ad.asreproast as asreproast_mod
