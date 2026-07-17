@@ -245,8 +245,10 @@ def test_ad_empty_results_have_operator_facing_classification():
         format_kerberoast_tgs_timeout,
     )
 
-    assert classify_asrep_outcome("authenticated", 1, 0)[0] == "completed_no_findings"
-    assert "candidate" in classify_asrep_outcome("authenticated", 1, 0)[1]
+    candidate_outcome = classify_asrep_outcome("authenticated", 1, 0)
+    assert candidate_outcome[0] == "operator_error"
+    assert "ASREPRoast candidate" in candidate_outcome[1]
+    assert "Next steps:" in candidate_outcome[1]
     assert classify_asrep_outcome("authenticated", 0, 0)[0] == "completed_no_findings"
     assert classify_kerberoast_outcome(1, 0, 1)[0] == "network_error"
     assert classify_kerberoast_outcome(1, 0, 0)[0] == "completed_no_findings"
