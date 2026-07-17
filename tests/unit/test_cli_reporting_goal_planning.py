@@ -146,6 +146,7 @@ class TestReportGenerator:
             f = data["findings"][0]
             for key in ("id", "title", "severity", "confidence", "mitre_technique"):
                 assert key in f, f"Missing key: {key}"
+            assert f["confidence"] == campaign.findings[0].confidence
 
     def test_generate_html_report(self):
         from ares.modules.reporting.report_gen import ReportGenerator

@@ -181,3 +181,41 @@ class TestValidator:
         result = await v.validate(f, {})
         assert result.confidence == 1.0
         assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_ad_confidence_uses_module_evidence(self):
+        from ares.core.validator import build_default_validator
+
+        validator = build_default_validator()
+        captured = Finding(
+            title="AS-REP hash",
+            description="Captured hash evidence",
+            severity=Severity.HIGH,
+            module_id="ad.asreproast",
+            evidence={"hash_count": 1},
+        )
+        candidates = Finding(
+            title="SPN candidates",
+            description="Enumerated service accounts",
+            severity=Severity.HIGH,
+            module_id="ad.enum_spn",
+            evidence={"total_spns": 2},
+        )
+        tgs = Finding(
+            title="TGS hash",
+            description="Captured TGS evidence",
+            severity=Severity.CRITICAL,
+            module_id="ad.kerberoast",
+            evidence={"hash_count": 1},
+        )
+
+        captured_result = await validator.validate(captured, {})
+        candidate_result = await validator.validate(candidates, {})
+        tgs_result = await validator.validate(tgs, {})
+
+        assert captured_result.confidence == 0.95
+        assert candidates.confidence == 0.6
+        assert tgs_result.confidence == 0.95
+        assert captured_result.passed is True
+        assert candidate_result.passed is True
+        assert tgs_result.passed is True

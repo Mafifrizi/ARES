@@ -176,6 +176,31 @@ async def _check_docker_socket_exploitable(
     return False, 0.1, "Docker socket exists but not accessible"
 
 
+async def _check_ad_finding_evidence(
+    finding: Finding, context: dict[str, Any]
+) -> tuple[bool, float, str]:
+    """Score AD findings from the evidence produced by the module itself."""
+    evidence = finding.evidence
+    module_id = finding.module_id
+
+    if module_id in {"ad.asreproast", "ad.kerberoast"}:
+        hash_count = int(evidence.get("hash_count", 0) or 0)
+        if hash_count > 0:
+            return True, 0.95, f"{hash_count} captured hash result(s)"
+        return False, 0.0, "No captured hash evidence"
+
+    if module_id == "ad.enum_spn":
+        candidate_count = int(
+            evidence.get("total_spns", 0)
+            or len(evidence.get("accounts", []))
+        )
+        if candidate_count > 0:
+            return True, 0.6, f"{candidate_count} SPN candidate account(s) enumerated"
+        return False, 0.0, "No SPN candidate evidence"
+
+    return False, 0.0, "Unsupported AD finding type"
+
+
 # ── Default validator registry ────────────────────────────────────────────────
 
 def build_default_validator() -> FindingValidator:
@@ -213,5 +238,14 @@ def build_default_validator() -> FindingValidator:
             weight=2.0,
         ),
     ])
+
+    for module_id in ("ad.asreproast", "ad.enum_spn", "ad.kerberoast"):
+        v.register(module_id, [
+            ValidationCheck(
+                stage=ValidationStage.EXISTENCE,
+                name="module_evidence_confidence",
+                check=_check_ad_finding_evidence,
+            ),
+        ])
 
     return v
