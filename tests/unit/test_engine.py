@@ -195,6 +195,48 @@ class TestAsyncEngine:
         assert "account/SPN validity" in result.operator_next_steps[0]
 
     @pytest.mark.asyncio
+    async def test_asreproast_operator_outcome_does_not_retry(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        from ares.modules.ad.asreproast import ASREPRoastModule
+        from ares.modules.base import ModuleResult
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        calls = 0
+
+        async def candidate_failure(self_unused: Any, ctx: Any) -> ModuleResult:
+            nonlocal calls
+            calls += 1
+            return ModuleResult(
+                status="success",
+                raw={
+                    "outcome_category": "operator_error",
+                    "outcome_message": (
+                        "LDAP found 1 ASREPRoast candidate account(s), but Kerberos "
+                        "did not return AS-REP material. Last Kerberos error: "
+                        "KRB_AP_ERR_SKEW: Kerberos clock skew too great."
+                    ),
+                },
+                module_id="ad.asreproast",
+            )
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "alice@corp.local",
+            "password": "Passw0rd!",
+        }
+        with patch.object(ASREPRoastModule, "execute", candidate_failure), \
+             patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+            result = await engine.run_module("ad.asreproast", campaign, params)
+
+        assert calls == 1
+        assert retry_sleep.await_count == 0
+        assert result.outcome == "operator_error"
+        assert "ASREPRoast candidate" in result.outcome_message
+
+    @pytest.mark.asyncio
     async def test_retry_stops_when_retry_attempt_classifies_tgs_timeout(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:

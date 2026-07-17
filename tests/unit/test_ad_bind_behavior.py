@@ -170,6 +170,39 @@ async def test_asreproast_dry_run_does_not_bind_or_request_kerberos(monkeypatch)
     assert result.raw["would_request_kerberos"] is False
 
 
+def test_asreproast_capture_uses_impacket_no_preauth_api(monkeypatch):
+    import ares.modules.ad.asreproast as asreproast_mod
+
+    _install_fake_kerberos(monkeypatch)
+    import impacket.krb5.kerberosv5 as kerberosv5
+
+    captured = {}
+
+    def fake_get_kerberos_tgt(client, password, domain, lmhash, nthash, **kwargs):
+        captured.update(
+            client=client,
+            password=password,
+            domain=domain,
+            lmhash=lmhash,
+            nthash=nthash,
+            **kwargs,
+        )
+        return b"raw-asrep", None, None, None
+
+    monkeypatch.setattr(kerberosv5, "getKerberosTGT", fake_get_kerberos_tgt)
+
+    raw = asreproast_mod._capture_asrep_raw(
+        "10.0.0.5", "lab.local", "legacy-nonpreauth"
+    )
+
+    assert raw == b"raw-asrep"
+    assert captured["password"] == ""
+    assert captured["domain"] == "lab.local"
+    assert captured["kdcHost"] == "10.0.0.5"
+    assert captured["requestPAC"] is True
+    assert captured["kerberoast_no_preauth"] is True
+
+
 @pytest.mark.asyncio
 async def test_kerberoast_dry_run_does_not_request_tgt_or_spns(monkeypatch):
     from ares.modules.ad.kerberoast import KerberoastModule
@@ -458,3 +491,170 @@ async def test_kerberoast_tgs_collection_window_precedes_engine_timeout(monkeypa
     assert "found 3 Kerberoastable candidate account(s)" in str(exc_info.value)
     assert "Kerberos TGS request timed out before a hash was confirmed" in str(exc_info.value)
     assert "Password1!" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monkeypatch):
+    import ares.modules.ad.asreproast as asreproast_mod
+    from ares.core.validator import build_default_validator
+    from ares.modules.ad.asreproast import ASREPRoastModule
+
+    monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
+    module, _ = _make_module(ASREPRoastModule)
+
+    async def fake_candidates(*args, **kwargs):
+        return ["legacy-nonpreauth"]
+
+    monkeypatch.setattr(module, "_ldap_get_nopreauth", fake_candidates)
+    monkeypatch.setattr(
+        asreproast_mod,
+        "_capture_asrep_raw",
+        lambda *args, **kwargs: b"raw-asrep",
+    )
+    monkeypatch.setattr(
+        asreproast_mod,
+        "_format_krb5asrep_hash",
+        lambda *args, **kwargs: "$krb5asrep$23$redacted",
+    )
+
+    findings, raw = await module.run(
+        dc="10.0.0.5",
+        domain="lab.local",
+        username="alice@lab.local",
+        password="Password1!",
+    )
+
+    assert len(findings) == 1
+    assert raw["asrep_hashes"]
+    validator = build_default_validator()
+    validation = await validator.validate(findings[0], raw)
+    assert validation.passed is True
+    assert validation.confidence >= 0.90
+
+
+@pytest.mark.asyncio
+async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypatch):
+    import ares.modules.ad.asreproast as asreproast_mod
+    from ares.modules.ad.asreproast import ASREPRoastModule
+
+    monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
+    module, _ = _make_module(ASREPRoastModule)
+
+    async def fake_candidates(*args, **kwargs):
+        return ["legacy-nonpreauth"]
+
+    def skewed_asrep(*args, **kwargs):
+        raise RuntimeError(
+            "Kerberos SessionError: KRB_AP_ERR_SKEW(Clock skew too great) "
+            "password=Password1!"
+        )
+
+    monkeypatch.setattr(module, "_ldap_get_nopreauth", fake_candidates)
+    monkeypatch.setattr(asreproast_mod, "_capture_asrep_raw", skewed_asrep)
+
+    findings, raw = await module.run(
+        dc="10.0.0.5",
+        domain="lab.local",
+        username="alice@lab.local",
+        password="Password1!",
+    )
+
+    assert findings == []
+    assert raw["outcome_category"] == "operator_error"
+    assert "LDAP found 1 ASREPRoast candidate account(s)" in raw["outcome_message"]
+    assert "KRB_AP_ERR_SKEW" in raw["outcome_message"]
+    assert "Next steps:" in raw["outcome_message"]
+    assert "completed_no_findings" not in raw["outcome_message"]
+    assert "Password1!" not in raw["outcome_message"]
+    assert "Password1!" not in raw["asrep_failure_reason"]
+
+
+@pytest.mark.asyncio
+async def test_asreproast_parse_failure_is_candidate_aware(monkeypatch):
+    import ares.modules.ad.asreproast as asreproast_mod
+    from ares.modules.ad.asreproast import ASREPRoastModule, ASREPParseError
+
+    monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
+    module, _ = _make_module(ASREPRoastModule)
+
+    async def fake_candidates(*args, **kwargs):
+        return ["legacy-nonpreauth"]
+
+    monkeypatch.setattr(module, "_ldap_get_nopreauth", fake_candidates)
+    monkeypatch.setattr(asreproast_mod, "_capture_asrep_raw", lambda *args, **kwargs: b"raw")
+
+    def parse_failure(*args, **kwargs):
+        raise ASREPParseError("AS-REP response could not be parsed (EndOfStreamError)")
+
+    monkeypatch.setattr(
+        asreproast_mod,
+        "_format_krb5asrep_hash",
+        parse_failure,
+    )
+
+    findings, raw = await module.run(
+        dc="10.0.0.5",
+        domain="lab.local",
+        username="alice@lab.local",
+        password="Password1!",
+    )
+
+    assert findings == []
+    assert raw["outcome_category"] == "module_error"
+    assert "candidate=legacy-nonpreauth" in raw["outcome_message"]
+    assert "EndOfStreamError" in raw["outcome_message"]
+    assert "malformed or unsupported" in raw["outcome_message"]
+    assert "Next steps:" in raw["outcome_message"]
+    assert "Password1!" not in raw["outcome_message"]
+
+
+@pytest.mark.asyncio
+async def test_asreproast_without_candidates_remains_no_findings(monkeypatch):
+    import ares.modules.ad.asreproast as asreproast_mod
+    from ares.modules.ad.asreproast import ASREPRoastModule
+
+    monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
+    module, _ = _make_module(ASREPRoastModule)
+
+    async def no_candidates(*args, **kwargs):
+        return []
+
+    def unexpected_asrep(*args, **kwargs):
+        raise AssertionError("AS-REP must not be requested without candidates")
+
+    monkeypatch.setattr(module, "_ldap_get_nopreauth", no_candidates)
+    monkeypatch.setattr(asreproast_mod, "_capture_asrep_raw", unexpected_asrep)
+
+    findings, raw = await module.run(
+        dc="10.0.0.5",
+        domain="lab.local",
+        username="alice@lab.local",
+        password="Password1!",
+    )
+
+    assert findings == []
+    assert raw["outcome_category"] == "completed_no_findings"
+    assert "no accounts without Kerberos pre-auth were found" in raw["outcome_message"]
+
+
+@pytest.mark.parametrize(
+    ("error_text", "category", "reason"),
+    [
+        ("KRB_AP_ERR_SKEW(Clock skew too great)", "operator_error", "KRB_AP_ERR_SKEW"),
+        ("KDC_ERR_WRONG_REALM", "operator_error", "KDC_ERR_WRONG_REALM"),
+        ("KDC_ERR_CANNOT_POSTDATE", "operator_error", "KDC_ERR_CANNOT_POSTDATE"),
+        ("KDC_ERR_PREAUTH_FAILED", "operator_error", "invalid credentials"),
+        ("Kerberos request timed out", "network_error", "timed out"),
+        ("unexpected parser failure", "module_error", "unexpected parser failure"),
+    ],
+)
+def test_asreproast_request_error_classification_is_safe(error_text, category, reason):
+    from ares.modules.ad.asreproast import classify_asrep_request_error
+
+    actual_category, actual_reason = classify_asrep_request_error(
+        RuntimeError(f"{error_text} password=Password1!")
+    )
+
+    assert actual_category == category
+    assert reason in actual_reason
+    assert "Password1!" not in actual_reason
