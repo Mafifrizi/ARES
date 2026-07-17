@@ -225,6 +225,13 @@ def test_engine_done_without_findings_has_explicit_outcome():
         "Kerberos clock skew too great; sync the operator host and domain controller time, then rerun."
     )
     assert clock_skew.operator_next_steps
+    realm_mismatch = EngineModuleResult(
+        module_id="ad.kerberoast",
+        status=ModuleStatus.FAILED,
+        error="KDC_ERR_WRONG_REALM",
+    )
+    assert realm_mismatch.outcome == "operator_error"
+    assert "Kerberos realm mismatch" in realm_mismatch.outcome_message
     assert "Passw0rd!" not in (secret_error.error or "")
     assert "secret-token" not in (secret_error.error or "")
 
@@ -255,5 +262,5 @@ def test_ad_empty_results_have_operator_facing_classification():
     assert timeout.outcome != "module_error"
     assert timeout.outcome_message == timeout_message
     assert timeout.operator_next_steps == [
-        "Verify DC/KDC reachability on port 88, clock synchronization, and Kerberos service health, then rerun."
+        "Verify DC/KDC reachability on port 88, clock synchronization, Kerberos service health, and account/SPN validity, then rerun."
     ]

@@ -81,6 +81,14 @@ def normalize_module_outcome(
         )
     error_text = str(error or "").strip()
     if (
+        "kdc_err_wrong_realm" in error_text.lower()
+        or "kerberos realm mismatch" in error_text.lower()
+    ):
+        return (
+            "operator_error",
+            "Kerberos realm mismatch; use the AD DNS domain/realm such as lab.local or LAB.LOCAL, not the DC IP address.",
+        )
+    if (
         "ldap/spn enumeration succeeded and found" in error_text.lower()
         and "before a hash was confirmed" in error_text.lower()
     ):
@@ -200,7 +208,7 @@ class EngineModuleResult(BaseModel):
             ]
         elif self.outcome == "network_error" and "before a hash was confirmed" in self.outcome_message.lower():
             self.operator_next_steps = [
-                "Verify DC/KDC reachability on port 88, clock synchronization, and Kerberos service health, then rerun."
+                "Verify DC/KDC reachability on port 88, clock synchronization, Kerberos service health, and account/SPN validity, then rerun."
             ]
 
     @property
@@ -519,6 +527,12 @@ class AresEngine:
                         attempt=attempt,
                         timeout_seconds=effective_timeout,
                     )
+                except AresError as re:
+                    _last_exc = re
+                    _action = re.action
+                    logger.warning("engine_retry_failed", module_id=module_id, attempt=attempt, re=re)
+                    if _action != AresError.RETRY:
+                        break
                 except Exception as re:
                     _last_exc = re
                     logger.warning("engine_retry_failed", module_id=module_id, attempt=attempt, re=re)
