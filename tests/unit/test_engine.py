@@ -237,6 +237,90 @@ class TestAsyncEngine:
         assert "ASREPRoast candidate" in result.outcome_message
 
     @pytest.mark.asyncio
+    async def test_enum_users_nonretryable_bind_failure_does_not_retry(
+        self, settings: AresSettings, campaign: Campaign, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ares.core.errors import ModuleValidationError
+        from ares.core.noise import JitterEngine
+        from ares.modules.ad.enum_users import ADEnumUsersModule
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        calls = 0
+
+        def classified_bind_failure(*args: Any, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise ModuleValidationError(
+                "ad.enum_users LDAP bind failed: invalid LDAP credentials.",
+                module_id="ad.enum_users",
+                field="username",
+            )
+
+        monkeypatch.setattr(ADEnumUsersModule, "_ldap_query_sync", classified_bind_failure)
+
+        async def no_noise_sleep(*args: Any, **kwargs: Any) -> None:
+            return None
+
+        monkeypatch.setattr(JitterEngine, "sleep", no_noise_sleep)
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "alice@corp.local",
+            "password": "Passw0rd!",
+            "use_ldaps": False,
+        }
+        with patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+            result = await engine.run_module("ad.enum_users", campaign, params)
+
+        assert calls == 1
+        assert retry_sleep.await_count == 0
+        assert result.outcome == "operator_error"
+        assert result.findings == []
+        assert "invalid LDAP credentials" in result.outcome_message
+        assert "Passw0rd!" not in result.outcome_message
+
+    @pytest.mark.asyncio
+    async def test_kerberoast_clock_skew_does_not_retry(
+        self, settings: AresSettings, campaign: Campaign
+    ) -> None:
+        from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.kerberoast import (
+            KerberoastModule,
+            format_kerberos_clock_skew,
+        )
+
+        engine = AresEngine(settings=settings)
+        engine.load_modules()
+        calls = 0
+
+        async def classified_clock_skew(self_unused: Any, ctx: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise ModuleValidationError(
+                format_kerberos_clock_skew(),
+                module_id="ad.kerberoast",
+                field="time",
+            )
+
+        params = {
+            "dc": "10.0.0.5",
+            "domain": "corp.local",
+            "username": "alice@corp.local",
+            "password": "Passw0rd!",
+            "target_user": "sqlsvc",
+        }
+        with patch.object(KerberoastModule, "execute", classified_clock_skew), \
+             patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
+            result = await engine.run_module("ad.kerberoast", campaign, params)
+
+        assert calls == 1
+        assert retry_sleep.await_count == 0
+        assert result.outcome == "operator_error"
+        assert "clock skew too great" in result.outcome_message
+        assert result.findings == []
+
+    @pytest.mark.asyncio
     async def test_retry_stops_when_retry_attempt_classifies_tgs_timeout(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:

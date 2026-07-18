@@ -41,6 +41,18 @@ def format_kerberos_realm_mismatch() -> str:
     )
 
 
+def format_kerberos_clock_skew() -> str:
+    return (
+        "Kerberos clock skew too great; sync the operator host and domain "
+        "controller time, then rerun."
+    )
+
+
+def is_kerberos_clock_skew(exc: BaseException) -> bool:
+    error_text = f"{type(exc).__name__}: {exc}".lower()
+    return "krb_ap_err_skew" in error_text or "clock skew too great" in error_text
+
+
 def _kerberos_tgs_worker(
     connection: Any,
     spn: str,
@@ -306,6 +318,12 @@ class KerberoastModule(BaseModule):
         except Exception as exc:
             from ares.core.errors import NetworkError
             err = str(exc).lower()
+            if is_kerberos_clock_skew(exc):
+                raise ModuleValidationError(
+                    format_kerberos_clock_skew(),
+                    module_id=self.MODULE_ID,
+                    field="time",
+                ) from exc
             if "invalid credentials" in err or "logon failure" in err:
                 raise nonretryable_ad_auth_error(
                     module_id=self.MODULE_ID,
@@ -382,6 +400,12 @@ class KerberoastModule(BaseModule):
                     username=username,
                     domain=domain,
                     service="Kerberos",
+                ) from exc
+            if is_kerberos_clock_skew(exc):
+                raise ModuleValidationError(
+                    format_kerberos_clock_skew(),
+                    module_id=self.MODULE_ID,
+                    field="time",
                 ) from exc
             if "kdc_err_wrong_realm" in err or "wrong realm" in err:
                 raise ModuleValidationError(
@@ -483,6 +507,12 @@ class KerberoastModule(BaseModule):
                     field="kerberos_tgs",
                 ) from exc
             except Exception as exc:
+                if is_kerberos_clock_skew(exc):
+                    raise ModuleValidationError(
+                        format_kerberos_clock_skew(),
+                        module_id=self.MODULE_ID,
+                        field="time",
+                    ) from exc
                 self._last_tgs_failures += 1
                 logger.debug("kerberoast_tgs_failed", spn=spn, error=str(exc)[:80])
 

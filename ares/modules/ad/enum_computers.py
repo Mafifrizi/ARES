@@ -5,6 +5,7 @@ MITRE: T1018, T1087.002
 """
 from __future__ import annotations
 import datetime
+import re
 from typing import Any
 from ares.core.logger import get_logger
 
@@ -13,6 +14,8 @@ from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import AresError, ModuleValidationError, NetworkError
+from ares.modules.ad.dependencies import build_ad_bind_plan
 
 def _days_since_ts(ts):
     if not ts or str(ts) in ("0","9223372036854775807"): return None
@@ -20,6 +23,46 @@ def _days_since_ts(ts):
         dt = datetime.datetime(1601,1,1) + datetime.timedelta(microseconds=int(str(ts))//10)
         return max(0,(datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-dt).days)
     except Exception: return None
+
+
+def _safe_ldap_exception_text(exc: BaseException) -> str:
+    text = " ".join(str(exc).split())[:160]
+    return re.sub(
+        r"(?i)\b(password|passwd|secret|token|api[_-]?key)\b\s*([:=])\s*[^\s,;]+",
+        r"\1\2[redacted]",
+        text,
+    ) or type(exc).__name__
+
+
+def _is_ldap_configuration_failure(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "ssl wrapping",
+            "sslerror",
+            "tls",
+            "certificate",
+            "wrong version number",
+            "winerror 10054",
+            "forcibly closed",
+            "connection reset",
+        )
+    )
+
+
+def _format_ldap_connection_failure(
+    *, dc: str, port: int, use_ldaps: bool, exc: BaseException
+) -> str:
+    mode = "LDAPS" if use_ldaps else "plain LDAP"
+    return (
+        f"ad.enum_computers {mode} connection failed for dc {dc} "
+        f"(use_ldaps={str(use_ldaps).lower()}, port {port}). "
+        f"Verify DC LDAP/LDAPS support ({'LDAPS on port 636' if use_ldaps else 'plain LDAP on port 389'}), "
+        "or switch use_ldaps to the supported mode; check the 389 vs 636 port, "
+        "firewall rules, and certificate/LDAPS configuration. "
+        f"Reason: {_safe_ldap_exception_text(exc)}"
+    )
 
 class ADEnumComputersModule(BaseModule):
     """
@@ -64,6 +107,7 @@ class ADEnumComputersModule(BaseModule):
         from ares.modules.base import ModuleResult
         ad = self._extract_ad_params(ctx)
         dc, domain, username, password = ad["dc"], ad["domain"], ad["username"], ad["password"]
+        use_ldaps = ctx.params.get("use_ldaps", True)
         if getattr(ctx, "dry_run", False):
             return ModuleResult(
                 status="dry_run", module_id=self.MODULE_ID,
@@ -71,6 +115,7 @@ class ADEnumComputersModule(BaseModule):
             )
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain,
+            use_ldaps=use_ldaps,
         )
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
@@ -80,14 +125,17 @@ class ADEnumComputersModule(BaseModule):
         )
 
     @trace_module("ad.enum_computers")
-    async def run(self, dc, username, password, domain, **kwargs):
+    async def run(self, dc, username, password, domain, use_ldaps=True, **kwargs):
         dc,username,domain = sanitize_hostname(dc),sanitize_ldap(username),sanitize_ldap(domain)
         await self.before_request(dc,"ldap")
-        logger.info("ad.enum_computers_start", dc=dc)
+        logger.info("ad.enum_computers_start", dc=dc, ldaps=use_ldaps)
         try:
-            computers = await self._fetch_computers(dc, username, password, domain)
+            computers = await self._fetch_computers(
+                dc, username, password, domain, use_ldaps=use_ldaps
+            )
+        except AresError:
+            raise
         except Exception as exc:
-            from ares.core.errors import NetworkError
             raise NetworkError(f"Computer enum failed: {exc}") from exc
         raw = {"computer_list": computers}
         # ISU-07: produce HostArtifact objects for ArtifactIntelEngine
@@ -111,32 +159,68 @@ class ADEnumComputersModule(BaseModule):
         logger.info("ad.enum_computers_done", total=len(computers))
         return self._findings, raw
 
-    async def _fetch_computers(self, dc, username, password, domain):
+    async def _fetch_computers(self, dc, username, password, domain, use_ldaps=True):
         import ssl
         from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, AUTO_BIND_NO_TLS, Tls
-        tls = Tls(validate=ssl.CERT_NONE)
-        server = Server(dc, port=636, use_ssl=True, tls=tls, get_info=ALL)
-        conn = Connection(server, user=f"{domain.upper()}\\{username}", password=password,
-                          authentication=NTLM, auto_bind=AUTO_BIND_NO_TLS)
+        port = 636 if use_ldaps else 389
+        tls = Tls(validate=ssl.CERT_NONE) if use_ldaps else None
+        bind_plan = build_ad_bind_plan(username, domain)
+        try:
+            server = Server(
+                dc,
+                port=port,
+                use_ssl=use_ldaps,
+                tls=tls,
+                get_info=ALL,
+                connect_timeout=10,
+            )
+            conn_kwargs = {
+                "user": bind_plan.user,
+                "password": password,
+                "auto_bind": AUTO_BIND_NO_TLS,
+                "receive_timeout": 30,
+            }
+            if bind_plan.mode == "ntlm":
+                conn_kwargs["authentication"] = NTLM
+            conn = Connection(server, **conn_kwargs)
+            if not conn.bind():
+                raise ConnectionError(f"LDAP bind returned false: {conn.result}")
+        except Exception as exc:
+            message = _format_ldap_connection_failure(
+                dc=dc, port=port, use_ldaps=use_ldaps, exc=exc
+            )
+            if _is_ldap_configuration_failure(exc):
+                raise ModuleValidationError(
+                    f"LDAP configuration validation failed: {message}",
+                    module_id=self.MODULE_ID,
+                    field="use_ldaps",
+                    target=dc,
+                ) from exc
+            raise NetworkError(message, module_id=self.MODULE_ID, target=dc) from exc
         base = ",".join(f"DC={p}" for p in domain.upper().split("."))
-        conn.search(base, "(objectClass=computer)", search_scope=SUBTREE,
-                    attributes=["name","dNSHostName","operatingSystem","operatingSystemVersion",
-                                "lastLogon","userAccountControl","primaryGroupID","whenCreated"])
-        computers = []
-        for e in conn.entries:
-            uac = int(e.userAccountControl.value or 0)
-            pgid = int(e.primaryGroupID.value or 0)
-            computers.append({
-                "name":         str(e.name),
-                "dns":          str(e.dNSHostName or ""),
-                "os":           str(e.operatingSystem or "Unknown"),
-                "os_version":   str(e.operatingSystemVersion or ""),
-                "is_dc":        pgid in (516, 521),  # Domain Controllers group
-                "enabled":      not bool(uac & 0x0002),
-                "days_since_logon": _days_since_ts(e.lastLogon.value),
-            })
-        conn.unbind()
-        return computers
+        try:
+            conn.search(base, "(objectClass=computer)", search_scope=SUBTREE,
+                        attributes=["name","dNSHostName","operatingSystem","operatingSystemVersion",
+                                    "lastLogon","userAccountControl","primaryGroupID","whenCreated"])
+            computers = []
+            for e in conn.entries:
+                uac = int(e.userAccountControl.value or 0)
+                pgid = int(e.primaryGroupID.value or 0)
+                computers.append({
+                    "name":         str(e.name),
+                    "dns":          str(e.dNSHostName or ""),
+                    "os":           str(e.operatingSystem or "Unknown"),
+                    "os_version":   str(e.operatingSystemVersion or ""),
+                    "is_dc":        pgid in (516, 521),  # Domain Controllers group
+                    "enabled":      not bool(uac & 0x0002),
+                    "days_since_logon": _days_since_ts(e.lastLogon.value),
+                })
+            return computers
+        finally:
+            try:
+                conn.unbind()
+            except Exception:
+                pass
 
     def _analyze(self, raw):
         computers = raw.get("computer_list",[])

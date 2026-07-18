@@ -16,6 +16,11 @@ from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import AresError, ModuleValidationError, NetworkError
+from ares.modules.ad.dependencies import (
+    build_ad_bind_plan,
+    classify_ad_ldap_bind_failure,
+)
 
 UAC_ACCOUNT_DISABLE      = 0x0002
 UAC_DONT_EXPIRE_PASSWORD = 0x10000
@@ -115,8 +120,9 @@ class ADEnumUsersModule(BaseModule):
                 None,
                 lambda: self._ldap_query_sync(dc, username, password, domain, use_ldaps, page_size),
             )
+        except AresError:
+            raise
         except Exception as exc:
-            from ares.core.errors import NetworkError
             raise NetworkError(f"LDAP failed on {dc}: {exc}") from exc
         raw = {"user_list": users, "password_policy": policy}
         # ISU-07: produce UserArtifact objects for ArtifactIntelEngine
@@ -153,32 +159,77 @@ class ADEnumUsersModule(BaseModule):
         from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
         from ldap3.core.exceptions import LDAPBindError
 
-        # Try LDAPS first, fall back to plain LDAP
+        bind_plan = build_ad_bind_plan(username, domain)
+        last_failure: AresError | None = None
         conn = None
         for port, use_ssl in ([(636, True), (389, False)] if use_ldaps else [(389, False)]):
+            attempt_conn = None
             try:
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL,
                                  connect_timeout=10)
-                conn = Connection(
-                    server,
-                    user=f"{domain.upper()}\\{username}",
-                    password=password,
-                    authentication=NTLM,
-                    auto_bind=ldap3.AUTO_BIND_NONE,
-                    receive_timeout=30,
-                )
-                result = conn.bind()
+                conn_kwargs = {
+                    "user": bind_plan.user,
+                    "password": password,
+                    "auto_bind": ldap3.AUTO_BIND_NONE,
+                    "receive_timeout": 30,
+                }
+                if bind_plan.mode == "ntlm":
+                    conn_kwargs["authentication"] = NTLM
+                attempt_conn = Connection(server, **conn_kwargs)
+                result = attempt_conn.bind()
                 if not result:
-                    raise LDAPBindError(f"Bind failed: {conn.result}")
+                    bind_error = LDAPBindError(f"Bind failed: {attempt_conn.result}")
+                    classified = classify_ad_ldap_bind_failure(
+                        bind_error,
+                        module_id=self.MODULE_ID,
+                        dc=dc,
+                        bind_plan=bind_plan,
+                        result=attempt_conn.result,
+                    )
+                    if isinstance(classified, ModuleValidationError):
+                        raise classified from bind_error
+                    last_failure = classified
+                    continue
+                conn = attempt_conn
                 break
+            except ModuleValidationError:
+                raise
             except Exception as exc:
-                conn = None
-                continue
+                classified = classify_ad_ldap_bind_failure(
+                    exc,
+                    module_id=self.MODULE_ID,
+                    dc=dc,
+                    bind_plan=bind_plan,
+                    result=getattr(attempt_conn, "result", None),
+                )
+                if isinstance(classified, ModuleValidationError):
+                    raise classified from exc
+                last_failure = classified
+            finally:
+                if attempt_conn is not None and attempt_conn is not conn:
+                    try:
+                        attempt_conn.unbind()
+                    except Exception:
+                        pass
 
         if conn is None:
-            raise ConnectionError(f"Could not bind to {dc} on ports 636 or 389")
+            if isinstance(last_failure, NetworkError):
+                raise NetworkError(
+                    f"{last_failure.message} Verify use_ldaps={str(use_ldaps).lower()}, "
+                    "LDAP port 389 versus LDAPS port 636, firewall rules, and "
+                    "DC certificate/LDAPS configuration.",
+                    module_id=self.MODULE_ID,
+                    target=dc,
+                    context=last_failure.context,
+                ) from last_failure
+            raise NetworkError(
+                f"{self.MODULE_ID} could not bind to {dc} using "
+                f"use_ldaps={str(use_ldaps).lower()} on ports 389/636.",
+                module_id=self.MODULE_ID,
+                target=dc,
+            )
 
         base  = _dn_to_base(domain)
         users: list[dict] = []
