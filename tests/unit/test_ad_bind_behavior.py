@@ -764,6 +764,7 @@ async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypa
     import ares.modules.ad.asreproast as asreproast_mod
     from ares.modules.ad.asreproast import ASREPRoastModule
 
+    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)
 
