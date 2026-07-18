@@ -608,7 +608,7 @@ async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monke
     assert validation.confidence >= 0.90
 
 
-def _install_fake_ldap3_ssl_close(monkeypatch):
+def _install_fake_ldap3_ssl_close(monkeypatch, error_message=None):
     class FakeTls:
         def __init__(self, *args, **kwargs):
             self.args = args
@@ -622,8 +622,11 @@ def _install_fake_ldap3_ssl_close(monkeypatch):
     class FakeConnection:
         def __init__(self, *args, **kwargs):
             raise OSError(
-                "socket ssl wrapping error: [WinError 10054] "
-                "An existing connection was forcibly closed by the remote host"
+                error_message
+                or (
+                    "socket ssl wrapping error: [WinError 10054] "
+                    "An existing connection was forcibly closed by the remote host"
+                )
             )
 
     ldap3_mod = types.ModuleType("ldap3")
@@ -708,6 +711,50 @@ async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_c
     assert result.findings == []
     assert "use_ldaps=false" in result.outcome_message
     assert "389" in result.outcome_message and "636" in result.outcome_message
+
+
+@pytest.mark.asyncio
+async def test_enum_computers_ldaps_network_failure_is_not_module_error(
+    monkeypatch, minimal_campaign
+):
+    from unittest.mock import AsyncMock, patch
+
+    from ares.core.config import AresSettings
+    from ares.core.engine import AresEngine
+    from ares.core.noise import JitterEngine
+
+    engine = AresEngine(settings=AresSettings())
+    engine.load_modules()
+    _install_fake_ldap3_ssl_close(
+        monkeypatch,
+        error_message=(
+            "socket connection error while opening: [WinError 10060] "
+            "A connection attempt failed because the connected party did not "
+            "properly respond"
+        ),
+    )
+
+    async def no_noise_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(JitterEngine, "sleep", no_noise_sleep)
+    params = {
+        "dc": "10.0.0.5",
+        "domain": "lab.local",
+        "username": "alice@lab.local",
+        "password": "Password1!",
+        "use_ldaps": True,
+    }
+    with patch("ares.core.engine.asyncio.sleep", new=AsyncMock()):
+        result = await engine.run_module("ad.enum_computers", minimal_campaign, params)
+
+    assert result.outcome == "network_error"
+    assert result.findings == []
+    assert "module_error" not in result.outcome_message
+    assert "use_ldaps=true" in result.outcome_message
+    assert "389" in result.outcome_message and "636" in result.outcome_message
+    assert "certificate/LDAPS configuration" in result.outcome_message
+    assert "Password1!" not in result.outcome_message
 
 
 @pytest.mark.asyncio

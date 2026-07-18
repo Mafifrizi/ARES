@@ -145,6 +145,40 @@ class TestSecurity:
 
 class TestValidator:
     @pytest.mark.asyncio
+    async def test_validator_confidence_log_is_ascii_safe(self, monkeypatch):
+        import ares.core.validator as validator_module
+        from unittest.mock import Mock
+
+        logger_info = Mock()
+        monkeypatch.setattr(validator_module.logger, "info", logger_info)
+
+        async def always_pass(finding: Finding, context: dict) -> tuple[bool, float, str]:
+            return True, 0.95, "confirmed"
+
+        validator = FindingValidator()
+        validator.register("test.ascii_log", [
+            ValidationCheck(
+                stage=ValidationStage.EXISTENCE,
+                name="ascii_check",
+                check=always_pass,
+            )
+        ])
+        finding = Finding(
+            title="ASREPRoast Hashes Captured (1)",
+            description="Captured hash evidence",
+            severity=Severity.HIGH,
+            module_id="test.ascii_log",
+        )
+
+        result = await validator.validate(finding, {})
+
+        logged_message = logger_info.call_args.args[0]
+        assert logged_message.isascii()
+        assert " -> " in logged_message
+        assert "confidence=0.95" in logged_message
+        assert result.confidence == 0.95
+
+    @pytest.mark.asyncio
     async def test_no_checks_defaults_to_medium_confidence(self):
         v = FindingValidator()
         f = Finding(title="T", description="D" * 10, severity=Severity.HIGH, module_id="unknown.mod")

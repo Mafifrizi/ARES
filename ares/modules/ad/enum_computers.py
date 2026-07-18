@@ -196,7 +196,12 @@ class ADEnumComputersModule(BaseModule):
                     field="use_ldaps",
                     target=dc,
                 ) from exc
-            raise NetworkError(message, module_id=self.MODULE_ID, target=dc) from exc
+            network_message = message.replace(
+                "ad.enum_computers ", "ad.enum_computers network ", 1
+            )
+            raise NetworkError(
+                network_message, module_id=self.MODULE_ID, target=dc
+            ) from exc
         base = ",".join(f"DC={p}" for p in domain.upper().split("."))
         try:
             conn.search(base, "(objectClass=computer)", search_scope=SUBTREE,
