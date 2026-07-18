@@ -575,6 +575,7 @@ async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monke
     from ares.core.validator import build_default_validator
     from ares.modules.ad.asreproast import ASREPRoastModule
 
+    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)
 
@@ -601,11 +602,12 @@ async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monke
     )
 
     assert len(findings) == 1
-    assert raw["asrep_hashes"]
+    assert raw["asrep_hashes"] == ["$krb5asrep$23$redacted"]
+    assert "Password1!" not in str(raw)
     validator = build_default_validator()
     validation = await validator.validate(findings[0], raw)
     assert validation.passed is True
-    assert validation.confidence >= 0.90
+    assert validation.confidence == 0.95
 
 
 def _install_fake_ldap3_ssl_close(monkeypatch, error_message=None):
