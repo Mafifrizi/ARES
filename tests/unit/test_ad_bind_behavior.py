@@ -319,6 +319,56 @@ def test_enum_spn_invalid_credentials_abort_not_network(monkeypatch):
     assert "WrongPassword1!" not in str(exc_info.value)
 
 
+def test_enum_users_invalid_credentials_abort_not_network(monkeypatch):
+    from ares.modules.ad.enum_users import ADEnumUsersModule
+
+    _install_fake_ldap3(monkeypatch, bind_outcomes=[False])
+    module, _ = _make_module(ADEnumUsersModule)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        module._ldap_query_sync(
+            "10.0.0.5",
+            "alice@lab.local",
+            "WrongPassword1!",
+            "lab.local",
+            False,
+            50,
+        )
+
+    message = str(exc_info.value)
+    assert exc_info.value.action == "abort"
+    assert exc_info.value.field == "username"
+    assert "invalid LDAP credentials" in message
+    assert "WrongPassword1!" not in message
+
+
+def test_enum_users_network_bind_failure_is_actionable(monkeypatch):
+    from ares.modules.ad.enum_users import ADEnumUsersModule
+
+    _install_fake_ldap3(
+        monkeypatch,
+        bind_outcomes=[OSError("socket connection error while opening")],
+    )
+    module, _ = _make_module(ADEnumUsersModule)
+
+    with pytest.raises(NetworkError) as exc_info:
+        module._ldap_query_sync(
+            "10.0.0.5",
+            "alice@lab.local",
+            "Password1!",
+            "lab.local",
+            False,
+            50,
+        )
+
+    message = str(exc_info.value)
+    assert exc_info.value.action == "retry"
+    assert "network/connectivity failure" in message
+    assert "use_ldaps=false" in message
+    assert "389" in message and "636" in message
+    assert "Password1!" not in message
+
+
 @pytest.mark.asyncio
 async def test_kerberoast_invalid_tgt_credentials_are_nonretryable(monkeypatch):
     from ares.modules.ad.kerberoast import KerberoastModule
@@ -363,6 +413,32 @@ async def test_kerberoast_wrong_realm_is_nonretryable(monkeypatch):
     assert exc_info.value.field == "domain"
     assert str(exc_info.value) == kerberoast_mod.format_kerberos_realm_mismatch()
     assert "UserLab!2026" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_kerberoast_clock_skew_is_nonretryable(monkeypatch):
+    import ares.modules.ad.kerberoast as kerberoast_mod
+    from ares.modules.ad.kerberoast import KerberoastModule
+
+    _install_fake_kerberos(
+        monkeypatch,
+        tgt_error=Exception("KRB_AP_ERR_SKEW(Clock skew too great)"),
+    )
+    module, _ = _make_module(KerberoastModule)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module._request_tickets(
+            "10.0.0.5",
+            "alice@lab.local",
+            "Password1!",
+            "lab.local",
+            "HTTP/web.lab.local",
+        )
+
+    assert exc_info.value.action == "abort"
+    assert exc_info.value.field == "time"
+    assert str(exc_info.value) == kerberoast_mod.format_kerberos_clock_skew()
+    assert "Password1!" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
