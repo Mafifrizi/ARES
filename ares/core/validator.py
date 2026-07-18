@@ -108,7 +108,7 @@ class FindingValidator:
             finding.mark_false_positive(f"Confidence too low: {final_confidence:.2f}")
 
         logger.info(
-            f"[validator] Finding '{finding.title}' → "
+            f"[validator] Finding '{finding.title}' -> "
             f"confidence={result.confidence:.2f} passed={result.passed}"
         )
         return result
