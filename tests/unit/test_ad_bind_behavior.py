@@ -129,6 +129,12 @@ def _install_fake_kerberos(monkeypatch, *, tgt_error=None):
     monkeypatch.setitem(sys.modules, "pyasn1_modules", types.ModuleType("pyasn1_modules"))
 
 
+@pytest.fixture(autouse=True)
+def _asreproast_tests_use_fake_kerberos(request, monkeypatch):
+    if "asreproast" in request.node.name:
+        _install_fake_kerberos(monkeypatch)
+
+
 def _blocking_tgs_worker(connection, *args):
     time.sleep(5)
 
@@ -173,7 +179,6 @@ async def test_asreproast_dry_run_does_not_bind_or_request_kerberos(monkeypatch)
 def test_asreproast_capture_uses_impacket_no_preauth_api(monkeypatch):
     import ares.modules.ad.asreproast as asreproast_mod
 
-    _install_fake_kerberos(monkeypatch)
     import impacket.krb5.kerberosv5 as kerberosv5
 
     captured = {}
@@ -575,7 +580,6 @@ async def test_asreproast_candidate_hash_is_confirmed_with_high_confidence(monke
     from ares.core.validator import build_default_validator
     from ares.modules.ad.asreproast import ASREPRoastModule
 
-    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)
 
@@ -764,7 +768,6 @@ async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypa
     import ares.modules.ad.asreproast as asreproast_mod
     from ares.modules.ad.asreproast import ASREPRoastModule
 
-    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)
 
@@ -802,7 +805,6 @@ async def test_asreproast_parse_failure_is_candidate_aware(monkeypatch):
     import ares.modules.ad.asreproast as asreproast_mod
     from ares.modules.ad.asreproast import ASREPRoastModule, ASREPParseError
 
-    _install_fake_kerberos(monkeypatch)
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)
 
