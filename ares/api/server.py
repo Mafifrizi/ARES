@@ -1212,6 +1212,16 @@ async def list_modules(
     return enriched
 
 
+@app.get("/modules/execution-chains", tags=["modules"])
+async def list_execution_chains(
+    actor: AuthenticatedUser = _api_key_read_dep,
+) -> list[dict[str, Any]]:
+    """Return read-only execution-chain guidance for the Modules page."""
+    from ares.core.execution_chains import list_execution_chains as get_chains
+
+    return get_chains()
+
+
 class RunRequest(BaseModel):
     campaign_id: str
     params: dict[str, Any] = {}
@@ -2067,6 +2077,15 @@ async def delete_report(
 
 
 # ── Telemetry ─────────────────────────────────────────────────────────────────
+
+
+@app.get("/stats/monthly", tags=["telemetry"])
+async def get_monthly_stats(
+    actor: AuthenticatedUser = _api_key_read_dep,
+    db: AresDatabase = Depends(get_db),
+) -> dict[str, Any]:
+    """Return confirmed findings grouped by day in the current calendar month."""
+    return await db.get_monthly_confirmed_finding_stats()
 
 
 @app.get("/telemetry", tags=["telemetry"])

@@ -209,6 +209,48 @@ def test_asreproast_capture_uses_impacket_no_preauth_api(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kerberoast_empty_target_fails_fast_before_tgs_worker(monkeypatch):
+    from ares.modules.ad.kerberoast import KerberoastModule
+
+    async def unexpected_tickets(*args, **kwargs):
+        raise AssertionError("empty target must not start TGS or SPN work")
+
+    module, _ = _make_module(KerberoastModule)
+    monkeypatch.setattr(module, "_request_tickets", unexpected_tickets)
+
+    with pytest.raises(ModuleValidationError) as exc_info:
+        await module.run(
+            dc="10.0.0.5",
+            domain="lab.local",
+            username="alice@lab.local",
+            password="Password1!",
+            target_user=" ",
+        )
+
+    message = str(exc_info.value)
+    assert "ad.kerberoast requires a specific target user or SPN" in message
+    assert "ad.enum_spn" in message
+    assert "svc-sql" in message
+    assert "MSSQLSvc/sql01.lab.local:1433" in message
+    assert "Password1!" not in message
+
+
+def test_ad_kerberos_execution_chain_metadata_is_guided_and_targeted():
+    from ares.core.execution_chains import list_execution_chains
+
+    chain = next(item for item in list_execution_chains() if item["id"] == "ad-kerberos-exposure-chain")
+    stages = chain["stages"]
+    targeted = next(stage for stage in stages if stage["module_ids"] == ["ad.kerberoast"])
+
+    assert chain["title"] == "AD Kerberos Exposure Chain"
+    assert [stage["order"] for stage in stages] == [1, 2, 3, 4]
+    assert stages[0]["module_ids"] == ["ad.enum_users", "ad.asreproast"]
+    assert stages[1]["module_ids"] == ["ad.enum_spn"]
+    assert "target_user" in targeted["required_inputs"]
+    assert "ad.enum_spn" in targeted["next_action"]
+
+
+@pytest.mark.asyncio
 async def test_kerberoast_dry_run_does_not_request_tgt_or_spns(monkeypatch):
     from ares.modules.ad.kerberoast import KerberoastModule
 

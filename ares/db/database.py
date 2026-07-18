@@ -436,6 +436,33 @@ class AresDatabase:
             stats["total"] += r["n"]
         return stats
 
+    async def get_monthly_confirmed_finding_stats(self) -> dict[str, Any]:
+        """Return confirmed findings grouped by day in the current UTC month."""
+        period = datetime.now(timezone.utc).strftime("%Y-%m")
+        async with self._conn.execute(
+            """
+            SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
+            FROM findings
+            WHERE validated=1
+              AND false_positive=0
+              AND substr(discovered_at, 1, 7)=?
+            GROUP BY substr(discovered_at, 1, 10)
+            ORDER BY finding_date
+            """,
+            (period,),
+        ) as cur:
+            rows = await cur.fetchall()
+        series = [
+            {"date": str(row["finding_date"]), "count": int(row["n"])}
+            for row in rows
+        ]
+        return {
+            "period": period,
+            "label": "Security signals this cycle",
+            "total": sum(item["count"] for item in series),
+            "series": series,
+        }
+
     async def campaign_summary(self, campaign_id: str) -> dict[str, Any]:
         """High-level stats for a campaign."""
         findings = await self.get_findings(campaign_id)

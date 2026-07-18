@@ -26,7 +26,7 @@ Windows virtualenv example:
 This one-terminal launcher starts:
 
 - Backend API: `python -m uvicorn ares.api.server:app --host 127.0.0.1 --port 8080 --reload`
-- Frontend: `npm run dev -- --host 127.0.0.1 --port 5173`
+- Frontend: `npm run dev -- --host 127.0.0.1 --port 5173 --strictPort`
 
 It prints `http://127.0.0.1:5173/dashboard/`, opens it by default, and stops
 both child processes when you press `Ctrl+C`. Login with username `admin` and

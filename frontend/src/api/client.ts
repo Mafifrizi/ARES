@@ -2,8 +2,10 @@ import type {
   ApiKeyCreateResponse,
   ApiKeyMeta,
   Campaign,
+  ExecutionChain,
   Finding,
   ModuleMeta,
+  MonthlyFindingStats,
   ReportItem,
   TemplateMeta,
   TokenResponse,
@@ -62,24 +64,34 @@ async function parseResponse(response: Response): Promise<unknown> {
   }
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+export async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
     return false;
   }
-  const response = await fetch("/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken })
-  });
-  if (!response.ok) {
+
+  try {
+    const response = await fetch("/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    if (!response.ok) {
+      clearTokens();
+      return false;
+    }
+    const token = (await response.json()) as TokenResponse;
+    if (!token.access_token || !token.refresh_token) {
+      clearTokens();
+      return false;
+    }
+    setAccessToken(token.access_token);
+    setRefreshToken(token.refresh_token);
+    return true;
+  } catch {
     clearTokens();
     return false;
   }
-  const token = (await response.json()) as TokenResponse;
-  setAccessToken(token.access_token);
-  setRefreshToken(token.refresh_token);
-  return true;
 }
 
 export async function apiRequest<T>(
@@ -164,6 +176,7 @@ export const api = {
   me: () => apiRequest<UserProfile>("/auth/me"),
   health: () => apiRequest<Record<string, unknown>>("/health"),
   telemetry: () => apiRequest<Record<string, unknown>>("/telemetry"),
+  monthlyStats: () => apiRequest<MonthlyFindingStats>("/stats/monthly"),
   campaigns: () => apiRequest<Campaign[]>("/campaigns"),
   createCampaign: (body: { name: string; client: string; targets: string[]; scope_cidrs: string[]; noise_profile: string }) =>
     apiRequest<Campaign>("/campaigns", {
@@ -187,8 +200,9 @@ export const api = {
   diffCampaign: (id: string, otherId: string) =>
     apiRequest<Record<string, unknown>>(
       `/campaigns/${encodeURIComponent(id)}/diff/${encodeURIComponent(otherId)}`
-    ),
+  ),
   modules: () => apiRequest<ModuleMeta[]>("/modules"),
+  executionChains: () => apiRequest<ExecutionChain[]>("/modules/execution-chains"),
   runModule: (moduleId: string, payload: ReturnType<typeof buildModuleRunPayload>) =>
     apiRequest<Record<string, unknown>>(`/modules/${encodeURIComponent(moduleId)}/run`, {
       method: "POST",

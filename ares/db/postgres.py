@@ -422,6 +422,42 @@ class PostgresDatabase:
             stats["total"] += r["n"]
         return stats
 
+    async def get_monthly_confirmed_finding_stats(self) -> dict[str, Any]:
+        """Return confirmed findings grouped by day in the current UTC month."""
+        now = datetime.now(timezone.utc)
+        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if period_start.month == 12:
+            next_month = period_start.replace(year=period_start.year + 1, month=1)
+        else:
+            next_month = period_start.replace(month=period_start.month + 1)
+        period = period_start.strftime("%Y-%m")
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT (discovered_at AT TIME ZONE 'UTC')::date AS finding_date,
+                       COUNT(*) AS n
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                  AND discovered_at >= $1
+                  AND discovered_at < $2
+                GROUP BY 1
+                ORDER BY 1
+                """,
+                period_start,
+                next_month,
+            )
+        series = [
+            {"date": row["finding_date"].isoformat(), "count": int(row["n"])}
+            for row in rows
+        ]
+        return {
+            "period": period,
+            "label": "Security signals this cycle",
+            "total": sum(item["count"] for item in series),
+            "series": series,
+        }
+
     # ── Hosts ──────────────────────────────────────────────────────────────────
 
     async def upsert_host(self, h: Any) -> str:

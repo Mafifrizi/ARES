@@ -28,6 +28,27 @@ The dashboard and API enforce authentication, RBAC, scope validation, parameter
 validation, rate limits, and token revocation. The frontend is a convenience
 layer; the backend remains the enforcement boundary.
 
+## Execution Chains inside Modules
+
+The Modules page includes an **Execution Chains** section alongside the manual
+module catalog. Chains are read-only execution guidance: they show an ordered
+relationship between existing modules, the inputs each step needs, the output
+that can feed the next step, and the final evidence goal. They do not auto-run
+modules or replace campaign, RBAC, scope, OPSEC, or parameter validation.
+
+The chains cover AD/domain, web/API, cloud, credential/secret, OPSEC/safety,
+reporting/evidence, and standalone utility workflows. The **AD Kerberos
+Exposure Chain** is the reference example: run `ad.enum_users` or
+`ad.asreproast`, then `ad.enum_spn`, then select a discovered service account or
+SPN for targeted `ad.kerberoast`, and finish by reviewing a campaign report.
+Use a value such as `svc-sql` or `MSSQLSvc/sql01.lab.local:1433` for
+`target_user`; an empty target is rejected before Kerberos work begins.
+
+Manual module execution remains available for advanced operators. Selecting a
+module chip in a chain only opens that module in the existing Run Panel; the
+operator still supplies inputs, chooses dry-run or live execution, and submits
+each step explicitly.
+
 ## Dry-Run and Outcomes
 
 The module catalog is the source of truth for required and optional parameters,

@@ -1,7 +1,5 @@
 import {
-  Activity,
   AlertTriangle,
-  BarChart3,
   Bell,
   Boxes,
   CheckCircle2,
@@ -52,12 +50,14 @@ import {
   api,
   buildModuleRunPayload,
   campaignEventsPath,
+  clearTokens,
   getAccessToken,
   getRefreshToken,
   login as loginRequest,
-  logout as logoutRequest
+  logout as logoutRequest,
+  refreshAccessToken
 } from "./api/client";
-import type { ApiKeyMeta, Campaign, Finding, ModuleMeta, ParamField, ReportItem, UserProfile } from "./api/types";
+import type { ApiKeyMeta, Campaign, ExecutionChain, Finding, ModuleMeta, MonthlyFindingStats, ParamField, ReportItem, UserProfile } from "./api/types";
 
 interface AuthState {
   user: UserProfile | null;
@@ -215,23 +215,29 @@ function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    api
-      .me()
-      .then((profile) => {
+    (async () => {
+      try {
+        if (!(await refreshAccessToken())) {
+          if (active) {
+            setUser(null);
+          }
+          return;
+        }
+        const profile = await api.me();
         if (active) {
           setUser(profile);
         }
-      })
-      .catch(() => {
+      } catch {
+        clearTokens();
         if (active) {
           setUser(null);
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) {
           setLoading(false);
         }
-      });
+      }
+    })();
     return () => {
       active = false;
     };
@@ -255,7 +261,11 @@ function AuthProvider({ children }: { children: ReactNode }) {
     [loading, queryClient, user]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {loading ? <ScreenMessage title="ARES" body="Loading session" /> : children}
+    </AuthContext.Provider>
+  );
 }
 
 const navItems = [
@@ -535,12 +545,13 @@ function ProtectedShell() {
   const notifications = useMemo<DashboardNotification[]>(() => {
     const items: DashboardNotification[] = [];
     const snapshot = telemetry.data as TelemetrySnapshot | undefined;
-    const healthStatus = String(health.data?.status ?? "").toLowerCase();
+    const healthSnapshot = health.data as Record<string, unknown> | undefined;
+    const healthStatus = String(healthSnapshot?.status ?? "").toLowerCase();
 
     if (health.isError) {
       items.push({ id: "health:error", title: "Backend health check failed", detail: "ARES API health is not reachable.", tone: "danger" });
     } else if (health.isSuccess && healthStatus && !["ok", "healthy", "online"].includes(healthStatus)) {
-      items.push({ id: `health:status:${healthStatus}`, title: "Backend status needs attention", detail: String(health.data?.status), tone: "warn" });
+      items.push({ id: `health:status:${healthStatus}`, title: "Backend status needs attention", detail: String(healthSnapshot?.status), tone: "warn" });
     }
     if (telemetry.isError) {
       items.push({ id: "telemetry:error", title: "Telemetry unavailable", detail: "Runtime telemetry could not be loaded.", tone: "warn" });
@@ -766,6 +777,7 @@ function ProtectedShell() {
           <div className="content-shell">
             <Routes>
               <Route path="/" element={<OverviewPage />} />
+              <Route path="/playbooks" element={<Navigate to="/modules" replace />} />
               <Route path="/campaigns" element={<CampaignsPage />} />
               <Route path="/modules" element={<ModulesPage />} />
               <Route path="/reports" element={<ReportsPage />} />
@@ -836,26 +848,19 @@ function LoginPage() {
 }
 
 function OverviewPage() {
-  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
+  const monthlyStats = useQuery({ queryKey: ["monthlyStats"], queryFn: api.monthlyStats });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const snapshot = telemetry.data as TelemetrySnapshot | undefined;
+  const monthlyData = monthlyStats.data as MonthlyFindingStats | undefined;
   const campaignList = campaigns.data ?? [];
   const activeCampaigns = campaignList.filter((campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted").length;
   const findings = typeof snapshot?.findings === "number" ? snapshot.findings : 0;
+  const monthlyTotal = typeof monthlyData?.total === "number" ? monthlyData.total : 0;
+  const monthlySeries = normalizeMonthlySeries(monthlyData?.period, monthlyData?.series);
   return (
     <Page
       title="Overview"
-      actions={(
-        <>
-          <span className={health.isSuccess ? "status-pill status-low" : "status-pill status-medium"}>
-            <Activity size={13} /> {String(health.data?.status ?? "checking")}
-          </span>
-          <span className={telemetry.isSuccess ? "status-pill status-low" : "status-pill"}>
-            <BarChart3 size={13} /> {telemetry.isSuccess ? "Telemetry online" : "Telemetry pending"}
-          </span>
-        </>
-      )}
     >
       <div className="dashboard-grid">
         <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
@@ -871,16 +876,46 @@ function OverviewPage() {
           <section className="panel p-4">
             <SectionHeader title="Monthly Statistics" />
             <div className="monthly-stat">
-              <span>+ {formatMetric(findings + activeCampaigns)}</span>
-              <small>Security signals this cycle</small>
+              <span>{formatMetric(monthlyTotal)}</span>
+              <small>{monthlyData?.label ?? "Security signals this cycle"}</small>
             </div>
-            <SparklineBars values={[32, 44, 28, 52, 46, 62, 39, 48, 58, 42, 51, 67]} />
+            {monthlyStats.isPending ? <p className="text-sm text-slate-500">Loading monthly activity...</p> : null}
+            {monthlyStats.isError ? <p className="text-sm text-slate-500">Monthly activity unavailable.</p> : null}
+            {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal === 0 ? (
+              <p className="text-sm text-slate-500">No monthly activity yet</p>
+            ) : null}
+            {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal > 0 && monthlySeries.some((value) => value.count > 0) ? (
+              <SparklineBars values={monthlySeries} />
+            ) : null}
           </section>
         </div>
       </div>
       <CampaignTable campaigns={campaignList} />
     </Page>
   );
+}
+
+function normalizeMonthlySeries(
+  period: string | undefined,
+  series: MonthlyFindingStats["series"] | undefined
+): MonthlyFindingStats["series"] {
+  if (!period || !/^\d{4}-\d{2}$/.test(period)) return [];
+  const [yearText, monthText] = period.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return [];
+
+  const counts = new Map<string, number>();
+  for (const item of series ?? []) {
+    const count = Number(item.count);
+    if (item.date && Number.isFinite(count)) counts.set(item.date, Math.max(0, count));
+  }
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const date = `${period}-${String(index + 1).padStart(2, "0")}`;
+    return { date, count: counts.get(date) ?? 0 };
+  });
 }
 
 function CampaignsPage() {
@@ -1046,10 +1081,78 @@ function CampaignsPage() {
   );
 }
 
+function ExecutionChainsPanel({
+  chains,
+  moduleIds,
+  onSelectModule
+}: {
+  chains: ExecutionChain[];
+  moduleIds: Set<string>;
+  onSelectModule: (moduleId: string) => void;
+}) {
+  if (chains.length === 0) {
+    return <EmptyState text="No execution chains are available." />;
+  }
+  return (
+    <section className="grid gap-3">
+      {chains.map((chain) => (
+        <article className="panel p-4" key={chain.id}>
+          <SectionHeader
+            title={chain.title}
+            eyebrow={chain.category}
+            description={chain.description}
+            action={<span className="badge">{chain.stages.length} stages</span>}
+          />
+          <div className="grid gap-3">
+            {chain.stages.map((stage) => (
+              <div className="compact-row" key={`${chain.id}-${stage.order}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="badge">Step {stage.order}</span>
+                    <strong>{stage.title}</strong>
+                    {stage.final_goal && <span className="badge badge-low">Final goal</span>}
+                  </div>
+                  <span className="text-xs font-medium text-slate-500">
+                    {stage.uses_previous_output ? "Uses prior output" : "Starts from campaign inputs"}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-600">{stage.purpose}</p>
+                {stage.module_ids.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <strong className="text-sm">Run</strong>
+                    {stage.module_ids.map((moduleId) => (
+                      <button
+                        className="btn btn-compact"
+                        disabled={!moduleIds.has(moduleId)}
+                        key={moduleId}
+                        onClick={() => onSelectModule(moduleId)}
+                        title={moduleIds.has(moduleId) ? `Open ${moduleId} in the run panel` : "Module is not available in the current catalog"}
+                        type="button"
+                      >
+                        <Play size={13} /> {moduleId}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-3 grid gap-1 text-xs text-slate-500">
+                  <span><strong>Inputs:</strong> {stage.required_inputs.join(", ") || "none"}</span>
+                  <span><strong>Produces:</strong> {stage.produces.join("; ") || "none"}</span>
+                  <span><strong>Next:</strong> {stage.next_action}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function ModulesPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
+  const executionChains = useQuery({ queryKey: ["executionChains"], queryFn: api.executionChains });
   const [selectedId, setSelectedId] = useSessionState("ares.dashboard.modules.selectedId", "");
   const [search, setSearch] = useSessionState("ares.dashboard.modules.search", "");
   const [category, setCategory] = useSessionState("ares.dashboard.modules.category", "");
@@ -1077,6 +1180,22 @@ function ModulesPage() {
     }
   });
   const list = modules.data ?? [];
+  const moduleIds = useMemo(() => new Set(list.map((item) => item.id)), [list]);
+  const relatedChainsByModule = useMemo(() => {
+    const related = new Map<string, string[]>();
+    for (const chain of executionChains.data ?? []) {
+      for (const stage of chain.stages) {
+        for (const moduleId of stage.module_ids) {
+          const current = related.get(moduleId) ?? [];
+          if (!current.includes(chain.title)) {
+            current.push(chain.title);
+          }
+          related.set(moduleId, current);
+        }
+      }
+    }
+    return related;
+  }, [executionChains.data]);
   const selected = list.find((item) => item.id === selectedId);
   const selectedCampaign = campaignDetail.data ?? (campaigns.data ?? []).find((item) => item.id === campaignId);
   const scopeWarning = moduleScopeWarning(selected, selectedCampaign, params, dryRun);
@@ -1091,8 +1210,9 @@ function ModulesPage() {
   });
   const sensitive = isSensitiveModule(selected);
   const dryRunSupported = selected?.dry_run_supported !== false;
+  const kerberoastTargetMissing = selected?.id === "ad.kerberoast" && !String(params.target_user ?? "").trim();
   const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending && (!dryRun || dryRunSupported);
-  const runBlocked = !canRun || Boolean(scopeWarning);
+  const runBlocked = !canRun || Boolean(scopeWarning) || kerberoastTargetMissing;
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
   const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
   const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
@@ -1112,7 +1232,7 @@ function ModulesPage() {
     <Page
       title="Modules"
       actions={<span className="status-pill">{visible.length} shown</span>}
-      tabs={["Catalog", "Run Panel", "Results"]}
+      tabs={["Catalog", "Execution Chains", "Run Panel", "Results"]}
       activeTab={activeTab}
       onTabChange={setActiveTab}
     >
@@ -1152,6 +1272,9 @@ function ModulesPage() {
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {(item.mitre_list ?? []).slice(0, 4).map((technique) => <span className="badge" key={technique}>{technique}</span>)}
+                  {(relatedChainsByModule.get(item.id) ?? []).slice(0, 2).map((chainTitle) => (
+                    <span className="badge" key={chainTitle}>Chain: {chainTitle}</span>
+                  ))}
                 </div>
               </button>
             ))}
@@ -1160,6 +1283,22 @@ function ModulesPage() {
             )}
           </div>
         </section>
+      )}
+      {activeTab === "Execution Chains" && (
+        <>
+          {executionChains.isPending && <EmptyState text="Loading execution chains..." />}
+          {executionChains.error && <DataPanel title="Execution Chain Error" data={executionChains.error} />}
+          {!executionChains.isPending && !executionChains.error && (
+            <ExecutionChainsPanel
+              chains={executionChains.data ?? []}
+              moduleIds={moduleIds}
+              onSelectModule={(moduleId) => {
+                setSelectedId(moduleId);
+                setActiveTab("Run Panel");
+              }}
+            />
+          )}
+        </>
       )}
       {activeTab === "Run Panel" && (
         <section className="panel p-4">
@@ -1199,7 +1338,12 @@ function ModulesPage() {
                 run.mutate();
               }}
             >
-              <ParamForm schema={selected.param_schema} values={params} onChange={setParams} />
+              <ParamForm
+                schema={selected.param_schema}
+                values={params}
+                onChange={setParams}
+                requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
+              />
               {runHint && (
                 <p className="notice">
                   {runHint}
@@ -2431,14 +2575,34 @@ function HighlightRow({
   );
 }
 
-function SparklineBars({ values }: { values: number[] }) {
-  const max = Math.max(...values, 1);
+function SparklineBars({ values }: { values: MonthlyFindingStats["series"] }) {
+  const max = Math.max(...values.map((value) => value.count), 1);
+  const labelDays = new Set([1, 7, 14, 21, 28, values.length]);
   return (
-    <div className="sparkline" aria-hidden="true">
-      {values.map((value, index) => (
-        <span key={`${value}-${index}`} style={{ height: `${Math.max(12, (value / max) * 100)}%` }} />
-      ))}
-    </div>
+    <>
+      <div className="sparkline" aria-hidden="true">
+        {values.map((value) => (
+          <span
+            key={value.date}
+            title={`${formatMonthlyDate(value.date)} — ${value.count} ${value.count === 1 ? "security signal" : "security signals"}`}
+            style={{ height: value.count > 0 ? `${Math.max(6, (value.count / max) * 100)}%` : "0%" }}
+          />
+        ))}
+      </div>
+      <div className="sparkline-axis" aria-hidden="true">
+        {values.map((value) => {
+          const day = Number(value.date.slice(-2));
+          return <span key={value.date}>{labelDays.has(day) ? formatMonthlyDate(value.date) : null}</span>;
+        })}
+      </div>
+    </>
+  );
+}
+
+function formatMonthlyDate(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(
+    new Date(Date.UTC(year, month - 1, day))
   );
 }
 
@@ -2875,11 +3039,13 @@ function LiveEventCard({ event, index }: { event: unknown; index: number }) {
 function ParamForm({
   schema,
   values,
-  onChange
+  onChange,
+  requiredOverrides
 }: {
   schema: ModuleMeta["param_schema"];
   values: Record<string, unknown>;
   onChange: (values: Record<string, unknown>) => void;
+  requiredOverrides?: Record<string, boolean>;
 }) {
   const entries = Object.entries(schema ?? {});
   if (entries.length === 0) {
@@ -2887,35 +3053,40 @@ function ParamForm({
   }
   return (
     <div className="grid gap-3">
-      {entries.map(([name, field]) => (
-        <label className="block text-sm font-semibold" key={name}>
-          <span className="flex items-center gap-2">
-            <span>
-              {name}
-              {field.required && <span className="text-red-700"> *</span>}
+      {entries.map(([name, field]) => {
+        const required = requiredOverrides?.[name] ?? field.required;
+        const inputField = required === field.required ? field : { ...field, required };
+        const description = fieldDescription(name, field);
+        return (
+          <label className="block text-sm font-semibold" key={name}>
+            <span className="flex items-center gap-2">
+              <span>
+                {name}
+                {required && <span className="text-red-700"> *</span>}
+              </span>
+              {!required && <span className="badge">optional</span>}
             </span>
-            {!field.required && <span className="badge">optional</span>}
-          </span>
-          <ParamInput
-            name={name}
-            field={field}
-            value={values[name]}
-            onChange={(value) => {
-              const next = { ...values };
-              if (!field.required && isEmptyParamValue(value)) {
-                delete next[name];
-              } else {
-                next[name] = value;
-              }
-              onChange(next);
-            }}
-          />
-          {field.description && <span className="mt-1 block text-xs text-slate-600">{field.description}</span>}
-          {fieldDefaultHint(field) && (
-            <span className="mt-1 block text-xs font-medium text-slate-500">{fieldDefaultHint(field)}</span>
-          )}
-        </label>
-      ))}
+            <ParamInput
+              name={name}
+              field={inputField}
+              value={values[name]}
+              onChange={(value) => {
+                const next = { ...values };
+                if (!required && isEmptyParamValue(value)) {
+                  delete next[name];
+                } else {
+                  next[name] = value;
+                }
+                onChange(next);
+              }}
+            />
+            {description && <span className="mt-1 block text-xs text-slate-600">{description}</span>}
+            {fieldDefaultHint(field) && (
+              <span className="mt-1 block text-xs font-medium text-slate-500">{fieldDefaultHint(field)}</span>
+            )}
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -2937,6 +3108,7 @@ function ParamInput({
         className="ml-2"
         type="checkbox"
         checked={Boolean(value)}
+        required={field.required}
         onChange={(event) => onChange(event.target.checked)}
       />
     );
@@ -2995,6 +3167,9 @@ function paramPlaceholder(name: string, field: ParamField): string {
     }
   }
   const lower = name.toLowerCase();
+  if (lower === "target_user" && field.description === "Required target user or SPN; run ad.enum_spn first") {
+    return "svc-sql or MSSQLSvc/sql01.lab.local:1433";
+  }
   if (lower.includes("target")) {
     return "127.0.0.1";
   }
@@ -3005,6 +3180,13 @@ function paramPlaceholder(name: string, field: ParamField): string {
     return "corp.local";
   }
   return field.required ? "" : "Leave blank to use the module default";
+}
+
+function fieldDescription(name: string, field: ParamField): string | undefined {
+  if (name === "target_user" && field.description === "Required target user or SPN; run ad.enum_spn first") {
+    return "Required target user or SPN; run ad.enum_spn first.";
+  }
+  return field.description;
 }
 
 function formatDefaultValue(value: unknown): string {
