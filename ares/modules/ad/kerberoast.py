@@ -48,6 +48,26 @@ def format_kerberos_clock_skew() -> str:
     )
 
 
+def format_kerberoast_target_required() -> str:
+    return (
+        "ad.kerberoast requires a specific target user or SPN. Run ad.enum_spn "
+        "first, choose a Kerberoastable service account such as svc-sql or an "
+        "SPN such as MSSQLSvc/sql01.lab.local:1433, then rerun ad.kerberoast "
+        "with target set."
+    )
+
+
+def _require_kerberoast_target(target_user: Any) -> str:
+    target = str(target_user or "").strip()
+    if not target:
+        raise ModuleValidationError(
+            format_kerberoast_target_required(),
+            module_id="ad.kerberoast",
+            field="target_user",
+        )
+    return target
+
+
 def is_kerberos_clock_skew(exc: BaseException) -> bool:
     error_text = f"{type(exc).__name__}: {exc}".lower()
     return "krb_ap_err_skew" in error_text or "clock skew too great" in error_text
@@ -256,6 +276,7 @@ class KerberoastModule(BaseModule):
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
+        _require_kerberoast_target(ctx.params.get("target_user"))
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
@@ -270,7 +291,7 @@ class KerberoastModule(BaseModule):
         from ares.modules.base import ModuleResult
         ad = self._extract_ad_params(ctx)
         dc, domain, username, password = ad["dc"], ad["domain"], ad["username"], ad["password"]
-        target_user = ctx.params.get("target_user")
+        target_user = _require_kerberoast_target(ctx.params.get("target_user"))
         if getattr(ctx, "dry_run", False):
             return ModuleResult(
                 status="dry_run", module_id=self.MODULE_ID,
@@ -294,6 +315,7 @@ class KerberoastModule(BaseModule):
 
     @trace_module("ad.kerberoast")
     async def run(self, dc, username, password, domain, target_user=None, **kwargs):
+        target_user = _require_kerberoast_target(target_user)
         ensure_ad_dependencies(
             ("impacket", "pyasn1", "pyasn1_modules"),
             module_id=self.MODULE_ID,

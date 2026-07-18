@@ -77,6 +77,33 @@ export interface ModuleMeta {
   [key: string]: unknown;
 }
 
+export interface ExecutionChainStage {
+  order: number;
+  title: string;
+  module_ids: string[];
+  purpose: string;
+  required_inputs: string[];
+  uses_previous_output: boolean;
+  produces: string[];
+  next_action: string;
+  final_goal: boolean;
+}
+
+export interface ExecutionChain {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  stages: ExecutionChainStage[];
+}
+
+export interface MonthlyFindingStats {
+  period: string;
+  label: string;
+  total: number;
+  series: Array<{ date: string; count: number }>;
+}
+
 export interface ReportItem {
   filename: string;
   format: string;

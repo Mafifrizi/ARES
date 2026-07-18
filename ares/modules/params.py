@@ -181,7 +181,7 @@ class DomainAuthParams(ModuleParams):
 
 class KerberoastParams(DomainAuthParams):
     target_user: str = param(
-        "Target specific user (default: all SPN accounts)",
+        "Required target user or SPN; run ad.enum_spn first",
         required=False,
         default="",
         max_length=256,

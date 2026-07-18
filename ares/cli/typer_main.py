@@ -1546,7 +1546,16 @@ def build_frontend_command(npm_command: str, ui_host: str, ui_port: int) -> list
         ui_host,
         "--port",
         str(ui_port),
+        "--strictPort",
     ]
+
+
+def is_port_in_use(host: str, port: int, *, timeout_seconds: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True
+    except OSError:
+        return False
 
 
 def wait_for_port(host: str, port: int, *, timeout_seconds: float = 30.0) -> bool:
@@ -1814,6 +1823,7 @@ def _run_dashboard_dev(
     os_name: str | None = None,
     popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
     run_func: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    port_in_use_func: Callable[[str, int], bool] = is_port_in_use,
     wait_for_port_func: Callable[..., bool] = wait_for_port,
     open_browser_func: Callable[[str], object] = webbrowser.open,
     sleep_func: Callable[[float], object] = time.sleep,
@@ -1823,6 +1833,21 @@ def _run_dashboard_dev(
     if not (frontend_dir / "package.json").exists():
         console.print(f"[red]Frontend directory not found:[/red] {frontend_dir}")
         raise typer.Exit(1)
+
+    for label, host, port in (
+        ("backend", api_host, api_port),
+        ("frontend", ui_host, ui_port),
+    ):
+        if port_in_use_func(host, port):
+            console.print(f"[red]Cannot start dashboard: {label} port {host}:{port} is already occupied.[/red]")
+            console.print(
+                "[yellow]Likely cause: a stale Python or Node dashboard process is still running.[/yellow]"
+            )
+            console.print(
+                "Cleanup suggestion: Get-Process python,node -ErrorAction SilentlyContinue "
+                "| Stop-Process -Force -ErrorAction SilentlyContinue"
+            )
+            raise typer.Exit(1)
 
     npm_command = resolve_npm_command(os_name=os_name)
     _ensure_frontend_dependencies(
@@ -1882,12 +1907,13 @@ def _run_dashboard_dev(
             threads.append(thread)
 
         if open_browser:
-            if wait_for_port_func(ui_host, ui_port, timeout_seconds=30.0):
-                console.print(f"[green]Opening dashboard:[/green] {dashboard_url}")
-            else:
+            if not wait_for_port_func(ui_host, ui_port, timeout_seconds=30.0):
                 console.print(
-                    "[yellow]Dashboard port was not ready yet; opening the URL anyway.[/yellow]"
+                    f"[red]Frontend did not become ready on {ui_host}:{ui_port}; "
+                    "dashboard was not opened.[/red]"
                 )
+                return 1
+            console.print(f"[green]Opening dashboard:[/green] {dashboard_url}")
             open_browser_func(dashboard_url)
         else:
             console.print("[dim]Browser open skipped because --no-open was provided.[/dim]")

@@ -71,6 +71,7 @@ def test_dashboard_dev_command_builders():
         "127.0.0.1",
         "--port",
         "5173",
+        "--strictPort",
     ]
 
 
@@ -80,12 +81,42 @@ def test_dashboard_dev_missing_node_modules_prints_clear_instruction(tmp_path, c
     _make_repo(tmp_path, node_modules=False)
 
     with pytest.raises(typer.Exit):
-        _run_dashboard_dev(root=tmp_path, open_browser=False)
+        _run_dashboard_dev(
+            root=tmp_path,
+            open_browser=False,
+            port_in_use_func=lambda host, port: False,
+        )
 
     output = capsys.readouterr().out
     assert "frontend/node_modules is missing" in output
     assert "npm ci" in output
     assert "--install" in output
+
+
+def test_dashboard_dev_rejects_occupied_port_before_starting_processes(tmp_path, capsys):
+    from ares.cli.typer_main import _run_dashboard_dev
+
+    _make_repo(tmp_path)
+    started = []
+
+    def fail_if_started(*args, **kwargs):
+        started.append((args, kwargs))
+        raise AssertionError("dashboard process should not start")
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _run_dashboard_dev(
+            root=tmp_path,
+            open_browser=False,
+            popen_factory=fail_if_started,
+            port_in_use_func=lambda host, port: port == 5173,
+        )
+
+    assert exc_info.value.exit_code == 1
+    assert started == []
+    output = capsys.readouterr().out
+    assert "frontend port 127.0.0.1:5173 is already occupied" in output
+    assert "stale Python or Node dashboard process" in output
+    assert "Get-Process python,node" in output
 
 
 def test_dashboard_dev_install_runs_npm_ci_when_requested(tmp_path):
@@ -134,7 +165,7 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
             self.kwargs = kwargs
             self.pid = FakeProcess._next_pid
             FakeProcess._next_pid += 1
-            self.stdout = []
+            self.stdout = ["frontend page reload src/api/client.test.ts\n"]
             self.stopped = False
             self.signals = []
             launched.append(self)
@@ -175,6 +206,7 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
         os_name="nt",
         open_browser=False,
         popen_factory=fake_popen,
+        port_in_use_func=lambda host, port: False,
         wait_for_port_func=lambda *args, **kwargs: True,
         open_browser_func=lambda url: opened.append(url),
         sleep_func=interrupt,
@@ -197,6 +229,7 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
         "127.0.0.1",
         "--port",
         "5173",
+        "--strictPort",
     ]
     assert launched[0].kwargs["cwd"] == str(tmp_path)
     assert launched[1].kwargs["cwd"] == str(tmp_path / "frontend")
@@ -209,6 +242,7 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
     assert all("/T" in call[0] and "/F" in call[0] for call in taskkill_calls)
 
     output = capsys.readouterr().out
+    assert "page reload src/api/client.test.ts" in output
     assert "Dashboard URL: http://127.0.0.1:5173/dashboard/" in output
     assert "Login username: admin" in output
     assert (
@@ -216,3 +250,117 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
         in output
     )
     assert "DoNotPrintThisSecret123!" not in output
+
+
+def test_dashboard_dev_backend_exit_terminates_frontend(monkeypatch, tmp_path, capsys):
+    from ares.cli import typer_main
+
+    _make_repo(tmp_path)
+    launched = []
+    taskkill_calls = []
+
+    class FakeProcess:
+        _next_pid = 5000
+
+        def __init__(self, command, exit_code):
+            self.command = command
+            self.pid = FakeProcess._next_pid
+            FakeProcess._next_pid += 1
+            self.exit_code = exit_code
+            self.stopped = False
+            self.stdout = []
+
+        def poll(self):
+            if self.stopped:
+                return 0
+            return self.exit_code
+
+        def wait(self, timeout=None):
+            self.stopped = True
+            return 0
+
+        def kill(self):
+            self.stopped = True
+
+    def fake_popen(command, **kwargs):
+        process = FakeProcess(command, 3 if not launched else None)
+        launched.append(process)
+        return process
+
+    def fake_run(command, **kwargs):
+        taskkill_calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(typer_main, "resolve_npm_command", lambda os_name=None: "npm.cmd")
+    monkeypatch.setattr(typer_main.subprocess, "run", fake_run)
+
+    exit_code = typer_main._run_dashboard_dev(
+        root=tmp_path,
+        os_name="nt",
+        open_browser=False,
+        popen_factory=fake_popen,
+        port_in_use_func=lambda host, port: False,
+    )
+
+    assert exit_code == 3
+    assert len(launched) == 2
+    assert launched[1].stopped
+    assert any(command[:2] == ["taskkill", "/PID"] for command in taskkill_calls)
+    assert "Backend process exited with code 3" in capsys.readouterr().out
+
+
+def test_dashboard_dev_frontend_exit_terminates_backend(monkeypatch, tmp_path, capsys):
+    from ares.cli import typer_main
+
+    _make_repo(tmp_path)
+    launched = []
+    taskkill_calls = []
+
+    class FakeProcess:
+        _next_pid = 6000
+
+        def __init__(self, command, exit_code):
+            self.command = command
+            self.pid = FakeProcess._next_pid
+            FakeProcess._next_pid += 1
+            self.exit_code = exit_code
+            self.stopped = False
+            self.stdout = []
+
+        def poll(self):
+            if self.stopped:
+                return 0
+            return self.exit_code
+
+        def wait(self, timeout=None):
+            self.stopped = True
+            return 0
+
+        def kill(self):
+            self.stopped = True
+
+    def fake_popen(command, **kwargs):
+        process = FakeProcess(command, None if not launched else 4)
+        launched.append(process)
+        return process
+
+    def fake_run(command, **kwargs):
+        taskkill_calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(typer_main, "resolve_npm_command", lambda os_name=None: "npm.cmd")
+    monkeypatch.setattr(typer_main.subprocess, "run", fake_run)
+
+    exit_code = typer_main._run_dashboard_dev(
+        root=tmp_path,
+        os_name="nt",
+        open_browser=False,
+        popen_factory=fake_popen,
+        port_in_use_func=lambda host, port: False,
+    )
+
+    assert exit_code == 4
+    assert len(launched) == 2
+    assert launched[0].stopped
+    assert any(command[:2] == ["taskkill", "/PID"] for command in taskkill_calls)
+    assert "Frontend process exited with code 4" in capsys.readouterr().out

@@ -8,6 +8,7 @@ import asyncio
 import json
 import subprocess
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -190,6 +191,111 @@ class TestDatabase:
         stats = await db.get_finding_stats(campaign.id)
         assert stats["total"] == 1
         assert stats["high"] == 1
+
+    @pytest.mark.asyncio
+    async def test_monthly_confirmed_finding_stats_empty(
+        self, db: AresDatabase
+    ) -> None:
+        stats = await db.get_monthly_confirmed_finding_stats()
+
+        assert stats["period"] == datetime.now(timezone.utc).strftime("%Y-%m")
+        assert stats["label"] == "Security signals this cycle"
+        assert stats["total"] == 0
+        assert stats["series"] == []
+
+    @pytest.mark.asyncio
+    async def test_monthly_confirmed_finding_stats_groups_current_month_only(
+        self, db: AresDatabase, campaign: Campaign
+    ) -> None:
+        await db.save_campaign(campaign)
+        month_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        period = month_start.strftime("%Y-%m")
+        day_one = f"{period}-01 12:00:00"
+        day_two = f"{period}-02 12:00:00"
+        previous_month = (month_start - timedelta(days=1)).strftime(
+            "%Y-%m-%d 12:00:00"
+        )
+
+        async def save_at(finding: Finding, discovered_at: str) -> None:
+            await db.save_finding(campaign.id, finding, finding.module_id)
+            await db.conn.execute(
+                "UPDATE findings SET discovered_at=? WHERE id=?",
+                (discovered_at, finding.id),
+            )
+
+        await save_at(
+            Finding(
+                title="Current confirmed one",
+                description="confirmed",
+                severity=Severity.HIGH,
+                validated=True,
+                module_id="test.monthly",
+            ),
+            day_one,
+        )
+        await save_at(
+            Finding(
+                title="Current confirmed two",
+                description="confirmed",
+                severity=Severity.MEDIUM,
+                validated=True,
+                module_id="test.monthly",
+            ),
+            day_one,
+        )
+        await save_at(
+            Finding(
+                title="Current confirmed three",
+                description="confirmed",
+                severity=Severity.LOW,
+                validated=True,
+                module_id="test.monthly",
+            ),
+            day_two,
+        )
+        await save_at(
+            Finding(
+                title="Previous month",
+                description="outside period",
+                severity=Severity.HIGH,
+                validated=True,
+                module_id="test.monthly",
+            ),
+            previous_month,
+        )
+        await save_at(
+            Finding(
+                title="Not validated",
+                description="filtered",
+                severity=Severity.HIGH,
+                validated=False,
+                module_id="test.monthly",
+            ),
+            day_two,
+        )
+        await save_at(
+            Finding(
+                title="False positive",
+                description="filtered",
+                severity=Severity.HIGH,
+                validated=True,
+                false_positive=True,
+                module_id="test.monthly",
+            ),
+            day_two,
+        )
+        await db.conn.commit()
+
+        stats = await db.get_monthly_confirmed_finding_stats()
+
+        assert stats["period"] == period
+        assert stats["total"] == 3
+        assert stats["series"] == [
+            {"date": f"{period}-01", "count": 2},
+            {"date": f"{period}-02", "count": 1},
+        ]
 
     @pytest.mark.asyncio
     async def test_upsert_host(self, db: AresDatabase, campaign: Campaign) -> None:

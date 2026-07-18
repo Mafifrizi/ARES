@@ -5,13 +5,16 @@ import {
   clearTokens,
   getAccessToken,
   getRefreshToken,
-  login
+  login,
+  refreshAccessToken,
+  setRefreshToken
 } from "./client";
 
 describe("api client auth", () => {
   beforeEach(() => {
     clearTokens();
     sessionStorage.clear();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -37,6 +40,38 @@ describe("api client auth", () => {
     expect(fetchMock).toHaveBeenCalledWith("/auth/token", expect.any(Object));
     expect(getAccessToken()).toBe("access");
     expect(getRefreshToken()).toBe("refresh");
+  });
+
+  it("refreshes the access token from the stored refresh token", async () => {
+    setRefreshToken("refresh-old");
+    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ refresh_token: "refresh-old" });
+      return new Response(
+        JSON.stringify({
+          access_token: "access-new",
+          refresh_token: "refresh-new",
+          token_type: "bearer",
+          expires_in: 3600,
+          role: "operator"
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(refreshAccessToken()).resolves.toBe(true);
+    expect(getAccessToken()).toBe("access-new");
+    expect(getRefreshToken()).toBe("refresh-new");
+  });
+
+  it("clears tokens when refresh fails", async () => {
+    setRefreshToken("expired-refresh");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
+
+    await expect(refreshAccessToken()).resolves.toBe(false);
+    expect(getAccessToken()).toBeNull();
+    expect(getRefreshToken()).toBeNull();
   });
 });
 

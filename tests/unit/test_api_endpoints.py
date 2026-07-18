@@ -93,6 +93,14 @@ def _make_mock_db():
     db.list_campaigns = AsyncMock(return_value=([], 0))
     db.get_campaign = AsyncMock(return_value=None)
     db.list_findings = AsyncMock(return_value=([], 0))
+    db.get_monthly_confirmed_finding_stats = AsyncMock(
+        return_value={
+            "period": "2026-07",
+            "label": "Security signals this cycle",
+            "total": 0,
+            "series": [],
+        }
+    )
     db.delete_campaign = AsyncMock(return_value=False)
     db.verify_api_key = AsyncMock(return_value=None)
     return db
@@ -175,6 +183,28 @@ class TestHealthEndpoint:
         c, _, __ = aclient
         r = await c.get("/health")
         assert "version" in r.json()
+
+
+class TestMonthlyStatsEndpoint:
+    def setup_method(self):
+        _reset_rate_limiter()
+
+    @pytest.mark.asyncio
+    async def test_monthly_stats_returns_confirmed_finding_series(self, aclient):
+        c, db, _ = aclient
+        expected = {
+            "period": "2026-07",
+            "label": "Security signals this cycle",
+            "total": 2,
+            "series": [{"date": "2026-07-18", "count": 2}],
+        }
+        db.get_monthly_confirmed_finding_stats.return_value = expected
+
+        response = await c.get("/stats/monthly", headers=_auth("admin", "team_lead"))
+
+        assert response.status_code == 200
+        assert response.json() == expected
+        db.get_monthly_confirmed_finding_stats.assert_awaited_once_with()
 
 
 # ── Security headers ──────────────────────────────────────────────────────────
@@ -721,6 +751,7 @@ class TestRouteInventoryAndDashboard:
             ("GET", "/campaigns"),
             ("DELETE", "/campaigns/{campaign_id}"),
             ("GET", "/modules"),
+            ("GET", "/modules/execution-chains"),
             ("POST", "/modules/{module_id}/run"),
             ("POST", "/reports/{campaign_id}"),
             ("GET", "/reports/{campaign_id}"),
@@ -815,6 +846,21 @@ class TestModuleSchemaEndpoint:
         ):
             assert field in module
         assert module["dry_run_supported"] is True
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_execution_chains_are_available_with_module_metadata(
+        self, aclient: Any
+    ) -> None:
+        c, db, _ = aclient
+        db.is_access_token_revoked.return_value = False
+        response = await c.get("/modules/execution-chains", headers=_auth("admin", "team_lead"))
+
+        assert response.status_code == 200
+        chains = response.json()
+        assert len(chains) >= 7
+        kerberos = next(chain for chain in chains if chain["id"] == "ad-kerberos-exposure-chain")
+        assert kerberos["stages"][1]["module_ids"] == ["ad.enum_spn"]
+        assert kerberos["stages"][2]["module_ids"] == ["ad.kerberoast"]
 
 
 # ── Reports safety ───────────────────────────────────────────────────────────
