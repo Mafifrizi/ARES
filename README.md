@@ -40,6 +40,12 @@ auditable workflow:
 ARES is designed for the part of an engagement where authorization already
 exists and the operator needs discipline, repeatability, reporting, and guardrails.
 
+## Demo Video
+
+[![ARES Kerberoast Active Directory Lab](https://img.youtube.com/vi/jsw_qoCxkps/maxresdefault.jpg)](https://www.youtube.com/watch?v=jsw_qoCxkps)
+
+This demo shows ARES running a guided Kerberoast workflow inside an isolated Active Directory lab, including SPN enumeration, Kerberoast execution, telemetry, findings, and dashboard reporting.
+
 ## What ARES Is Not
 
 ARES is not:
