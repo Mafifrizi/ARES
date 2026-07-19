@@ -149,6 +149,15 @@ def _is_successful_module_outcome(status: Any) -> bool:
     return _module_outcome_value(status) in _SUCCESSFUL_MODULE_OUTCOMES
 
 
+def _safe_module_result_payload(result: Any) -> dict[str, Any]:
+    """Redact sensitive runtime evidence before returning a module result."""
+    from ares.modules.reporting.report_gen import _redact_sensitive_evidence
+
+    payload = result.model_dump()
+    safe_payload = _redact_sensitive_evidence(payload)
+    return safe_payload if isinstance(safe_payload, dict) else {}
+
+
 async def _record_module_run(
     db: AresDatabase,
     campaign_id: str,
@@ -1436,7 +1445,7 @@ async def run_module(
         },
     )
 
-    return result.model_dump()
+    return _safe_module_result_payload(result)
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
