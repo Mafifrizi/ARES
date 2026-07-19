@@ -101,6 +101,7 @@ export interface MonthlyFindingStats {
   period: string;
   label: string;
   total: number;
+  confirmed_findings?: number;
   series: Array<{ date: string; count: number }>;
 }
 

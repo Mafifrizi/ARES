@@ -175,6 +175,25 @@ class AresDatabase:
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_findings_cvss ON findings(cvss_score)"
         )
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS module_runs (
+                id           TEXT PRIMARY KEY,
+                campaign_id  TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+                module_id    TEXT NOT NULL,
+                outcome      TEXT NOT NULL,
+                success      INTEGER NOT NULL DEFAULT 0,
+                duration_ms  REAL NOT NULL DEFAULT 0.0,
+                completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_module_runs_campaign ON module_runs(campaign_id)"
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_module_runs_completed ON module_runs(completed_at)"
+        )
         await self._conn.commit()
 
     async def _run_alembic_migrations(self) -> bool:
@@ -441,6 +460,15 @@ class AresDatabase:
         period = datetime.now(timezone.utc).strftime("%Y-%m")
         async with self._conn.execute(
             """
+            SELECT COUNT(*) AS n
+            FROM findings
+            WHERE validated=1
+              AND false_positive=0
+            """
+        ) as cur:
+            confirmed_findings = int((await cur.fetchone())["n"])
+        async with self._conn.execute(
+            """
             SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
             FROM findings
             WHERE validated=1
@@ -460,7 +488,94 @@ class AresDatabase:
             "period": period,
             "label": "Security signals this cycle",
             "total": sum(item["count"] for item in series),
+            "confirmed_findings": confirmed_findings,
             "series": series,
+        }
+
+    async def record_module_run(
+        self,
+        campaign_id: str,
+        module_id: str,
+        outcome: str,
+        success: bool,
+        duration_ms: float,
+    ) -> None:
+        """Persist non-sensitive execution metadata for restart-safe telemetry."""
+        await self._conn.execute(
+            """
+            INSERT INTO module_runs
+                (id, campaign_id, module_id, outcome, success, duration_ms, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                campaign_id,
+                module_id,
+                outcome,
+                int(bool(success)),
+                max(0.0, float(duration_ms or 0.0)),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        await self._conn.commit()
+
+    async def get_telemetry_stats(self) -> dict[str, Any]:
+        """Aggregate persisted execution, finding, and discovered-host telemetry."""
+        async with self._conn.execute(
+            "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
+        ) as cur:
+            run_rows = await cur.fetchall()
+
+        total = len(run_rows)
+        success = sum(int(row["success"]) for row in run_rows)
+        failed = total - success
+        durations = sorted(float(row["duration_ms"] or 0.0) for row in run_rows)
+
+        def percentile(fraction: float) -> float | None:
+            if not durations:
+                return None
+            index = max(0, min(len(durations) - 1, int(len(durations) * fraction + 0.999999) - 1))
+            return round(durations[index], 1)
+
+        recent_cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=60)
+        ).isoformat()
+        recent_runs = sum(
+            1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff
+        )
+
+        async with self._conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM findings
+            WHERE validated=1 AND false_positive=0
+            """
+        ) as cur:
+            confirmed_findings = int((await cur.fetchone())["n"])
+        async with self._conn.execute("SELECT COUNT(*) AS n FROM hosts") as cur:
+            discovered_hosts = int((await cur.fetchone())["n"])
+
+        return {
+            "modules": {
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "error_rate": failed / total if total else 0.0,
+            },
+            "findings": confirmed_findings,
+            "latency_ms": {
+                "p50": percentile(0.50),
+                "p95": percentile(0.95),
+                "p99": percentile(0.99),
+            },
+            "throughput": {
+                "tasks_per_min": float(recent_runs) if recent_runs else None,
+            },
+            "hosts": {
+                "available": False,
+                "discovered": discovered_hosts,
+                "owned": None,
+            },
         }
 
     async def campaign_summary(self, campaign_id: str) -> dict[str, Any]:

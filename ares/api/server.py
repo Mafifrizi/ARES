@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -122,6 +123,56 @@ def _finding_from_db_row(row: dict[str, Any], *, report_confirmed: bool = False)
     if row.get("discovered_at"):
         data["discovered_at"] = row["discovered_at"]
     return Finding(**data)
+
+
+_SUCCESSFUL_MODULE_OUTCOMES = {
+    "modulestatus.done",
+    "done",
+    "success",
+    "partial",
+    "confirmed_findings",
+    "completed_no_findings",
+    "dry_run_ok",
+}
+
+
+def _module_outcome_value(value: Any) -> str:
+    """Normalize enum/string result values for telemetry classification."""
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None:
+        value = enum_value
+    return str(value or "").strip().lower()
+
+
+def _is_successful_module_outcome(status: Any) -> bool:
+    """Return whether a module outcome is operationally successful."""
+    return _module_outcome_value(status) in _SUCCESSFUL_MODULE_OUTCOMES
+
+
+async def _record_module_run(
+    db: AresDatabase,
+    campaign_id: str,
+    module_id: str,
+    *,
+    outcome: str,
+    success: bool,
+    duration_ms: float,
+) -> None:
+    """Persist only safe execution metadata; telemetry must not block the result."""
+    try:
+        await db.record_module_run(
+            campaign_id=campaign_id,
+            module_id=module_id,
+            outcome=str(outcome)[:64],
+            success=success,
+            duration_ms=duration_ms,
+        )
+    except Exception as exc:
+        logger.warning(
+            "module_run_telemetry_persist_failed",
+            module_id=module_id,
+            error=str(exc)[:120],
+        )
 
 
 async def _campaign_for_report(db: AresDatabase, row: dict[str, Any]) -> Campaign:
@@ -1310,8 +1361,36 @@ async def run_module(
     if getattr(body, "dry_run", False):
         return engine.dry_run_module(module_id, safe_params)
 
-    result = await engine.run_module(
-        module_id, c_obj, safe_params, actor_role=actor.role
+    run_started = time.monotonic()
+    try:
+        result = await engine.run_module(
+            module_id, c_obj, safe_params, actor_role=actor.role
+        )
+    except Exception:
+        await _record_module_run(
+            db,
+            body.campaign_id,
+            module_id,
+            outcome="error",
+            success=False,
+            duration_ms=(time.monotonic() - run_started) * 1000,
+        )
+        raise
+
+    status = _module_outcome_value(getattr(result, "status", ""))
+    outcome = _module_outcome_value(getattr(result, "outcome", "")) or status
+    success = _is_successful_module_outcome(outcome)
+    run_duration_ms = float(getattr(result, "duration_ms", 0.0) or 0.0)
+    if run_duration_ms <= 0.0:
+        run_duration_ms = max(0.0, (time.monotonic() - run_started) * 1000)
+        result.duration_ms = run_duration_ms
+    await _record_module_run(
+        db,
+        body.campaign_id,
+        module_id,
+        outcome=outcome or "unknown",
+        success=success,
+        duration_ms=run_duration_ms,
     )
     await db.audit(
         actor.username, "module_run", f"module={module_id}", body.campaign_id, module_id
@@ -1321,11 +1400,9 @@ async def run_module(
     try:
         from ares.telemetry.collector import get_collector
 
-        status = str(getattr(result, "status", "")).lower()
-        success = status in {"modulestatus.done", "done", "success", "partial"}
         get_collector().record_execution(
             module_id,
-            float(getattr(result, "duration_ms", 0.0) or 0.0),
+            run_duration_ms,
             success=success,
             campaign_id=body.campaign_id,
         )
@@ -2091,10 +2168,27 @@ async def get_monthly_stats(
 @app.get("/telemetry", tags=["telemetry"])
 async def get_telemetry(
     actor: AuthenticatedUser = _api_key_read_dep,
+    db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     from ares.telemetry.collector import get_collector
 
-    return get_collector().snapshot().to_dict()
+    snapshot = get_collector().snapshot().to_dict()
+    try:
+        persisted = await db.get_telemetry_stats()
+    except Exception as exc:
+        logger.warning("telemetry_persisted_aggregate_failed", error=str(exc)[:120])
+        return snapshot
+
+    for key in ("modules", "latency_ms", "throughput", "hosts"):
+        if isinstance(persisted.get(key), dict):
+            current = snapshot.get(key)
+            snapshot[key] = {
+                **(current if isinstance(current, dict) else {}),
+                **persisted[key],
+            }
+    if isinstance(persisted.get("findings"), int):
+        snapshot["findings"] = persisted["findings"]
+    return snapshot
 
 
 @app.get("/telemetry/prometheus", tags=["telemetry"])
@@ -2283,6 +2377,17 @@ async def run_campaign_plan(
 
     c_obj = _campaign_from_db_row(campaign)
     results = await engine.run_plan(plan, c_obj, body.global_params, actor_role=actor.role)
+    for module_id, result in results.items():
+        status = _module_outcome_value(getattr(result, "status", ""))
+        outcome = _module_outcome_value(getattr(result, "outcome", "")) or status
+        await _record_module_run(
+            db,
+            campaign_id,
+            module_id,
+            outcome=outcome or "unknown",
+            success=_is_successful_module_outcome(outcome),
+            duration_ms=float(getattr(result, "duration_ms", 0.0) or 0.0),
+        )
     return {
         "campaign_id": campaign_id,
         "modules_run": len(results),

@@ -165,7 +165,7 @@ function useSessionState<T>(key: string, initialValue: T): readonly [T, Dispatch
 const REQUIRED_FIELD_MESSAGE = "This field is required.";
 
 type ValidatableElement = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-type TelemetryMetricMap = Record<string, number | string | undefined>;
+type TelemetryMetricMap = Record<string, boolean | number | string | null | undefined>;
 interface TelemetrySnapshot {
   modules?: TelemetryMetricMap;
   queue?: TelemetryMetricMap;
@@ -855,7 +855,7 @@ function OverviewPage() {
   const monthlyData = monthlyStats.data as MonthlyFindingStats | undefined;
   const campaignList = campaigns.data ?? [];
   const activeCampaigns = campaignList.filter((campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted").length;
-  const findings = typeof snapshot?.findings === "number" ? snapshot.findings : 0;
+  const findings = typeof monthlyData?.confirmed_findings === "number" ? monthlyData.confirmed_findings : 0;
   const monthlyTotal = typeof monthlyData?.total === "number" ? monthlyData.total : 0;
   const monthlySeries = normalizeMonthlySeries(monthlyData?.period, monthlyData?.series);
   return (
@@ -863,7 +863,7 @@ function OverviewPage() {
       title="Overview"
     >
       <div className="dashboard-grid">
-        <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} />
+        <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} confirmedFindings={findings} />
         <div className="side-stack">
           <section className="panel p-4">
             <SectionHeader title="Highlights" />
@@ -1150,6 +1150,7 @@ function ExecutionChainsPanel({
 
 function ModulesPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
+  const queryClient = useQueryClient();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
   const executionChains = useQuery({ queryKey: ["executionChains"], queryFn: api.executionChains });
@@ -1173,10 +1174,18 @@ function ModulesPage() {
     onSuccess: (payload) => {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload });
       setActiveTab("Results");
+      if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
+        void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
+      }
     },
     onError: (error) => {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true });
       setActiveTab("Results");
+      if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
+        void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
+      }
     }
   });
   const list = modules.data ?? [];
@@ -2607,13 +2616,17 @@ function formatMonthlyDate(date: string): string {
 }
 
 function metricNumber(map: TelemetryMetricMap | undefined, key: string): number {
+  return metricNumberOrNull(map, key) ?? 0;
+}
+
+function metricNumberOrNull(map: TelemetryMetricMap | undefined, key: string): number | null {
   const value = map?.[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
+  if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : null;
   }
-  return 0;
+  return null;
 }
 
 function formatMetric(value: number, suffix = ""): string {
@@ -2654,20 +2667,28 @@ function formatReportDate(value: number): string {
   return new Date(timestamp).toLocaleString();
 }
 
-function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; loading: boolean }) {
+function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: TelemetrySnapshot; loading: boolean; confirmedFindings: number }) {
   const total = metricNumber(snapshot?.modules, "total");
   const success = metricNumber(snapshot?.modules, "success");
   const failed = metricNumber(snapshot?.modules, "failed");
-  const findings = typeof snapshot?.findings === "number" ? snapshot.findings : 0;
-  const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
-  const errorRate = metricNumber(snapshot?.modules, "error_rate");
-  const p95 = metricNumber(snapshot?.latency_ms, "p95");
+  const findings = confirmedFindings;
+  const successRate = total > 0 ? Math.round((success / total) * 100) : null;
+  const errorRate = total > 0 ? Math.min(100, Math.round(metricNumber(snapshot?.modules, "error_rate") * 100)) : null;
+  const p95 = metricNumberOrNull(snapshot?.latency_ms, "p95");
   const queueDepth = metricNumber(snapshot?.queue, "depth");
   const activeWorkers = metricNumber(snapshot?.workers, "active");
   const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
   const hostsDiscovered = metricNumber(snapshot?.hosts, "discovered");
-  const hostsOwned = metricNumber(snapshot?.hosts, "owned");
-  const tasksPerMin = metricNumber(snapshot?.throughput, "tasks_per_min");
+  const hostsOwned = metricNumberOrNull(snapshot?.hosts, "owned");
+  const tasksPerMin = metricNumberOrNull(snapshot?.throughput, "tasks_per_min");
+  const workerTotal = activeWorkers + unhealthyWorkers;
+  const workerCapacity = workerTotal > 0 ? Math.round((activeWorkers / workerTotal) * 100) : null;
+  const hostsAvailable = snapshot?.hosts?.available === true;
+  const hostOwnership = hostsAvailable && hostsDiscovered > 0 && hostsOwned !== null
+    ? Math.round((hostsOwned / hostsDiscovered) * 100)
+    : null;
+  const throughputValue = tasksPerMin === null ? "n/a" : `${formatMetric(tasksPerMin)}/min`;
+  const latencyDetail = p95 === null ? "no run timing data" : `${formatMetric(p95, " ms")} p95`;
 
   return (
     <section className="panel telemetry-panel">
@@ -2679,22 +2700,22 @@ function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; l
 
       <div className="telemetry-chart" aria-label="Runtime telemetry chart">
         <TelemetryBar label="Success rate" value={successRate} />
-        <TelemetryBar label="Error rate" value={Math.min(100, Math.round(errorRate * 100))} tone="danger" />
-        <TelemetryBar label="Worker capacity" value={activeWorkers + unhealthyWorkers > 0 ? Math.round((activeWorkers / (activeWorkers + unhealthyWorkers)) * 100) : 0} />
-        <TelemetryBar label="Host ownership" value={hostsDiscovered > 0 ? Math.round((hostsOwned / hostsDiscovered) * 100) : 0} tone={hostsOwned > 0 ? "danger" : "ok"} />
+        <TelemetryBar label="Error rate" value={errorRate} tone="danger" />
+        <TelemetryBar label="Worker capacity" value={workerCapacity} />
+        <TelemetryBar label="Host ownership" value={hostOwnership} tone={hostsOwned !== null && hostsOwned > 0 ? "danger" : "ok"} />
       </div>
 
       <div className="mini-stat-grid mt-4">
         <MiniStat title="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} icon={<Database size={16} />} />
         <MiniStat title="Findings" value={formatMetric(findings)} icon={<ShieldAlert size={16} />} />
         <MiniStat title="Queue" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} icon={<Layers size={16} />} />
-        <MiniStat title="Throughput" value={`${formatMetric(tasksPerMin)}/min`} detail={`${formatMetric(p95, " ms")} p95`} icon={<TrendingUp size={16} />} />
+        <MiniStat title="Throughput" value={throughputValue} detail={latencyDetail} icon={<TrendingUp size={16} />} />
       </div>
 
       <div className="telemetry-footer">
         <span><Target size={14} /> Scope: {snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</span>
-        <span>{hostsDiscovered} discovered / {hostsOwned} owned hosts</span>
-        <span>{unhealthyWorkers === 0 ? "workers healthy" : `${unhealthyWorkers} unhealthy workers`}</span>
+        <span>{hostsAvailable ? `${hostsDiscovered} discovered / ${hostsOwned ?? 0} owned hosts` : "Host ownership unavailable"}</span>
+        <span>{workerTotal === 0 ? "no worker sample" : unhealthyWorkers === 0 ? "workers healthy" : `${unhealthyWorkers} unhealthy workers`}</span>
       </div>
 
       <details className="advanced-details">
@@ -2705,15 +2726,15 @@ function TelemetryPanel({ snapshot, loading }: { snapshot?: TelemetrySnapshot; l
   );
 }
 
-function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: number; tone?: "ok" | "danger" }) {
-  const clamped = Math.max(0, Math.min(100, value));
+function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: number | null; tone?: "ok" | "danger" }) {
+  const clamped = value === null ? 0 : Math.max(0, Math.min(100, value));
   return (
-    <div className="telemetry-bar">
+    <div className="telemetry-bar" title={value === null ? "Not enough telemetry data" : undefined}>
       <span>{label}</span>
       <div className="telemetry-bar-track">
         <div className={tone === "danger" ? "telemetry-bar-fill danger" : "telemetry-bar-fill"} style={{ width: `${clamped}%` }} />
       </div>
-      <strong>{clamped}%</strong>
+      <strong>{value === null ? "n/a" : `${clamped}%`}</strong>
     </div>
   );
 }

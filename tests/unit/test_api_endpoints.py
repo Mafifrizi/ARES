@@ -98,7 +98,18 @@ def _make_mock_db():
             "period": "2026-07",
             "label": "Security signals this cycle",
             "total": 0,
+            "confirmed_findings": 0,
             "series": [],
+        }
+    )
+    db.record_module_run = AsyncMock()
+    db.get_telemetry_stats = AsyncMock(
+        return_value={
+            "modules": {"total": 0, "success": 0, "failed": 0, "error_rate": 0.0},
+            "findings": 0,
+            "latency_ms": {"p50": None, "p95": None, "p99": None},
+            "throughput": {"tasks_per_min": None},
+            "hosts": {"available": False, "discovered": 0, "owned": None},
         }
     )
     db.delete_campaign = AsyncMock(return_value=False)
@@ -119,6 +130,32 @@ def _run(coro):
 
 
 # ── shared async client ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [
+        ("modulestatus.done", True),
+        ("done", True),
+        ("success", True),
+        ("partial", True),
+        ("confirmed_findings", True),
+        ("completed_no_findings", True),
+        ("dry_run_ok", True),
+        ("failed", False),
+        ("error", False),
+        ("module_error", False),
+        ("operator_error", False),
+        ("dependency_error", False),
+        ("network_error", False),
+        ("timeout", False),
+        ("unsupported", False),
+    ],
+)
+def test_module_outcome_success_mapping(outcome: str, expected: bool) -> None:
+    from ares.api.server import _is_successful_module_outcome
+
+    assert _is_successful_module_outcome(outcome) is expected
 
 
 @pytest.fixture(scope="module")
@@ -196,6 +233,7 @@ class TestMonthlyStatsEndpoint:
             "period": "2026-07",
             "label": "Security signals this cycle",
             "total": 2,
+            "confirmed_findings": 2,
             "series": [{"date": "2026-07-18", "count": 2}],
         }
         db.get_monthly_confirmed_finding_stats.return_value = expected
@@ -1114,6 +1152,7 @@ class TestModuleRunEndpoint:
         class FakeResult:
             findings: list[Any] = [FakeFinding()]
             status = "done"
+            outcome = "confirmed_findings"
             duration_ms = 42.5
 
             def model_dump(self) -> dict[str, Any]:
@@ -1125,6 +1164,7 @@ class TestModuleRunEndpoint:
                     "raw_output": {},
                     "error": "",
                     "duration_ms": self.duration_ms,
+                    "outcome": self.outcome,
                 }
 
         class FakeEngine:
@@ -1141,6 +1181,14 @@ class TestModuleRunEndpoint:
 
         db.is_access_token_revoked.return_value = False
         db.save_finding = AsyncMock()
+        db.record_module_run.reset_mock()
+        db.get_telemetry_stats.return_value = {
+            "modules": {"total": 1, "success": 1, "failed": 0, "error_rate": 0.0},
+            "findings": 1,
+            "latency_ms": {"p50": 42.5, "p95": 42.5, "p99": 42.5},
+            "throughput": {"tasks_per_min": 1.0},
+            "hosts": {"available": False, "discovered": 0, "owned": None},
+        }
         db.get_campaign.return_value = {
             "id": "camp-telemetry",
             "name": "Telemetry",
@@ -1182,6 +1230,9 @@ class TestModuleRunEndpoint:
         assert snapshot["modules"]["success"] == 1
         assert snapshot["findings"] == 1
         assert snapshot["latency_ms"]["p50"] == 42.5
+        db.record_module_run.assert_awaited_once()
+        assert db.record_module_run.await_args.kwargs["outcome"] == "confirmed_findings"
+        assert db.record_module_run.await_args.kwargs["success"] is True
 
 
 class TestReportEndpoints:
