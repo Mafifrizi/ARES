@@ -1032,6 +1032,7 @@ function CampaignsPage() {
             <DataPanel title="Create Error" data={create.error} />
           </section>
           <CampaignTable campaigns={campaignList} />
+          <DataPanel title="Campaign Error" data={campaigns.error} />
         </>
       )}
       {activeTab === "Scope" && (
@@ -1062,6 +1063,9 @@ function CampaignsPage() {
             </div>
           </section>
           <DataPanel title="Delete Error" data={remove.error} />
+          <DataPanel title="Campaign Detail Error" data={detail.error} />
+          <DataPanel title="CVSS Error" data={cvss.error} />
+          <DataPanel title="Campaign Diff Error" data={diff.error} />
           <DataPanel title="Campaign Detail" data={detail.data} />
           <DataPanel title="CVSS Summary" data={cvss.data} />
           <DataPanel title="Diff" data={diff.data} />
@@ -1074,6 +1078,7 @@ function CampaignsPage() {
             <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
             {!selected ? <EmptyState text="Select a campaign to review findings." /> : null}
           </section>
+          {selected ? <DataPanel title="Findings Error" data={findings.error} /> : null}
           {selected ? <FindingsTable findings={findings.data ?? []} /> : null}
         </section>
       )}
@@ -1291,6 +1296,7 @@ function ModulesPage() {
               <EmptyState text="No modules match the current search and filters." />
             )}
           </div>
+          <DataPanel title="Module Catalog Error" data={modules.error} />
         </section>
       )}
       {activeTab === "Execution Chains" && (
@@ -1335,6 +1341,7 @@ function ModulesPage() {
               <Loader2 className="spin" size={16} /> Loading campaign scope...
             </div>
           )}
+          <DataPanel title="Campaign Scope Error" data={campaignDetail.error} />
           {selected ? (
             <form
               aria-busy={run.isPending}
@@ -1612,6 +1619,7 @@ function ReportsPage() {
             {libraryError}
           </p>
         )}
+        <DataPanel title="Report Library Error" data={reports.error} />
         {campaignId && reportItems.length === 0 && (
           <EmptyState text="No reports generated for this campaign yet." />
         )}
@@ -1677,6 +1685,7 @@ function GraphPage() {
           ) : (
             <EmptyState text={campaignId ? "No graph nodes yet. Run discovery modules or ingest BloodHound JSON." : "Select a campaign to load graph data."} />
           )}
+          <DataPanel title="Graph Error" data={graph.error} />
         </section>
       )}
       {activeTab === "Attack Paths" && (
@@ -1690,6 +1699,8 @@ function GraphPage() {
           </div>
           {!campaignId ? (
             <EmptyState text="Select a campaign to load attack paths." />
+          ) : paths.error ? (
+            <DataPanel title="Attack Path Error" data={paths.error} />
           ) : paths.data ? (
             <DataPanel title="Attack Paths" data={paths.data} />
           ) : (
@@ -1734,6 +1745,7 @@ function GraphPage() {
           </form>
           {warning && <p className="notice notice-danger mt-3">{warning}</p>}
           <DataPanel title="Attack Paths" data={paths.data} />
+          <DataPanel title="Attack Path Error" data={paths.error} />
           <DataPanel
             title={(ingest.error ?? (persistedIngestResult?.isError ? persistedIngestResult.payload : undefined)) ? "Ingest Error" : "Ingest Result"}
             data={ingest.data ?? ingest.error ?? persistedIngestResult?.payload}
@@ -1769,6 +1781,7 @@ function TemplatesPage() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
     >
+      <DataPanel title="Template Error" data={templates.error} />
       {activeTab === "Templates" && (
         <section className="panel p-4">
           <SectionHeader
@@ -1970,7 +1983,7 @@ function StrategyPage() {
               <MiniStat title="Authorization" value={allowed ? "ready" : "restricted"} />
             </div>
           </section>
-          {active.data ? <DataPanel title="Active" data={active.data} /> : <EmptyState text="No active strategy state is available yet." />}
+          {active.error ? <DataPanel title="Active Strategy Error" data={active.error} /> : active.data ? <DataPanel title="Active" data={active.data} /> : <EmptyState text="No active strategy state is available yet." />}
         </section>
       )}
       {activeTab === "Result" && (
@@ -2173,15 +2186,15 @@ function SecurityPage() {
             </div>
           ))}
           {(keys.data ?? []).length === 0 && <EmptyState text="No API keys yet." />}
-          <DataPanel title="API Key Error" data={apiKeyError ?? remove.error} />
+          <DataPanel title="API Key Error" data={apiKeyError ?? remove.error ?? keys.error} />
         </section>
       )}
       {activeTab === "Audit" && (
         <section className="grid gap-4">
           {user?.role === "team_lead" ? (
             <>
-              {audit.data ? <DataPanel title="Security Audit" data={audit.data} /> : <EmptyState text="No security audit data loaded yet." />}
-              {users.data ? <DataPanel title="Users" data={users.data} /> : <EmptyState text="No user records loaded yet." />}
+              {audit.error ? <DataPanel title="Security Audit Error" data={audit.error} /> : audit.data ? <DataPanel title="Security Audit" data={audit.data} /> : <EmptyState text="No security audit data loaded yet." />}
+              {users.error ? <DataPanel title="Users Error" data={users.error} /> : users.data ? <DataPanel title="Users" data={users.data} /> : <EmptyState text="No user records loaded yet." />}
             </>
           ) : (
             <EmptyState text="Audit data is available to team leads." />
@@ -2294,6 +2307,7 @@ function EdrPage() {
         <p className="mt-3 text-sm text-slate-600">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
       </section>
       <DataPanel title="Stats Details" data={stats.data} />
+      <DataPanel title="Stats Error" data={stats.error} />
       </>
       )}
       {activeTab === "Report Outcome" && (
