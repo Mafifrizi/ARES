@@ -201,6 +201,7 @@ class TestDatabase:
         assert stats["period"] == datetime.now(timezone.utc).strftime("%Y-%m")
         assert stats["label"] == "Security signals this cycle"
         assert stats["total"] == 0
+        assert stats["confirmed_findings"] == 0
         assert stats["series"] == []
 
     @pytest.mark.asyncio
@@ -208,6 +209,8 @@ class TestDatabase:
         self, db: AresDatabase, campaign: Campaign
     ) -> None:
         await db.save_campaign(campaign)
+        second_campaign = Campaign(name="Second Campaign", operator="tester")
+        await db.save_campaign(second_campaign)
         month_start = datetime.now(timezone.utc).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
@@ -218,8 +221,12 @@ class TestDatabase:
             "%Y-%m-%d 12:00:00"
         )
 
-        async def save_at(finding: Finding, discovered_at: str) -> None:
-            await db.save_finding(campaign.id, finding, finding.module_id)
+        async def save_at(
+            finding: Finding,
+            discovered_at: str,
+            campaign_id: str = "",
+        ) -> None:
+            await db.save_finding(campaign_id or campaign.id, finding, finding.module_id)
             await db.conn.execute(
                 "UPDATE findings SET discovered_at=? WHERE id=?",
                 (discovered_at, finding.id),
@@ -267,6 +274,17 @@ class TestDatabase:
         )
         await save_at(
             Finding(
+                title="Second campaign confirmed",
+                description="outside period in another campaign",
+                severity=Severity.HIGH,
+                validated=True,
+                module_id="test.monthly",
+            ),
+            previous_month,
+            second_campaign.id,
+        )
+        await save_at(
+            Finding(
                 title="Not validated",
                 description="filtered",
                 severity=Severity.HIGH,
@@ -292,10 +310,67 @@ class TestDatabase:
 
         assert stats["period"] == period
         assert stats["total"] == 3
+        assert stats["confirmed_findings"] == 5
         assert stats["series"] == [
             {"date": f"{period}-01", "count": 2},
             {"date": f"{period}-02", "count": 1},
         ]
+
+    @pytest.mark.asyncio
+    async def test_telemetry_stats_persist_success_failure_and_restart(
+        self, db: AresDatabase, campaign: Campaign, settings: AresSettings
+    ) -> None:
+        from ares.api.server import _is_successful_module_outcome
+
+        empty = await db.get_telemetry_stats()
+        assert empty["modules"] == {
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "error_rate": 0.0,
+        }
+        assert empty["latency_ms"]["p95"] is None
+        assert empty["throughput"]["tasks_per_min"] is None
+        assert empty["findings"] == 0
+
+        await db.save_campaign(campaign)
+        outcomes = [
+            "modulestatus.done",
+            "done",
+            "success",
+            "partial",
+            "confirmed_findings",
+            "completed_no_findings",
+            "dry_run_ok",
+            "module_error",
+            "failed",
+        ]
+        for index, outcome in enumerate(outcomes):
+            await db.record_module_run(
+                campaign.id,
+                f"safe.{index}",
+                outcome,
+                _is_successful_module_outcome(outcome),
+                100.0 + index,
+            )
+
+        stats = await db.get_telemetry_stats()
+        assert stats["modules"]["total"] == 9
+        assert stats["modules"]["success"] == 7
+        assert stats["modules"]["failed"] == 2
+        assert stats["modules"]["error_rate"] == pytest.approx(2 / 9)
+        assert stats["latency_ms"]["p95"] == 108.0
+        assert stats["throughput"]["tasks_per_min"] == 9.0
+        assert stats["hosts"] == {"available": False, "discovered": 0, "owned": None}
+
+        reopened = await AresDatabase(db._db_path, settings.encryption_key_value).connect()
+        try:
+            restarted = await reopened.get_telemetry_stats()
+        finally:
+            await reopened.close()
+        assert restarted["modules"] == stats["modules"]
+        assert restarted["latency_ms"] == stats["latency_ms"]
+        assert restarted["findings"] == 0
 
     @pytest.mark.asyncio
     async def test_upsert_host(self, db: AresDatabase, campaign: Campaign) -> None:

@@ -43,6 +43,20 @@ CREATE TABLE IF NOT EXISTS campaigns (
 );
 
 -- ── Findings ─────────────────────────────────────────────────────────────────
+-- Module execution history (non-sensitive telemetry metadata)
+CREATE TABLE IF NOT EXISTS module_runs (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    module_id       TEXT NOT NULL,
+    outcome         TEXT NOT NULL,
+    success         INTEGER NOT NULL DEFAULT 0,
+    duration_ms     REAL NOT NULL DEFAULT 0.0,
+    completed_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_module_runs_campaign ON module_runs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_module_runs_completed ON module_runs(completed_at);
+
 CREATE TABLE IF NOT EXISTS findings (
     id              TEXT PRIMARY KEY,
     campaign_id     TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,

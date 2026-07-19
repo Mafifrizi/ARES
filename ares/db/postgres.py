@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS campaigns (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS module_runs (
+    id              TEXT PRIMARY KEY,
+    campaign_id     TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    module_id       TEXT NOT NULL,
+    outcome         TEXT NOT NULL,
+    success         INTEGER NOT NULL DEFAULT 0,
+    duration_ms     DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    completed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pg_module_runs_campaign ON module_runs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_pg_module_runs_completed ON module_runs(completed_at);
+
 CREATE TABLE IF NOT EXISTS findings (
     id              TEXT PRIMARY KEY,
     campaign_id     TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
@@ -432,6 +444,14 @@ class PostgresDatabase:
             next_month = period_start.replace(month=period_start.month + 1)
         period = period_start.strftime("%Y-%m")
         async with self._pool.acquire() as conn:
+            confirmed_findings = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                """
+            )
             rows = await conn.fetch(
                 """
                 SELECT (discovered_at AT TIME ZONE 'UTC')::date AS finding_date,
@@ -455,10 +475,94 @@ class PostgresDatabase:
             "period": period,
             "label": "Security signals this cycle",
             "total": sum(item["count"] for item in series),
+            "confirmed_findings": int(confirmed_findings or 0),
             "series": series,
         }
 
     # ── Hosts ──────────────────────────────────────────────────────────────────
+
+    async def record_module_run(
+        self,
+        campaign_id: str,
+        module_id: str,
+        outcome: str,
+        success: bool,
+        duration_ms: float,
+    ) -> None:
+        """Persist non-sensitive execution metadata for restart-safe telemetry."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO module_runs
+                    (id, campaign_id, module_id, outcome, success, duration_ms, completed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                str(uuid.uuid4()),
+                campaign_id,
+                module_id,
+                outcome,
+                int(bool(success)),
+                max(0.0, float(duration_ms or 0.0)),
+                datetime.now(timezone.utc),
+            )
+
+    async def get_telemetry_stats(self) -> dict[str, Any]:
+        """Aggregate persisted execution, finding, and discovered-host telemetry."""
+        async with self._pool.acquire() as conn:
+            run_rows = await conn.fetch(
+                "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
+            )
+            confirmed_findings = int(
+                await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM findings
+                    WHERE validated=1 AND false_positive=0
+                    """
+                )
+                or 0
+            )
+            discovered_hosts = int(await conn.fetchval("SELECT COUNT(*) FROM hosts") or 0)
+
+        total = len(run_rows)
+        success = sum(int(row["success"]) for row in run_rows)
+        failed = total - success
+        durations = sorted(float(row["duration_ms"] or 0.0) for row in run_rows)
+
+        def percentile(fraction: float) -> float | None:
+            if not durations:
+                return None
+            index = max(0, min(len(durations) - 1, int(len(durations) * fraction + 0.999999) - 1))
+            return round(durations[index], 1)
+
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        recent_runs = sum(
+            1
+            for row in run_rows
+            if row["completed_at"] is not None and row["completed_at"] >= recent_cutoff
+        )
+        return {
+            "modules": {
+                "total": total,
+                "success": success,
+                "failed": failed,
+                "error_rate": failed / total if total else 0.0,
+            },
+            "findings": confirmed_findings,
+            "latency_ms": {
+                "p50": percentile(0.50),
+                "p95": percentile(0.95),
+                "p99": percentile(0.99),
+            },
+            "throughput": {
+                "tasks_per_min": float(recent_runs) if recent_runs else None,
+            },
+            "hosts": {
+                "available": False,
+                "discovered": discovered_hosts,
+                "owned": None,
+            },
+        }
 
     async def upsert_host(self, h: Any) -> str:
         async with self._pool.acquire() as conn:
