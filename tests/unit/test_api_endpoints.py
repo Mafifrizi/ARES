@@ -1129,6 +1129,94 @@ class TestModuleRunEndpoint:
         }
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
+    async def test_module_result_redacts_sensitive_hash_evidence(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        full_asrep = "$krb5asrep$23$user@LAB.LOCAL:abcdef123456"
+        full_tgs = "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef123456"
+
+        class FakeRegistry:
+            def get(self, module_id: str) -> Any:
+                return object
+
+        class FakeResult:
+            findings: list[Any] = []
+            status = "done"
+            duration_ms = 1.0
+
+            def model_dump(self) -> dict[str, Any]:
+                return {
+                    "module_id": "demo.hash_output",
+                    "status": "done",
+                    "findings": [
+                        {
+                            "evidence": {
+                                "hash_count": 2,
+                                "sample_hash": full_asrep,
+                            }
+                        }
+                    ],
+                    "validation_results": [],
+                    "raw_output": {
+                        "asrep_hashes": [full_asrep],
+                        "kerberos_hashes": [full_tgs],
+                        "accounts": [{"name": "svc-sql", "hash": full_tgs}],
+                        "hash_count": 2,
+                    },
+                    "error": "",
+                    "duration_ms": self.duration_ms,
+                }
+
+        class FakeEngine:
+            registry = FakeRegistry()
+
+            async def run_module(
+                self,
+                module_id: str,
+                campaign: Any,
+                params: dict[str, Any],
+                actor_role: str = "",
+            ) -> FakeResult:
+                return FakeResult()
+
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.return_value = {
+            "id": "camp-hash-output",
+            "name": "Hash Output",
+            "client": "Internal",
+            "operator": "admin",
+            "noise_profile": "normal",
+            "scope_json": '[{"cidr": "10.0.0.0/8", "description": ""}]',
+            "targets_json": '["10.0.0.5"]',
+            "status": "created",
+        }
+        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        try:
+            response = await c.post(
+                "/modules/demo.hash_output/run",
+                json={
+                    "campaign_id": "camp-hash-output",
+                    "params": {"target": "10.0.0.5"},
+                    "dry_run": False,
+                },
+                headers=_auth("admin", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert full_asrep not in response.text
+        assert full_tgs not in response.text
+        assert payload["raw_output"]["hash_count"] == 2
+        assert payload["raw_output"]["asrep_hashes"] == "[REDACTED sensitive evidence]"
+        assert payload["raw_output"]["kerberos_hashes"] == "[REDACTED sensitive evidence]"
+        assert payload["findings"][0]["evidence"]["sample_hash"] == "[REDACTED sensitive evidence]"
+
+    @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_module_run_updates_telemetry_snapshot(
         self, aclient: Any, monkeypatch: Any
     ) -> None:
