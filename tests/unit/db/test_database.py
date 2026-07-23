@@ -99,7 +99,7 @@ class TestPluginLoader:
         assert len(ad_mods) >= 4
 
     def test_external_dir_empty_is_ok(self, tmp_path: Path) -> None:
-        loader = PluginLoader()
+        loader = PluginLoader(trusted_external_roots=[tmp_path])
         loader._load_external(str(tmp_path))  # Should not raise
         assert loader.errors == []
 
@@ -135,14 +135,14 @@ class ExternalTestModule(BaseModule):
         return [], {}
 '''
         (tmp_path / "external_test_module.py").write_text(plugin_code)
-        loader = PluginLoader()
+        loader = PluginLoader(trusted_external_roots=[tmp_path])
         registry = loader.load_all(external_dir=str(tmp_path))
         assert "external.test" in registry
 
     def test_invalid_plugin_does_not_crash_loader(self, tmp_path: Path) -> None:
         """Broken plugin should not crash the loader."""
         (tmp_path / "broken.py").write_text("this is not valid python }{}{")
-        loader = PluginLoader()
+        loader = PluginLoader(trusted_external_roots=[tmp_path])
         loader.load_all(external_dir=str(tmp_path))
         assert len(loader.errors) >= 1
 

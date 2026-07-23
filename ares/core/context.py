@@ -86,6 +86,8 @@ class ExecutionContext:
     # These are references — mutations visible to engine after execution
     session:    Any = None    # OperatorSession
     vault:      Any = None    # CredentialVault
+    artifact_store: Any = None  # ArtifactStore
+    runtime_state: Any = None   # CampaignRuntimeState
 
     # ── Engine references ─────────────────────────────────────────────────
     settings:   Any = None    # AresSettings
@@ -180,6 +182,7 @@ class ExecutionContext:
             "tags":          self.tags,
             "has_credentials": len(self.credentials) > 0,
             "has_session":     self.session is not None,
+            "has_artifact_store": self.artifact_store is not None,
         }
 
     @classmethod
@@ -195,6 +198,8 @@ class ExecutionContext:
         credentials:  list[Any] | None = None,
         session:      Any = None,
         vault:        Any = None,
+        artifact_store: Any = None,
+        runtime_state: Any = None,
         settings:     Any = None,
         noise:        Any = None,
         telemetry:    Any = None,
@@ -218,6 +223,8 @@ class ExecutionContext:
             credentials    = credentials or [],
             session        = session,
             vault          = vault,
+            artifact_store = artifact_store,
+            runtime_state  = runtime_state,
             settings       = settings,
             campaign       = campaign,
             noise          = noise,

@@ -707,6 +707,55 @@ class AresDatabase:
             result.append(d)
         return result
 
+    async def save_campaign_graph(self, campaign_id: str, graph: dict[str, Any]) -> None:
+        """Persist a sanitized graph snapshot without adding a new schema dependency."""
+        graph_id = f"campaign_graph:{campaign_id}"
+        payload = json.dumps(graph, separators=(",", ":"))
+        await self._conn.execute(
+            """
+            INSERT INTO loot
+                (id,campaign_id,loot_type,name,description,content_enc,source_module,tags_json)
+            VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+              description=excluded.description,
+              content_enc=excluded.content_enc,
+              source_module=excluded.source_module,
+              tags_json=excluded.tags_json,
+              captured_at=datetime('now')
+            """,
+            (
+                graph_id,
+                campaign_id,
+                "campaign_graph",
+                "durable_attack_graph",
+                "Sanitized artifact and BloodHound graph snapshot",
+                self._enc_val(payload),
+                "core.graph",
+                json.dumps(["runtime", "safe-metadata"]),
+            ),
+        )
+        await self._conn.commit()
+
+    async def get_campaign_graph(self, campaign_id: str) -> dict[str, Any] | None:
+        """Load the latest safe graph snapshot, returning no decrypted loot to callers."""
+        async with self._conn.execute(
+            """
+            SELECT content_enc FROM loot
+            WHERE id=? AND campaign_id=? AND loot_type='campaign_graph'
+            """,
+            (f"campaign_graph:{campaign_id}", campaign_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row or not row["content_enc"]:
+            return None
+        try:
+            decoded = self._dec_val(row["content_enc"])
+            parsed = json.loads(decoded) if decoded else None
+            return parsed if isinstance(parsed, dict) else None
+        except (TypeError, ValueError):
+            logger.warning("campaign_graph_snapshot_invalid", campaign_id=campaign_id[:8])
+            return None
+
     # ── Audit log ─────────────────────────────────────────────────────────────
 
     async def audit(self, actor: str, action: str, detail: str = "",

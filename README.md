@@ -219,12 +219,14 @@ Common page inputs and outputs:
 
 Telemetry note:
 
-The Overview telemetry panel is an in-memory operational snapshot for the
-currently running ARES API process. It shows module run totals, success/failure
-counts, latency, throughput, findings, hosts, queue depth, and worker health. It
-is useful while operating or recording a demo, but it is not the durable
-campaign database and resets when the API process restarts. Use Campaigns,
-Findings, and Reports for permanent engagement history.
+The Overview telemetry panel combines live process metrics with database-backed
+aggregates for module runs, confirmed findings, and discovered hosts. Queue
+depth and worker health remain process-local and reset on restart; campaign
+findings, credentials, module-run records, and graph snapshots remain durable.
+
+Graph data is hydrated from campaign records and a sanitized persisted graph
+snapshot. BloodHound/SharpHound imports are available to later graph requests;
+credential secrets are never included in graph or API payloads.
 
 Planning modes:
 

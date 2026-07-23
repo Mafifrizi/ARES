@@ -96,6 +96,12 @@ class StrategyEngine:
         logger.info("strategy_engine_start", goal=goal, max_rounds=max_rounds,
                     llm_backend=llm_backend, consensus=bool(secondary_backend))
 
+        # Strategy executions must share the same campaign vault, session, and
+        # artifact store as API and plan executions.  The engine owns the
+        # rehydration boundary, including durable credentials and hosts.
+        if self._engine and hasattr(self._engine, "ensure_campaign_runtime"):
+            await self._engine.ensure_campaign_runtime(campaign)
+
         for round_num in range(1, max_rounds + 1):
             logger.info("strategy_round_start", round=round_num, goal=goal)
 
@@ -325,41 +331,63 @@ class StrategyEngine:
                     if isinstance(result, Exception):
                         success = False
                         findings_count = 0
+                        quality = 0.0
+                        evidence = f"module_error: {str(result)[:160]}"
                         logger.warning("strategy_module_error", module=mid,
                                        error=str(result)[:100])
                     else:
-                        success       = getattr(result, "status", "") in ("success", "partial")
-                        findings_count = len(getattr(result, "findings", []))
+                        from ares.core.engine import is_successful_module_outcome
 
-                    quality = getattr(result, "effective_quality", 0.5 if success else 0.0)
-                    evidence = getattr(result, "outcome_evidence", "")
+                        status = getattr(result, "status", "")
+                        outcome_value = getattr(result, "outcome", "") or status
+                        success = is_successful_module_outcome(outcome_value)
+                        findings_count = len(getattr(result, "findings", []))
+                        validations = list(getattr(result, "validation_results", []) or [])
+                        passed_confidence = [
+                            float(getattr(validation, "confidence", 0.0))
+                            for validation in validations
+                            if bool(getattr(validation, "passed", False))
+                        ]
+                        if passed_confidence:
+                            quality = sum(passed_confidence) / len(passed_confidence)
+                        elif findings_count:
+                            # EngineModuleResult.findings contains only confirmed findings.
+                            quality = 0.6
+                        else:
+                            # ModuleStatus.DONE is a successful, evidence-light result.
+                            quality = 0.5 if success else 0.0
+                        evidence = str(
+                            getattr(result, "outcome_message", "")
+                            or getattr(result, "error", "")
+                            or getattr(result, "outcome", "")
+                            or ""
+                        )[:200]
                     outcome = ModuleOutcome(
-                        module_id=mid, success=quality >= 0.5,
+                        module_id=mid, success=success and quality >= 0.5,
                         quality=quality, evidence=evidence,
                         edr_vendor=edr_vendor, bypass_used=bypass_name,
                         findings_count=findings_count,
                     )
                     round_outcomes.append(outcome)
                     self._kb.record_outcome(
-                        mid, success=quality >= 0.5, quality=quality,
+                        mid, success=outcome.success, quality=quality,
                         evidence=evidence, edr_vendor=edr_vendor, bypass_used=bypass_name
                     )
                     # Persist bypass outcome to DB for cross-session learning
-                    if bypass_name and self._engine and hasattr(self._engine, "_db"):
-                        _db_ref = getattr(self._engine, "_db", None)
+                    if bypass_name and self._engine:
+                        _db_ref = getattr(self._engine, "db", None)
                         if _db_ref and hasattr(_db_ref, "save_bypass_outcome"):
                             try:
-                                import asyncio as _aio
-                                _aio.ensure_future(_db_ref.save_bypass_outcome(
+                                await _db_ref.save_bypass_outcome(
                                     technique_id=bypass_name,
                                     edr_vendor=edr_vendor,
                                     edr_version="",
-                                    success=quality >= 0.5,
+                                    success=outcome.success,
                                     campaign_id=getattr(campaign, "id", ""),
                                     notes=evidence[:200] if evidence else "",
-                                ))
-                            except Exception:
-                                pass  # DB persistence is best-effort
+                                )
+                            except Exception as exc:
+                                logger.debug("strategy_bypass_outcome_persist_failed", error=str(exc)[:100])
                     # Update per-host state memory
                     # AD modules use "dc" key, Linux use "host", others use "target"
                     _mp = stage_params.get(mid, {}) if isinstance(stage_params, dict) else {}
@@ -371,7 +399,7 @@ class StrategyEngine:
                     if target_hint and not isinstance(result, Exception):
                         self._target_state.update_from_result(mid, target_hint, result)
 
-                    if success:
+                    if outcome.success:
                         succeeded.append(mid)
                     else:
                         failed.append(mid)

@@ -110,6 +110,26 @@ _PRIVILEGE_COLORS = {
     "user":         "#6c757d",
 }
 
+_GRAPH_SECRET_KEYS = {
+    "secret", "secret_enc", "password", "passwd", "token", "api_key",
+    "private_key", "hash_value", "nt_hash", "lm_hash", "cracked_value",
+}
+
+
+def _safe_graph_data(value: Any) -> Any:
+    """Defence in depth for graph snapshots originating outside the API process."""
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_graph_data(item)
+            for key, item in value.items()
+            if str(key).lower() not in _GRAPH_SECRET_KEYS
+        }
+    if isinstance(value, list):
+        return [_safe_graph_data(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
 
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
@@ -136,11 +156,23 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
     session = getattr(campaign, "session", None) or getattr(campaign, "_session", None)
 
     if session:
-        hosts = getattr(session, "hosts", {})
-        for ip, host in hosts.items():
+        session_hosts = getattr(session, "hosts", None)
+        if isinstance(session_hosts, dict):
+            host_items = list(session_hosts.items())
+        elif callable(getattr(session, "all_hosts", None)):
+            host_items = [
+                (str(getattr(host, "ip_address", "") or getattr(host, "hostname", "")), host)
+                for host in session.all_hosts()
+            ]
+        else:
+            host_items = []
+        for ip, host in host_items:
+            if not ip:
+                continue
             c_level = getattr(getattr(host, "compromise_level", None), "value", "none")
             is_dc   = getattr(host, "is_dc", False)
             hostname = getattr(host, "hostname", "") or ip
+            is_owned = bool(getattr(host, "owned", getattr(host, "is_owned", False)))
 
             add_node(APIGraphNode(
                 id    = f"host:{ip}",
@@ -153,11 +185,11 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                     "is_dc":            is_dc,
                     "open_ports":       getattr(host, "open_ports", []),
                     "os_info":          getattr(host, "os_info", ""),
-                    "owned":            getattr(host, "is_owned", False),
+                    "owned":            is_owned,
                 },
                 color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
                 shape = "diamond" if is_dc else "circle",
-                size  = 35 if is_dc else (28 if getattr(host, "is_owned", False) else 20),
+                size  = 35 if is_dc else (28 if is_owned else 20),
             ))
 
             # Edges: discovery chain
@@ -190,9 +222,9 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                     ))
 
     # ── Credentials ────────────────────────────────────────────────────────
-    vault = getattr(campaign, "vault", None)
+    vault = getattr(campaign, "vault", None) or getattr(campaign, "_vault", None)
     if vault:
-        creds = getattr(vault, "_credentials", {})
+        creds = getattr(vault, "_store", None) or getattr(vault, "_credentials", {})
         for cred_id, cred in creds.items():
             username  = getattr(cred, "username", "")
             domain    = getattr(cred, "domain", "")
@@ -352,6 +384,75 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
             },
         },
     }
+
+
+def merge_durable_attack_graph(
+    campaign_graph: dict[str, Any],
+    artifact_graph: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Merge a persisted AttackGraph snapshot into the dashboard graph contract."""
+    if not artifact_graph:
+        campaign_graph["data_sources"] = {"campaign_runtime": True, "artifact_graph": False}
+        return campaign_graph
+
+    nodes = list(campaign_graph.get("nodes", []))
+    edges = list(campaign_graph.get("edges", []))
+    node_map: dict[str, str] = {}
+    for raw_node in artifact_graph.get("nodes", []):
+        if not isinstance(raw_node, dict) or not raw_node.get("id"):
+            continue
+        raw_id = str(raw_node["id"])
+        node_id = f"artifact:{raw_id}"
+        node_map[raw_id] = node_id
+        node_type = str(raw_node.get("type") or "artifact")
+        nodes.append(APIGraphNode(
+            id=node_id,
+            type=node_type,
+            label=str(raw_node.get("label") or raw_id),
+            data={
+                "risk": raw_node.get("risk", 0.0),
+                "is_target": bool(raw_node.get("is_target", False)),
+                "properties": _safe_graph_data(raw_node.get("properties", {})),
+                "source": "durable_artifact_graph",
+            },
+            color=str(raw_node.get("color") or "#64748b"),
+            shape="diamond" if bool(raw_node.get("is_target", False)) else "circle",
+            size=24 if bool(raw_node.get("is_target", False)) else 18,
+        ).to_dict())
+    for raw_edge in artifact_graph.get("links", []):
+        if not isinstance(raw_edge, dict):
+            continue
+        source = node_map.get(str(raw_edge.get("source") or ""))
+        target = node_map.get(str(raw_edge.get("target") or ""))
+        if not source or not target:
+            continue
+        edges.append(APIGraphEdge(
+            source=source,
+            target=target,
+            type=str(raw_edge.get("type") or "related"),
+            label=str(raw_edge.get("label") or ""),
+            weight=float(raw_edge.get("weight", 1.0) or 1.0),
+            data={
+                "properties": _safe_graph_data(raw_edge.get("properties", {})),
+                "source": "durable_artifact_graph",
+            },
+        ).to_dict())
+
+    merged = dict(campaign_graph)
+    merged["nodes"] = nodes
+    merged["edges"] = edges
+    stats = dict(merged.get("stats", {}))
+    stats["total_nodes"] = len(nodes)
+    stats["total_edges"] = len(edges)
+    stats["artifact_nodes"] = len(node_map)
+    stats["artifact_edges"] = sum(
+        1 for edge in edges
+        if edge.get("data", {}).get("source") == "durable_artifact_graph"
+    )
+    merged["stats"] = stats
+    merged["layout_hint"] = "hierarchical" if len(nodes) < 20 else "force_directed"
+    merged["data_sources"] = {"campaign_runtime": True, "artifact_graph": True}
+    return merged
 
 # Backward-compatible aliases
 GraphNode = APIGraphNode

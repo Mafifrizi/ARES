@@ -32,7 +32,7 @@ import inspect
 import os as _os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 from ares.core.logger import get_logger
 
@@ -195,9 +195,18 @@ class PluginLoader:
     ENTRY_POINT_GROUP = "ares.modules"
     EXTERNAL_DIR_ENV = "ARES_PLUGIN_DIR"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        trusted_external_roots: Iterable[str | Path] | None = None,
+    ) -> None:
         self.registry = ModuleRegistry()
         self._errors: list[dict[str, str]] = []
+        # Explicit process-local injection for controlled embedding/tests only;
+        # it never expands the production environment/default allowlist.
+        self._trusted_external_roots = tuple(
+            Path(root).resolve() for root in (trusted_external_roots or ())
+        )
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -311,6 +320,7 @@ class PluginLoader:
 
         _allowed_bases = [
             Path.home().resolve(),
+            *self._trusted_external_roots,
             Path("/tmp").resolve(),  # noqa: S108  — sandbox staging area
         ]
         if not any(

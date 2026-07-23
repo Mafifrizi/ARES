@@ -1318,9 +1318,10 @@ class TestModuleRunEndpoint:
         assert snapshot["modules"]["success"] == 1
         assert snapshot["findings"] == 1
         assert snapshot["latency_ms"]["p50"] == 42.5
-        db.record_module_run.assert_awaited_once()
-        assert db.record_module_run.await_args.kwargs["outcome"] == "confirmed_findings"
-        assert db.record_module_run.await_args.kwargs["success"] is True
+        # Persistence belongs to the DB-bound engine.  A lightweight route
+        # double must not cause the API layer to write a second record.
+        db.record_module_run.assert_not_awaited()
+        db.save_finding.assert_not_awaited()
 
 
 class TestReportEndpoints:
@@ -1471,6 +1472,9 @@ class TestReportEndpoints:
         class FakeEngine:
             registry = FakeRegistry()
 
+            def __init__(self, db: AresDatabase) -> None:
+                self.db = db
+
             async def run_module(
                 self,
                 module_id: str,
@@ -1511,20 +1515,29 @@ class TestReportEndpoints:
                         remediation="Rotate service account credentials.",
                         host="10.10.10.20",
                     )
-                return EngineModuleResult(
+                result = EngineModuleResult(
                     module_id=module_id,
                     status=ModuleStatus.DONE,
                     findings=[finding],
                     raw_output={"confirmed": 1},
                     duration_ms=12.0,
                 )
+                await self.db.save_finding(campaign.id, finding, module_id)
+                await self.db.record_module_run(
+                    campaign.id,
+                    module_id,
+                    result.outcome,
+                    True,
+                    result.duration_ms,
+                )
+                return result
 
         def generator_factory(*args: Any, **kwargs: Any) -> Any:
             return real_report_generator(output_dir=str(tmp_path / "reports"), **kwargs)
 
         app.state.db = real_db
         app.dependency_overrides[get_db] = lambda: real_db
-        app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        app.dependency_overrides[get_engine] = lambda: FakeEngine(real_db)
         monkeypatch.setattr(report_gen, "ReportGenerator", generator_factory)
         try:
             common_params = {

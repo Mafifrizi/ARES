@@ -669,6 +669,54 @@ class PostgresDatabase:
             result.append(d)
         return result
 
+    async def save_campaign_graph(self, campaign_id: str, graph: dict[str, Any]) -> None:
+        """Persist a sanitized graph snapshot in the existing encrypted loot store."""
+        graph_id = f"campaign_graph:{campaign_id}"
+        payload = json.dumps(graph, separators=(",", ":"))
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO loot
+                    (id,campaign_id,loot_type,name,description,content_enc,source_module,tags_json)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+                ON CONFLICT(id) DO UPDATE SET
+                  description=EXCLUDED.description,
+                  content_enc=EXCLUDED.content_enc,
+                  source_module=EXCLUDED.source_module,
+                  tags_json=EXCLUDED.tags_json,
+                  captured_at=now()
+                """,
+                graph_id,
+                campaign_id,
+                "campaign_graph",
+                "durable_attack_graph",
+                "Sanitized artifact and BloodHound graph snapshot",
+                self._enc_val(payload),
+                "core.graph",
+                json.dumps(["runtime", "safe-metadata"]),
+            )
+
+    async def get_campaign_graph(self, campaign_id: str) -> dict[str, Any] | None:
+        """Load the safe graph snapshot without returning general decrypted loot."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT content_enc FROM loot
+                WHERE id=$1 AND campaign_id=$2 AND loot_type='campaign_graph'
+                """,
+                f"campaign_graph:{campaign_id}",
+                campaign_id,
+            )
+        if not row or not row["content_enc"]:
+            return None
+        try:
+            decoded = self._dec_val(row["content_enc"])
+            parsed = json.loads(decoded) if decoded else None
+            return parsed if isinstance(parsed, dict) else None
+        except (TypeError, ValueError):
+            logger.warning("campaign_graph_snapshot_invalid", campaign_id=campaign_id[:8])
+            return None
+
     async def campaign_summary(self, campaign_id: str) -> dict[str, Any]:
         findings = await self.get_findings(campaign_id)
         hosts    = await self.get_hosts(campaign_id)

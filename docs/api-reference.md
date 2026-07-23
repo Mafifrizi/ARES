@@ -421,14 +421,12 @@ Clear generated report artifacts for the campaign.
 
 ### `GET /telemetry`
 
-Get current operational telemetry snapshot.
+Get the current operational telemetry snapshot.
 
-Telemetry is an in-memory runtime view of the current API process. It records
-API-triggered module runs, success/failure counts, latency, throughput, queue
-depth, worker health, findings, hosts, and other operator metrics. It is useful
-for live monitoring and demos, but it is not durable campaign history and
-resets when the API process restarts. Use the database-backed campaign,
-findings, and report endpoints for permanent records.
+The response combines live process metrics with database-backed aggregates for
+module runs, confirmed findings, and discovered hosts. Queue depth and worker
+health remain process-local; use the campaign, finding, report, and graph
+endpoints for durable engagement records.
 
 ```json
 {
@@ -472,15 +470,19 @@ List all users.
 
 ### `GET /graph/{campaign_id}`
 
-Get the attack graph for a campaign.
+Get the attack graph for a campaign. The response hydrates persisted hosts,
+findings, safe credential metadata, and the campaign graph snapshot.
+Credential secrets are never returned.
 
 ### `GET /graph/{campaign_id}/attack-paths`
 
-Get identified attack paths sorted by severity.
+Get identified attack paths sorted by severity from persisted campaign data and
+the campaign graph snapshot.
 
 ### `POST /graph/{campaign_id}/bloodhound`
 
-Ingest BloodHound/SharpHound JSON from an allowed local path.
+Ingest BloodHound/SharpHound JSON from an allowed local path and persist a
+sanitized campaign graph snapshot for later requests.
 
 ---
 

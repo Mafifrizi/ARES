@@ -41,6 +41,26 @@ except ImportError:
 
 logger = get_logger("ares.graph")
 
+_GRAPH_SECRET_KEYS = {
+    "secret", "secret_enc", "password", "passwd", "token", "api_key",
+    "private_key", "hash_value", "nt_hash", "lm_hash", "cracked_value",
+}
+
+
+def _safe_graph_value(value: Any) -> Any:
+    """Drop secret-bearing fields before graph data is persisted or returned."""
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_graph_value(item)
+            for key, item in value.items()
+            if str(key).lower() not in _GRAPH_SECRET_KEYS
+        }
+    if isinstance(value, list):
+        return [_safe_graph_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
 
 # ── Edge types ────────────────────────────────────────────────────────────────
 
@@ -124,6 +144,112 @@ class AttackGraph:
         self._g: Any = nx.DiGraph()  # type: ignore[attr-defined]
         self._nodes: dict[str, GraphNode] = {}
         self._edges: list[GraphEdge] = []
+
+    @classmethod
+    def from_d3_json(cls, payload: dict[str, Any]) -> "AttackGraph":
+        """Rehydrate a graph snapshot produced by :meth:`to_d3_json`."""
+        graph = cls()
+        graph.load_d3_json(payload)
+        return graph
+
+    def load_d3_json(self, payload: dict[str, Any]) -> "AttackGraph":
+        """Load safe D3 graph metadata into this graph instance."""
+        for raw_node in payload.get("nodes", []):
+            if not isinstance(raw_node, dict) or not raw_node.get("id"):
+                continue
+            node = GraphNode(
+                node_id=str(raw_node["id"]),
+                label=str(raw_node.get("label") or raw_node["id"]),
+                node_type=str(raw_node.get("type") or "unknown"),
+                properties=_safe_graph_value(raw_node.get("properties", {})),
+                risk_score=float(raw_node.get("risk", 0.0) or 0.0),
+                is_target=bool(raw_node.get("is_target", False)),
+            )
+            self._add_node(node)
+        for raw_edge in payload.get("links", []):
+            if not isinstance(raw_edge, dict):
+                continue
+            source, target = raw_edge.get("source"), raw_edge.get("target")
+            if not source or not target:
+                continue
+            self._add_edge(GraphEdge(
+                source=str(source),
+                target=str(target),
+                edge_type=str(raw_edge.get("type") or "related"),
+                label=str(raw_edge.get("label") or ""),
+                weight=float(raw_edge.get("weight", 1.0) or 1.0),
+                properties=_safe_graph_value(raw_edge.get("properties", {})),
+            ))
+        return self
+
+    def add_persisted_campaign_data(
+        self,
+        hosts: list[dict[str, Any]],
+        findings: list[dict[str, Any]],
+        credentials: list[dict[str, Any]],
+    ) -> "AttackGraph":
+        """Add durable host/finding/credential metadata without any secret values."""
+        host_ids: dict[str, str] = {}
+        for host in hosts:
+            ip = str(host.get("ip_address") or "")
+            if not ip:
+                continue
+            node_id = f"host:{ip}"
+            host_ids[ip] = node_id
+            label = str(host.get("hostname") or ip)
+            self._add_node(GraphNode(
+                node_id=node_id,
+                label=label,
+                node_type="domain_controller" if host.get("is_dc") else "host",
+                properties={
+                    "ip": ip,
+                    "hostname": host.get("hostname") or "",
+                    "os": host.get("os") or "",
+                    "domain": host.get("domain") or "",
+                    "open_ports": host.get("open_ports_json") or [],
+                },
+                risk_score=4.0 if host.get("is_dc") else 2.0,
+                is_target=bool(host.get("is_dc")),
+            ))
+        for finding in findings:
+            finding_id = str(finding.get("id") or "")
+            title = str(finding.get("title") or "Finding")
+            node_id = f"finding:{finding_id or title[:80]}"
+            self._add_node(GraphNode(
+                node_id=node_id,
+                label=title,
+                node_type="finding",
+                properties={
+                    "severity": finding.get("severity") or "info",
+                    "module_id": finding.get("module_id") or "",
+                    "cvss_score": finding.get("cvss_score") or 0.0,
+                    "mitre_technique": finding.get("mitre_technique") or "",
+                    "trace_id": finding.get("trace_id") or "",
+                },
+                risk_score=float(finding.get("cvss_score") or 0.0),
+            ))
+            host = str(finding.get("host") or "")
+            if host in host_ids:
+                self._add_edge(GraphEdge(
+                    source=host_ids[host], target=node_id,
+                    edge_type="finding", label="finding", weight=1.0,
+                ))
+        for credential in credentials:
+            cred_id = str(credential.get("id") or "")
+            username = str(credential.get("username") or "credential")
+            domain = str(credential.get("domain") or "")
+            self._add_node(GraphNode(
+                node_id=f"credential:{cred_id or username}",
+                label=f"{domain}\\{username}" if domain else username,
+                node_type="credential",
+                properties={
+                    "cred_type": credential.get("cred_type") or "",
+                    "source_module": credential.get("source_module") or "",
+                    "cracked": bool(credential.get("cracked", False)),
+                },
+                risk_score=2.0,
+            ))
+        return self
 
     # ── Build from artifact store ──────────────────────────────────────────
 
@@ -445,7 +571,17 @@ class AttackGraph:
     def high_value_nodes(self) -> list[GraphNode]:
         """Return all high-value target nodes (DC, Domain Admins, krbtgt, etc.)."""
         return [
-            self._nodes[nid]
+            self._nodes.get(
+                nid,
+                GraphNode(
+                    node_id=nid,
+                    label=str(data.get("label", nid)),
+                    node_type=str(data.get("node_type", "unknown")),
+                    properties=_safe_graph_value(data.get("properties", {})),
+                    risk_score=float(data.get("risk_score", 0.0) or 0.0),
+                    is_target=True,
+                ),
+            )
             for nid, data in self._g.nodes(data=True)
             if data.get("is_target")
         ]
@@ -498,7 +634,7 @@ class AttackGraph:
                 "color":    self.NODE_COLORS.get(ntype, "#94a3b8"),
                 "risk":     data.get("risk_score", 1.0),
                 "is_target": data.get("is_target", False),
-                "properties": data.get("properties", {}),
+                "properties": _safe_graph_value(data.get("properties", {})),
             })
 
         links = []
@@ -509,7 +645,7 @@ class AttackGraph:
                 "label":     data.get("label", ""),
                 "type":      data.get("edge_type", ""),
                 "weight":    data.get("weight", 1.0),
-                "properties": data.get("properties", {}),
+                "properties": _safe_graph_value(data.get("properties", {})),
             })
 
         return {"nodes": nodes, "links": links}

@@ -135,3 +135,63 @@ export interface ApiKeyCreateResponse extends ApiKeyMeta {
   key: string;
   note?: string;
 }
+
+export type SafeGraphValue = boolean | number | string | null | SafeGraphValue[] | { [key: string]: SafeGraphValue };
+
+export interface GraphNodePayload {
+  id: string;
+  type: string;
+  label: string;
+  color?: string;
+  data?: Record<string, SafeGraphValue>;
+  style?: {
+    color?: string;
+    shape?: string;
+    size?: number;
+  };
+}
+
+export interface GraphEdgePayload {
+  source: string;
+  target: string;
+  type?: string;
+  label?: string;
+  weight?: number;
+  data?: Record<string, SafeGraphValue>;
+  style?: {
+    color?: string;
+    dashed?: boolean;
+  };
+}
+
+export interface CampaignGraph {
+  nodes: GraphNodePayload[];
+  edges: GraphEdgePayload[];
+  stats?: Record<string, SafeGraphValue>;
+  data_sources?: Record<string, SafeGraphValue>;
+}
+
+export interface AttackPathStep {
+  from: string;
+  to: string;
+  edge?: string;
+  attack?: string;
+  weight?: number;
+}
+
+export interface AttackPath {
+  path_length?: number;
+  total_score?: number;
+  steps: AttackPathStep[];
+  attack_modules?: string[];
+  start?: string;
+  end?: string;
+}
+
+export interface AttackPathsResponse {
+  paths?: AttackPath[];
+  path?: AttackPath | null;
+  paths_found?: number;
+  message?: string;
+  stats?: Record<string, SafeGraphValue>;
+}

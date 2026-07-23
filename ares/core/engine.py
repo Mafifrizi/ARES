@@ -22,6 +22,7 @@ from ares.core.logger import audit, setup_logger
 from ares.core.noise import NoiseController
 from ares.core.notifier import build_notifier_from_settings
 from ares.core.plugin.loader import ModuleRegistry, PluginLoader
+from ares.core.runtime_state import CampaignRuntimeState, CampaignRuntimeStateStore
 from ares.core.validator import FindingValidator, ValidationResult, build_default_validator
 logger = get_logger("ares.engine")
 
@@ -45,9 +46,31 @@ MODULE_OUTCOMES = (
     "unsupported",
     "module_error",
 )
+_SUCCESSFUL_MODULE_OUTCOMES = {
+    "modulestatus.done",
+    "done",
+    "success",
+    "partial",
+    "confirmed_findings",
+    "completed_no_findings",
+    "dry_run_ok",
+}
 _SECRET_ERROR_PATTERN = re.compile(
     r"(?i)\b(password|passwd|secret|token|api[_-]?key|nt_hash|lm_hash|krbtgt_hash)\b\s*([:=])\s*([^\s,;]+)"
 )
+
+
+def module_outcome_value(value: Any) -> str:
+    """Normalize enum/string result values for durable outcome handling."""
+    enum_value = getattr(value, "value", None)
+    if enum_value is not None:
+        value = enum_value
+    return str(value or "").strip().lower()
+
+
+def is_successful_module_outcome(value: Any) -> bool:
+    """Return whether an engine outcome represents a completed execution."""
+    return module_outcome_value(value) in _SUCCESSFUL_MODULE_OUTCOMES
 
 
 def redact_error_message(error: str | None) -> str | None:
@@ -312,6 +335,13 @@ class AresEngine:
         self._registry:   ModuleRegistry | None = None
         self._semaphore:  asyncio.Semaphore | None = None
         self.notifier     = build_notifier_from_settings(self.settings)
+        from ares.telemetry.collector import get_collector
+
+        self.telemetry = get_collector()
+        self._runtime_states = CampaignRuntimeStateStore(
+            self.settings.encryption_key_value,
+            telemetry=self.telemetry,
+        )
         setup_logger(self.settings.ares_log_level, self.settings.ares_log_file)
 
     # ── Loading ────────────────────────────────────────────────────────────
@@ -337,6 +367,34 @@ class AresEngine:
     def list_modules(self) -> list[dict[str, Any]]:
         return self.registry.list_metadata()
 
+    async def ensure_campaign_runtime(
+        self,
+        campaign: Campaign,
+        db: Any | None = None,
+    ) -> CampaignRuntimeState:
+        """Attach the campaign's shared state and rehydrate safe durable state."""
+        return await self._runtime_states.ensure(campaign, self.db if db is None else db)
+
+    def bind_database(self, db: Any) -> None:
+        """Bind the active API database once, rejecting accidental split persistence."""
+        if self.db is None:
+            self.db = db
+            return
+        if self.db is not db:
+            raise RuntimeError("AresEngine is already bound to a different database")
+
+    async def restore_campaign_vault(self, campaign: Campaign) -> int:
+        """Restore encrypted credential records into the shared campaign state."""
+        if self.db is None:
+            raise RuntimeError("Credential restore requires an active database")
+        return await self._runtime_states.restore_vault(campaign, self.db)
+
+    def campaign_runtime_state(self, campaign_id: str) -> CampaignRuntimeState | None:
+        return self._runtime_states.get(campaign_id)
+
+    def discard_campaign_runtime(self, campaign_id: str) -> None:
+        self._runtime_states.discard(campaign_id)
+
     # ── Single module ──────────────────────────────────────────────────────
 
     async def run_module(
@@ -348,25 +406,26 @@ class AresEngine:
         timeout_seconds: int  = 120,
         actor_role:      str  = "operator",
     ) -> EngineModuleResult:
+        runtime_state = await self.ensure_campaign_runtime(campaign)
 
         if module_id not in self.registry:
-            return EngineModuleResult(
+            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                 module_id=module_id,
                 status=ModuleStatus.FAILED,
                 error=f"Module '{module_id}' not found. Run: ares module list",
-            )
+            ))
 
         # ── RBAC check — role must be allowed to run this module ──────────
         from ares.collab.manager import can_role_run_module
         if not can_role_run_module(actor_role, module_id, self.registry):
             audit("module_rbac_denied", actor=campaign.operator,
                   detail=f"role={actor_role} module={module_id}")
-            return EngineModuleResult(
+            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                 module_id=module_id,
                 status=ModuleStatus.FAILED,
                 error=(f"Role '{actor_role}' is not permitted to run "
                        f"'{module_id}'. Check ROLE_PERMISSIONS in collab/manager.py."),
-            )
+            ))
 
         # ── Scope pre-check — enforce before any module code runs ────────
         # Cloud/reporting modules use API credentials, not host IPs — skip scope check
@@ -378,12 +437,12 @@ class AresEngine:
                 from ares.core.errors import ScopeError
                 audit("module_scope_violation", actor=campaign.operator,
                       detail=f"module={module_id} target={_target!r} not in scope")
-                return EngineModuleResult(
+                return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                     module_id=module_id,
                     status=ModuleStatus.FAILED,
                     error=f"Target {_target!r} is not in campaign scope {[s.cidr for s in campaign.scope]}. "
                           "Add the target CIDR to scope or use a different target.",
-                )
+                ))
 
         cls      = self.registry.get(module_id)
         noise    = NoiseController(campaign)
@@ -411,8 +470,14 @@ class AresEngine:
                 domain     = params.get("domain", ""),
                 params     = params,
                 operator   = campaign.operator,
+                credentials=runtime_state.safe_credentials(),
+                session    = runtime_state.session,
+                vault      = runtime_state.vault,
+                artifact_store=runtime_state.artifact_store,
+                runtime_state=runtime_state,
                 settings   = self.settings,
                 noise      = noise,
+                telemetry  = runtime_state.telemetry,
             )
 
 
@@ -430,12 +495,12 @@ class AresEngine:
                     duration_ms = round((time.monotonic() - t0) * 1000, 2)
                     audit("module_validation_failed", actor=campaign.operator,
                           detail=f"module={module_id} reason=timeout")
-                    return EngineModuleResult(
+                    return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                         module_id   = module_id,
                         status      = ModuleStatus.FAILED,
                         error       = f"Module '{module_id}' validate() timed out (>10s)",
                         duration_ms = duration_ms,
-                    )
+                    ))
                 except Exception as val_exc:
                     duration_ms = round((time.monotonic() - t0) * 1000, 2)
                     err_msg = str(val_exc)
@@ -443,12 +508,12 @@ class AresEngine:
                                    module_id=module_id, error=err_msg[:200])
                     audit("module_validation_failed", actor=campaign.operator,
                           detail=f"module={module_id} error={err_msg[:100]}")
-                    return EngineModuleResult(
+                    return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                         module_id   = module_id,
                         status      = ModuleStatus.FAILED,
                         error       = f"Validation failed: {err_msg[:300]}",
                         duration_ms = duration_ms,
-                    )
+                    ))
             # ── end validate ───────────────────────────────────────────
 
             # Call execute(ctx) — preferred interface.
@@ -508,8 +573,14 @@ class AresEngine:
                         domain     = params.get("domain", ""),
                         params     = params,
                         operator   = campaign.operator,
+                        credentials=runtime_state.safe_credentials(),
+                        session    = runtime_state.session,
+                        vault      = runtime_state.vault,
+                        artifact_store=runtime_state.artifact_store,
+                        runtime_state=runtime_state,
                         settings   = self.settings,
                         noise      = noise,
+                        telemetry  = runtime_state.telemetry,
                     )
                     module_result2 = await asyncio.wait_for(
                         module2.execute(ctx2), timeout=effective_timeout
@@ -540,11 +611,11 @@ class AresEngine:
         if _last_exc is not None:
             status = (ModuleStatus.TIMEOUT if _was_timeout
                       else ModuleStatus.FAILED)
-            return EngineModuleResult(
+            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
                 module_id=module_id, status=status,
                 error=str(_last_exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
-            )
+            ))
 
         duration_ms = round((time.monotonic() - t0) * 1000, 2)
 
@@ -558,9 +629,17 @@ class AresEngine:
 
         # Persist confirmed findings
         confirmed: list[Finding] = []
+        from ares.core.cvss import enrich_finding_with_cvss
+        from ares.core.tracing import get_current_trace_id
+
+        trace_id = get_current_trace_id() or ""
         for f in findings:
             if not f.false_positive:
                 f.validated = True
+                f.module_id = f.module_id or module_id
+                enrich_finding_with_cvss(f)
+                if trace_id:
+                    f.trace_id = trace_id
                 campaign.add_finding(f)
                 confirmed.append(f)
                 if self.db:
@@ -598,7 +677,7 @@ class AresEngine:
                       f"confirmed={len(confirmed)} fp={fp_count}"))
 
         # ── Persist vault credentials to DB ───────────────────────────────
-        if self.db and getattr(campaign, "_vault", None) is not None:
+        if self.db and runtime_state.vault is not None:
             try:
                 await self._persist_vault_credentials(campaign)
             except Exception as _ve:
@@ -612,16 +691,12 @@ class AresEngine:
             cls_ref = self.registry.get(module_id)
             outputs = getattr(cls_ref, "OUTPUTS", []) if cls_ref else []
             if outputs and raw:
-                # Retrieve or create campaign artifact store
-                if not hasattr(campaign, "_artifact_store"):
-                    from ares.normalize.artifacts import ArtifactStore
-                    campaign._artifact_store = ArtifactStore()  # type: ignore[attr-defined]
                 normalizer = ArtifactNormalizer()
                 artifact_count = normalizer.normalize(
                     module_id=module_id,
                     outputs=outputs,
                     raw=raw,
-                    store=campaign._artifact_store,  # type: ignore[attr-defined]
+                    store=runtime_state.artifact_store,
                 )
                 if artifact_count > 0:
                     logger.debug(
@@ -632,12 +707,16 @@ class AresEngine:
         except Exception as _norm_exc:
             logger.debug("artifact_normalization_skipped", error=str(_norm_exc)[:80])
 
-        return EngineModuleResult(
+        if self.db:
+            await self._persist_runtime_hosts(campaign, runtime_state)
+            await self._persist_runtime_graph(campaign, runtime_state)
+
+        return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
             module_id=module_id, status=ModuleStatus.DONE,
             findings=confirmed,
             validation_results=validation_results,
             raw_output=raw, duration_ms=duration_ms,
-        )
+        ))
 
     # ── Parallel plan ──────────────────────────────────────────────────────
 
@@ -966,6 +1045,137 @@ class AresEngine:
                 "Disable dry-run only after confirming authorization.",
             ],
         }
+
+    async def _finalize_module_result(
+        self,
+        campaign: Campaign,
+        module_id: str,
+        result: EngineModuleResult,
+    ) -> EngineModuleResult:
+        """Persist one safe execution record after the engine has a final result."""
+        if self.db is None:
+            return result
+
+        outcome = module_outcome_value(result.outcome) or module_outcome_value(result.status)
+        success = is_successful_module_outcome(outcome)
+        duration_ms = max(0.0, float(result.duration_ms or 0.0))
+
+        try:
+            await self.db.record_module_run(
+                campaign_id=campaign.id,
+                module_id=module_id,
+                outcome=(outcome or "unknown")[:64],
+                success=success,
+                duration_ms=duration_ms,
+            )
+        except Exception as exc:
+            logger.warning(
+                "engine_module_run_persist_failed",
+                module_id=module_id,
+                error=str(exc)[:120],
+            )
+
+        try:
+            await self.db.audit(
+                campaign.operator,
+                "module_run",
+                f"module={module_id} outcome={outcome or 'unknown'}",
+                campaign.id,
+                module_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "engine_module_audit_persist_failed",
+                module_id=module_id,
+                error=str(exc)[:120],
+            )
+
+        try:
+            self.telemetry.record_execution(
+                module_id,
+                duration_ms,
+                success=success,
+                campaign_id=campaign.id,
+            )
+            if result.findings:
+                self.telemetry.record_finding(len(result.findings))
+        except Exception as exc:
+            logger.debug("engine_telemetry_record_failed", module_id=module_id, error=str(exc)[:120])
+        return result
+
+    async def _persist_runtime_hosts(
+        self,
+        campaign: Campaign,
+        runtime_state: CampaignRuntimeState,
+    ) -> None:
+        """Persist discovered host metadata without serializing runtime/session secrets."""
+        if self.db is None or not hasattr(self.db, "upsert_host"):
+            return
+
+        from ares.db.database import Host
+
+        for artifact in runtime_state.artifact_store.hosts():
+            if artifact.ip_address:
+                runtime_state.session.add_host(
+                    artifact.ip_address,
+                    hostname=artifact.hostname,
+                    fqdn=artifact.fqdn,
+                    os=artifact.os,
+                    os_version=artifact.os_version,
+                    domain=artifact.domain,
+                    is_dc=artifact.is_dc,
+                    open_ports=list(artifact.open_ports),
+                )
+
+        for host in runtime_state.session.all_hosts():
+            if not host.ip_address:
+                continue
+            try:
+                await self.db.upsert_host(Host(
+                    campaign_id=campaign.id,
+                    ip_address=host.ip_address,
+                    hostname=host.hostname or None,
+                    fqdn=host.fqdn or None,
+                    os=host.os or None,
+                    os_version=host.os_version or None,
+                    domain=host.domain or None,
+                    is_dc=host.is_dc,
+                    open_ports=list(host.open_ports),
+                    tags=list(host.tags),
+                ))
+            except Exception as exc:
+                logger.debug(
+                    "engine_host_persist_failed",
+                    campaign_id=campaign.id[:8],
+                    error=str(exc)[:120],
+                )
+
+    async def _persist_runtime_graph(
+        self,
+        campaign: Campaign,
+        runtime_state: CampaignRuntimeState,
+    ) -> None:
+        """Checkpoint a safe artifact graph using the existing encrypted loot store.
+
+        The snapshot intentionally contains graph metadata only.  It never
+        serializes vault values or artifact raw payloads, so rehydration cannot
+        expose credential secrets through the graph API.
+        """
+        if self.db is None or not hasattr(self.db, "save_campaign_graph"):
+            return
+        try:
+            from ares.graph.attack_graph import AttackGraph
+
+            graph = AttackGraph()
+            graph.build_from_store(runtime_state.artifact_store)
+            runtime_state.attack_graph = graph
+            await self.db.save_campaign_graph(campaign.id, graph.to_d3_json())
+        except Exception as exc:
+            logger.debug(
+                "engine_graph_snapshot_persist_failed",
+                campaign_id=campaign.id[:8],
+                error=str(exc)[:120],
+            )
 
     async def _persist_vault_credentials(self, campaign: "Campaign") -> int:
         """

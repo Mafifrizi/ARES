@@ -31,13 +31,31 @@ _ENCKEY = "integration-enc-key-min32-chars!!"
 _ADMIN  = "IntegrationAdmin1!"
 _DBURL  = "sqlite+aiosqlite:///file:int_post_test?mode=memory&cache=shared&uri=true"
 
-os.environ["ARES_SECRET_KEY"]            = _SECRET
-os.environ["ARES_ENCRYPTION_KEY"]        = _ENCKEY
-os.environ["ARES_DEFAULT_ADMIN_PASSWORD"]= _ADMIN
-os.environ["ARES_DATABASE_URL"]          = _DBURL
-
 import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(scope="module", autouse=True)
+def isolated_api_post_environment():
+    """Keep this integration database URL from leaking into the full suite."""
+    updates = {
+        "ARES_SECRET_KEY": _SECRET,
+        "ARES_ENCRYPTION_KEY": _ENCKEY,
+        "ARES_DEFAULT_ADMIN_PASSWORD": _ADMIN,
+        "ARES_DATABASE_URL": _DBURL,
+    }
+    original = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    from ares.core.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    for key, value in original.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    get_settings.cache_clear()
 
 
 def _fresh_client() -> TestClient:

@@ -202,6 +202,29 @@ async def _campaign_for_report(db: AresDatabase, row: dict[str, Any]) -> Campaig
     return campaign
 
 
+async def _hydrate_campaign_graph_data(
+    db: AresDatabase,
+    engine: AresEngine,
+    row: dict[str, Any],
+) -> tuple[Campaign, Any, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Rebuild the safe campaign view used by both graph endpoints."""
+    campaign = _campaign_from_db_row(row)
+    finding_rows, _ = await db.list_findings(
+        campaign.id,
+        page=1,
+        per_page=10000,
+        false_positive=False,
+    )
+    campaign.findings = [
+        _finding_from_db_row(finding_row, report_confirmed=True)
+        for finding_row in finding_rows
+    ]
+    hosts = await db.get_hosts(campaign.id)
+    credentials = await db.get_credentials(campaign.id, decrypt=False)
+    runtime_state = await engine.ensure_campaign_runtime(campaign, db)
+    return campaign, runtime_state, finding_rows, hosts, credentials
+
+
 def _setup_otel(app: FastAPI, settings: Any) -> None:
     """Initialize OpenTelemetry tracing if endpoint is configured."""
     if not settings.ares_otel_endpoint:
@@ -222,6 +245,7 @@ _db: AresDatabase | None = None
 # WebSocket connection registry: campaign_id → set of WebSocket connections
 _ws_connections: dict[str, set[WebSocket]] = {}
 _active_engagements: dict[str, str] = {}  # engagement_id → campaign_id
+_engagement_tasks: dict[str, asyncio.Task[None]] = {}
 _MAX_CONCURRENT_ENGAGEMENTS = 3  # operator-configurable via ARES_MAX_ENGAGEMENTS
 
 # Asyncio lock for atomic engagement registration (prevents TOCTOU race)
@@ -294,7 +318,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     _RL["global"] = settings.ares_rate_limit_rpm
 
-    _engine = AresEngine(settings=settings)
+    _engine = AresEngine(settings=settings, db=_db)
     _engine.load_modules()
     app.state.engine = _engine
 
@@ -556,6 +580,12 @@ def get_engine(request: Request) -> AresEngine:
     engine = request.app.state.engine
     if not engine:
         raise HTTPException(503, "Engine not ready")
+    if isinstance(engine, AresEngine):
+        try:
+            engine.bind_database(request.app.state.db)
+        except RuntimeError as exc:
+            logger.error("engine_database_binding_mismatch", error=str(exc))
+            raise HTTPException(503, "Engine persistence is not ready") from exc
     return engine
 
 
@@ -1158,6 +1188,7 @@ async def restore_campaign_vault(
     request: Request,
     campaign_id: str,
     actor: AuthenticatedUser = Depends(require_operator()),
+    engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -1165,6 +1196,8 @@ async def restore_campaign_vault(
     Returns count of credentials re-hydrated into memory.
     The vault is attached to the running engine's campaign object.
     """
+    if isinstance(engine, AresEngine):
+        engine.bind_database(db)
     ip = request.client.host if request.client else "unknown"
     allowed, _ = await _limiter.is_allowed_async(
         f"vault_restore:{ip}", RATE_LIMITS["vault_restore"]
@@ -1176,19 +1209,9 @@ async def restore_campaign_vault(
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(c, actor)
 
-    records = await db.load_credentials_raw(campaign_id)
-    if not records:
-        return {
-            "restored": 0,
-            "campaign_id": campaign_id,
-            "message": "No credentials found in DB for this campaign",
-        }
-
-    from ares.credential.vault import CredentialVault
-
-    settings = get_settings()
-    vault = CredentialVault(encryption_key=settings.encryption_key_value)
-    count = vault.restore_from_db_records(records)
+    # Restore into the engine-owned per-campaign state, rather than into a
+    # local vault object that disappears as soon as this request completes.
+    count = await engine.restore_campaign_vault(_campaign_from_db_row(c))
 
     await db.audit(
         actor.username,
@@ -1196,7 +1219,11 @@ async def restore_campaign_vault(
         f"campaign={campaign_id} count={count}",
         campaign_id,
     )
-    return {"restored": count, "campaign_id": campaign_id}
+    return {
+        "restored": count,
+        "campaign_id": campaign_id,
+        "message": "Vault restored into the active campaign runtime state",
+    }
 
 
 @app.get("/campaigns/{campaign_id}/findings", tags=["campaigns"])
@@ -1309,6 +1336,9 @@ async def run_module(
     """Run module. HIGH_NOISE requires team_lead. Rate limited: 20/min."""
     from ares.modules.base import OpsecLevel
 
+    if isinstance(engine, AresEngine):
+        engine.bind_database(db)
+
     # Use the engine's already-loaded registry — avoids rescanning disk on every request
     cls = engine.registry.get(module_id)
     if cls and getattr(cls, "OPSEC_LEVEL", None) == OpsecLevel.HIGH_NOISE:
@@ -1370,69 +1400,12 @@ async def run_module(
     if getattr(body, "dry_run", False):
         return engine.dry_run_module(module_id, safe_params)
 
-    run_started = time.monotonic()
-    try:
-        result = await engine.run_module(
-            module_id, c_obj, safe_params, actor_role=actor.role
-        )
-    except Exception:
-        await _record_module_run(
-            db,
-            body.campaign_id,
-            module_id,
-            outcome="error",
-            success=False,
-            duration_ms=(time.monotonic() - run_started) * 1000,
-        )
-        raise
-
-    status = _module_outcome_value(getattr(result, "status", ""))
-    outcome = _module_outcome_value(getattr(result, "outcome", "")) or status
-    success = _is_successful_module_outcome(outcome)
-    run_duration_ms = float(getattr(result, "duration_ms", 0.0) or 0.0)
-    if run_duration_ms <= 0.0:
-        run_duration_ms = max(0.0, (time.monotonic() - run_started) * 1000)
-        result.duration_ms = run_duration_ms
-    await _record_module_run(
-        db,
-        body.campaign_id,
-        module_id,
-        outcome=outcome or "unknown",
-        success=success,
-        duration_ms=run_duration_ms,
+    # The DB-bound engine owns finding, credential, module-run, audit, and
+    # telemetry persistence.  Keeping this route read/response-only prevents
+    # duplicate rows for API-triggered executions.
+    result = await engine.run_module(
+        module_id, c_obj, safe_params, actor_role=actor.role
     )
-    await db.audit(
-        actor.username, "module_run", f"module={module_id}", body.campaign_id, module_id
-    )
-
-    # Keep the operational telemetry panel in sync with API-triggered executions.
-    try:
-        from ares.telemetry.collector import get_collector
-
-        get_collector().record_execution(
-            module_id,
-            run_duration_ms,
-            success=success,
-            campaign_id=body.campaign_id,
-        )
-        if result.findings:
-            get_collector().record_finding(len(result.findings))
-    except Exception as exc:
-        logger.debug("telemetry_record_failed", module_id=module_id, error=str(exc))
-
-    # Enrich findings with CVSS scores and trace ID before persisting
-    from ares.core.cvss import enrich_finding_with_cvss
-    from ares.core.tracing import get_current_trace_id
-
-    _trace_id = get_current_trace_id() or ""
-    for finding in result.findings:
-        enrich_finding_with_cvss(finding)
-        if _trace_id:
-            finding.trace_id = _trace_id
-
-    # Persist findings to DB
-    for finding in result.findings:
-        await db.save_finding(body.campaign_id, finding, module_id)
 
     # Broadcast to WebSocket subscribers
     await _broadcast_event(
@@ -1606,6 +1579,18 @@ async def start_autonomous_engagement(
             if config_error:
                 raise HTTPException(status_code=422, detail=config_error)
 
+    campaign_data = await _db.get_campaign(body.campaign_id)
+    if not campaign_data:
+        raise HTTPException(
+            status_code=404, detail=f"Campaign {body.campaign_id!r} not found"
+        )
+    await _require_campaign_access(campaign_data, actor)
+    campaign = (
+        _campaign_from_db_row(campaign_data)
+        if isinstance(campaign_data, dict)
+        else campaign_data
+    )
+
     # FIX 2: Concurrent engagement limit — atomic via asyncio.Lock (Issue 14)
     _max = int(os.environ.get("ARES_MAX_ENGAGEMENTS", _MAX_CONCURRENT_ENGAGEMENTS))
     _lock = await _get_engagement_lock()
@@ -1637,20 +1622,7 @@ async def start_autonomous_engagement(
 
         engagement_id = f"engage_{body.campaign_id[:8]}_{int(_time_reg.time())}"
         _active_engagements[engagement_id] = body.campaign_id
-
-    campaign_data = await _db.get_campaign(body.campaign_id)
-    if not campaign_data:
-        raise HTTPException(
-            status_code=404, detail=f"Campaign {body.campaign_id!r} not found"
-        )
     # Enforce campaign ownership — same as all other campaign endpoints
-    await _require_campaign_access(campaign_data, actor)
-    campaign = (
-        _campaign_from_db_row(campaign_data)
-        if isinstance(campaign_data, dict)
-        else campaign_data
-    )
-
     async def _run() -> None:
         from ares.strategy import OperatorNotifier, StrategyEngine
 
@@ -1702,11 +1674,13 @@ async def start_autonomous_engagement(
                 }
             )
         finally:
-            _active_engagements.pop(engagement_id, None)  # deregister on completion
+            async with _lock:
+                _active_engagements.pop(engagement_id, None)
+            _engagement_tasks.pop(engagement_id, None)
 
-    import asyncio as _aio
-
-    _aio.ensure_future(_run())
+    _engagement_tasks[engagement_id] = asyncio.create_task(
+        _run(), name=f"ares-strategy-{engagement_id}"
+    )
     return {
         "engagement_id": engagement_id,
         "status": "started",
@@ -2221,18 +2195,22 @@ async def get_prometheus(
 async def campaign_graph(
     campaign_id: str,
     actor: AuthenticatedUser = _api_key_read_dep,
+    engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
-    from ares.api.graph import build_campaign_graph
+    from ares.api.graph import build_campaign_graph, merge_durable_attack_graph
 
     campaign = await db.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(campaign, actor)
-    from ares.core.campaign import Campaign as CM
-
-    c_obj = CM(**{k: v for k, v in campaign.items() if k in CM.model_fields})
-    return build_campaign_graph(c_obj)
+    c_obj, runtime_state, _findings, _hosts, _credentials = await _hydrate_campaign_graph_data(
+        db, engine, campaign
+    )
+    snapshot = await db.get_campaign_graph(campaign_id)
+    if snapshot is None and getattr(runtime_state, "attack_graph", None) is not None:
+        snapshot = runtime_state.attack_graph.to_d3_json()
+    return merge_durable_attack_graph(build_campaign_graph(c_obj), snapshot)
 
 
 @app.get("/graph/{campaign_id}/attack-paths", tags=["visualization"])
@@ -2242,6 +2220,7 @@ async def campaign_attack_paths(
     source: str | None = None,
     target: str | None = None,
     actor: AuthenticatedUser = _api_key_read_dep,
+    engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """
@@ -2259,7 +2238,6 @@ async def campaign_attack_paths(
 
     try:
         from ares.graph.attack_graph import AttackGraph
-        from ares.normalize.artifacts import ArtifactStore
     except ImportError as e:
         logger.warning(
             "attack_graph_unavailable", error=str(e), hint="pip install networkx"
@@ -2270,25 +2248,21 @@ async def campaign_attack_paths(
             "Ensure networkx is installed: pip install ares-redteam",
         )
 
-    # Build graph from campaign findings stored in DB
-    rows, _ = await db.list_findings(campaign_id, page=1, per_page=10000)
-    hosts = await db.get_hosts(campaign_id)
-
-    store = ArtifactStore()
-    from ares.normalize.artifacts import HostArtifact
-
-    for h in hosts:
-        store.add(
-            HostArtifact(
-                ip_address=h.get("ip_address", ""),
-                hostname=h.get("hostname", ""),
-                is_dc=h.get("is_dc", False),
-                os=h.get("os", ""),
-            )
-        )
-
-    graph = AttackGraph()
-    graph.build_from_store(store)
+    _campaign, runtime_state, rows, hosts, credentials = await _hydrate_campaign_graph_data(
+        db, engine, campaign
+    )
+    snapshot = await db.get_campaign_graph(campaign_id)
+    if snapshot:
+        graph = AttackGraph.from_d3_json(snapshot)
+    elif getattr(runtime_state, "attack_graph", None) is not None:
+        graph = runtime_state.attack_graph
+    else:
+        graph = AttackGraph()
+        graph.build_from_store(runtime_state.artifact_store)
+    # These rows are durable evidence, not merely a preflight check.  Add their
+    # safe metadata so attack-path queries cannot silently ignore persisted data.
+    graph.add_persisted_campaign_data(hosts, rows, credentials)
+    runtime_state.attack_graph = graph
 
     if not graph.stats()["nodes"]:
         return {
@@ -2386,17 +2360,6 @@ async def run_campaign_plan(
 
     c_obj = _campaign_from_db_row(campaign)
     results = await engine.run_plan(plan, c_obj, body.global_params, actor_role=actor.role)
-    for module_id, result in results.items():
-        status = _module_outcome_value(getattr(result, "status", ""))
-        outcome = _module_outcome_value(getattr(result, "outcome", "")) or status
-        await _record_module_run(
-            db,
-            campaign_id,
-            module_id,
-            outcome=outcome or "unknown",
-            success=_is_successful_module_outcome(outcome),
-            duration_ms=float(getattr(result, "duration_ms", 0.0) or 0.0),
-        )
     return {
         "campaign_id": campaign_id,
         "modules_run": len(results),
@@ -2616,12 +2579,15 @@ async def ingest_bloodhound(
     campaign_id: str,
     body: BloodhoundIngestRequest,
     actor: AuthenticatedUser = Depends(require_operator()),
+    engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """
     Import BloodHound/SharpHound JSON into the campaign's attack graph.
     After ingest, use GET /graph/{id}/attack-paths to compute paths to DA.
     """
+    if isinstance(engine, AresEngine):
+        engine.bind_database(db)
     campaign = await db.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
@@ -2637,7 +2603,17 @@ async def ingest_bloodhound(
     try:
         from ares.graph.attack_graph import AttackGraph
 
-        graph = AttackGraph()
+        _campaign, runtime_state, _findings, _hosts, _credentials = await _hydrate_campaign_graph_data(
+            db, engine, campaign
+        )
+        snapshot = await db.get_campaign_graph(campaign_id)
+        if snapshot:
+            graph = AttackGraph.from_d3_json(snapshot)
+        elif getattr(runtime_state, "attack_graph", None) is not None:
+            graph = runtime_state.attack_graph
+        else:
+            graph = AttackGraph()
+            graph.build_from_store(runtime_state.artifact_store)
         result = graph.ingest_bloodhound(safe_path)
         if result.get("error"):
             raise HTTPException(422, result["error"])
@@ -2651,6 +2627,8 @@ async def ingest_bloodhound(
             f"nodes={result['nodes_added']} edges={result['edges_added']}",
             campaign_id,
         )
+        runtime_state.attack_graph = graph
+        await db.save_campaign_graph(campaign_id, graph.to_d3_json())
         return {
             "campaign_id": campaign_id,
             "ingest_result": result,
@@ -2659,6 +2637,8 @@ async def ingest_bloodhound(
         }
     except ImportError:
         raise HTTPException(503, "networkx required — pip install networkx")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")
 
