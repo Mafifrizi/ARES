@@ -516,7 +516,7 @@ class TestDashboardModuleSchemaContracts:
 
         from ares.modules.params import MODULE_PARAMS
 
-        frontend = Path("frontend/src/App.tsx").read_text(encoding="utf-8")
+        frontend = Path("frontend/src/features/dashboard/DashboardPages.tsx").read_text(encoding="utf-8")
         assert "Object.entries(schema ?? {})" in frontend
         assert "field.required" in frontend
         assert "required={field.required}" in frontend
