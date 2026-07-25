@@ -4,13 +4,15 @@ All credential/token content encrypted at rest via Fernet.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable
+from urllib.parse import unquote
 
 import aiosqlite
 from ares.core.logger import get_logger
@@ -20,6 +22,123 @@ logger = get_logger("ares.db")
 from ares.core.campaign import Campaign, Finding
 from ares.core.security import DataEncryptor, hash_password, verify_password
 from ares.db.schema import CREATE_TABLES, SCHEMA_VERSION
+
+
+async def _await_task_completion(
+    task: asyncio.Future[Any],
+    *,
+    cancellation_baseline: int,
+    caught_cancellations: list[int],
+) -> Any:
+    """Wait for one owned SQLite operation and account for caller cancellation."""
+    caller = asyncio.current_task()
+    while True:
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            if caller is not None:
+                caught_cancellations[0] = max(
+                    caught_cancellations[0],
+                    caller.cancelling() - cancellation_baseline,
+                )
+            if task.done():
+                return task.result()
+
+
+def _cancel_count() -> int:
+    task = asyncio.current_task()
+    return task.cancelling() if task is not None else 0
+
+
+def _remove_suppressed_cancellations(
+    *,
+    cancellation_baseline: int,
+    caught_cancellations: int,
+) -> int:
+    """Remove only cancellation requests suppressed after a committed rotation."""
+    task = asyncio.current_task()
+    if task is None:
+        return 0
+    removed = 0
+    while (
+        removed < caught_cancellations
+        and task.cancelling() > cancellation_baseline
+    ):
+        task.uncancel()
+        removed += 1
+    return removed
+
+
+def _sqlite_uri_query_value(query: str, name: str) -> str | None:
+    for item in query.split("&"):
+        key, separator, value = item.partition("=")
+        if unquote(key).lower() == name.lower():
+            return unquote(value) if separator else ""
+    return None
+
+
+def _windows_drive_uri_path(uri_path: str) -> str | None:
+    """Return the drive-absolute path from a standard Windows file URI."""
+    leading_slashes = len(uri_path) - len(uri_path.lstrip("/"))
+    if leading_slashes not in (0, 1, 3):
+        return None
+    candidate = uri_path[leading_slashes:]
+    if (
+        len(candidate) >= 3
+        and candidate[0].isalpha()
+        and candidate[1] == ":"
+        and candidate[2] in ("/", "\\")
+    ):
+        return candidate
+    return None
+
+
+def _normalize_sqlite_target(db_path: str) -> tuple[str, bool, str]:
+    """Bind a SQLite target to one stable identity without rewriting URI data."""
+    if db_path == ":memory:":
+        return (
+            f"file:ares-memory-{uuid.uuid4().hex}?mode=memory&cache=shared",
+            True,
+            "sqlite-memory",
+        )
+    if not db_path.startswith("file:"):
+        return str(Path(db_path).expanduser().resolve()), False, "sqlite-file"
+
+    uri_body = db_path[5:]
+    uri_path, separator, query = uri_body.partition("?")
+    if "\x00" in uri_path:
+        raise ValueError("Unsupported SQLite file URI")
+    if "%2f" in uri_path.lower() or "%5c" in uri_path.lower():
+        raise ValueError("Unsupported SQLite file URI path")
+    if _sqlite_uri_query_value(query, "vfs") is not None:
+        raise ValueError("Unsupported SQLite file URI")
+
+    mode = _sqlite_uri_query_value(query, "mode")
+    if uri_path == ":memory:" or (mode is not None and mode.lower() == "memory"):
+        return db_path, True, "sqlite-memory"
+    if not uri_path:
+        raise ValueError("Unsupported SQLite file URI")
+
+    if uri_path.startswith("//") and not uri_path.startswith("///"):
+        authority = uri_path[2:].replace("\\", "/").split("/", 1)[0]
+        if authority.lower() != "localhost":
+            raise ValueError("Unsupported SQLite file URI authority")
+
+    windows_drive_path = _windows_drive_uri_path(uri_path)
+    if windows_drive_path is not None:
+        uri_path = windows_drive_path
+        path_is_absolute = True
+    else:
+        path_is_absolute = Path(uri_path).is_absolute()
+    if not path_is_absolute and not uri_path.startswith("//localhost/"):
+        uri_path = Path(uri_path).expanduser().resolve().as_posix()
+
+    normalized = f"file:{uri_path}"
+    if separator:
+        normalized = f"{normalized}?{query}"
+    return normalized, True, "sqlite-file"
 
 
 # ── Domain models ─────────────────────────────────────────────────────────────
@@ -79,9 +198,13 @@ class AresDatabase:
         db_path: str | Path = "ares.db",
         encryption_key: str | bytes | "DataEncryptor | None" = None,
     ) -> None:
-        db_path_str = str(db_path)
-        self._is_sqlite_uri = db_path_str.startswith("file:")
-        self._db_path = db_path_str if self._is_sqlite_uri else Path(db_path_str)
+        (
+            self._db_path,
+            self._is_sqlite_uri,
+            self._database_label,
+        ) = _normalize_sqlite_target(
+            str(db_path),
+        )
         if isinstance(encryption_key, DataEncryptor):
             self._enc: DataEncryptor | None = encryption_key
         elif encryption_key:
@@ -89,20 +212,108 @@ class AresDatabase:
         else:
             self._enc = None
         self._conn: aiosqlite.Connection | None = None
+        self._connected = False
+        self._lifecycle_lock = asyncio.Lock()
 
-    @property
-    def conn(self) -> aiosqlite.Connection:
-        if self._conn is None:
+    def _require_connected(self) -> aiosqlite.Connection:
+        if not self._connected or self._conn is None:
             raise RuntimeError("Database not connected — call await db.connect() first")
         return self._conn
 
+    @property
+    def conn(self) -> aiosqlite.Connection:
+        return self._require_connected()
+
+    async def _open_primary_connection(self) -> aiosqlite.Connection:
+        return await aiosqlite.connect(
+            self._db_path,
+            uri=self._is_sqlite_uri,
+        )
+
+    async def _close_primary_connection(
+        self,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        await connection.close()
+
+    @staticmethod
+    def _name_owned_task(task: asyncio.Future[Any], name: str) -> None:
+        if isinstance(task, asyncio.Task):
+            task.set_name(name)
+
+    async def _finish_connection_cleanup(
+        self,
+        operation: Awaitable[Any],
+        *,
+        action: str,
+        cancellation_baseline: int,
+        caught_cancellations: list[int],
+    ) -> None:
+        cleanup_task = asyncio.ensure_future(operation)
+        self._name_owned_task(cleanup_task, f"ares-sqlite-{action}")
+        try:
+            await _await_task_completion(
+                cleanup_task,
+                cancellation_baseline=cancellation_baseline,
+                caught_cancellations=caught_cancellations,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as cleanup_error:
+            logger.warning(
+                "sqlite_connection_cleanup_failed",
+                action=action,
+                error_type=type(cleanup_error).__name__,
+            )
+
     async def connect(self) -> "AresDatabase":
-        self._conn = await aiosqlite.connect(str(self._db_path), uri=self._is_sqlite_uri)
-        self._conn.row_factory = aiosqlite.Row
-        if not self._is_sqlite_uri:
-            await self._conn.execute("PRAGMA journal_mode = WAL")
-        await self._conn.execute("PRAGMA foreign_keys = ON")
-        await self._init_schema()
+        async with self._lifecycle_lock:
+            return await self._connect_locked()
+
+    async def _connect_locked(self) -> "AresDatabase":
+        if self._connected and self._conn is not None:
+            return self
+
+        cancellation_baseline = _cancel_count()
+        caught_cancellations = [0]
+        open_task = asyncio.ensure_future(
+            self._open_primary_connection()
+        )
+        self._name_owned_task(open_task, "ares-sqlite-primary-connect")
+        connection = await _await_task_completion(
+            open_task,
+            cancellation_baseline=cancellation_baseline,
+            caught_cancellations=caught_cancellations,
+        )
+        if caught_cancellations[0]:
+            await self._finish_connection_cleanup(
+                connection.close(),
+                action="cancelled-primary-connect-close",
+                cancellation_baseline=cancellation_baseline,
+                caught_cancellations=caught_cancellations,
+            )
+            raise asyncio.CancelledError
+
+        self._conn = connection
+        try:
+            connection.row_factory = aiosqlite.Row
+            if not self._is_sqlite_uri:
+                await connection.execute("PRAGMA journal_mode = WAL")
+            await connection.execute("PRAGMA foreign_keys = ON")
+            await self._init_schema()
+        except BaseException:
+            self._conn = None
+            self._connected = False
+            cleanup_baseline = _cancel_count()
+            cleanup_cancellations = [0]
+            await self._finish_connection_cleanup(
+                connection.close(),
+                action="failed-primary-connect-close",
+                cancellation_baseline=cleanup_baseline,
+                caught_cancellations=cleanup_cancellations,
+            )
+            raise
+        self._connected = True
         return self
 
     async def __aenter__(self) -> "AresDatabase":
@@ -152,7 +363,11 @@ class AresDatabase:
             await self._conn.executescript(CREATE_TABLES)
             await self._conn.commit()
         await self._reconcile_sqlite_schema()
-        logger.info("db_ready", path=str(self._db_path), schema_version=SCHEMA_VERSION)
+        logger.info(
+            "db_ready",
+            database=self._database_label,
+            schema_version=SCHEMA_VERSION,
+        )
 
     async def _reconcile_sqlite_schema(self) -> None:
         """Ensure critical columns exist after idempotent/fallback migrations."""
@@ -198,7 +413,10 @@ class AresDatabase:
 
     async def _run_alembic_migrations(self) -> bool:
         if self._is_sqlite_uri:
-            logger.debug("alembic_skipped_for_sqlite_uri", db=str(self._db_path))
+            logger.debug(
+                "alembic_skipped_for_sqlite_uri",
+                database=self._database_label,
+            )
             return False
 
         try:
@@ -209,7 +427,7 @@ class AresDatabase:
             repo_root   = Path(__file__).parent.parent.parent
             alembic_ini = repo_root / "alembic.ini"
             if not alembic_ini.exists():
-                logger.debug("alembic_ini_not_found", path=str(alembic_ini))
+                logger.debug("alembic_ini_not_found", file="alembic.ini")
                 return False
 
             alembic_cfg = AlembicConfig(str(alembic_ini))
@@ -222,15 +440,21 @@ class AresDatabase:
                 None,
                 lambda: alembic_command.upgrade(alembic_cfg, "head")
             )
-            logger.info("alembic_migrations_applied", db=str(self._db_path))
+            logger.info(
+                "alembic_migrations_applied",
+                database=self._database_label,
+            )
             return True
 
         except ImportError:
             logger.debug("alembic_not_installed", hint="pip install alembic")
             return False
         except Exception as exc:
-            logger.warning("alembic_migration_failed", error=str(exc)[:200],
-                           fallback="raw_sql_create_if_not_exists")
+            logger.warning(
+                "alembic_migration_failed",
+                error_type=type(exc).__name__,
+                fallback="raw_sql_create_if_not_exists",
+            )
             return False
 
     # ── Backup / export ───────────────────────────────────────────────────────
@@ -291,8 +515,32 @@ class AresDatabase:
         return output_path
 
     async def close(self) -> None:
-        if self._conn:
-            await self._conn.close()
+        async with self._lifecycle_lock:
+            await self._close_locked()
+
+    async def _close_locked(self) -> None:
+        connection = self._conn
+        self._connected = False
+        self._conn = None
+        if connection is None:
+            return
+        cancellation_baseline = _cancel_count()
+        caught_cancellations = [0]
+        close_task = asyncio.ensure_future(
+            self._close_primary_connection(connection)
+        )
+        self._name_owned_task(close_task, "ares-sqlite-primary-close")
+        try:
+            await _await_task_completion(
+                close_task,
+                cancellation_baseline=cancellation_baseline,
+                caught_cancellations=caught_cancellations,
+            )
+        finally:
+            self._connected = False
+            self._conn = None
+        if caught_cancellations[0]:
+            raise asyncio.CancelledError
 
     def _enc_val(self, v: str | None) -> str | None:
         return self._enc.encrypt(v) if self._enc and v else v
@@ -869,7 +1117,13 @@ class AresDatabase:
             """SELECT ak.*, u.username, u.role
                FROM api_keys ak JOIN users u ON ak.user_id=u.id
                WHERE ak.key_prefix=? AND ak.is_active=1
-               AND (ak.expires_at IS NULL OR ak.expires_at > datetime('now'))""",
+               AND (
+                   ak.expires_at IS NULL
+                   OR (
+                       julianday(ak.expires_at) IS NOT NULL
+                       AND julianday(ak.expires_at) > julianday('now')
+                   )
+               )""",
             (prefix,)
         ) as cur:
             rows = [dict(r) for r in await cur.fetchall()]
@@ -922,39 +1176,216 @@ class AresDatabase:
         await self._conn.commit()
         return raw_token   # client gets raw; DB stores only hash
 
+    async def _open_refresh_rotation_connection(self) -> aiosqlite.Connection:
+        return await aiosqlite.connect(
+            self._db_path,
+            uri=self._is_sqlite_uri,
+            timeout=30.0,
+        )
+
+    async def _insert_refresh_successor(
+        self,
+        tx: aiosqlite.Connection,
+        token_hash: str,
+        user_id: str,
+        expires_at: str,
+    ) -> None:
+        await tx.execute(
+            "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
+            (token_hash, user_id, expires_at),
+        )
+
+    async def _commit_refresh_rotation(
+        self,
+        tx: aiosqlite.Connection,
+    ) -> None:
+        await tx.commit()
+
+    async def _finish_refresh_rotation_cleanup(
+        self,
+        operation: Awaitable[Any],
+        action: str,
+        *,
+        cancellation_baseline: int,
+        caught_cancellations: list[int],
+    ) -> None:
+        cleanup_task = asyncio.ensure_future(operation)
+        self._name_owned_task(
+            cleanup_task,
+            f"ares-sqlite-refresh-{action}",
+        )
+        try:
+            await _await_task_completion(
+                cleanup_task,
+                cancellation_baseline=cancellation_baseline,
+                caught_cancellations=caught_cancellations,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as cleanup_error:
+            logger.warning(
+                "refresh_rotation_cleanup_failed",
+                action=action,
+                error_type=type(cleanup_error).__name__,
+            )
+
     async def rotate_refresh_token(
         self, old_token: str
     ) -> tuple[dict[str, Any] | None, str | None]:
+        async with self._lifecycle_lock:
+            return await self._rotate_refresh_token_locked(old_token)
+
+    async def _rotate_refresh_token_locked(
+        self, old_token: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """Rotate a token while lifecycle ownership keeps DB identity stable.
+
+        Cancellation propagates before COMMIT. Once the protected COMMIT starts,
+        cancellation may be delayed and suppressed so the committed successor can
+        be returned after its dedicated connection is closed.
+        """
         import hashlib
-        # Hash the incoming token to look it up in DB (DB stores hashes only)
+
+        self._require_connected()
         old_hash = hashlib.sha256(old_token.encode()).hexdigest()
-        async with self._conn.execute(
-            """SELECT rt.*, u.username, u.role, u.id as uid
-               FROM refresh_tokens rt JOIN users u ON rt.user_id=u.id
-               WHERE rt.id=? AND rt.is_revoked=0 AND rt.expires_at > datetime('now')""",
-            (old_hash,)
-        ) as cur:
-            row = await cur.fetchone()
+        tx: aiosqlite.Connection | None = None
+        transaction_started = False
+        commit_started = False
+        committed = False
+        result: tuple[dict[str, Any] | None, str | None] = (None, None)
+        commit_cancellation_baseline = 0
+        commit_cancellations = [0]
+        noncommit_close_cancellations = [0]
+        try:
+            open_cancellation_baseline = _cancel_count()
+            open_cancellations = [0]
+            open_task = asyncio.ensure_future(
+                self._open_refresh_rotation_connection()
+            )
+            self._name_owned_task(
+                open_task,
+                "ares-sqlite-refresh-connect",
+            )
+            tx = await _await_task_completion(
+                open_task,
+                cancellation_baseline=open_cancellation_baseline,
+                caught_cancellations=open_cancellations,
+            )
+            if open_cancellations[0]:
+                await self._finish_refresh_rotation_cleanup(
+                    tx.close(),
+                    "cancelled-connect-close",
+                    cancellation_baseline=open_cancellation_baseline,
+                    caught_cancellations=open_cancellations,
+                )
+                tx = None
+                raise asyncio.CancelledError
 
-        if not row:
-            return None, None
+            tx.row_factory = aiosqlite.Row
+            await tx.execute("PRAGMA foreign_keys = ON")
+            await tx.execute("BEGIN IMMEDIATE")
+            transaction_started = True
+            async with tx.execute(
+                """SELECT rt.*, u.username, u.role, u.id as uid
+                   FROM refresh_tokens rt JOIN users u ON rt.user_id=u.id
+                   WHERE rt.id=? AND rt.is_revoked=0
+                   AND julianday(rt.expires_at) IS NOT NULL
+                   AND julianday(rt.expires_at) > julianday('now')""",
+                (old_hash,),
+            ) as cur:
+                row = await cur.fetchone()
 
-        row = dict(row)
-        await self._conn.execute(
-            "UPDATE refresh_tokens SET is_revoked=1, used_at=datetime('now') WHERE id=?",
-            (old_hash,)
-        )
-        new_raw   = secrets.token_urlsafe(48)
-        new_hash  = hashlib.sha256(new_raw.encode()).hexdigest()
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-        await self._conn.execute(
-            "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
-            (new_hash, row["uid"], expires_at)
-        )
-        await self._conn.commit()
+            if not row:
+                await tx.rollback()
+                transaction_started = False
+            else:
+                async with tx.execute(
+                    """UPDATE refresh_tokens
+                       SET is_revoked=1, used_at=datetime('now')
+                       WHERE id=? AND is_revoked=0
+                       AND julianday(expires_at) IS NOT NULL
+                       AND julianday(expires_at) > julianday('now')""",
+                    (old_hash,),
+                ) as cur:
+                    changed = cur.rowcount
+                if changed != 1:
+                    await tx.rollback()
+                    transaction_started = False
+                else:
+                    row = dict(row)
+                    new_raw = secrets.token_urlsafe(48)
+                    new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
+                    expires_at = (
+                        datetime.now(timezone.utc) + timedelta(days=30)
+                    ).isoformat()
+                    await self._insert_refresh_successor(
+                        tx,
+                        new_hash,
+                        row["uid"],
+                        expires_at,
+                    )
+                    commit_started = True
+                    commit_cancellation_baseline = _cancel_count()
+                    commit_task = asyncio.create_task(
+                        self._commit_refresh_rotation(tx),
+                        name="ares-sqlite-refresh-commit",
+                    )
+                    await _await_task_completion(
+                        commit_task,
+                        cancellation_baseline=commit_cancellation_baseline,
+                        caught_cancellations=commit_cancellations,
+                    )
+                    committed = True
+                    transaction_started = False
+                    user = {
+                        "id": row["uid"],
+                        "username": row["username"],
+                        "role": row["role"],
+                    }
+                    result = (user, new_raw)
+        except BaseException:
+            if tx is not None and transaction_started and not committed:
+                cleanup_cancellation_baseline = _cancel_count()
+                cleanup_cancellations = [0]
+                cleanup_action = (
+                    "rollback_after_commit_failure"
+                    if commit_started
+                    else "rollback_before_commit"
+                )
+                await self._finish_refresh_rotation_cleanup(
+                    tx.rollback(),
+                    cleanup_action,
+                    cancellation_baseline=cleanup_cancellation_baseline,
+                    caught_cancellations=cleanup_cancellations,
+                )
+            raise
+        finally:
+            if tx is not None:
+                close_cancellation_baseline = (
+                    commit_cancellation_baseline
+                    if committed
+                    else _cancel_count()
+                )
+                close_cancellations = (
+                    commit_cancellations
+                    if committed
+                    else noncommit_close_cancellations
+                )
+                await self._finish_refresh_rotation_cleanup(
+                    tx.close(),
+                    "close",
+                    cancellation_baseline=close_cancellation_baseline,
+                    caught_cancellations=close_cancellations,
+                )
 
-        user = {"id": row["uid"], "username": row["username"], "role": row["role"]}
-        return user, new_raw   # client gets raw token; DB stores only hash
+        if committed:
+            _remove_suppressed_cancellations(
+                cancellation_baseline=commit_cancellation_baseline,
+                caught_cancellations=commit_cancellations[0],
+            )
+        elif noncommit_close_cancellations[0]:
+            raise asyncio.CancelledError
+        return result
 
     async def revoke_access_token(self, jti: str, user_id: str, expires_at: str) -> None:
         """Add access token jti to blacklist. Called on logout."""
@@ -1059,7 +1490,8 @@ class AresDatabase:
     async def purge_expired_tokens(self) -> int:
         async with self._conn.execute(
             "DELETE FROM refresh_tokens WHERE is_revoked=1 OR "
-            "expires_at < datetime('now', '-7 days')"
+            "(julianday(expires_at) IS NOT NULL AND "
+            "julianday(expires_at) < julianday('now', '-7 days'))"
         ) as cur:
             n = cur.rowcount
         await self._conn.commit()
