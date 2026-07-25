@@ -48,7 +48,6 @@ jobs:
           --health-retries 5
     env:
       ARES_TEST_POSTGRES_HOST: 127.0.0.1
-      ARES_TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
       ARES_TEST_POSTGRES_USER: ares_ci_runner
       ARES_TEST_POSTGRES_DB: ares_ci_control
     steps:
@@ -58,7 +57,9 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev,postgres]"
-      - run: >-
+      - env:
+          ARES_TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        run: >-
           pytest tests/integration/test_postgres_*.py
           -q --tb=short --timeout=60 --timeout-method=thread --maxfail=1
           --basetemp="${{ runner.temp }}/ares-postgres-pytest"
