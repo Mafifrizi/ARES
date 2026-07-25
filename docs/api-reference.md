@@ -240,6 +240,12 @@ cleanup or removing test campaigns from the dashboard.
 Get confirmed findings for a campaign.  
 Optional filters: `?severity=critical&page=1&per_page=50`
 
+Campaign finding metadata remains available, but `evidence_json` is redacted for
+every caller and contains the JSON-encoded string `{"redacted":true}`. This
+endpoint does not provide raw evidence access. The policy applies only to the
+API response; it does not delete or rewrite evidence stored for authorized
+internal forensic consumers.
+
 ---
 
 ### `GET /campaigns/{id}/cvss`

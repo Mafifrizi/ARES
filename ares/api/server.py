@@ -43,6 +43,7 @@ from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 
 from ares.__version__ import __version__ as _ares_version
+from ares.api.findings import redact_finding_response_rows
 from ares.api.rbac import (
     RATE_LIMITS,
     AuthenticatedUser,
@@ -1245,7 +1246,7 @@ async def list_findings(
         campaign_id, page, per_page, severity, false_positive
     )
     return JSONResponse(
-        content=rows,
+        content=redact_finding_response_rows(rows),
         headers={
             "X-Total-Count": str(total),
             "X-Page": str(page),

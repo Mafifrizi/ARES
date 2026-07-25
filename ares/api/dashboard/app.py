@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSock
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from ares.api.findings import redact_finding_response_rows
 from ares.core.logger import get_logger
 from ares.__version__ import __version__ as _ares_version
 
@@ -504,11 +505,11 @@ async def api_findings(campaign_id: str, severity: str | None = None,
         if getattr(dashboard_app.state, "db", None) is not None:
             rows, _ = await db.list_findings(campaign_id, severity=severity,
                                              validated=True, false_positive=False)
-            return rows
+            return redact_finding_response_rows(rows)
         async with db:
             rows, _ = await db.list_findings(campaign_id, severity=severity,
                                              validated=True, false_positive=False)
-            return rows
+            return redact_finding_response_rows(rows)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
         raise HTTPException(status_code=500, detail="Internal server error")

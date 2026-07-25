@@ -745,6 +745,147 @@ class TestPagination:
 # ── Error handling ────────────────────────────────────────────────────────────
 
 
+class TestFindingsEvidenceContainment:
+    _MARKER = "SYNTHETIC-HTTP-EVIDENCE-MARKER"
+
+    def setup_method(self):
+        _reset_rate_limiter()
+
+    @classmethod
+    def _finding_row(cls) -> dict[str, Any]:
+        return {
+            "id": "finding-contained",
+            "campaign_id": "camp-contained",
+            "module_id": "demo.synthetic",
+            "title": "Synthetic finding title",
+            "description": "Synthetic finding description",
+            "severity": "high",
+            "confidence": 0.9,
+            "evidence_json": (
+                '{"nested":{"token":"' + cls._MARKER + '"},'
+                '"keyless":"' + cls._MARKER + '"}'
+            ),
+            "remediation": "Synthetic remediation",
+            "host": "host.example.test",
+            "validated": 1,
+            "false_positive": 0,
+        }
+
+    @staticmethod
+    def _prepare_db(db: Any, *, operator: str) -> None:
+        db.is_access_token_revoked.return_value = False
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = {
+            "id": "camp-contained",
+            "name": "Contained Findings",
+            "operator": operator,
+        }
+        db.list_findings.side_effect = None
+        db.list_findings.reset_mock()
+
+    @pytest.mark.parametrize(
+        "role", ("reporter", "recon", "operator", "team_lead")
+    )
+    @pytest.mark.asyncio
+    async def test_default_findings_response_redacts_every_jwt_role(
+        self, aclient, role
+    ):
+        c, db, _ = aclient
+        username = f"user-{role}"
+        self._prepare_db(db, operator=username)
+        row = self._finding_row()
+        db.list_findings.return_value = ([row], 1)
+
+        response = await c.get(
+            "/campaigns/camp-contained/findings",
+            headers=_auth(username, role),
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["evidence_json"] == '{"redacted":true}'
+        assert response.json()[0]["title"] == row["title"]
+        assert response.json()[0]["description"] == row["description"]
+        assert self._MARKER not in response.text
+
+    @pytest.mark.asyncio
+    async def test_read_scoped_api_key_receives_redacted_findings(self, aclient):
+        c, db, _ = aclient
+        self._prepare_db(db, operator="api-reader")
+        row = self._finding_row()
+        db.list_findings.return_value = ([row], 1)
+        db.verify_api_key.return_value = _api_key_record(
+            "read",
+            username="api-reader",
+            role="reporter",
+        )
+
+        try:
+            response = await c.get(
+                "/campaigns/camp-contained/findings",
+                headers=_api_key_headers(),
+            )
+        finally:
+            db.verify_api_key.return_value = None
+
+        assert response.status_code == 200
+        assert response.json()[0]["evidence_json"] == '{"redacted":true}'
+        assert self._MARKER not in response.text
+
+    @pytest.mark.asyncio
+    async def test_findings_preserve_filters_headers_total_and_db_rows(self, aclient):
+        c, db, _ = aclient
+        self._prepare_db(db, operator="operator-user")
+        row = self._finding_row()
+        original = dict(row)
+        db.list_findings.return_value = ([row], 37)
+
+        response = await c.get(
+            "/campaigns/camp-contained/findings"
+            "?page=2&per_page=7&severity=high&false_positive=true",
+            headers=_auth("operator-user", "operator"),
+        )
+
+        assert response.status_code == 200
+        assert response.headers["x-total-count"] == "37"
+        assert response.headers["x-page"] == "2"
+        assert response.headers["x-per-page"] == "7"
+        db.list_findings.assert_awaited_once_with(
+            "camp-contained", 2, 7, "high", True
+        )
+        assert row == original
+        assert response.json()[0]["evidence_json"] == '{"redacted":true}'
+        assert self._MARKER not in response.text
+
+    @pytest.mark.asyncio
+    async def test_campaign_ownership_denial_remains_404(self, aclient):
+        c, db, _ = aclient
+        self._prepare_db(db, operator="campaign-owner")
+
+        response = await c.get(
+            "/campaigns/camp-contained/findings",
+            headers=_auth("different-reporter", "reporter"),
+        )
+
+        assert response.status_code == 404
+        db.list_findings.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unknown_raw_query_flags_cannot_bypass_redaction(self, aclient):
+        c, db, _ = aclient
+        self._prepare_db(db, operator="admin")
+        row = self._finding_row()
+        db.list_findings.return_value = ([row], 1)
+
+        response = await c.get(
+            "/campaigns/camp-contained/findings?raw=true&include_sensitive=true",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["evidence_json"] == '{"redacted":true}'
+        assert self._MARKER not in response.text
+
+
 class TestErrorHandling:
     def setup_method(self):
         _reset_rate_limiter()
@@ -1583,6 +1724,22 @@ class TestReportEndpoints:
             )
             assert findings_response.status_code == 200
             assert len(findings_response.json()) == 2
+            assert all(
+                row["evidence_json"] == '{"redacted":true}'
+                for row in findings_response.json()
+            )
+            assert "$krb5asrep$" not in findings_response.text
+            assert "$krb5tgs$" not in findings_response.text
+
+            stored_rows, stored_total = await real_db.list_findings(
+                campaign.id, page=1, per_page=50
+            )
+            stored_evidence = [
+                __import__("json").loads(row["evidence_json"]) for row in stored_rows
+            ]
+            assert stored_total == 2
+            assert all("sample_hash" in evidence for evidence in stored_evidence)
+            assert all(evidence != {"redacted": True} for evidence in stored_evidence)
 
             report_response = await c.post(
                 f"/reports/{campaign.id}?fmt=json",
@@ -1606,6 +1763,10 @@ class TestReportEndpoints:
         assert len(data["key_findings"]) >= 2
         assert data["campaign"]["targets"] == ["10.10.10.20"]
         assert data["campaign"]["scope"][0]["cidr"] == "10.10.10.0/24"
+        assert all(
+            finding["evidence"]["sample_hash"] == "[REDACTED sensitive evidence]"
+            for finding in data["findings"]
+        )
         assert "T1558.003" in path.read_text(encoding="utf-8")
         assert "T1558.004" in path.read_text(encoding="utf-8")
         assert "$krb5asrep$" not in path.read_text(encoding="utf-8")

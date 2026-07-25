@@ -646,7 +646,14 @@ class TestDashboardApp:
 
     def test_api_findings_with_campaign_id(self, client):
         mock_db = AsyncMock()
-        mock_db.list_findings = AsyncMock(return_value=([], 0))
+        marker = "SYNTHETIC-LEGACY-EVIDENCE-MARKER"
+        row = {
+            "id": "legacy-finding",
+            "title": "Legacy metadata remains visible",
+            "evidence_json": f'{{"nested":"{marker}"}}',
+        }
+        original = dict(row)
+        mock_db.list_findings = AsyncMock(return_value=([row], 1))
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__  = AsyncMock(return_value=None)
 
@@ -656,7 +663,40 @@ class TestDashboardApp:
         with self._authenticated_dashboard(mock_db) as headers, \
              patch("ares.api.dashboard.app.dashboard_app.state", mock_state):
             r = client.get("/api/campaigns/c-001/findings", headers=headers)
-            assert r.status_code in (200, 500)
+            assert r.status_code == 200
+            assert r.json()[0]["evidence_json"] == '{"redacted":true}'
+            assert r.json()[0]["title"] == row["title"]
+            assert marker not in r.text
+            assert row == original
+
+    def test_api_findings_standalone_db_branch_uses_same_redaction(self, client):
+        marker = "SYNTHETIC-LEGACY-STANDALONE-MARKER"
+        row = {
+            "id": "legacy-standalone-finding",
+            "title": "Legacy standalone metadata",
+            "evidence_json": marker,
+        }
+        original = dict(row)
+        mock_db = AsyncMock()
+        mock_db.list_findings = AsyncMock(return_value=([row], 1))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=None)
+        mock_state = MagicMock()
+        mock_state.db = None
+
+        # This slice contains evidence only; legacy campaign ownership remains
+        # intentionally unchanged and must be handled by a separate policy.
+        with self._authenticated_dashboard(mock_db) as headers, \
+             patch("ares.api.dashboard.app.dashboard_app.state", mock_state), \
+             patch("ares.api.dashboard.app._get_db", return_value=mock_db):
+            r = client.get("/api/campaigns/c-001/findings", headers=headers)
+
+        assert r.status_code == 200
+        assert r.json()[0]["evidence_json"] == '{"redacted":true}'
+        assert r.json()[0]["title"] == row["title"]
+        assert marker not in r.text
+        assert row == original
+        mock_db.__aenter__.assert_awaited()
 
     def test_api_summary_with_mock_db(self, client):
         mock_db = AsyncMock()
