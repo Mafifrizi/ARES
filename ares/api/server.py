@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -1324,6 +1324,85 @@ class PlanRunRequest(BaseModel):
     dry_run: bool = False
 
 
+_INVALID_PLAN_MODULE_IDS_DETAIL = (
+    "Invalid plan: every stage must contain a modules list of non-empty "
+    "string module IDs."
+)
+
+
+def _collect_plan_module_ids_for_authorization(
+    plan_data: Mapping[str, Any],
+) -> list[str]:
+    """Validate raw plan module structure and return sorted unique IDs."""
+    stages = plan_data.get("stages", [])
+    if not isinstance(stages, list):
+        raise HTTPException(
+            status_code=422,
+            detail=_INVALID_PLAN_MODULE_IDS_DETAIL,
+        )
+
+    module_ids: list[str] = []
+    for stage in stages:
+        if not isinstance(stage, Mapping) or "modules" not in stage:
+            raise HTTPException(
+                status_code=422,
+                detail=_INVALID_PLAN_MODULE_IDS_DETAIL,
+            )
+        stage_module_ids = stage["modules"]
+        if not isinstance(stage_module_ids, list):
+            raise HTTPException(
+                status_code=422,
+                detail=_INVALID_PLAN_MODULE_IDS_DETAIL,
+            )
+        for module_id in stage_module_ids:
+            if not isinstance(module_id, str) or not module_id.strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail=_INVALID_PLAN_MODULE_IDS_DETAIL,
+                )
+            module_ids.append(module_id)
+
+    return sorted(set(module_ids))
+
+
+def _require_high_noise_module_access(
+    module_ids: Iterable[Any],
+    actor: AuthenticatedUser,
+    engine: AresEngine,
+) -> None:
+    """Require team_lead for every registered HIGH_NOISE module."""
+    from ares.modules.base import OpsecLevel
+
+    validated_module_ids: set[str] = set()
+    for module_id in module_ids:
+        if not isinstance(module_id, str) or not module_id.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=_INVALID_PLAN_MODULE_IDS_DETAIL,
+            )
+        validated_module_ids.add(module_id)
+
+    rejected = [
+        module_id
+        for module_id in sorted(validated_module_ids)
+        if (
+            (module_cls := engine.registry.get(module_id)) is not None
+            and getattr(module_cls, "OPSEC_LEVEL", None) == OpsecLevel.HIGH_NOISE
+        )
+    ]
+    if actor.role == "team_lead" or not rejected:
+        return
+
+    if len(rejected) == 1:
+        detail = f"{rejected[0]!r} is HIGH_NOISE — team_lead only."
+    else:
+        detail = (
+            f"{', '.join(repr(module_id) for module_id in rejected)} "
+            "are HIGH_NOISE — team_lead only."
+        )
+    raise HTTPException(status_code=403, detail=detail)
+
+
 @app.post("/modules/{module_id}/run", tags=["modules"])
 async def run_module(
     module_id: str,
@@ -1335,16 +1414,11 @@ async def run_module(
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """Run module. HIGH_NOISE requires team_lead. Rate limited: 20/min."""
-    from ares.modules.base import OpsecLevel
-
     if isinstance(engine, AresEngine):
         engine.bind_database(db)
 
-    # Use the engine's already-loaded registry — avoids rescanning disk on every request
-    cls = engine.registry.get(module_id)
-    if cls and getattr(cls, "OPSEC_LEVEL", None) == OpsecLevel.HIGH_NOISE:
-        if actor.role != "team_lead":
-            raise HTTPException(403, f"{module_id!r} is HIGH_NOISE — team_lead only.")
+    # Use the engine's already-loaded registry — avoids rescanning disk on every request.
+    _require_high_noise_module_access([module_id], actor, engine)
 
     # Validate params against Pydantic schema
     from pydantic import ValidationError as PydanticValidationError
@@ -2351,10 +2425,13 @@ async def run_campaign_plan(
 
     from ares.core.engine import ExecutionPlan
 
+    plan_module_ids = _collect_plan_module_ids_for_authorization(body.plan)
     try:
         plan = ExecutionPlan.from_dict(body.plan)
     except Exception as exc:
         raise HTTPException(422, f"Invalid plan: {exc}")
+
+    _require_high_noise_module_access(plan_module_ids, actor, engine)
 
     if body.dry_run:
         return engine.dry_run_plan(plan, body.global_params)

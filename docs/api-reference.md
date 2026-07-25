@@ -265,6 +265,11 @@ Useful for verifying remediation between assessments.
 
 Run an execution plan against the campaign.
 
+Plans execute live by default; set `dry_run` to `true` for a preview. If any
+module anywhere in the plan is classified `HIGH_NOISE`, the caller must have
+the `team_lead` role. The complete plan is authorized before execution or
+dry-run processing begins.
+
 ```json
 {
   "plan":       [{"module_id": "ad.kerberoast", "params": {"dc": "dc01.corp.local"}}],

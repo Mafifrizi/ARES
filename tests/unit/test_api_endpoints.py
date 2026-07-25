@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 
 # ── env bootstrap (before any ares import) ────────────────────────────────────
@@ -1043,6 +1044,909 @@ class TestModuleSchemaEndpoint:
 
 
 # ── Reports safety ───────────────────────────────────────────────────────────
+
+
+class TestHighNoiseAuthorizationPolicy:
+    _INVALID_PLAN_DETAIL = (
+        "Invalid plan: every stage must contain a modules list of non-empty "
+        "string module IDs."
+    )
+
+    def setup_method(self) -> None:
+        _reset_rate_limiter()
+
+    @staticmethod
+    def _module_classes() -> tuple[type, type]:
+        from ares.modules.base import OpsecLevel
+
+        class SafeModule:
+            OPSEC_LEVEL = OpsecLevel.LOW
+
+        class HighNoiseModule:
+            OPSEC_LEVEL = OpsecLevel.HIGH_NOISE
+
+        return SafeModule, HighNoiseModule
+
+    @staticmethod
+    def _actor(role: str, username: str = "operator-user") -> Any:
+        from ares.api.rbac import AuthenticatedUser
+
+        return AuthenticatedUser(username=username, role=role)
+
+    @classmethod
+    def _engine(cls, registry_items: dict[str, type | None]) -> Any:
+        registry = MagicMock()
+        registry.get.side_effect = registry_items.get
+
+        def result_for(module_id: str) -> Any:
+            result = SimpleNamespace(
+                status="done",
+                findings=[],
+                error="",
+                duration_ms=1.0,
+            )
+            result.model_dump = lambda: {
+                "module_id": module_id,
+                "status": "done",
+                "findings": [],
+                "validation_results": [],
+                "raw_output": {},
+                "error": "",
+                "duration_ms": 1.0,
+            }
+            return result
+
+        async def run_module(
+            module_id: str,
+            campaign: Any,
+            params: dict[str, Any],
+            actor_role: str = "",
+        ) -> Any:
+            return result_for(module_id)
+
+        async def run_plan(
+            plan: Any,
+            campaign: Any,
+            global_params: dict[str, Any],
+            actor_role: str = "",
+        ) -> dict[str, Any]:
+            return {
+                module_id: result_for(module_id)
+                for module_id in plan.all_module_ids()
+            }
+
+        engine = SimpleNamespace(registry=registry)
+        engine.run_module = AsyncMock(side_effect=run_module)
+        engine.run_plan = AsyncMock(side_effect=run_plan)
+        engine.dry_run_plan = MagicMock(
+            return_value={
+                "status": "dry_run_ok",
+                "modules": [],
+                "would_execute": True,
+            }
+        )
+        return engine
+
+    @staticmethod
+    def _campaign(operator: str = "operator-user") -> dict[str, Any]:
+        return {
+            "id": "camp-plan-policy",
+            "name": "Plan Policy",
+            "client": "Internal",
+            "operator": operator,
+            "noise_profile": "normal",
+            "status": "created",
+            "scope_json": "[]",
+            "targets_json": "[]",
+            "notes": "",
+        }
+
+    @staticmethod
+    def _plan_body(
+        stages: list[tuple[str, list[str]]],
+        *,
+        dry_run: bool = False,
+        global_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "plan": {
+                "stages": [
+                    {"name": name, "modules": modules, "params": {}}
+                    for name, modules in stages
+                ]
+            },
+            "global_params": global_params or {},
+            "dry_run": dry_run,
+        }
+
+    def test_shared_policy_allows_operator_for_normal_module(self) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+
+        _require_high_noise_module_access(
+            ["plugin.safe"], self._actor("operator"), engine
+        )
+
+        engine.registry.get.assert_called_once_with("plugin.safe")
+
+    def test_shared_policy_blocks_dynamic_high_noise_module(self) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+
+        with pytest.raises(HTTPException) as exc_info:
+            _require_high_noise_module_access(
+                ["plugin.dynamic-high"], self._actor("operator"), engine
+            )
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail == (
+            "'plugin.dynamic-high' is HIGH_NOISE — team_lead only."
+        )
+
+    def test_shared_policy_allows_team_lead_for_high_noise_module(self) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+
+        _require_high_noise_module_access(
+            ["plugin.dynamic-high"], self._actor("team_lead"), engine
+        )
+
+    def test_shared_policy_delegates_unknown_module(self) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        engine = self._engine({})
+
+        _require_high_noise_module_access(
+            ["plugin.unknown"], self._actor("operator"), engine
+        )
+
+        engine.registry.get.assert_called_once_with("plugin.unknown")
+
+    def test_shared_policy_deduplicates_sorts_and_excludes_sensitive_values(
+        self,
+    ) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine(
+            {
+                "plugin.zeta-high": high_noise_module,
+                "plugin.alpha-high": high_noise_module,
+            }
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            _require_high_noise_module_access(
+                [
+                    "plugin.zeta-high",
+                    "plugin.alpha-high",
+                    "plugin.zeta-high",
+                ],
+                self._actor("operator"),
+                engine,
+            )
+
+        detail = str(exc_info.value.detail)
+        assert detail == (
+            "'plugin.alpha-high', 'plugin.zeta-high' "
+            "are HIGH_NOISE — team_lead only."
+        )
+        assert [call.args[0] for call in engine.registry.get.call_args_list] == [
+            "plugin.alpha-high",
+            "plugin.zeta-high",
+        ]
+        for sensitive_marker in (
+            "plan-param-marker",
+            "target-marker",
+            "credential-marker",
+            "evidence-marker",
+        ):
+            assert sensitive_marker not in detail
+
+    @pytest.mark.parametrize(
+        "module_ids",
+        [
+            pytest.param(["plugin.safe", 7], id="mixed-string-integer"),
+            pytest.param([None], id="null"),
+            pytest.param([["plugin.safe"]], id="list"),
+            pytest.param([{"module_id": "plugin.safe"}], id="dict"),
+            pytest.param([("plugin.safe",)], id="tuple"),
+            pytest.param([b"plugin.safe"], id="bytes"),
+            pytest.param([""], id="empty-string"),
+            pytest.param(["   "], id="whitespace-only"),
+            pytest.param([True], id="bool"),
+        ],
+    )
+    def test_shared_policy_rejects_invalid_ids_before_registry_lookup(
+        self, module_ids: list[Any]
+    ) -> None:
+        from ares.api.server import _require_high_noise_module_access
+
+        engine = self._engine({})
+
+        with pytest.raises(HTTPException) as exc_info:
+            _require_high_noise_module_access(
+                module_ids,
+                self._actor("operator"),
+                engine,
+            )
+
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.detail == self._INVALID_PLAN_DETAIL
+        engine.registry.get.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "plan_data",
+        [
+            pytest.param({"stages": [None]}, id="non-mapping-stage"),
+            pytest.param({"stages": [{}]}, id="missing-modules"),
+            pytest.param(
+                {"stages": [{"modules": None}]},
+                id="invalid-modules-collection",
+            ),
+            pytest.param(
+                {"stages": [{"modules": [[]]}]},
+                id="unhashable-module-id",
+            ),
+        ],
+    )
+    def test_plan_module_id_collector_rejects_structure_with_canonical_422(
+        self, plan_data: dict[str, Any]
+    ) -> None:
+        from ares.api.server import _collect_plan_module_ids_for_authorization
+
+        with pytest.raises(HTTPException) as exc_info:
+            _collect_plan_module_ids_for_authorization(plan_data)
+
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.detail == self._INVALID_PLAN_DETAIL
+
+    def test_plan_module_id_collector_preserves_absent_stages_and_valid_ids(
+        self,
+    ) -> None:
+        from ares.api.server import _collect_plan_module_ids_for_authorization
+
+        assert _collect_plan_module_ids_for_authorization({}) == []
+        module_ids = _collect_plan_module_ids_for_authorization(
+            {
+                "stages": [
+                    {
+                        "modules": [
+                            " plugin.safe ",
+                            "plugin.safe",
+                            " plugin.safe ",
+                        ]
+                    }
+                ]
+            }
+        )
+
+        assert module_ids == [" plugin.safe ", "plugin.safe"]
+
+    @pytest.mark.asyncio
+    async def test_single_module_operator_high_noise_denied_before_engine(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.reset_mock()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/modules/plugin.dynamic-high/run",
+                json={
+                    "campaign_id": "camp-plan-policy",
+                    "params": {"target": "target-marker"},
+                    "dry_run": False,
+                },
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == (
+            "'plugin.dynamic-high' is HIGH_NOISE — team_lead only."
+        )
+        engine.run_module.assert_not_awaited()
+        db.get_campaign.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_single_module_team_lead_high_noise_reaches_engine(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign("another-operator")
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/modules/plugin.dynamic-high/run",
+                json={
+                    "campaign_id": "camp-plan-policy",
+                    "params": {},
+                    "dry_run": False,
+                },
+                headers=_auth("lead-user", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        engine.run_module.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_single_module_normal_and_unknown_modules_reach_existing_path(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            safe_response = await c.post(
+                "/modules/plugin.safe/run",
+                json={
+                    "campaign_id": "camp-plan-policy",
+                    "params": {},
+                    "dry_run": False,
+                },
+                headers=_auth("operator-user", "operator"),
+            )
+            unknown_response = await c.post(
+                "/modules/plugin.unknown/run",
+                json={
+                    "campaign_id": "camp-plan-policy",
+                    "params": {},
+                    "dry_run": False,
+                },
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert safe_response.status_code == 200
+        assert unknown_response.status_code == 200
+        assert [call.args[0] for call in engine.run_module.await_args_list] == [
+            "plugin.safe",
+            "plugin.unknown",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_operator_safe_live_plan_reaches_engine_with_stable_response(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body([("safe", ["plugin.safe"])]),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "campaign_id": "camp-plan-policy",
+            "modules_run": 1,
+            "results": {
+                "plugin.safe": {
+                    "status": "done",
+                    "findings_count": 0,
+                    "error": "",
+                    "duration_ms": 1.0,
+                }
+            },
+        }
+        engine.run_plan.assert_awaited_once()
+        assert engine.run_plan.await_args.kwargs["actor_role"] == "operator"
+
+    @pytest.mark.parametrize(
+        "stages",
+        [
+            [
+                ("forbidden", ["plugin.dynamic-high"]),
+                ("safe", ["plugin.safe"]),
+            ],
+            [
+                ("safe", ["plugin.safe"]),
+                ("forbidden", ["plugin.dynamic-high"]),
+            ],
+        ],
+        ids=("high-noise-first", "high-noise-later"),
+    )
+    @pytest.mark.asyncio
+    async def test_operator_high_noise_live_plan_denied_before_any_execution(
+        self,
+        aclient: Any,
+        stages: list[tuple[str, list[str]]],
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, high_noise_module = self._module_classes()
+        engine = self._engine(
+            {
+                "plugin.safe": safe_module,
+                "plugin.dynamic-high": high_noise_module,
+            }
+        )
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(stages),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 403
+        engine.run_plan.assert_not_awaited()
+        engine.dry_run_plan.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_team_lead_high_noise_live_plan_reaches_engine(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign("another-operator")
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("forbidden", ["plugin.dynamic-high"])]
+                ),
+                headers=_auth("lead-user", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        engine.run_plan.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_high_noise_plan_detail_is_safe_and_deterministic(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine(
+            {
+                "plugin.zeta-high": high_noise_module,
+                "plugin.alpha-high": high_noise_module,
+            }
+        )
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        body = self._plan_body(
+            [
+                (
+                    "mixed",
+                    [
+                        "plugin.zeta-high",
+                        "plugin.alpha-high",
+                        "plugin.zeta-high",
+                    ],
+                )
+            ],
+            global_params={
+                "target": "target-marker",
+                "credential": "credential-marker",
+                "evidence": "evidence-marker",
+            },
+        )
+        body["plan"]["stages"][0]["params"] = {
+            "plugin.zeta-high": {"command": "plan-param-marker"}
+        }
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=body,
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == (
+            "'plugin.alpha-high', 'plugin.zeta-high' "
+            "are HIGH_NOISE — team_lead only."
+        )
+        for sensitive_marker in (
+            "plan-param-marker",
+            "target-marker",
+            "credential-marker",
+            "evidence-marker",
+        ):
+            assert sensitive_marker not in response.text
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        "modules",
+        [
+            pytest.param(["plugin.safe", 7], id="mixed-string-integer"),
+            pytest.param([None], id="null-entry"),
+            pytest.param([["plugin.safe"]], id="list-entry"),
+            pytest.param([{"module_id": "plugin.safe"}], id="dict-entry"),
+            pytest.param(None, id="null-collection"),
+            pytest.param(7, id="integer-collection"),
+            pytest.param("plugin.safe", id="string-collection"),
+            pytest.param(
+                {"module_id": "plugin.safe"},
+                id="dict-collection",
+            ),
+            pytest.param([""], id="empty-string"),
+            pytest.param(["   "], id="whitespace-only"),
+            pytest.param([True], id="bool-entry"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "dry_run",
+        [False, True],
+        ids=("live", "dry-run"),
+    )
+    @pytest.mark.asyncio
+    async def test_malformed_plan_module_ids_return_stable_422_before_policy_lookup(
+        self,
+        aclient: Any,
+        modules: Any,
+        dry_run: bool,
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json={
+                    "plan": {
+                        "stages": [
+                            {
+                                "name": "malformed",
+                                "modules": modules,
+                                "params": {},
+                            }
+                        ]
+                    },
+                    "dry_run": dry_run,
+                },
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "code": 422,
+            "detail": self._INVALID_PLAN_DETAIL,
+            "type": "api_error",
+        }
+        engine.registry.get.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+        engine.dry_run_plan.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "plan_data",
+        [
+            pytest.param({"stages": [None]}, id="null-stage"),
+            pytest.param({"stages": [123]}, id="integer-stage"),
+            pytest.param({"stages": ["invalid"]}, id="string-stage"),
+            pytest.param({"stages": [[]]}, id="list-stage"),
+            pytest.param({"stages": [{}]}, id="missing-modules"),
+            pytest.param(
+                {
+                    "stages": [
+                        {
+                            "name": "safe",
+                            "modules": ["plugin.safe"],
+                            "params": {},
+                        },
+                        None,
+                    ]
+                },
+                id="malformed-later-stage",
+            ),
+            pytest.param(
+                {"stages": "invalid-stages-collection"},
+                id="invalid-stages-collection",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "dry_run",
+        [False, True],
+        ids=("live", "dry-run"),
+    )
+    @pytest.mark.asyncio
+    async def test_malformed_plan_structure_returns_canonical_422_before_engine(
+        self,
+        aclient: Any,
+        plan_data: dict[str, Any],
+        dry_run: bool,
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json={"plan": plan_data, "dry_run": dry_run},
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 422
+        assert response.json() == {
+            "code": 422,
+            "detail": self._INVALID_PLAN_DETAIL,
+            "type": "api_error",
+        }
+        assert str(plan_data) not in response.text
+        engine.registry.get.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+        engine.dry_run_plan.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unknown_valid_plan_module_is_delegated_to_engine(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        engine = self._engine({})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("unknown", ["plugin.unknown"])]
+                ),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        engine.registry.get.assert_called_once_with("plugin.unknown")
+        engine.run_plan.assert_awaited_once()
+        engine.dry_run_plan.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_operator_safe_dry_run_reaches_preview_only(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("safe", ["plugin.safe"])], dry_run=True
+                ),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "dry_run_ok"
+        engine.dry_run_plan.assert_called_once()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_operator_high_noise_dry_run_denied_before_preview(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("forbidden", ["plugin.dynamic-high"])],
+                    dry_run=True,
+                ),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 403
+        engine.dry_run_plan.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_team_lead_high_noise_dry_run_reaches_preview(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign("another-operator")
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("forbidden", ["plugin.dynamic-high"])],
+                    dry_run=True,
+                ),
+                headers=_auth("lead-user", "team_lead"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 200
+        engine.dry_run_plan.assert_called_once()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_plan_missing_campaign_precedes_policy_lookup(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = None
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/missing/run",
+                json=self._plan_body(
+                    [("forbidden", ["plugin.dynamic-high"])]
+                ),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 404
+        engine.registry.get.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_plan_campaign_ownership_denial_precedes_policy_lookup(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        _, high_noise_module = self._module_classes()
+        engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign("different-owner")
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body(
+                    [("forbidden", ["plugin.dynamic-high"])]
+                ),
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 404
+        engine.registry.get.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_invalid_plan_structure_remains_422_before_policy_lookup(
+        self, aclient: Any
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        engine = self._engine({})
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = self._campaign()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json={"plan": {"stages": [{}]}, "dry_run": False},
+                headers=_auth("operator-user", "operator"),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 422
+        engine.registry.get.assert_not_called()
+        engine.run_plan.assert_not_awaited()
+
+    @pytest.mark.parametrize("role", ("reporter", "recon"))
+    @pytest.mark.asyncio
+    async def test_plan_reporter_and_recon_access_remains_forbidden(
+        self, aclient: Any, role: str
+    ) -> None:
+        c, db, app = aclient
+        from ares.api.server import get_engine
+
+        safe_module, _ = self._module_classes()
+        engine = self._engine({"plugin.safe": safe_module})
+        db.get_campaign.reset_mock()
+        app.dependency_overrides[get_engine] = lambda: engine
+        try:
+            response = await c.post(
+                "/campaigns/camp-plan-policy/run",
+                json=self._plan_body([("safe", ["plugin.safe"])]),
+                headers=_auth(f"{role}-user", role),
+            )
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
+        assert response.status_code == 403
+        db.get_campaign.assert_not_awaited()
+        engine.run_plan.assert_not_awaited()
 
 
 class TestModuleRunEndpoint:
