@@ -207,6 +207,22 @@ describe("AuthProvider session isolation", () => {
     expectAccountStateCleared(queryClient);
   });
 
+  it("purges legacy dashboard state when startup has no refresh token", async () => {
+    const queryClient = createQueryClient();
+    sessionStorage.setItem("ares.dashboard.modules.params", JSON.stringify({ field: "legacy" }));
+    sessionStorage.setItem("ares.dashboard.live.events", JSON.stringify([{ kind: "legacy" }]));
+    sessionStorage.setItem("unrelated.same-origin", "keep");
+
+    renderProvider(queryClient);
+    await waitForLoggedOut();
+
+    const paramsRemoved = sessionStorage.getItem("ares.dashboard.modules.params") === null;
+    const eventsRemoved = sessionStorage.getItem("ares.dashboard.live.events") === null;
+    const unrelatedPreserved = sessionStorage.getItem("unrelated.same-origin") === "keep";
+    requireFixed(paramsRemoved && eventsRemoved, "Unauthenticated startup should purge legacy dashboard state.");
+    requireFixed(unrelatedPreserved, "Unauthenticated startup should preserve unrelated session state.");
+  });
+
   it("cleans account state when startup profile resolution fails", async () => {
     const queryClient = createQueryClient();
     setRefreshToken("refresh-a");
@@ -355,10 +371,10 @@ describe("AuthProvider session isolation", () => {
       try {
         await refreshStarted.promise;
         await act(async () => {
-          await auth().login("bob", "password");
-        });
-        queryClient.setQueryData(["account-b"], { retained: true });
-        sessionStorage.setItem("ares.dashboard.modules.dryRun", JSON.stringify(true));
+        await auth().login("bob", "password");
+      });
+      queryClient.setQueryData(["account-b"], { retained: true });
+        sessionStorage.setItem("ares.dashboard.modules.category", JSON.stringify("network"));
         releaseRefresh.resolve();
         await act(async () => {
           await runtimeRequest.catch(() => undefined);
@@ -367,7 +383,7 @@ describe("AuthProvider session isolation", () => {
         expect(auth().user?.username).toBe("bob");
         expect(queryClient.getQueryData(["account-b"])).toEqual({ retained: true });
         const preferencePreserved =
-          sessionStorage.getItem("ares.dashboard.modules.dryRun") === JSON.stringify(true);
+          sessionStorage.getItem("ares.dashboard.modules.category") === JSON.stringify("network");
         const principalMatches =
           sessionStorage.getItem("ares.dashboard.principal")
           === JSON.stringify({ username: "bob", role: "operator" });
@@ -500,7 +516,8 @@ describe("AuthProvider session isolation", () => {
       "ares.dashboard.principal",
       JSON.stringify({ username: "alice", role: "operator" })
     );
-    sessionStorage.setItem("ares.dashboard.modules.dryRun", JSON.stringify(true));
+    sessionStorage.setItem("ares.dashboard.modules.category", JSON.stringify("network"));
+    sessionStorage.setItem("ares.dashboard.modules.dryRun", JSON.stringify(false));
     let refreshCalls = 0;
     let profileCalls = 0;
     vi.stubGlobal("fetch", vi.fn(async (path: string) => {
@@ -520,8 +537,11 @@ describe("AuthProvider session isolation", () => {
 
     expect({ profileCalls, refreshCalls }).toEqual({ profileCalls: 1, refreshCalls: 1 });
     const preferencePreserved =
-      sessionStorage.getItem("ares.dashboard.modules.dryRun") === JSON.stringify(true);
+      sessionStorage.getItem("ares.dashboard.modules.category") === JSON.stringify("network");
+    const legacySafetyStatePurged =
+      sessionStorage.getItem("ares.dashboard.modules.dryRun") === null;
     requireFixed(preferencePreserved, "StrictMode startup should preserve dashboard preference.");
+    requireFixed(legacySafetyStatePurged, "StrictMode startup should purge disallowed legacy state.");
   });
 
   it("clears account A data before account B is authenticated or rendered", async () => {
@@ -630,7 +650,7 @@ describe("AuthProvider session isolation", () => {
       await auth().login("alice", "password");
     });
     queryClient.setQueryData(["safe-preference"], { retained: true });
-    sessionStorage.setItem("ares.dashboard.modules.dryRun", JSON.stringify(true));
+    sessionStorage.setItem("ares.dashboard.modules.category", JSON.stringify("network"));
     runtime = true;
 
     await act(async () => {
@@ -640,7 +660,7 @@ describe("AuthProvider session isolation", () => {
     expect(auth().user?.username).toBe("alice");
     expect(queryClient.getQueryData(["safe-preference"])).toEqual({ retained: true });
     const preferencePreserved =
-      sessionStorage.getItem("ares.dashboard.modules.dryRun") === JSON.stringify(true);
+      sessionStorage.getItem("ares.dashboard.modules.category") === JSON.stringify("network");
     requireFixed(preferencePreserved, "Same-session refresh should preserve dashboard preference.");
     const rotatedAccessTokenCurrent = getAccessToken() === "access-b";
     requireFixed(rotatedAccessTokenCurrent, "expected same-session rotated access token");

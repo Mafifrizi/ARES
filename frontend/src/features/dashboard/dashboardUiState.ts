@@ -3,6 +3,27 @@ import type { UserProfile } from "../../api/types";
 
 const DASHBOARD_SESSION_PREFIX = "ares.dashboard.";
 const DASHBOARD_PRINCIPAL_KEY = `${DASHBOARD_SESSION_PREFIX}principal`;
+const PERSISTENT_DASHBOARD_KEYS = new Set<string>([
+  DASHBOARD_PRINCIPAL_KEY,
+  "ares.dashboard.selectedCampaignId",
+  "ares.dashboard.live.campaignId",
+  "ares.dashboard.campaigns.compareId",
+  "ares.dashboard.modules.selectedId",
+  "ares.dashboard.campaigns.tab",
+  "ares.dashboard.modules.tab",
+  "ares.dashboard.reports.tab",
+  "ares.dashboard.templates.tab",
+  "ares.dashboard.strategy.tab",
+  "ares.dashboard.security.tab",
+  "ares.dashboard.edr.tab",
+  "ares.dashboard.live.tab",
+  "ares.dashboard.modules.category",
+  "ares.dashboard.modules.opsec",
+  "ares.dashboard.reports.format",
+  "ares.dashboard.strategy.llmBackend",
+  // Selection metadata used by the existing cross-page template search/navigation flow.
+  "ares.dashboard.templates.name"
+]);
 
 let dashboardStorageEpoch = 0;
 let blockAllDashboardReads = false;
@@ -32,7 +53,7 @@ export function useDashboardUi(): DashboardUiState {
 
 function readSessionState<T>(key: string, initialValue: T): T {
   if (
-    !key.startsWith(DASHBOARD_SESSION_PREFIX)
+    !PERSISTENT_DASHBOARD_KEYS.has(key)
     || blockedDashboardKeys.has(key)
     || (blockAllDashboardReads && !currentEpochDashboardKeys.has(key))
   ) {
@@ -46,38 +67,60 @@ function readSessionState<T>(key: string, initialValue: T): T {
   }
 }
 
-export function clearDashboardSession(): void {
-  dashboardStorageEpoch += 1;
-  currentEpochDashboardKeys.clear();
-  let keys: string[] = [];
+function dashboardSessionKeys(): string[] | null {
   try {
-    keys = Array.from({ length: window.sessionStorage.length }, (_, index) => window.sessionStorage.key(index))
+    return Array.from({ length: window.sessionStorage.length }, (_, index) => window.sessionStorage.key(index))
       .filter((key): key is string => key !== null);
   } catch {
     blockAllDashboardReads = true;
-    blockedDashboardKeys.clear();
+    return null;
+  }
+}
+
+function removeDashboardSessionKey(key: string): void {
+  currentEpochDashboardKeys.delete(key);
+  try {
+    window.sessionStorage.removeItem(key);
+    blockedDashboardKeys.delete(key);
+  } catch {
+    try {
+      window.sessionStorage.setItem(key, "");
+    } catch {
+      // The blocked-key guard remains authoritative while storage is unavailable.
+    }
+    blockedDashboardKeys.add(key);
+  }
+}
+
+export function clearDashboardSession(): void {
+  dashboardStorageEpoch += 1;
+  currentEpochDashboardKeys.clear();
+  const keys = dashboardSessionKeys();
+  if (!keys) {
     return;
   }
   blockAllDashboardReads = false;
   for (const key of keys) {
     if (key.startsWith(DASHBOARD_SESSION_PREFIX)) {
-      try {
-        window.sessionStorage.removeItem(key);
-        blockedDashboardKeys.delete(key);
-      } catch {
-        try {
-          window.sessionStorage.setItem(key, "");
-        } catch {
-          // The blocked-key guard remains authoritative while storage is unavailable.
-        }
-        blockedDashboardKeys.add(key);
-      }
+      removeDashboardSessionKey(key);
+    }
+  }
+}
+
+function purgeDisallowedDashboardSession(): void {
+  const keys = dashboardSessionKeys();
+  if (!keys) {
+    return;
+  }
+  for (const key of keys) {
+    if (key.startsWith(DASHBOARD_SESSION_PREFIX) && !PERSISTENT_DASHBOARD_KEYS.has(key)) {
+      removeDashboardSessionKey(key);
     }
   }
 }
 
 function writeDashboardSessionAtEpoch(epoch: number, key: string, value: unknown): boolean {
-  if (epoch !== dashboardStorageEpoch || !key.startsWith(DASHBOARD_SESSION_PREFIX)) {
+  if (epoch !== dashboardStorageEpoch || !PERSISTENT_DASHBOARD_KEYS.has(key)) {
     return false;
   }
   try {
@@ -125,6 +168,8 @@ export function bindDashboardPrincipal(user: Pick<UserProfile, "username" | "rol
   }
   if (!matches) {
     clearDashboardSession();
+  } else {
+    purgeDisallowedDashboardSession();
   }
   writeDashboardSessionAtEpoch(dashboardStorageEpoch, DASHBOARD_PRINCIPAL_KEY, principal);
 }
