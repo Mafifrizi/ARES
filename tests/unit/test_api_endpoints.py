@@ -20,7 +20,7 @@ import asyncio
 import os
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -36,6 +36,9 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestApiPass1!")
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
+_MOCK_PRINCIPAL_ROLES: dict[str, str] = {}
+
+
 def _settings():
     from ares.core.config import AresSettings
 
@@ -45,6 +48,7 @@ def _settings():
 def _make_token(username: str, role: str) -> str:
     from ares.core.security import create_access_token
 
+    _MOCK_PRINCIPAL_ROLES[username] = role
     s = _settings()
     return create_access_token(
         data={"sub": username, "role": role},
@@ -89,6 +93,21 @@ def _make_mock_db():
     db.revoke_all_refresh_tokens = AsyncMock()
     db.revoke_access_token = AsyncMock()
     db.is_access_token_revoked = AsyncMock(return_value=False)
+
+    async def resolve_access_token_principal(
+        subject: str,
+        _jti: str,
+    ) -> dict[str, str] | None:
+        if db.is_access_token_revoked.return_value is True:
+            return None
+        role = _MOCK_PRINCIPAL_ROLES.get(subject)
+        if role is None:
+            return None
+        return {"id": f"mock-user-{subject}", "username": subject, "role": role}
+
+    db.resolve_access_token_principal = AsyncMock(
+        side_effect=resolve_access_token_principal
+    )
     db.audit = AsyncMock()
     db.purge_expired_tokens = AsyncMock(return_value=0)
     db.list_campaigns = AsyncMock(return_value=([], 0))
@@ -2723,6 +2742,11 @@ class TestReportEndpoints:
 
         real_report_generator = report_gen.ReportGenerator
         real_db = await AresDatabase.create(tmp_path / "ares.db")
+        await real_db.create_user(
+            "admin",
+            "SyntheticReportPrincipal1!",
+            "team_lead",
+        )
         original_db = getattr(app.state, "db", None)
         campaign = Campaign(
             name="AD Lab Attack Simulation",
@@ -3104,3 +3128,574 @@ class TestReportEndpoints:
         assert owned_txt.exists()
         assert other.exists()
         assert report_dir.exists()
+
+
+class TestAuthoritativeHTTPBearerPrincipal:
+    @pytest.fixture
+    async def auth_runtime(self, tmp_path: Any):
+        from ares.api.server import app, get_db
+        from ares.db import database as database_module
+        from ares.db.database import AresDatabase
+
+        database = await AresDatabase.create(tmp_path / "http-principal.db")
+        username = "http-principal-user"
+        with patch.object(database_module.logger, "info"):
+            user_id = await database.create_user(
+                username,
+                "SyntheticPrincipalPass1!",
+                "team_lead",
+            )
+        token = _make_token(username, "team_lead")
+        original_db = getattr(app.state, "db", None)
+        original_overrides = dict(app.dependency_overrides)
+        app.state.db = database
+        app.dependency_overrides[get_db] = lambda: database
+        client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://localhost",
+        )
+        try:
+            yield client, database, user_id, username, token, app
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+            app.dependency_overrides.update(original_overrides)
+            app.state.db = original_db
+            await database.close()
+
+    @staticmethod
+    def _bearer_headers(token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    @staticmethod
+    def _signed_token(payload: dict[str, Any]) -> str:
+        import jwt
+
+        settings = _settings()
+        return jwt.encode(
+            payload,
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+        )
+
+    @pytest.mark.asyncio
+    async def test_active_inactive_reactivation_rename_and_delete(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, user_id, username, token, _ = auth_runtime
+        _reset_rate_limiter()
+
+        active_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        active_body = active_response.json()
+        _require_fixed(
+            active_response.status_code == 200
+            and active_body.get("username") == username
+            and active_body.get("role") == "team_lead",
+            "expected an active bearer principal to reach the protected handler",
+        )
+
+        await database.conn.execute(
+            "UPDATE users SET is_active=0 WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        inactive_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        inactive_body = inactive_response.json()
+        _require_fixed(
+            inactive_response.status_code == 401
+            and inactive_body.get("detail") == "Not authenticated"
+            and "inactive" not in str(inactive_body).lower(),
+            "expected an inactive bearer principal to receive the generic failure",
+        )
+
+        list_calls = [0]
+        original_list_users = database.list_users
+
+        async def tracked_list_users() -> list[dict[str, Any]]:
+            list_calls[0] += 1
+            return await original_list_users()
+
+        database.list_users = tracked_list_users  # type: ignore[method-assign]
+        inactive_elevated_response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            inactive_elevated_response.status_code == 401 and list_calls[0] == 0,
+            "expected inactive bearer denial before protected handler work",
+        )
+
+        await database.conn.execute(
+            "UPDATE users SET is_active=1 WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        reactivated_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            reactivated_response.status_code == 200,
+            "expected the same bearer token to work after reactivation",
+        )
+
+        await database.conn.execute(
+            "UPDATE users SET username=? WHERE id=?",
+            ("renamed-http-principal", user_id),
+        )
+        await database.conn.commit()
+        renamed_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            renamed_response.status_code == 401,
+            "expected a token with a stale renamed subject to be rejected",
+        )
+
+        await database.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        await database.conn.commit()
+        deleted_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            deleted_response.status_code == 401
+            and deleted_response.json().get("detail") == "Not authenticated",
+            "expected a deleted bearer principal to receive the generic failure",
+        )
+
+    @pytest.mark.asyncio
+    async def test_current_database_role_controls_403_and_promotion(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, user_id, username, token, _ = auth_runtime
+        _reset_rate_limiter()
+        list_calls = [0]
+        original_list_users = database.list_users
+
+        async def tracked_list_users() -> list[dict[str, Any]]:
+            list_calls[0] += 1
+            return await original_list_users()
+
+        database.list_users = tracked_list_users  # type: ignore[method-assign]
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        demoted_response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            demoted_response.status_code == 403 and list_calls[0] == 0,
+            "expected current demoted role to block team-lead work",
+        )
+
+        promoted_token = _make_token(username, "reporter")
+        await database.conn.execute(
+            "UPDATE users SET role='team_lead' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        promoted_response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(promoted_token),
+        )
+        _require_fixed(
+            promoted_response.status_code == 200 and list_calls[0] == 1,
+            "expected current promoted role to authorize the next request",
+        )
+
+        await database.conn.execute(
+            "UPDATE users SET role='unsupported-role' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        invalid_role_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(promoted_token),
+        )
+        _require_fixed(
+            invalid_role_response.status_code == 401,
+            "expected an unknown database role to fail authentication",
+        )
+
+    @pytest.mark.asyncio
+    async def test_revoked_jti_is_generic_401(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        from ares.core.security import decode_access_token
+
+        client, database, user_id, _, token, _ = auth_runtime
+        settings = _settings()
+        payload = decode_access_token(
+            token,
+            settings.secret_key_value,
+            settings.ares_jwt_algorithm,
+        )
+        payload_valid = isinstance(payload, dict)
+        _require_fixed(payload_valid, "expected the test bearer token to decode")
+        jti = payload.get("jti") if payload else None
+        jti_valid = isinstance(jti, str) and bool(jti.strip())
+        _require_fixed(jti_valid, "expected the test bearer token to contain a JTI")
+        await database.revoke_access_token(
+            jti,
+            user_id,
+            "2099-01-01 00:00:00",
+        )
+        response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        body = response.json()
+        _require_fixed(
+            response.status_code == 401
+            and body.get("detail") == "Not authenticated"
+            and "revoked" not in str(body).lower(),
+            "expected a revoked bearer token to receive the generic failure",
+        )
+
+    @pytest.mark.parametrize(
+        ("_case", "claims"),
+        [
+            ("missing-sub", {"jti": "claim-jti", "exp": 4102444800}),
+            ("empty-sub", {"sub": "", "jti": "claim-jti", "exp": 4102444800}),
+            ("blank-sub", {"sub": "   ", "jti": "claim-jti", "exp": 4102444800}),
+            ("numeric-sub", {"sub": 7, "jti": "claim-jti", "exp": 4102444800}),
+            ("missing-jti", {"sub": "claim-user", "exp": 4102444800}),
+            ("empty-jti", {"sub": "claim-user", "jti": "", "exp": 4102444800}),
+            ("blank-jti", {"sub": "claim-user", "jti": "   ", "exp": 4102444800}),
+            ("object-jti", {"sub": "claim-user", "jti": {}, "exp": 4102444800}),
+            ("missing-exp", {"sub": "claim-user", "jti": "claim-jti"}),
+            (
+                "string-exp",
+                {"sub": "claim-user", "jti": "claim-jti", "exp": "4102444800"},
+            ),
+            (
+                "boolean-exp",
+                {"sub": "claim-user", "jti": "claim-jti", "exp": True},
+            ),
+        ],
+        ids=lambda value: value if isinstance(value, str) else None,
+    )
+    @pytest.mark.asyncio
+    async def test_mandatory_claim_failures_do_not_query_database(
+        self,
+        auth_runtime: Any,
+        _case: str,
+        claims: dict[str, Any],
+    ) -> None:
+        client, database, _, _, _, _ = auth_runtime
+        _reset_rate_limiter()
+        calls = [0]
+        original_resolve = database.resolve_access_token_principal
+
+        async def tracked_resolve(subject: str, jti: str) -> dict[str, Any] | None:
+            calls[0] += 1
+            return await original_resolve(subject, jti)
+
+        database.resolve_access_token_principal = tracked_resolve  # type: ignore[method-assign]
+        token = self._signed_token(claims)
+        response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        body = response.json()
+        _require_fixed(
+            response.status_code == 401
+            and body.get("detail") == "Not authenticated"
+            and response.headers.get("www-authenticate") == "Bearer"
+            and calls[0] == 0,
+            "expected fixed mandatory-claim validation failure",
+        )
+
+    @pytest.mark.parametrize(
+        "_case",
+        [
+            "object",
+            "list",
+            "null",
+            "positive-infinity",
+            "negative-infinity",
+            "nan",
+            "oversized-integer",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_malformed_exp_is_generic_401_before_database_or_handler(
+        self,
+        auth_runtime: Any,
+        _case: str,
+    ) -> None:
+        client, database, _, username, _, _ = auth_runtime
+        _reset_rate_limiter()
+        principal_calls = [0]
+        handler_calls = [0]
+        original_resolve = database.resolve_access_token_principal
+        original_list_users = database.list_users
+
+        async def tracked_resolve(subject: str, jti: str) -> dict[str, Any] | None:
+            principal_calls[0] += 1
+            return await original_resolve(subject, jti)
+
+        async def tracked_list_users() -> list[dict[str, Any]]:
+            handler_calls[0] += 1
+            return await original_list_users()
+
+        database.resolve_access_token_principal = tracked_resolve  # type: ignore[method-assign]
+        database.list_users = tracked_list_users  # type: ignore[method-assign]
+        malformed_exp_by_case: dict[str, Any] = {
+            "object": {},
+            "list": [],
+            "null": None,
+            "positive-infinity": float("inf"),
+            "negative-infinity": float("-inf"),
+            "nan": float("nan"),
+            "oversized-integer": 10**400,
+        }
+        token = self._signed_token(
+            {
+                "sub": username,
+                "jti": "malformed-exp-jti",
+                "exp": malformed_exp_by_case[_case],
+            }
+        )
+        response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(token),
+        )
+        body = response.json()
+        body_text = str(body).lower()
+        _require_fixed(
+            response.status_code == 401 and response.status_code != 500,
+            "expected malformed expiry to return the generic authentication status",
+        )
+        _require_fixed(
+            body.get("detail") == "Not authenticated"
+            and "typeerror" not in body_text
+            and "overflowerror" not in body_text
+            and "valueerror" not in body_text,
+            "expected malformed expiry to return the generic authentication envelope",
+        )
+        _require_fixed(
+            response.headers.get("www-authenticate") == "Bearer",
+            "expected malformed expiry to retain the bearer challenge",
+        )
+        _require_fixed(
+            principal_calls[0] == 0,
+            "expected malformed expiry to fail before database principal lookup",
+        )
+        _require_fixed(
+            handler_calls[0] == 0,
+            "expected malformed expiry to fail before protected handler work",
+        )
+
+    @pytest.mark.asyncio
+    async def test_expired_and_malformed_bearer_are_generic_401(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, _, username, _, _ = auth_runtime
+        _reset_rate_limiter()
+        calls = [0]
+        original_resolve = database.resolve_access_token_principal
+
+        async def tracked_resolve(subject: str, jti: str) -> dict[str, Any] | None:
+            calls[0] += 1
+            return await original_resolve(subject, jti)
+
+        database.resolve_access_token_principal = tracked_resolve  # type: ignore[method-assign]
+        from ares.core.security import create_access_token
+
+        settings = _settings()
+        expired = create_access_token(
+            {"sub": username, "role": "team_lead"},
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=-1,
+        )
+        expired_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(expired),
+        )
+        malformed_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers("synthetic.invalid.jwt"),
+        )
+        _require_fixed(
+            expired_response.status_code == 401
+            and malformed_response.status_code == 401
+            and calls[0] == 0,
+            "expected expired and malformed bearers to fail before DB authorization",
+        )
+
+    @pytest.mark.asyncio
+    async def test_closed_database_is_503_and_recovery_succeeds_without_handler_work(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, _, _, token, _ = auth_runtime
+        _reset_rate_limiter()
+        list_calls = [0]
+        original_list_users = database.list_users
+
+        async def tracked_list_users() -> list[dict[str, Any]]:
+            list_calls[0] += 1
+            return await original_list_users()
+
+        database.list_users = tracked_list_users  # type: ignore[method-assign]
+        await database.close()
+        unavailable_response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(token),
+        )
+        unavailable_body = unavailable_response.json()
+        _require_fixed(
+            unavailable_response.status_code == 503
+            and unavailable_body.get("detail") == "Authentication service unavailable"
+            and unavailable_response.headers.get("www-authenticate") is None
+            and list_calls[0] == 0,
+            "expected a closed auth database to deny work with fixed 503",
+        )
+
+        await database.connect()
+        recovered_response = await client.get(
+            "/security/users",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            recovered_response.status_code == 200 and list_calls[0] == 1,
+            "expected a recovered auth database to authorize a subsequent request",
+        )
+
+    @pytest.mark.asyncio
+    async def test_absent_and_timeout_database_are_fixed_503(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, _, _, token, app = auth_runtime
+        _reset_rate_limiter()
+        app.state.db = None
+        absent_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        _require_fixed(
+            absent_response.status_code == 503
+            and absent_response.json().get("detail")
+            == "Authentication service unavailable"
+            and absent_response.headers.get("www-authenticate") is None,
+            "expected absent auth database to map to fixed 503",
+        )
+
+        app.state.db = database
+
+        async def fail_lookup(_subject: str, _jti: str) -> dict[str, Any] | None:
+            raise TimeoutError
+
+        database.resolve_access_token_principal = fail_lookup  # type: ignore[method-assign]
+        timeout_response = await client.get(
+            "/auth/me",
+            headers=self._bearer_headers(token),
+        )
+        timeout_body = timeout_response.json()
+        _require_fixed(
+            timeout_response.status_code == 503
+            and timeout_body.get("detail") == "Authentication service unavailable"
+            and timeout_response.headers.get("www-authenticate") is None
+            and "timeout" not in str(timeout_body).lower(),
+            "expected auth lookup timeout to map to sanitized fixed 503",
+        )
+
+    @pytest.mark.asyncio
+    async def test_api_key_outage_is_503_invalid_key_is_401_and_bearer_wins(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, user_id, _, token, _ = auth_runtime
+        _reset_rate_limiter()
+        _, raw_key = await database.create_api_key(user_id, "http-outage-key")
+        verify_calls = [0]
+        original_verify = database.verify_api_key
+
+        async def tracked_verify(candidate: str) -> dict[str, Any] | None:
+            verify_calls[0] += 1
+            return await original_verify(candidate)
+
+        database.verify_api_key = tracked_verify  # type: ignore[method-assign]
+        await database.close()
+        api_key_response = await client.get(
+            "/auth/me",
+            headers={"X-API-Key": raw_key},
+        )
+        _require_fixed(
+            api_key_response.status_code == 503
+            and api_key_response.json().get("detail")
+            == "Authentication service unavailable"
+            and verify_calls[0] == 1,
+            "expected API-key database outage to map to fixed 503",
+        )
+
+        verify_calls[0] = 0
+        precedence_response = await client.get(
+            "/auth/me",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-API-Key": raw_key,
+            },
+        )
+        _require_fixed(
+            precedence_response.status_code == 503 and verify_calls[0] == 0,
+            "expected bearer backend outage not to fall through to API-key auth",
+        )
+
+        await database.connect()
+        invalid_response = await client.get(
+            "/auth/me",
+            headers={"X-API-Key": "ares_invalid_synthetic_key"},
+        )
+        _require_fixed(
+            invalid_response.status_code == 401
+            and invalid_response.json().get("detail")
+            == "Not authenticated. Provide Bearer token or X-API-Key.",
+            "expected invalid API key to retain the generic 401 contract",
+        )
+
+    @pytest.mark.asyncio
+    async def test_invalid_explicit_bearer_does_not_fall_through_to_api_key(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        client, database, user_id, _, _, _ = auth_runtime
+        _reset_rate_limiter()
+        _, raw_key = await database.create_api_key(user_id, "precedence-key")
+        verify_calls = [0]
+        original_verify = database.verify_api_key
+
+        async def tracked_verify(candidate: str) -> dict[str, Any] | None:
+            verify_calls[0] += 1
+            return await original_verify(candidate)
+
+        database.verify_api_key = tracked_verify  # type: ignore[method-assign]
+        response = await client.get(
+            "/auth/me",
+            headers={
+                "Authorization": "Bearer synthetic.invalid.jwt",
+                "X-API-Key": raw_key,
+            },
+        )
+        _require_fixed(
+            response.status_code == 401 and verify_calls[0] == 0,
+            "expected an explicitly invalid bearer not to fall through to API-key auth",
+        )

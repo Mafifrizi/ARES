@@ -796,6 +796,34 @@ class PostgresDatabase:
             )
         return self._row_to_dict(row) if row else None
 
+    async def resolve_access_token_principal(
+        self,
+        subject: str,
+        jti: str,
+    ) -> dict[str, Any] | None:
+        """Resolve current user eligibility and JTI status in one read snapshot."""
+        pool = self._pool
+        if pool is None:
+            raise RuntimeError("Database not connected")
+        is_closing = getattr(pool, "is_closing", None)
+        if callable(is_closing) and is_closing():
+            raise RuntimeError("Database pool is closing")
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT u.id, u.username, u.role
+                   FROM users AS u
+                   WHERE u.username=$1
+                     AND u.is_active=1
+                     AND NOT EXISTS (
+                         SELECT 1
+                         FROM revoked_access_tokens AS rat
+                         WHERE rat.jti=$2
+                     )""",
+                subject,
+                jti,
+            )
+        return self._row_to_dict(row) if row else None
+
     async def verify_user(self, username: str, password: str) -> dict[str, Any] | None:
         user = await self.get_user(username)
         _DUMMY = "$2b$12$notarealthashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"

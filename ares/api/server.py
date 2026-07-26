@@ -599,8 +599,18 @@ async def get_current_user_or_apikey(
         return bearer
     api_key = request.headers.get("X-API-Key")
     if api_key:
-        db = get_db(request)
-        data = await db.verify_api_key(api_key)
+        try:
+            db = get_db(request)
+            data = await db.verify_api_key(api_key)
+        except Exception as exc:
+            logger.warning(
+                "auth_backend_api_key_lookup_failed",
+                error_type=type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication service unavailable",
+            ) from None
         if data:
             return AuthenticatedUser(
                 username=data["username"],

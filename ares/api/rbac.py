@@ -17,9 +17,12 @@ TTL auto-expires keys after 120s to prevent memory leaks.
 """
 from __future__ import annotations
 
+import math
 import time
 from collections import defaultdict, deque
+from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
@@ -72,6 +75,103 @@ class AuthenticatedUser:
 
 
 # ── Rate limit configs ─────────────────────────────────────────────────────────
+
+class PrincipalDecisionStatus(str, Enum):
+    AUTHORIZED = "authorized"
+    INVALID = "invalid"
+    BACKEND_UNAVAILABLE = "backend_unavailable"
+
+
+@dataclass(frozen=True)
+class AuthoritativePrincipal:
+    user_id: str
+    username: str
+    role: str
+
+
+@dataclass(frozen=True)
+class PrincipalDecision:
+    status: PrincipalDecisionStatus
+    principal: AuthoritativePrincipal | None = None
+
+
+_VALID_PRINCIPAL_ROLES = frozenset(role.value for role in ROLE_ORDER)
+
+
+async def resolve_bearer_principal(
+    token: str,
+    *,
+    db: Any,
+    secret_key: str,
+    algorithm: str,
+) -> PrincipalDecision:
+    """Resolve a bearer token against one authoritative database snapshot."""
+    from ares.core.security import decode_access_token
+
+    try:
+        payload = decode_access_token(token, secret_key, algorithm)
+    except (TypeError, OverflowError):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    if not isinstance(payload, Mapping):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+
+    subject = payload.get("sub")
+    jti = payload.get("jti")
+    expires_at = payload.get("exp")
+    if (
+        not isinstance(subject, str)
+        or not subject.strip()
+        or not isinstance(jti, str)
+        or not jti.strip()
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+    ):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    try:
+        expires_at_is_finite = math.isfinite(float(expires_at))
+    except (TypeError, ValueError, OverflowError):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    if not expires_at_is_finite:
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+
+    if db is None:
+        logger.warning("auth_backend_principal_lookup_unavailable")
+        return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)
+
+    try:
+        row = await db.resolve_access_token_principal(subject, jti)
+    except Exception as exc:
+        logger.warning(
+            "auth_backend_principal_lookup_failed",
+            error_type=type(exc).__name__,
+        )
+        return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)
+
+    if not isinstance(row, Mapping):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+
+    user_id = row.get("id")
+    username = row.get("username")
+    role = row.get("role")
+    if (
+        not isinstance(user_id, str)
+        or not user_id.strip()
+        or not isinstance(username, str)
+        or username != subject
+        or not isinstance(role, str)
+        or role not in _VALID_PRINCIPAL_ROLES
+    ):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+
+    return PrincipalDecision(
+        PrincipalDecisionStatus.AUTHORIZED,
+        AuthoritativePrincipal(
+            user_id=user_id,
+            username=username,
+            role=role,
+        ),
+    )
+
 
 RATE_LIMITS: dict[str, int] = {
     "global":           60,
@@ -322,37 +422,39 @@ async def get_current_user(
     request: Request,
     token:   str | None = Depends(oauth2_scheme),
 ) -> AuthenticatedUser | None:
-    """Decode JWT. Returns None (not raises) so API-key auth can fallback."""
+    """Resolve an explicitly supplied bearer token against the live auth database."""
     if not token:
         return None
     from ares.core.config import get_settings
-    from ares.core.security import decode_access_token
+
     settings = get_settings()
-    payload = decode_access_token(token, settings.secret_key_value,
-                                   settings.ares_jwt_algorithm)
-    if not payload:
-        return None
-    # Check if this access token has been explicitly revoked (e.g. on logout).
-    # Use the DB connection from app.state (already open) — no new connection per request.
-    jti = payload.get("jti")
-    if jti:
-        try:
-            db = getattr(getattr(request, "app", None), "state", None)
-            db = getattr(db, "db", None) if db else None
-            if db is None:
-                # Fallback: open a short-lived connection (dev / test context)
-                from ares.db.database import AresDatabase
-                async with await AresDatabase.create(settings.db_path) as _db:
-                    if await _db.is_access_token_revoked(jti):
-                        return None
-            else:
-                if await db.is_access_token_revoked(jti):
-                    return None
-        except Exception:
-            pass   # DB unavailable — don't block auth on infra failure
-    username = payload.get("sub", "")
-    role     = payload.get("role", "reporter")
-    return AuthenticatedUser(username=username, role=role)
+    state = getattr(getattr(request, "app", None), "state", None)
+    db = getattr(state, "db", None) if state is not None else None
+    decision = await resolve_bearer_principal(
+        token,
+        db=db,
+        secret_key=settings.secret_key_value,
+        algorithm=settings.ares_jwt_algorithm,
+    )
+    if decision.status is PrincipalDecisionStatus.BACKEND_UNAVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service unavailable",
+        )
+    if decision.status is not PrincipalDecisionStatus.AUTHORIZED:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    principal = decision.principal
+    if principal is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return AuthenticatedUser(username=principal.username, role=principal.role)
 
 
 def require_role(*allowed_roles: str) -> Any:

@@ -816,6 +816,157 @@ async def test_postgres_api_key_returns_authoritative_current_role() -> None:
 
 
 @pytest.mark.asyncio
+async def test_postgres_authoritative_bearer_principal_contract() -> None:
+    from ares.api.rbac import PrincipalDecisionStatus, resolve_bearer_principal
+    from ares.core.security import create_access_token
+
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        jti = "postgres-principal-jti"
+        async with database._pool.acquire() as connection:
+            subject = await connection.fetchval(
+                "SELECT username FROM users WHERE id=$1",
+                user_id,
+            )
+            identity_before = await connection.fetchrow(
+                "SELECT xmin::text AS version, last_login FROM users WHERE id=$1",
+                user_id,
+            )
+
+        active = await database.resolve_access_token_principal(subject, jti)
+        async with database._pool.acquire() as connection:
+            identity_after = await connection.fetchrow(
+                "SELECT xmin::text AS version, last_login FROM users WHERE id=$1",
+                user_id,
+            )
+        _require_fixed(
+            active is not None
+            and active.get("id") == user_id
+            and active.get("username") == subject
+            and active.get("role") == "operator",
+            "expected active PostgreSQL bearer principal to resolve canonically",
+        )
+        _require_fixed(
+            identity_after == identity_before,
+            "expected authoritative PostgreSQL principal lookup to remain read-only",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET is_active=0 WHERE id=$1",
+                user_id,
+            )
+        inactive = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            inactive is None,
+            "expected inactive PostgreSQL bearer principal to be rejected",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET is_active=1, role=$1 WHERE id=$2",
+                "reporter",
+                user_id,
+            )
+        demoted = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            demoted is not None and demoted.get("role") == "reporter",
+            "expected PostgreSQL principal lookup to return the committed demoted role",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET role=$1 WHERE id=$2",
+                "team_lead",
+                user_id,
+            )
+        promoted = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            promoted is not None and promoted.get("role") == "team_lead",
+            "expected PostgreSQL principal lookup to return the committed promoted role",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET role=$1 WHERE id=$2",
+                "unsupported-role",
+                user_id,
+            )
+        signing_key = "postgres-principal-test-signing-key"
+        token = create_access_token(
+            {"sub": subject, "role": "team_lead"},
+            signing_key,
+        )
+        invalid_role = await resolve_bearer_principal(
+            token,
+            db=database,
+            secret_key=signing_key,
+            algorithm="HS256",
+        )
+        _require_fixed(
+            invalid_role.status is PrincipalDecisionStatus.INVALID,
+            "expected an unknown PostgreSQL database role to fail authorization",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET role=$1 WHERE id=$2",
+                "operator",
+                user_id,
+            )
+            await connection.execute(
+                """INSERT INTO revoked_access_tokens(jti,user_id,expires_at)
+                   VALUES($1,$2,now() + interval '1 hour')""",
+                jti,
+                user_id,
+            )
+        revoked = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            revoked is None,
+            "expected revoked PostgreSQL bearer principal to be rejected",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "DELETE FROM revoked_access_tokens WHERE jti=$1",
+                jti,
+            )
+            await connection.execute(
+                "UPDATE users SET is_active=0 WHERE id=$1",
+                user_id,
+            )
+        suspended = await database.resolve_access_token_principal(subject, jti)
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET is_active=1 WHERE id=$1",
+                user_id,
+            )
+        reactivated = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            suspended is None and reactivated is not None,
+            "expected temporary PostgreSQL suspension to be reversible",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute("DELETE FROM users WHERE id=$1", user_id)
+        deleted = await database.resolve_access_token_principal(subject, jti)
+        _require_fixed(
+            deleted is None,
+            "expected a deleted PostgreSQL bearer principal to be rejected",
+        )
+
+        closed = PostgresDatabase(harness.dsn, pool_min=1, pool_max=1)
+        await closed.connect()
+        await closed.close()
+        with pytest.raises(RuntimeError):
+            await closed.resolve_access_token_principal(
+                "closed-principal",
+                "closed-principal-jti",
+            )
+
+
+@pytest.mark.asyncio
 async def test_postgres_refresh_expiry_contract() -> None:
     async with _postgres_harness() as harness:
         database = harness.database

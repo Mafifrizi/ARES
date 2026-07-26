@@ -1007,6 +1007,146 @@ async def test_inactive_owner_refresh_is_immutable_and_reactivates(
 
 
 @pytest.mark.asyncio
+async def test_authoritative_principal_state_role_revocation_and_read_only(
+    db_and_user: tuple[AresDatabase, str],
+) -> None:
+    from ares.api.rbac import PrincipalDecisionStatus, resolve_bearer_principal
+    from ares.core.security import create_access_token
+
+    db, user_id = db_and_user
+    subject = "sqlite-lifecycle-user"
+    jti = "sqlite-principal-jti"
+
+    changes_before = db.conn.total_changes
+    active = await db.resolve_access_token_principal(subject, jti)
+    changes_after = db.conn.total_changes
+    _require_fixed(
+        active is not None
+        and active.get("id") == user_id
+        and active.get("username") == subject
+        and active.get("role") == "operator",
+        "expected active SQLite bearer principal to resolve canonically",
+    )
+    _require_fixed(
+        changes_after == changes_before,
+        "expected authoritative SQLite principal lookup to remain read-only",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET is_active=0 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    inactive = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        inactive is None,
+        "expected inactive SQLite bearer principal to be rejected",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET is_active=1, role='reporter' WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    demoted = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        demoted is not None and demoted.get("role") == "reporter",
+        "expected SQLite principal lookup to return the current demoted role",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET role='team_lead' WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    promoted = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        promoted is not None and promoted.get("role") == "team_lead",
+        "expected SQLite principal lookup to return the current promoted role",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET role='unsupported-role' WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    signing_key = "sqlite-principal-test-signing-key"
+    token = create_access_token(
+        {"sub": subject, "role": "team_lead"},
+        signing_key,
+    )
+    invalid_role = await resolve_bearer_principal(
+        token,
+        db=db,
+        secret_key=signing_key,
+        algorithm="HS256",
+    )
+    _require_fixed(
+        invalid_role.status is PrincipalDecisionStatus.INVALID,
+        "expected an unknown database role to fail bearer authorization",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET role='operator' WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.execute(
+        """INSERT INTO revoked_access_tokens(jti,user_id,expires_at)
+           VALUES(?,?,?)""",
+        (jti, user_id, "2099-01-01 00:00:00"),
+    )
+    await db.conn.commit()
+    revoked = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        revoked is None,
+        "expected revoked SQLite bearer principal to be rejected",
+    )
+
+    await db.conn.execute(
+        "DELETE FROM revoked_access_tokens WHERE jti=?",
+        (jti,),
+    )
+    await db.conn.execute(
+        "UPDATE users SET is_active=0 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    suspended = await db.resolve_access_token_principal(subject, jti)
+    await db.conn.execute(
+        "UPDATE users SET is_active=1 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    reactivated = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        suspended is None and reactivated is not None,
+        "expected temporary SQLite suspension to be reversible",
+    )
+
+    await db.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    await db.conn.commit()
+    deleted = await db.resolve_access_token_principal(subject, jti)
+    _require_fixed(
+        deleted is None,
+        "expected a deleted SQLite bearer principal to be rejected",
+    )
+
+
+@pytest.mark.asyncio
+async def test_authoritative_principal_closed_database_propagates(
+    db_and_user: tuple[AresDatabase, str],
+) -> None:
+    db, _ = db_and_user
+    await db.close()
+    with pytest.raises(RuntimeError):
+        await db.resolve_access_token_principal(
+            "sqlite-lifecycle-user",
+            "sqlite-closed-jti",
+        )
+    await db.connect()
+
+
+@pytest.mark.asyncio
 async def test_api_key_rejects_iso_expiry_earlier_on_current_utc_date(
     db_and_user: tuple[AresDatabase, str],
 ) -> None:

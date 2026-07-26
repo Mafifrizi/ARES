@@ -1042,6 +1042,28 @@ class AresDatabase:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def resolve_access_token_principal(
+        self,
+        subject: str,
+        jti: str,
+    ) -> dict[str, Any] | None:
+        """Resolve current user eligibility and JTI status in one read snapshot."""
+        connection = self._require_connected()
+        async with connection.execute(
+            """SELECT u.id, u.username, u.role
+               FROM users AS u
+               WHERE u.username=?
+                 AND u.is_active=1
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM revoked_access_tokens AS rat
+                     WHERE rat.jti=?
+                 )""",
+            (subject, jti),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def verify_user(self, username: str, password: str) -> dict[str, Any] | None:
         user = await self.get_user(username)
         # Always run bcrypt comparison to prevent username enumeration via timing attack.

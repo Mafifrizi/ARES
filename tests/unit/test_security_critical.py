@@ -29,6 +29,9 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestCriticalPass1!")
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+_MOCK_PRINCIPAL_ROLES: dict[str, str] = {}
+
+
 def _settings():
     from ares.core.config import get_settings
     get_settings.cache_clear()
@@ -37,6 +40,8 @@ def _settings():
 
 def _make_token(username: str, role: str, expires_minutes: int = 60) -> str:
     from ares.core.security import create_access_token
+
+    _MOCK_PRINCIPAL_ROLES[username] = role
     s = _settings()
     return create_access_token(
         data={"sub": username, "role": role},
@@ -60,6 +65,21 @@ def _make_mock_db():
     db.revoke_all_refresh_tokens = AsyncMock()
     db.revoke_access_token       = AsyncMock()
     db.is_access_token_revoked   = AsyncMock(return_value=False)
+
+    async def resolve_access_token_principal(
+        subject: str,
+        _jti: str,
+    ) -> dict[str, str] | None:
+        if db.is_access_token_revoked.return_value is True:
+            return None
+        role = _MOCK_PRINCIPAL_ROLES.get(subject)
+        if role is None:
+            return None
+        return {"id": f"mock-user-{subject}", "username": subject, "role": role}
+
+    db.resolve_access_token_principal = AsyncMock(
+        side_effect=resolve_access_token_principal
+    )
     db.audit                     = AsyncMock()
     db.purge_expired_tokens      = AsyncMock(return_value=0)
     db.list_campaigns            = AsyncMock(return_value=([], 0))
