@@ -313,6 +313,122 @@ class _BarrierPool:
         return getattr(self._pool, name)
 
 
+class _ApiKeyLookupBarrierConnection:
+    def __init__(
+        self,
+        connection: Any,
+        lookup_complete: asyncio.Event,
+        release_lookup: asyncio.Event,
+        lookup_pending: list[bool],
+        authoritative_update_seen: list[bool],
+    ) -> None:
+        self._connection = connection
+        self._lookup_complete = lookup_complete
+        self._release_lookup = release_lookup
+        self._lookup_pending = lookup_pending
+        self._authoritative_update_seen = authoritative_update_seen
+
+    async def fetch(self, query: str, *args: object) -> Any:
+        rows = await self._connection.fetch(query, *args)
+        normalized = " ".join(query.upper().split())
+        if (
+            self._lookup_pending[0]
+            and "FROM API_KEYS AK JOIN USERS U" in normalized
+        ):
+            self._lookup_pending[0] = False
+            self._lookup_complete.set()
+            try:
+                await asyncio.wait_for(self._release_lookup.wait(), timeout=10)
+            except TimeoutError:
+                pytest.fail(
+                    "API-key candidate lookup barrier was not released",
+                    pytrace=False,
+                )
+        return rows
+
+    async def fetchrow(self, query: str, *args: object) -> Any:
+        row = await self._connection.fetchrow(query, *args)
+        normalized = " ".join(query.upper().split())
+        if "UPDATE API_KEYS AS AK SET LAST_USED=NOW()" in normalized:
+            self._authoritative_update_seen[0] = all(
+                field in normalized
+                for field in (
+                    "RETURNING",
+                    "AK.ID",
+                    "AK.SCOPES",
+                    "U.USERNAME",
+                    "U.ROLE",
+                )
+            )
+        return row
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._connection, name)
+
+
+class _ApiKeyLookupBarrierAcquireContext:
+    def __init__(
+        self,
+        acquire_context: Any,
+        lookup_complete: asyncio.Event,
+        release_lookup: asyncio.Event,
+        lookup_pending: list[bool],
+        authoritative_update_seen: list[bool],
+    ) -> None:
+        self._acquire_context = acquire_context
+        self._lookup_complete = lookup_complete
+        self._release_lookup = release_lookup
+        self._lookup_pending = lookup_pending
+        self._authoritative_update_seen = authoritative_update_seen
+
+    async def __aenter__(self) -> _ApiKeyLookupBarrierConnection:
+        connection = await self._acquire_context.__aenter__()
+        return _ApiKeyLookupBarrierConnection(
+            connection,
+            self._lookup_complete,
+            self._release_lookup,
+            self._lookup_pending,
+            self._authoritative_update_seen,
+        )
+
+    async def __aexit__(self, *exc_info: object) -> bool | None:
+        return await self._acquire_context.__aexit__(*exc_info)
+
+
+class _ApiKeyLookupBarrierPool:
+    def __init__(
+        self,
+        pool: Any,
+        lookup_complete: asyncio.Event,
+        release_lookup: asyncio.Event,
+    ) -> None:
+        self._pool = pool
+        self._lookup_complete = lookup_complete
+        self._release_lookup = release_lookup
+        self._lookup_pending = [True]
+        self._authoritative_update_seen = [False]
+
+    def acquire(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> _ApiKeyLookupBarrierAcquireContext:
+        return _ApiKeyLookupBarrierAcquireContext(
+            self._pool.acquire(*args, **kwargs),
+            self._lookup_complete,
+            self._release_lookup,
+            self._lookup_pending,
+            self._authoritative_update_seen,
+        )
+
+    @property
+    def authoritative_update_seen(self) -> bool:
+        return self._authoritative_update_seen[0]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._pool, name)
+
+
 async def _wait_for_blocked_backend_sessions(
     database: PostgresDatabase,
     holder_pid: int,
@@ -535,6 +651,171 @@ async def test_postgres_api_key_expiry_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_postgres_inactive_owner_api_key_is_denied_without_usage() -> None:
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        key_id, raw_key = await database.create_api_key(
+            user_id,
+            "inactive-owner-key",
+            expires_days=1,
+        )
+
+        active_verification = await database.verify_api_key(raw_key)
+        _require_fixed(
+            active_verification is not None,
+            "expected active-owner API key verification to succeed",
+        )
+
+        usage_marker = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE api_keys SET last_used=$1 WHERE id=$2",
+                usage_marker,
+                key_id,
+            )
+            await connection.execute(
+                "UPDATE users SET is_active=0 WHERE id=$1",
+                user_id,
+            )
+            usage_before = await connection.fetchval(
+                "SELECT last_used FROM api_keys WHERE id=$1",
+                key_id,
+            )
+
+        inactive_verification = await database.verify_api_key(raw_key)
+        async with database._pool.acquire() as connection:
+            usage_after = await connection.fetchval(
+                "SELECT last_used FROM api_keys WHERE id=$1",
+                key_id,
+            )
+            await connection.execute(
+                "UPDATE users SET is_active=1 WHERE id=$1",
+                user_id,
+            )
+
+        _require_fixed(
+            inactive_verification is None,
+            "expected inactive-owner API key verification to be rejected",
+        )
+        _require_fixed(
+            usage_before == usage_marker and usage_after == usage_before,
+            "expected inactive-owner API key usage metadata to remain unchanged",
+        )
+
+        reactivated_verification = await database.verify_api_key(raw_key)
+        _require_fixed(
+            reactivated_verification is not None,
+            "expected reactivated-owner API key verification to succeed",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE api_keys SET is_active=0 WHERE id=$1",
+                key_id,
+            )
+        revoked_verification = await database.verify_api_key(raw_key)
+        _require_fixed(
+            revoked_verification is None,
+            "expected revoked API key verification to remain rejected",
+        )
+
+
+@pytest.mark.asyncio
+async def test_postgres_api_key_returns_authoritative_current_role() -> None:
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        key_id, raw_key = await database.create_api_key(
+            user_id,
+            "authoritative-identity-key",
+            expires_days=1,
+        )
+        real_pool = database._pool
+        lookup_complete = asyncio.Event()
+        release_lookup = asyncio.Event()
+        verification: asyncio.Task[Any] | None = None
+        result: dict[str, Any] | None = None
+
+        async with real_pool.acquire() as observer:
+            last_used_before = await observer.fetchval(
+                "SELECT last_used FROM api_keys WHERE id=$1",
+                key_id,
+            )
+
+        barrier_pool = _ApiKeyLookupBarrierPool(
+            real_pool,
+            lookup_complete,
+            release_lookup,
+        )
+        database._pool = barrier_pool
+        try:
+            verification = asyncio.create_task(database.verify_api_key(raw_key))
+            try:
+                await asyncio.wait_for(lookup_complete.wait(), timeout=10)
+            except TimeoutError:
+                pytest.fail(
+                    "production API-key lookup did not reach the barrier",
+                    pytrace=False,
+                )
+
+            async with real_pool.acquire() as updater:
+                await updater.execute(
+                    "UPDATE users SET role=$1 WHERE id=$2",
+                    "team_lead",
+                    user_id,
+                )
+            async with real_pool.acquire() as observer:
+                role_after_commit = await observer.fetchval(
+                    "SELECT role FROM users WHERE id=$1",
+                    user_id,
+                )
+                last_used_while_paused = await observer.fetchval(
+                    "SELECT last_used FROM api_keys WHERE id=$1",
+                    key_id,
+                )
+            _require_fixed(
+                role_after_commit == "team_lead",
+                "expected role change to commit before API-key update",
+            )
+            _require_fixed(
+                last_used_before is None and last_used_while_paused is None,
+                "expected candidate lookup not to update API-key usage metadata",
+            )
+
+            release_lookup.set()
+            try:
+                result = await asyncio.wait_for(verification, timeout=10)
+            except TimeoutError:
+                pytest.fail(
+                    "API-key verification did not finish after barrier release",
+                    pytrace=False,
+                )
+        finally:
+            release_lookup.set()
+            await _cancel_task(verification)
+            database._pool = real_pool
+
+        async with real_pool.acquire() as observer:
+            last_used_after = await observer.fetchval(
+                "SELECT last_used FROM api_keys WHERE id=$1",
+                key_id,
+            )
+        _require_fixed(
+            result is not None and result.get("role") == "team_lead",
+            "expected authoritative API-key result to use the committed role",
+        )
+        _require_fixed(
+            barrier_pool.authoritative_update_seen,
+            "expected authoritative update to return current identity metadata",
+        )
+        _require_fixed(
+            last_used_after is not None,
+            "expected authoritative API-key update to record usage metadata",
+        )
+
+
+@pytest.mark.asyncio
 async def test_postgres_refresh_expiry_contract() -> None:
     async with _postgres_harness() as harness:
         database = harness.database
@@ -577,6 +858,59 @@ async def test_postgres_refresh_expiry_contract() -> None:
         assert user["id"] == user_id
         assert successor is not None
         assert await _active_refresh_count(database, user_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_inactive_owner_refresh_is_immutable_and_reactivates() -> None:
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        predecessor = await database.create_refresh_token(user_id)
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET is_active=0 WHERE id=$1",
+                user_id,
+            )
+
+        inactive_result = await database.rotate_refresh_token(predecessor)
+        async with database._pool.acquire() as connection:
+            inactive_rows = await connection.fetch(
+                """SELECT user_id, is_revoked, used_at
+                   FROM refresh_tokens
+                   WHERE user_id=$1""",
+                user_id,
+            )
+        _require_fixed(
+            inactive_result == (None, None),
+            "expected inactive-owner refresh rotation to be rejected",
+        )
+        _require_fixed(
+            len(inactive_rows) == 1
+            and inactive_rows[0]["user_id"] == user_id
+            and inactive_rows[0]["is_revoked"] == 0
+            and inactive_rows[0]["used_at"] is None,
+            "expected inactive-owner refresh predecessor to remain unchanged",
+        )
+
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE users SET is_active=1 WHERE id=$1",
+                user_id,
+            )
+        reactivated_user, successor = await database.rotate_refresh_token(predecessor)
+        _require_fixed(
+            reactivated_user is not None and successor is not None,
+            "expected reactivated-owner refresh rotation to succeed",
+        )
+        reused_result = await database.rotate_refresh_token(predecessor)
+        _require_fixed(
+            reused_result == (None, None),
+            "expected the reactivated predecessor to rotate only once",
+        )
+        _require_fixed(
+            await _active_refresh_count(database, user_id) == 1,
+            "expected exactly one active refresh successor after reactivation",
+        )
 
 
 @pytest.mark.asyncio
@@ -987,6 +1321,66 @@ async def test_refresh_writers_use_expected_transaction_lock(
                 "refresh-token writer did not finish after advisory-lock release",
                 pytrace=False,
             )
+
+
+@pytest.mark.asyncio
+async def test_rotation_cas_rechecks_inactive_owner_after_advisory_wait() -> None:
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        predecessor = await database.create_refresh_token(user_id)
+        lock_key = _refresh_token_user_lock_key(user_id)
+        rotation: asyncio.Task[Any] | None = None
+
+        try:
+            async with database._pool.acquire() as holder:
+                async with holder.transaction():
+                    await holder.execute(
+                        "SELECT pg_advisory_xact_lock($1::BIGINT)",
+                        lock_key,
+                    )
+                    rotation = asyncio.create_task(
+                        database.rotate_refresh_token(predecessor)
+                    )
+                    await _wait_for_advisory_wait(database, rotation)
+                    async with database._pool.acquire() as deactivator:
+                        await deactivator.execute(
+                            "UPDATE users SET is_active=0 WHERE id=$1",
+                            user_id,
+                        )
+                    _require_fixed(
+                        not rotation.done(),
+                        "expected rotation to remain blocked until lock release",
+                    )
+
+            assert rotation is not None
+            try:
+                result = await asyncio.wait_for(rotation, timeout=10)
+            except TimeoutError:
+                pytest.fail(
+                    "rotation did not finish after inactive-owner lock release",
+                    pytrace=False,
+                )
+        finally:
+            await _cancel_task(rotation)
+
+        _require_fixed(
+            result == (None, None),
+            "expected inactive-owner CAS to lose after advisory lock release",
+        )
+        async with database._pool.acquire() as connection:
+            rows = await connection.fetch(
+                """SELECT is_revoked, used_at
+                   FROM refresh_tokens
+                   WHERE user_id=$1""",
+                user_id,
+            )
+        _require_fixed(
+            len(rows) == 1
+            and rows[0]["is_revoked"] == 0
+            and rows[0]["used_at"] is None,
+            "expected inactive-owner CAS loss to leave predecessor unchanged",
+        )
 
 
 @pytest.mark.asyncio

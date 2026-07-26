@@ -858,9 +858,10 @@ class PostgresDatabase:
         prefix = raw_key[:12]
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """SELECT ak.*, u.username, u.role
+                """SELECT ak.id, ak.key_hash
                    FROM api_keys ak JOIN users u ON ak.user_id=u.id
                    WHERE ak.key_prefix=$1 AND ak.is_active=1
+                   AND u.is_active=1
                    AND (ak.expires_at IS NULL OR ak.expires_at > now())""",
                 prefix,
             )
@@ -868,15 +869,26 @@ class PostgresDatabase:
             d = self._row_to_dict(row)
             if verify_password(raw_key, d["key_hash"]):
                 async with self._pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE api_keys SET last_used=now() WHERE id=$1", d["id"]
+                    updated = await conn.fetchrow(
+                        """UPDATE api_keys AS ak
+                           SET last_used=now()
+                           FROM users AS u
+                           WHERE ak.id=$1
+                             AND ak.is_active=1
+                             AND (ak.expires_at IS NULL OR ak.expires_at > now())
+                             AND u.id=ak.user_id
+                             AND u.is_active=1
+                           RETURNING ak.id, ak.scopes, u.username, u.role""",
+                        d["id"],
                     )
+                if updated is None:
+                    return None
                 return {
-                    "username": d["username"],
-                    "role": d["role"],
+                    "username": updated["username"],
+                    "role": updated["role"],
                     "auth_type": "api_key",
-                    "key_id": d["id"],
-                    "scopes": [d["scopes"]] if d.get("scopes") else [],
+                    "key_id": updated["id"],
+                    "scopes": [updated["scopes"]] if updated["scopes"] else [],
                 }
         return None
 
@@ -933,6 +945,7 @@ class PostgresDatabase:
                          AND rt.is_revoked=0
                          AND rt.expires_at > now()
                          AND u.id=rt.user_id
+                         AND u.is_active=1
                        RETURNING u.id AS uid, u.username, u.role""",
                     old_hash,
                     user_id,

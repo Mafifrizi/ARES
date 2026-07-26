@@ -1117,6 +1117,7 @@ class AresDatabase:
             """SELECT ak.*, u.username, u.role
                FROM api_keys ak JOIN users u ON ak.user_id=u.id
                WHERE ak.key_prefix=? AND ak.is_active=1
+               AND u.is_active=1
                AND (
                    ak.expires_at IS NULL
                    OR (
@@ -1130,10 +1131,27 @@ class AresDatabase:
 
         for row in rows:
             if verify_password(raw_key, row["key_hash"]):
-                await self._conn.execute(
-                    "UPDATE api_keys SET last_used=datetime('now') WHERE id=?", (row["id"],)
-                )
+                async with self._conn.execute(
+                    """UPDATE api_keys
+                       SET last_used=datetime('now')
+                       WHERE id=? AND is_active=1
+                       AND (
+                           expires_at IS NULL
+                           OR (
+                               julianday(expires_at) IS NOT NULL
+                               AND julianday(expires_at) > julianday('now')
+                           )
+                       )
+                       AND EXISTS (
+                           SELECT 1 FROM users u
+                           WHERE u.id=api_keys.user_id AND u.is_active=1
+                       )""",
+                    (row["id"],),
+                ) as cur:
+                    changed = cur.rowcount
                 await self._conn.commit()
+                if changed != 1:
+                    return None
                 return {
                     "username": row["username"],
                     "role": row["role"],
@@ -1289,6 +1307,7 @@ class AresDatabase:
                 """SELECT rt.*, u.username, u.role, u.id as uid
                    FROM refresh_tokens rt JOIN users u ON rt.user_id=u.id
                    WHERE rt.id=? AND rt.is_revoked=0
+                   AND u.is_active=1
                    AND julianday(rt.expires_at) IS NOT NULL
                    AND julianday(rt.expires_at) > julianday('now')""",
                 (old_hash,),
@@ -1304,7 +1323,11 @@ class AresDatabase:
                        SET is_revoked=1, used_at=datetime('now')
                        WHERE id=? AND is_revoked=0
                        AND julianday(expires_at) IS NOT NULL
-                       AND julianday(expires_at) > julianday('now')""",
+                       AND julianday(expires_at) > julianday('now')
+                       AND EXISTS (
+                           SELECT 1 FROM users u
+                           WHERE u.id=refresh_tokens.user_id AND u.is_active=1
+                       )""",
                     (old_hash,),
                 ) as cur:
                     changed = cur.rowcount

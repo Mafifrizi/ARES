@@ -130,6 +130,11 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+def _require_fixed(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message, pytrace=False)
+
+
 # ── shared async client ───────────────────────────────────────────────────────
 
 
@@ -360,6 +365,225 @@ class TestAuthFlow:
     async def test_unauthenticated_endpoint_returns_401(self, aclient):
         c, _, __ = aclient
         assert (await c.get("/campaigns/any-id")).status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_inactive_api_key_uses_generic_failure_without_endpoint_work(
+        self, aclient
+    ):
+        """Response/handler mapping; real SQLite containment is covered below."""
+        c, db, _ = aclient
+        _reset_rate_limiter()
+        db.verify_api_key.return_value = None
+        db.verify_api_key.reset_mock()
+        db.list_campaigns.reset_mock()
+
+        response = await c.get("/campaigns", headers=_api_key_headers())
+        response_body = response.json()
+        generic_failure = (
+            response_body.get("code") == 401
+            and response_body.get("detail")
+            == "Not authenticated. Provide Bearer token or X-API-Key."
+            and response_body.get("type") == "api_error"
+        )
+        if not (
+            response.status_code == 401
+            and generic_failure
+            and db.verify_api_key.await_count == 1
+            and db.list_campaigns.await_count == 0
+        ):
+            pytest.fail(
+                "expected inactive API key to fail generically before endpoint work",
+                pytrace=False,
+            )
+        if "inactive" in response.text.lower():
+            pytest.fail(
+                "expected API-key authentication failure not to disclose account status",
+                pytrace=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_inactive_refresh_uses_generic_failure_without_successor(
+        self, aclient
+    ):
+        """Response/handler mapping; real SQLite containment is covered below."""
+        c, db, _ = aclient
+        _reset_rate_limiter()
+        db.rotate_refresh_token.return_value = (None, None)
+        db.rotate_refresh_token.reset_mock()
+        db.create_refresh_token.reset_mock()
+
+        response = await c.post(
+            "/auth/refresh",
+            json={"refresh_token": "inactive-refresh-fixture"},
+        )
+        response_body = response.json()
+        generic_failure = (
+            response_body.get("code") == 401
+            and response_body.get("detail") == "Refresh token invalid or expired"
+            and response_body.get("type") == "api_error"
+        )
+        if not (
+            response.status_code == 401
+            and generic_failure
+            and db.rotate_refresh_token.await_count == 1
+            and db.create_refresh_token.await_count == 0
+        ):
+            pytest.fail(
+                "expected inactive refresh to fail generically without a successor",
+                pytrace=False,
+            )
+        if "inactive" in response.text.lower():
+            pytest.fail(
+                "expected refresh authentication failure not to disclose account status",
+                pytrace=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_real_sqlite_inactive_credentials_fail_at_api_boundary(
+        self,
+        aclient,
+        tmp_path,
+        monkeypatch,
+    ):
+        c, _, app = aclient
+        from ares.api.server import get_db
+        from ares.db.database import AresDatabase
+
+        real_db = await AresDatabase.create(tmp_path / "inactive-boundary.db")
+        original_app_db = getattr(app.state, "db", None)
+        no_override = object()
+        original_override = app.dependency_overrides.get(get_db, no_override)
+        handler_calls = [0]
+        original_list_campaigns = real_db.list_campaigns
+
+        async def counted_list_campaigns(*args, **kwargs):
+            handler_calls[0] += 1
+            return await original_list_campaigns(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(real_db, "list_campaigns", counted_list_campaigns)
+            app.state.db = real_db
+            app.dependency_overrides[get_db] = lambda: real_db
+            try:
+                user_id = await real_db.create_user(
+                    "inactive-boundary-user",
+                    "SyntheticBoundaryPass1!",
+                    "operator",
+                )
+                key_id, raw_key = await real_db.create_api_key(
+                    user_id,
+                    "inactive-boundary-key",
+                )
+                refresh_token = await real_db.create_refresh_token(user_id)
+                async with real_db.conn.execute(
+                    "SELECT id FROM refresh_tokens WHERE user_id=?",
+                    (user_id,),
+                ) as cur:
+                    original_refresh_row = await cur.fetchone()
+                original_refresh_id = (
+                    original_refresh_row["id"]
+                    if original_refresh_row is not None
+                    else None
+                )
+
+                active_response = await c.get(
+                    "/campaigns",
+                    headers={"X-API-Key": raw_key},
+                )
+                active_control = (
+                    active_response.status_code == 200 and handler_calls[0] == 1
+                )
+                _require_fixed(
+                    active_control,
+                    "expected active real SQLite API key to reach protected work",
+                )
+
+                usage_marker = "2000-01-01 00:00:00"
+                await real_db.conn.execute(
+                    "UPDATE api_keys SET last_used=? WHERE id=?",
+                    (usage_marker, key_id),
+                )
+                await real_db.conn.execute(
+                    "UPDATE users SET is_active=0 WHERE id=?",
+                    (user_id,),
+                )
+                await real_db.conn.commit()
+                handler_calls[0] = 0
+
+                api_response = await c.get(
+                    "/campaigns",
+                    headers={"X-API-Key": raw_key},
+                )
+                refresh_response = await c.post(
+                    "/auth/refresh",
+                    json={"refresh_token": refresh_token},
+                )
+
+                api_body = api_response.json()
+                refresh_body = refresh_response.json()
+                api_contract = (
+                    api_response.status_code == 401
+                    and api_body.get("detail")
+                    == "Not authenticated. Provide Bearer token or X-API-Key."
+                    and "inactive" not in api_response.text.lower()
+                    and handler_calls[0] == 0
+                )
+                refresh_contract = (
+                    refresh_response.status_code == 401
+                    and refresh_body.get("detail")
+                    == "Refresh token invalid or expired"
+                    and "inactive" not in refresh_response.text.lower()
+                    and "refresh_token" not in refresh_body
+                )
+
+                async with real_db.conn.execute(
+                    "SELECT last_used FROM api_keys WHERE id=?",
+                    (key_id,),
+                ) as cur:
+                    api_key_row = await cur.fetchone()
+                async with real_db.conn.execute(
+                    """SELECT id, user_id, is_revoked, used_at
+                       FROM refresh_tokens
+                       WHERE user_id=?""",
+                    (user_id,),
+                ) as cur:
+                    refresh_rows = await cur.fetchall()
+
+                usage_unchanged = (
+                    api_key_row is not None
+                    and api_key_row["last_used"] == usage_marker
+                )
+                predecessor_unchanged = (
+                    len(refresh_rows) == 1
+                    and original_refresh_id is not None
+                    and refresh_rows[0]["id"] == original_refresh_id
+                    and refresh_rows[0]["user_id"] == user_id
+                    and refresh_rows[0]["is_revoked"] == 0
+                    and refresh_rows[0]["used_at"] is None
+                )
+                _require_fixed(
+                    api_contract,
+                    "expected inactive real SQLite API key to fail generically",
+                )
+                _require_fixed(
+                    refresh_contract,
+                    "expected inactive real SQLite refresh to fail generically",
+                )
+                _require_fixed(
+                    usage_unchanged,
+                    "expected inactive API-key usage metadata to remain unchanged",
+                )
+                _require_fixed(
+                    predecessor_unchanged,
+                    "expected inactive refresh predecessor to remain unchanged",
+                )
+            finally:
+                app.state.db = original_app_db
+                if original_override is no_override:
+                    app.dependency_overrides.pop(get_db, None)
+                else:
+                    app.dependency_overrides[get_db] = original_override
+                await real_db.close()
 
 
 # ── RBAC enforcement ──────────────────────────────────────────────────────────

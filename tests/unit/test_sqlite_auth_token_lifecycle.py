@@ -93,6 +93,20 @@ async def _active_refresh_count(db: AresDatabase, user_id: str) -> int:
         return int((await cur.fetchone())["n"])
 
 
+def _require_fixed(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message, pytrace=False)
+
+
+async def _api_key_last_used(db: AresDatabase, key_id: str) -> object:
+    async with db.conn.execute(
+        "SELECT last_used FROM api_keys WHERE id=?",
+        (key_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    return None if row is None else row["last_used"]
+
+
 async def _run_cleanup_helper(
     db: AresDatabase,
     helper_name: str,
@@ -884,6 +898,112 @@ async def test_plain_memory_instances_are_isolated_and_independently_anchored() 
             await second.close()
         finally:
             await first.close()
+
+
+@pytest.mark.asyncio
+async def test_inactive_owner_api_key_is_denied_without_usage_and_reactivates(
+    db_and_user: tuple[AresDatabase, str],
+) -> None:
+    db, user_id = db_and_user
+    key_id, raw_key = await db.create_api_key(user_id, "inactive-owner-key")
+
+    active_verification = await db.verify_api_key(raw_key)
+    _require_fixed(
+        active_verification is not None,
+        "expected active-owner API key verification to succeed",
+    )
+
+    usage_marker = "2000-01-01 00:00:00"
+    await db.conn.execute(
+        "UPDATE api_keys SET last_used=? WHERE id=?",
+        (usage_marker, key_id),
+    )
+    await db.conn.execute(
+        "UPDATE users SET is_active=0 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    usage_before = await _api_key_last_used(db, key_id)
+
+    inactive_verification = await db.verify_api_key(raw_key)
+    usage_after = await _api_key_last_used(db, key_id)
+    _require_fixed(
+        inactive_verification is None,
+        "expected inactive-owner API key verification to be rejected",
+    )
+    _require_fixed(
+        usage_before == usage_marker and usage_after == usage_before,
+        "expected inactive-owner API key usage metadata to remain unchanged",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET is_active=1 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    reactivated_verification = await db.verify_api_key(raw_key)
+    _require_fixed(
+        reactivated_verification is not None,
+        "expected reactivated-owner API key verification to succeed",
+    )
+
+    await db.conn.execute(
+        "UPDATE api_keys SET is_active=0 WHERE id=?",
+        (key_id,),
+    )
+    await db.conn.commit()
+    revoked_verification = await db.verify_api_key(raw_key)
+    _require_fixed(
+        revoked_verification is None,
+        "expected revoked API key verification to remain rejected",
+    )
+
+
+@pytest.mark.asyncio
+async def test_inactive_owner_refresh_is_immutable_and_reactivates(
+    db_and_user: tuple[AresDatabase, str],
+) -> None:
+    db, user_id = db_and_user
+    predecessor = await db.create_refresh_token(user_id)
+    await db.conn.execute(
+        "UPDATE users SET is_active=0 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+
+    inactive_result = await db.rotate_refresh_token(predecessor)
+    inactive_rows = await _refresh_rows(db)
+    _require_fixed(
+        inactive_result == (None, None),
+        "expected inactive-owner refresh rotation to be rejected",
+    )
+    _require_fixed(
+        len(inactive_rows) == 1
+        and inactive_rows[0]["user_id"] == user_id
+        and inactive_rows[0]["is_revoked"] == 0
+        and inactive_rows[0]["used_at"] is None,
+        "expected inactive-owner refresh predecessor to remain unchanged",
+    )
+
+    await db.conn.execute(
+        "UPDATE users SET is_active=1 WHERE id=?",
+        (user_id,),
+    )
+    await db.conn.commit()
+    reactivated_user, successor = await db.rotate_refresh_token(predecessor)
+    _require_fixed(
+        reactivated_user is not None and successor is not None,
+        "expected reactivated-owner refresh rotation to succeed",
+    )
+    reused_result = await db.rotate_refresh_token(predecessor)
+    _require_fixed(
+        reused_result == (None, None),
+        "expected the reactivated predecessor to rotate only once",
+    )
+    _require_fixed(
+        await _active_refresh_count(db, user_id) == 1,
+        "expected exactly one active refresh successor after reactivation",
+    )
 
 
 @pytest.mark.asyncio
