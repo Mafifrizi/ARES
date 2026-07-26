@@ -27,6 +27,7 @@ Production checklist:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import uuid
@@ -37,6 +38,33 @@ from ares.core.logger import get_logger
 from ares.core.security import DataEncryptor, hash_password, verify_password
 
 logger = get_logger("ares.db.postgres")
+
+_REFRESH_TOKEN_LOCK_NAMESPACE = b"ares:refresh-token-user:v1\x00"
+
+
+def _refresh_token_user_lock_key(user_id: str) -> int:
+    """Return a stable signed BIGINT key for a user's refresh-token writes."""
+    digest = hashlib.sha256(
+        _REFRESH_TOKEN_LOCK_NAMESPACE + user_id.encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+async def _acquire_refresh_token_user_lock(conn: Any, user_id: str) -> None:
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock($1::BIGINT)",
+        _refresh_token_user_lock_key(user_id),
+    )
+
+
+def _parse_postgres_timestamptz(value: str) -> datetime:
+    """Convert the public access-token expiry string to an aware datetime."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+    return parsed.astimezone(timezone.utc)
 
 
 # ── Postgres schema DDL ────────────────────────────────────────────────────────
@@ -814,7 +842,7 @@ class PostgresDatabase:
         raw_key    = "ares_" + secrets.token_urlsafe(40)
         key_prefix = raw_key[:12]
         key_id     = str(uuid.uuid4())
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat() \
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days) \
                      if expires_days else None
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -870,49 +898,71 @@ class PostgresDatabase:
     # ── Refresh Tokens ─────────────────────────────────────────────────────────
 
     async def create_refresh_token(self, user_id: str, expires_days: int = 30) -> str:
-        import hashlib, secrets
         raw_token  = secrets.token_urlsafe(48)                          # returned to client
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()     # stored in DB
         expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
-                token_hash, user_id, expires_at,   # store hash, not raw
-            )
+            async with conn.transaction():
+                await _acquire_refresh_token_user_lock(conn, user_id)
+                await conn.execute(
+                    "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
+                    token_hash, user_id, expires_at,   # store hash, not raw
+                )
         return raw_token   # client gets raw token; DB stores only SHA-256 hash
 
     async def rotate_refresh_token(self, old_token: str) -> tuple[dict | None, str | None]:
-        import hashlib, secrets
         old_hash = hashlib.sha256(old_token.encode()).hexdigest()   # look up by hash
+        user: dict[str, Any] | None = None
+        new_raw: str | None = None
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """SELECT rt.*, u.username, u.role, u.id as uid
-                   FROM refresh_tokens rt JOIN users u ON rt.user_id=u.id
-                   WHERE rt.id=$1 AND rt.is_revoked=0 AND rt.expires_at > now()""",
-                old_hash,
-            )
-            if not row:
-                return None, None
-            d = self._row_to_dict(row)
-            await conn.execute(
-                "UPDATE refresh_tokens SET is_revoked=1, used_at=now() WHERE id=$1", old_hash
-            )
-            new_raw   = secrets.token_urlsafe(48)
-            new_hash  = hashlib.sha256(new_raw.encode()).hexdigest()
-            expires_at = datetime.now(timezone.utc) + timedelta(days=30)
-            await conn.execute(
-                "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
-                new_hash, d["uid"], expires_at,   # store hash
-            )
-        user = {"id": d["uid"], "username": d["username"], "role": d["role"]}
+            async with conn.transaction():
+                user_id = await conn.fetchval(
+                    "SELECT user_id FROM refresh_tokens WHERE id=$1",
+                    old_hash,
+                )
+                if user_id is None:
+                    return None, None
+
+                await _acquire_refresh_token_user_lock(conn, user_id)
+                row = await conn.fetchrow(
+                    """UPDATE refresh_tokens AS rt
+                       SET is_revoked=1, used_at=now()
+                       FROM users AS u
+                       WHERE rt.id=$1
+                         AND rt.user_id=$2
+                         AND rt.is_revoked=0
+                         AND rt.expires_at > now()
+                         AND u.id=rt.user_id
+                       RETURNING u.id AS uid, u.username, u.role""",
+                    old_hash,
+                    user_id,
+                )
+                if row is None:
+                    return None, None
+
+                new_raw = secrets.token_urlsafe(48)
+                new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
+                expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+                await conn.execute(
+                    "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
+                    new_hash, user_id, expires_at,   # store hash
+                )
+                user = {
+                    "id": row["uid"],
+                    "username": row["username"],
+                    "role": row["role"],
+                }
+        if user is None or new_raw is None:
+            return None, None
         return user, new_raw   # return raw to client
 
     async def revoke_access_token(self, jti: str, user_id: str, expires_at: str) -> None:
+        parsed_expires_at = _parse_postgres_timestamptz(expires_at)
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) VALUES($1,$2,$3) "
                 "ON CONFLICT(jti) DO NOTHING",
-                jti, user_id, expires_at,
+                jti, user_id, parsed_expires_at,
             )
             await conn.execute(
                 "DELETE FROM revoked_access_tokens WHERE expires_at < now()"
@@ -926,9 +976,11 @@ class PostgresDatabase:
 
     async def revoke_all_refresh_tokens(self, user_id: str) -> None:
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE refresh_tokens SET is_revoked=1 WHERE user_id=$1", user_id
-            )
+            async with conn.transaction():
+                await _acquire_refresh_token_user_lock(conn, user_id)
+                await conn.execute(
+                    "UPDATE refresh_tokens SET is_revoked=1 WHERE user_id=$1", user_id
+                )
 
     async def purge_expired_tokens(self) -> int:
         async with self._pool.acquire() as conn:
