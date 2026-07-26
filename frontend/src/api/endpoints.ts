@@ -13,10 +13,11 @@ import type {
   TokenResponse,
   UserProfile
 } from "./types";
-import { apiBlobRequest, apiRequest } from "./http";
-import { clearTokens, setAccessToken, setRefreshToken } from "./session";
+import { apiBlobRequest, apiRequest, ApiError } from "./http";
+import { beginIdentityTransition, installTokenPairIfCurrent } from "./session";
 
 export async function login(username: string, password: string): Promise<TokenResponse> {
+  const loginSession = beginIdentityTransition();
   const body = new URLSearchParams();
   body.set("username", username);
   body.set("password", password);
@@ -29,17 +30,14 @@ export async function login(username: string, password: string): Promise<TokenRe
     },
     false
   );
-  setAccessToken(token.access_token);
-  setRefreshToken(token.refresh_token);
+  if (!installTokenPairIfCurrent(loginSession, token.access_token, token.refresh_token)) {
+    throw new ApiError(401, "Session changed");
+  }
   return token;
 }
 
 export async function logout(): Promise<void> {
-  try {
-    await apiRequest<{ status: string }>("/auth/logout", { method: "POST" }, false);
-  } finally {
-    clearTokens();
-  }
+  await apiRequest<{ status: string }>("/auth/logout", { method: "POST" }, false);
 }
 
 export function campaignEventsPath(campaignId: string, token: string): string {

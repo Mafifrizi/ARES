@@ -1,5 +1,11 @@
 import type { TokenResponse } from "./types";
-import { clearTokens, getAccessToken, getRefreshToken, setAccessToken, setRefreshToken } from "./session";
+import {
+  captureSession,
+  invalidateSession,
+  isSessionCurrent,
+  replaceTokenPairIfCurrent,
+  type SessionSnapshot
+} from "./session";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -31,9 +37,16 @@ function errorDetail(body: unknown): unknown {
   return body;
 }
 
-export async function refreshAccessToken(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
+interface RefreshFlight {
+  readonly revision: number;
+  readonly refreshToken: string;
+  promise: Promise<boolean>;
+}
+
+let refreshFlight: RefreshFlight | null = null;
+
+async function performRefresh(snapshot: SessionSnapshot): Promise<boolean> {
+  if (!snapshot.refreshToken) {
     return false;
   }
 
@@ -41,24 +54,100 @@ export async function refreshAccessToken(): Promise<boolean> {
     const response = await fetch("/auth/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken })
+      body: JSON.stringify({ refresh_token: snapshot.refreshToken })
     });
     if (!response.ok) {
-      clearTokens();
+      invalidateSession(snapshot);
       return false;
     }
     const token = (await response.json()) as TokenResponse;
     if (!token.access_token || !token.refresh_token) {
-      clearTokens();
+      invalidateSession(snapshot);
       return false;
     }
-    setAccessToken(token.access_token);
-    setRefreshToken(token.refresh_token);
-    return true;
+    return replaceTokenPairIfCurrent(snapshot, token.access_token, token.refresh_token);
   } catch {
-    clearTokens();
+    invalidateSession(snapshot);
     return false;
   }
+}
+
+export function refreshAccessToken(snapshot = captureSession()): Promise<boolean> {
+  if (!snapshot.refreshToken) {
+    return Promise.resolve(false);
+  }
+  if (
+    refreshFlight
+    && refreshFlight.revision === snapshot.revision
+    && refreshFlight.refreshToken === snapshot.refreshToken
+  ) {
+    return refreshFlight.promise;
+  }
+
+  const flight: RefreshFlight = {
+    revision: snapshot.revision,
+    refreshToken: snapshot.refreshToken,
+    promise: Promise.resolve(false)
+  };
+  flight.promise = performRefresh(snapshot).finally(() => {
+    if (refreshFlight === flight) {
+      refreshFlight = null;
+    }
+  });
+  refreshFlight = flight;
+  return flight.promise;
+}
+
+function sessionChangedError(): ApiError {
+  return new ApiError(401, "Session changed");
+}
+
+async function fetchWithSession(
+  path: string,
+  init: RequestInit,
+  retry: boolean,
+  snapshot = captureSession()
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (snapshot.accessToken) {
+    headers.set("Authorization", `Bearer ${snapshot.accessToken}`);
+  }
+  const response = await fetch(path, { ...init, headers });
+
+  if (snapshot.accessToken && !isSessionCurrent(snapshot)) {
+    throw sessionChangedError();
+  }
+
+  if (response.status !== 401) {
+    return response;
+  }
+
+  if (!retry) {
+    if (snapshot.accessToken) {
+      invalidateSession(snapshot);
+    }
+    return response;
+  }
+
+  const current = captureSession();
+  if (!isSessionCurrent(snapshot)) {
+    throw sessionChangedError();
+  }
+
+  if (current.accessToken && current.accessToken !== snapshot.accessToken) {
+    return fetchWithSession(path, init, false, current);
+  }
+
+  if (await refreshAccessToken(current)) {
+    const refreshed = captureSession();
+    if (!isSessionCurrent(snapshot)) {
+      throw sessionChangedError();
+    }
+    return fetchWithSession(path, init, false, refreshed);
+  }
+
+  invalidateSession(current);
+  return response;
 }
 
 export async function apiRequest<T>(
@@ -66,15 +155,7 @@ export async function apiRequest<T>(
   init: RequestInit = {},
   retry = true
 ): Promise<T> {
-  const headers = new Headers(init.headers);
-  const accessToken = getAccessToken();
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  const response = await fetch(path, { ...init, headers });
-  if (response.status === 401 && retry && (await refreshAccessToken())) {
-    return apiRequest<T>(path, init, false);
-  }
+  const response = await fetchWithSession(path, init, retry);
   const body = await parseResponse(response);
   if (!response.ok) {
     throw new ApiError(response.status, errorDetail(body));
@@ -87,15 +168,7 @@ export async function apiBlobRequest(
   init: RequestInit = {},
   retry = true
 ): Promise<Blob> {
-  const headers = new Headers(init.headers);
-  const accessToken = getAccessToken();
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  const response = await fetch(path, { ...init, headers });
-  if (response.status === 401 && retry && (await refreshAccessToken())) {
-    return apiBlobRequest(path, init, false);
-  }
+  const response = await fetchWithSession(path, init, retry);
   if (!response.ok) {
     const body = await parseResponse(response);
     throw new ApiError(response.status, errorDetail(body));

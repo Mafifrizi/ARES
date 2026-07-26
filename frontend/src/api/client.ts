@@ -2,9 +2,14 @@
 export { apiBlobRequest, apiRequest, ApiError, refreshAccessToken } from "./http";
 export { api, buildModuleRunPayload, campaignEventsPath, login, logout } from "./endpoints";
 export {
+  beginIdentityTransition,
+  captureSession,
   clearTokens,
   getAccessToken,
   getRefreshToken,
+  invalidateSession,
+  isSessionCurrent,
+  subscribeToSessionInvalidation,
   setAccessToken,
   setRefreshToken
 } from "./session";

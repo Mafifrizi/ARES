@@ -44,7 +44,12 @@ import { ApiError, api, buildModuleRunPayload, campaignEventsPath, getAccessToke
 import type { ApiKeyMeta, Campaign, ExecutionChain, Finding, ModuleMeta, MonthlyFindingStats, ParamField, ReportItem } from "../../api/types";
 import { useAuth } from "../auth/authContext";
 import { DashboardUiProvider } from "./dashboardUi";
-import { type DashboardUiState, useDashboardUi, useSessionState } from "./dashboardUiState";
+import {
+  type DashboardUiState,
+  useDashboardSessionWriter,
+  useDashboardUi,
+  useSessionState
+} from "./dashboardUiState";
 
 interface ModuleRunRecord {
   campaignId: string;
@@ -216,6 +221,7 @@ function formatRole(role?: string): string {
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
   const navigate = useNavigate();
+  const writeDashboardSession = useDashboardSessionWriter();
   const [selectedCampaignId, setSelectedCampaignId] = useSessionState("ares.dashboard.selectedCampaignId", "");
   const [liveCampaignId, setLiveCampaignId] = useSessionState("ares.dashboard.live.campaignId", "");
   const [liveEvents, setLiveEvents] = useSessionState<unknown[]>("ares.dashboard.live.events", []);
@@ -327,7 +333,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           route: "/campaigns",
           onSelect: () => {
             setSelectedCampaignId(campaign.id);
-            window.sessionStorage.setItem("ares.dashboard.campaigns.tab", JSON.stringify("Scope"));
+            writeDashboardSession("ares.dashboard.campaigns.tab", "Scope");
           }
         },
         `${campaign.name ?? ""} ${campaign.id} ${campaign.client ?? ""} ${campaign.status ?? ""}`
@@ -342,8 +348,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           detail: module.description || "Module",
           route: "/modules",
           onSelect: () => {
-            window.sessionStorage.setItem("ares.dashboard.modules.selectedId", JSON.stringify(module.id));
-            window.sessionStorage.setItem("ares.dashboard.modules.tab", JSON.stringify("Run Panel"));
+            writeDashboardSession("ares.dashboard.modules.selectedId", module.id);
+            writeDashboardSession("ares.dashboard.modules.tab", "Run Panel");
           }
         },
         `${module.id} ${module.name ?? ""} ${module.description ?? ""} ${module.category ?? ""} ${module.mitre ?? ""}`
@@ -359,7 +365,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           detail: `${report.format || "report"} artifact`,
           route: "/reports",
           onSelect: () => {
-            window.sessionStorage.setItem("ares.dashboard.reports.tab", JSON.stringify("Library"));
+            writeDashboardSession("ares.dashboard.reports.tab", "Library");
           }
         },
         `${report.filename} ${report.format ?? ""}`
@@ -376,8 +382,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           detail: String(template.description ?? "Campaign template"),
           route: "/templates",
           onSelect: () => {
-            window.sessionStorage.setItem("ares.dashboard.templates.name", JSON.stringify(templateName));
-            window.sessionStorage.setItem("ares.dashboard.templates.tab", JSON.stringify("Plan Builder"));
+            writeDashboardSession("ares.dashboard.templates.name", templateName);
+            writeDashboardSession("ares.dashboard.templates.tab", "Plan Builder");
           }
         },
         `${templateName} ${String(template.description ?? "")}`
@@ -385,7 +391,15 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     });
 
     return results.slice(0, 8);
-  }, [campaigns.data, modules.data, reports.data, searchTerm, setSelectedCampaignId, templates.data]);
+  }, [
+    campaigns.data,
+    modules.data,
+    reports.data,
+    searchTerm,
+    setSelectedCampaignId,
+    templates.data,
+    writeDashboardSession
+  ]);
 
   const notifications = useMemo<DashboardNotification[]>(() => {
     const items: DashboardNotification[] = [];
