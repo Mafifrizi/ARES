@@ -3699,3 +3699,1238 @@ class TestAuthoritativeHTTPBearerPrincipal:
             response.status_code == 401 and verify_calls[0] == 0,
             "expected an explicitly invalid bearer not to fall through to API-key auth",
         )
+
+
+_WS_TEST_DISCONNECT = object()
+_WS_TEST_HEARTBEAT = object()
+
+
+class _FirstBroadcastSendCoordinator:
+    """Order-independent barrier for the first of two real send stages."""
+
+    def __init__(self) -> None:
+        self._claim_lock = asyncio.Lock()
+        self._roles: dict[int, bool] = {}
+        self.release_first = asyncio.Event()
+        self.first_stalled = asyncio.Event()
+        self.first_cancelled = asyncio.Event()
+        self.peer_delivered = asyncio.Event()
+        self.active_count = 0
+        self.settled_count = 0
+
+    async def before_send(self, socket: Any) -> None:
+        async with self._claim_lock:
+            is_first = not self._roles
+            self._roles[id(socket)] = is_first
+            self.active_count += 1
+        if not is_first:
+            return
+        self.first_stalled.set()
+        try:
+            await asyncio.wait_for(self.release_first.wait(), timeout=10.0)
+        except asyncio.CancelledError:
+            self.first_cancelled.set()
+            raise
+        except asyncio.TimeoutError:
+            pytest.fail(
+                "expected the first broadcast send barrier to be released",
+                pytrace=False,
+            )
+
+    def after_send(self, socket: Any, *, delivered: bool) -> None:
+        is_first = self._roles.pop(id(socket), None)
+        if is_first is None:
+            return
+        self.active_count -= 1
+        self.settled_count += 1
+        if not is_first and delivered:
+            self.peer_delivered.set()
+
+
+class _MainWebSocketHarness:
+    """Minimal ASGI peer for the real registered WebSocket route."""
+
+    def __init__(self, app: Any) -> None:
+        self.scope = {"app": app}
+        self.accepted = asyncio.Event()
+        self.closed = asyncio.Event()
+        self.disconnect_observed = asyncio.Event()
+        self.close_code: int | None = None
+        self.close_reason: str | None = None
+        self.close_calls = 0
+        self.sent_types: list[str] = []
+        self.sent = asyncio.Queue[str]()
+        self.inbound = asyncio.Queue[Any]()
+        self.fail_next_send = False
+        self.block_next_send = False
+        self.send_started = asyncio.Event()
+        self.send_release = asyncio.Event()
+        self.broadcast_send_coordinator: (
+            _FirstBroadcastSendCoordinator | None
+        ) = None
+
+    async def accept(self) -> None:
+        self.accepted.set()
+
+    async def close(self, *, code: int, reason: str) -> None:
+        self.close_calls += 1
+        self.close_code = code
+        self.close_reason = reason
+        self.closed.set()
+        await self.inbound.put(_WS_TEST_DISCONNECT)
+
+    async def send_json(self, payload: Any) -> None:
+        coordinator = self.broadcast_send_coordinator
+        delivered = False
+        try:
+            if coordinator is not None:
+                await coordinator.before_send(self)
+            if self.block_next_send:
+                self.block_next_send = False
+                self.send_started.set()
+                await _ws_wait(
+                    self.send_release.wait(),
+                    "expected protected send barrier release",
+                )
+            if self.fail_next_send:
+                self.fail_next_send = False
+                raise RuntimeError
+            event_type = payload.get("type") if isinstance(payload, dict) else None
+            safe_type = event_type if isinstance(event_type, str) else "unknown"
+            self.sent_types.append(safe_type)
+            await self.sent.put(safe_type)
+            delivered = True
+        finally:
+            if coordinator is not None:
+                coordinator.after_send(self, delivered=delivered)
+
+    async def receive_text(self) -> str:
+        item = await self.inbound.get()
+        if item is _WS_TEST_HEARTBEAT:
+            raise asyncio.TimeoutError
+        if item is _WS_TEST_DISCONNECT:
+            self.disconnect_observed.set()
+            from starlette.websockets import WebSocketDisconnect
+
+            raise WebSocketDisconnect
+        return str(item)
+
+    async def client_disconnect(self) -> None:
+        await self.inbound.put(_WS_TEST_DISCONNECT)
+
+    async def trigger_heartbeat(self) -> None:
+        await self.inbound.put(_WS_TEST_HEARTBEAT)
+
+
+async def _ws_wait(awaitable: Any, message: str) -> Any:
+    try:
+        return await asyncio.wait_for(awaitable, timeout=3.0)
+    except asyncio.TimeoutError:
+        pytest.fail(message, pytrace=False)
+
+
+def _main_campaign_websocket_endpoint(app: Any) -> Any:
+    endpoints = [
+        getattr(route, "endpoint", None)
+        for route in app.routes
+        if getattr(route, "path", None) == "/ws/campaigns/{campaign_id}/events"
+    ]
+    if len(endpoints) != 1 or endpoints[0] is None:
+        pytest.fail("expected exactly one main campaign WebSocket route", pytrace=False)
+    return endpoints[0]
+
+
+async def _launch_main_websocket(
+    app: Any,
+    campaign_id: str,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+) -> tuple[_MainWebSocketHarness, asyncio.Task[None]]:
+    socket = _MainWebSocketHarness(app)
+    endpoint = _main_campaign_websocket_endpoint(app)
+    task = asyncio.create_task(
+        endpoint(socket, campaign_id, token=token, api_key=api_key)
+    )
+    return socket, task
+
+
+async def _settle_main_websocket(
+    socket: _MainWebSocketHarness,
+    task: asyncio.Task[None],
+) -> None:
+    if not task.done():
+        await socket.client_disconnect()
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+    except asyncio.TimeoutError:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        pytest.fail("expected main WebSocket task to terminate", pytrace=False)
+
+
+class TestMainWebSocketAuthoritativeLifetime:
+    @pytest.fixture
+    async def ws_runtime(
+        self,
+        tmp_path: Any,
+    ) -> Any:
+        from ares.api import server
+        from ares.core.campaign import Campaign
+        from ares.core.security import create_access_token
+        from ares.db import database as database_module
+        from ares.db.database import AresDatabase
+
+        database = await AresDatabase.create(tmp_path / "main-websocket.db")
+        username = "main-websocket-principal"
+        with patch.object(database_module.logger, "info"):
+            user_id = await database.create_user(
+                username,
+                "SyntheticWebSocketPass1!",
+                "team_lead",
+            )
+        settings = _settings()
+        token = create_access_token(
+            {"sub": username, "role": "team_lead"},
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=60,
+        )
+        campaign = Campaign(
+            name="Synthetic WebSocket Campaign",
+            operator="separate-campaign-owner",
+        )
+        await database.save_campaign(campaign)
+        original_db = getattr(server.app.state, "db", None)
+        server.app.state.db = database
+        server._ws_connections.clear()
+        try:
+            yield server, database, user_id, username, token, campaign, server.app
+        finally:
+            server._ws_connections.clear()
+            server.app.state.db = original_db
+            await database.close()
+
+    @staticmethod
+    async def _await_connected(socket: _MainWebSocketHarness) -> None:
+        await _ws_wait(
+            socket.accepted.wait(),
+            "expected main WebSocket handshake acceptance",
+        )
+        initial_type = await _ws_wait(
+            socket.sent.get(),
+            "expected main WebSocket connected event",
+        )
+        _require_fixed(
+            initial_type == "connected",
+            "expected the fixed connected event after authorization",
+        )
+
+    @staticmethod
+    async def _await_denied(
+        socket: _MainWebSocketHarness,
+        task: asyncio.Task[None],
+        *,
+        code: int,
+    ) -> None:
+        await _ws_wait(
+            socket.closed.wait(),
+            "expected main WebSocket handshake denial",
+        )
+        await _ws_wait(task, "expected denied WebSocket route to terminate")
+        safe_contract = (
+            not socket.accepted.is_set()
+            and socket.close_code == code
+            and socket.close_reason
+            in {
+                "Authentication or authorization failed",
+                "Authentication service unavailable",
+            }
+            and socket.close_calls == 1
+        )
+        _require_fixed(
+            safe_contract,
+            "expected fixed WebSocket denial code and reason",
+        )
+
+    @pytest.mark.asyncio
+    async def test_active_bearer_and_api_key_use_real_authoritative_handshake(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, _, token, campaign, app = ws_runtime
+        bearer_socket, bearer_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(bearer_socket)
+            registered = list(server._ws_connections.get(campaign.id, set()))
+            representation_safe = (
+                len(registered) == 1 and token not in repr(registered[0])
+            )
+            _require_fixed(
+                representation_safe,
+                "expected opaque registry state without credential representation",
+            )
+        finally:
+            await _settle_main_websocket(bearer_socket, bearer_task)
+
+        with patch("ares.db.database.logger.info"):
+            _, raw_key = await database.create_api_key(
+                user_id,
+                "main-websocket-read-key",
+                scopes="read",
+            )
+        key_socket, key_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            api_key=raw_key,
+        )
+        try:
+            await self._await_connected(key_socket)
+            key_representation_safe = all(
+                raw_key not in repr(connection)
+                for connection in server._ws_connections.get(campaign.id, set())
+            )
+            _require_fixed(
+                key_representation_safe,
+                "expected API-key connection state to hide the credential",
+            )
+        finally:
+            await _settle_main_websocket(key_socket, key_task)
+
+    @pytest.mark.asyncio
+    async def test_bearer_handshake_denies_inactive_renamed_revoked_and_deleted(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, user_id, username, token, campaign, app = ws_runtime
+
+        await database.conn.execute(
+            "UPDATE users SET is_active=0 WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        inactive_socket, inactive_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(inactive_socket, inactive_task, code=4001)
+
+        await database.conn.execute(
+            "UPDATE users SET is_active=1, username=? WHERE id=?",
+            ("renamed-main-websocket-principal", user_id),
+        )
+        await database.conn.commit()
+        renamed_socket, renamed_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(renamed_socket, renamed_task, code=4001)
+
+        await database.conn.execute(
+            "UPDATE users SET username=? WHERE id=?",
+            (username, user_id),
+        )
+        await database.conn.commit()
+        import jwt
+        from datetime import datetime, timedelta, timezone
+
+        settings = _settings()
+        expired_token = jwt.encode(
+            {
+                "sub": username,
+                "role": "team_lead",
+                "jti": "synthetic-expired-websocket-marker",
+                "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+            },
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+        )
+        expired_socket, expired_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=expired_token,
+        )
+        await self._await_denied(expired_socket, expired_task, code=4001)
+
+        revocation_marker = "synthetic-main-websocket-revocation"
+        revoked_token = jwt.encode(
+            {
+                "sub": username,
+                "role": "team_lead",
+                "jti": revocation_marker,
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            },
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+        )
+        await database.revoke_access_token(
+            revocation_marker,
+            user_id,
+            (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        )
+        revoked_socket, revoked_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=revoked_token,
+        )
+        await self._await_denied(revoked_socket, revoked_task, code=4001)
+
+        await database.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        await database.conn.commit()
+        deleted_socket, deleted_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(deleted_socket, deleted_task, code=4001)
+
+    @pytest.mark.asyncio
+    async def test_current_role_and_campaign_ownership_control_handshake(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, user_id, _, token, campaign, app = ws_runtime
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(socket, task, code=4001)
+
+    @pytest.mark.asyncio
+    async def test_explicit_invalid_bearer_is_terminal_over_valid_api_key(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, user_id, _, _, campaign, app = ws_runtime
+        missing_socket, missing_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+        )
+        await self._await_denied(missing_socket, missing_task, code=4001)
+
+        with patch("ares.db.database.logger.info"):
+            _, raw_key = await database.create_api_key(
+                user_id,
+                "main-websocket-precedence-key",
+            )
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token="synthetic.invalid.jwt",
+            api_key=raw_key,
+        )
+        await self._await_denied(socket, task, code=4001)
+
+    @pytest.mark.asyncio
+    async def test_api_key_revocation_and_inactive_owner_deny_handshake(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, user_id, _, _, campaign, app = ws_runtime
+        with patch("ares.db.database.logger.info"):
+            key_id, raw_key = await database.create_api_key(
+                user_id,
+                "main-websocket-lifecycle-key",
+            )
+        await database.conn.execute(
+            "UPDATE api_keys SET is_active=0 WHERE id=?",
+            (key_id,),
+        )
+        await database.conn.commit()
+        revoked_socket, revoked_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            api_key=raw_key,
+        )
+        await self._await_denied(revoked_socket, revoked_task, code=4001)
+
+        await database.conn.execute(
+            "UPDATE api_keys SET is_active=1 WHERE id=?",
+            (key_id,),
+        )
+        await database.conn.execute(
+            "UPDATE users SET is_active=0 WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        inactive_socket, inactive_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            api_key=raw_key,
+        )
+        await self._await_denied(inactive_socket, inactive_task, code=4001)
+
+    @pytest.mark.asyncio
+    async def test_absent_closed_and_failing_backend_close_1013_then_recover(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, _, _, token, campaign, app = ws_runtime
+        app.state.db = None
+        absent_socket, absent_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(absent_socket, absent_task, code=1013)
+
+        app.state.db = database
+        await database.close()
+        closed_socket, closed_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        await self._await_denied(closed_socket, closed_task, code=1013)
+        await database.connect()
+
+        original_resolve = database.resolve_access_token_principal
+
+        async def fail_lookup(_subject: str, _jti: str) -> Any:
+            raise TimeoutError
+
+        database.resolve_access_token_principal = fail_lookup  # type: ignore[method-assign]
+        try:
+            failed_socket, failed_task = await _launch_main_websocket(
+                app,
+                campaign.id,
+                token=token,
+            )
+            await self._await_denied(failed_socket, failed_task, code=1013)
+        finally:
+            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+
+        recovered_socket, recovered_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(recovered_socket)
+        finally:
+            await _settle_main_websocket(recovered_socket, recovered_task)
+
+    @pytest.mark.parametrize(
+        "state_change",
+        ["inactive", "renamed", "deleted", "revoked", "expired", "demoted"],
+    )
+    @pytest.mark.asyncio
+    async def test_bearer_lifetime_revalidation_closes_before_event(
+        self,
+        ws_runtime: Any,
+        state_change: str,
+        monkeypatch: Any,
+    ) -> None:
+        server, database, user_id, username, token, campaign, app = ws_runtime
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(socket)
+            if state_change == "inactive":
+                await database.conn.execute(
+                    "UPDATE users SET is_active=0 WHERE id=?",
+                    (user_id,),
+                )
+                await database.conn.commit()
+            elif state_change == "renamed":
+                await database.conn.execute(
+                    "UPDATE users SET username=? WHERE id=?",
+                    ("renamed-after-websocket-connect", user_id),
+                )
+                await database.conn.commit()
+            elif state_change == "deleted":
+                await database.conn.execute(
+                    "DELETE FROM users WHERE id=?",
+                    (user_id,),
+                )
+                await database.conn.commit()
+            elif state_change == "revoked":
+                from ares.core.security import decode_access_token
+                from datetime import datetime, timedelta, timezone
+
+                settings = _settings()
+                payload = decode_access_token(
+                    token,
+                    settings.secret_key_value,
+                    settings.ares_jwt_algorithm,
+                )
+                revocation_marker = payload.get("jti") if payload else None
+                if not isinstance(revocation_marker, str):
+                    pytest.fail(
+                        "expected generated bearer to contain a revocation marker",
+                        pytrace=False,
+                    )
+                await database.revoke_access_token(
+                    revocation_marker,
+                    user_id,
+                    (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                )
+            elif state_change == "expired":
+                import jwt.api_jwt
+                from datetime import datetime, timedelta, timezone
+
+                real_datetime = datetime
+
+                class FutureDateTime(datetime):
+                    @classmethod
+                    def now(cls, tz: Any = None) -> datetime:
+                        current = real_datetime.now(timezone.utc) + timedelta(days=2)
+                        return current if tz is not None else current.replace(tzinfo=None)
+
+                monkeypatch.setattr(jwt.api_jwt, "datetime", FutureDateTime)
+            else:
+                await database.conn.execute(
+                    "UPDATE users SET role='operator' WHERE id=?",
+                    (user_id,),
+                )
+                await database.conn.commit()
+
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected stale bearer connection to close before delivery",
+            )
+            no_protected_event = (
+                socket.close_code == 4001
+                and socket.close_reason == "Authentication or authorization failed"
+                and socket.sent_types == ["connected"]
+                and not server._ws_connections.get(campaign.id)
+            )
+            _require_fixed(
+                no_protected_event,
+                "expected bearer state change to prevent protected delivery",
+            )
+        finally:
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.parametrize("state_change", ["revoked", "inactive", "ownership"])
+    @pytest.mark.asyncio
+    async def test_api_key_and_ownership_lifetime_revalidation(
+        self,
+        ws_runtime: Any,
+        state_change: str,
+    ) -> None:
+        server, database, user_id, username, _, campaign, app = ws_runtime
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.execute(
+            "UPDATE campaigns SET operator=? WHERE id=?",
+            (username, campaign.id),
+        )
+        await database.conn.commit()
+        with patch("ares.db.database.logger.info"):
+            key_id, raw_key = await database.create_api_key(
+                user_id,
+                "main-websocket-revalidation-key",
+            )
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            api_key=raw_key,
+        )
+        try:
+            await self._await_connected(socket)
+            if state_change == "revoked":
+                await database.conn.execute(
+                    "UPDATE api_keys SET is_active=0 WHERE id=?",
+                    (key_id,),
+                )
+            elif state_change == "inactive":
+                await database.conn.execute(
+                    "UPDATE users SET is_active=0 WHERE id=?",
+                    (user_id,),
+                )
+            else:
+                await database.conn.execute(
+                    "UPDATE campaigns SET operator=? WHERE id=?",
+                    ("different-campaign-owner", campaign.id),
+                )
+            await database.conn.commit()
+
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected stale API-key or ownership connection to close",
+            )
+            denied_without_delivery = (
+                socket.close_code == 4001
+                and socket.sent_types == ["connected"]
+                and not server._ws_connections.get(campaign.id)
+            )
+            _require_fixed(
+                denied_without_delivery,
+                "expected API-key or ownership change to prevent delivery",
+            )
+        finally:
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_revalidates_without_broadcast(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, _, token, campaign, app = ws_runtime
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(socket)
+            await database.conn.execute(
+                "UPDATE users SET is_active=0 WHERE id=?",
+                (user_id,),
+            )
+            await database.conn.commit()
+            await socket.trigger_heartbeat()
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected heartbeat to detect authorization loss",
+            )
+            heartbeat_denied = (
+                socket.close_code == 4001
+                and socket.sent_types == ["connected"]
+                and not server._ws_connections.get(campaign.id)
+            )
+            _require_fixed(
+                heartbeat_denied,
+                "expected heartbeat revalidation before keepalive delivery",
+            )
+        finally:
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.asyncio
+    async def test_delayed_authoritative_lookup_observes_committed_invalidation(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, _, token, campaign, app = ws_runtime
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        lookup_started = asyncio.Event()
+        lookup_release = asyncio.Event()
+        original_resolve = database.resolve_access_token_principal
+
+        async def delayed_resolve(subject: str, jti: str) -> Any:
+            lookup_started.set()
+            await _ws_wait(
+                lookup_release.wait(),
+                "expected authoritative lookup barrier release",
+            )
+            return await original_resolve(subject, jti)
+
+        try:
+            await self._await_connected(socket)
+            database.resolve_access_token_principal = delayed_resolve  # type: ignore[method-assign]
+            broadcast_task = asyncio.create_task(
+                server._broadcast_event(
+                    campaign.id,
+                    {"type": "synthetic_protected_event"},
+                )
+            )
+            await _ws_wait(
+                lookup_started.wait(),
+                "expected authoritative lookup barrier to be reached",
+            )
+            await database.conn.execute(
+                "UPDATE users SET is_active=0 WHERE id=?",
+                (user_id,),
+            )
+            await database.conn.commit()
+            lookup_release.set()
+            await _ws_wait(
+                broadcast_task,
+                "expected delayed protected broadcast to terminate",
+            )
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected committed invalidation to close delayed connection",
+            )
+            _require_fixed(
+                socket.sent_types == ["connected"]
+                and socket.close_code == 4001
+                and not server._ws_connections.get(campaign.id),
+                "expected post-barrier authoritative state to prevent delivery",
+            )
+        finally:
+            lookup_release.set()
+            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.asyncio
+    async def test_backend_failure_after_connect_closes_1013_and_new_connection_recovers(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, _, _, token, campaign, app = ws_runtime
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        original_resolve = database.resolve_access_token_principal
+
+        async def fail_lookup(_subject: str, _jti: str) -> Any:
+            raise ConnectionError
+
+        try:
+            await self._await_connected(socket)
+            database.resolve_access_token_principal = fail_lookup  # type: ignore[method-assign]
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected backend failure to close established connection",
+            )
+            unavailable_without_delivery = (
+                socket.close_code == 1013
+                and socket.close_reason == "Authentication service unavailable"
+                and socket.sent_types == ["connected"]
+                and not server._ws_connections.get(campaign.id)
+            )
+            _require_fixed(
+                unavailable_without_delivery,
+                "expected backend outage to prevent protected delivery with 1013",
+            )
+        finally:
+            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+            await _settle_main_websocket(socket, task)
+
+        recovered_socket, recovered_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(recovered_socket)
+        finally:
+            await _settle_main_websocket(recovered_socket, recovered_task)
+
+    @pytest.mark.asyncio
+    async def test_one_failed_connection_does_not_block_an_authorized_peer(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, _, _, token, campaign, app = ws_runtime
+        from ares.core.security import create_access_token
+        from ares.db import database as database_module
+
+        with patch.object(database_module.logger, "info"):
+            await database.create_user(
+                "main-websocket-peer",
+                "SyntheticWebSocketPeer1!",
+                "team_lead",
+            )
+        settings = _settings()
+        peer_token = create_access_token(
+            {"sub": "main-websocket-peer", "role": "team_lead"},
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=60,
+        )
+        first_socket, first_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        second_socket, second_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=peer_token,
+        )
+        try:
+            await self._await_connected(first_socket)
+            await self._await_connected(second_socket)
+            first_socket.fail_next_send = True
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            delivered_type = await _ws_wait(
+                second_socket.sent.get(),
+                "expected authorized peer delivery after another send failure",
+            )
+            delivery_isolated = (
+                delivered_type == "synthetic_protected_event"
+                and first_socket.sent_types == ["connected"]
+                and len(server._ws_connections.get(campaign.id, set())) == 1
+            )
+            _require_fixed(
+                delivery_isolated,
+                "expected one failed connection not to block an authorized peer",
+            )
+        finally:
+            await _settle_main_websocket(first_socket, first_task)
+            await _settle_main_websocket(second_socket, second_task)
+
+    @pytest.mark.asyncio
+    async def test_authorization_loser_does_not_block_an_authorized_peer(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, _, token, campaign, app = ws_runtime
+        from ares.core.security import create_access_token
+        from ares.db import database as database_module
+
+        with patch.object(database_module.logger, "info"):
+            await database.create_user(
+                "main-websocket-authorized-peer",
+                "SyntheticAuthorizedPeerPass1!",
+                "team_lead",
+            )
+        settings = _settings()
+        peer_token = create_access_token(
+            {"sub": "main-websocket-authorized-peer", "role": "team_lead"},
+            settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=60,
+        )
+        stale_socket, stale_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        peer_socket, peer_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=peer_token,
+        )
+        try:
+            await self._await_connected(stale_socket)
+            await self._await_connected(peer_socket)
+            await database.conn.execute(
+                "UPDATE users SET is_active=0 WHERE id=?",
+                (user_id,),
+            )
+            await database.conn.commit()
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            await _ws_wait(
+                stale_socket.closed.wait(),
+                "expected authorization loser to be retired",
+            )
+            peer_event_type = await _ws_wait(
+                peer_socket.sent.get(),
+                "expected authorized peer to receive protected event",
+            )
+            isolated_delivery = (
+                stale_socket.close_code == 4001
+                and stale_socket.sent_types == ["connected"]
+                and peer_event_type == "synthetic_protected_event"
+                and len(server._ws_connections.get(campaign.id, set())) == 1
+            )
+            _require_fixed(
+                isolated_delivery,
+                "expected an authorization loser not to block an authorized peer",
+            )
+        finally:
+            await _settle_main_websocket(stale_socket, stale_task)
+            await _settle_main_websocket(peer_socket, peer_task)
+
+    @pytest.mark.asyncio
+    async def test_slow_first_peer_does_not_delay_authorized_peer(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, _, _, _, token, campaign, app = ws_runtime
+        first_socket, first_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        second_socket, second_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        coordinator = _FirstBroadcastSendCoordinator()
+        broadcast_task: asyncio.Task[None] | None = None
+        try:
+            await self._await_connected(first_socket)
+            await self._await_connected(second_socket)
+            first_socket.broadcast_send_coordinator = coordinator
+            second_socket.broadcast_send_coordinator = coordinator
+            broadcast_task = asyncio.create_task(
+                server._broadcast_event(
+                    campaign.id,
+                    {"type": "synthetic_protected_event"},
+                )
+            )
+            await _ws_wait(
+                coordinator.first_stalled.wait(),
+                "expected the first protected send to reach the barrier",
+            )
+            await _ws_wait(
+                coordinator.peer_delivered.wait(),
+                "expected an authorized peer to receive before slow-peer release",
+            )
+            delivered_while_first_stalled = (
+                not coordinator.release_first.is_set()
+                and not broadcast_task.done()
+                and sum(
+                    socket.sent_types.count("synthetic_protected_event")
+                    for socket in (first_socket, second_socket)
+                )
+                == 1
+            )
+            _require_fixed(
+                delivered_while_first_stalled,
+                "expected slow-peer isolation before releasing the first send",
+            )
+
+            coordinator.release_first.set()
+            await _ws_wait(
+                broadcast_task,
+                "expected concurrent protected broadcast to complete",
+            )
+            all_operations_settled = (
+                coordinator.active_count == 0
+                and coordinator.settled_count == 2
+                and all(
+                    socket.sent_types
+                    == ["connected", "synthetic_protected_event"]
+                    for socket in (first_socket, second_socket)
+                )
+                and len(server._ws_connections.get(campaign.id, set())) == 2
+            )
+            _require_fixed(
+                all_operations_settled,
+                "expected both concurrent protected sends to settle",
+            )
+        finally:
+            coordinator.release_first.set()
+            first_socket.broadcast_send_coordinator = None
+            second_socket.broadcast_send_coordinator = None
+            if broadcast_task is not None and not broadcast_task.done():
+                await _ws_wait(
+                    broadcast_task,
+                    "expected slow-peer broadcast cleanup",
+                )
+            await _settle_main_websocket(first_socket, first_task)
+            await _settle_main_websocket(second_socket, second_task)
+
+    @pytest.mark.asyncio
+    async def test_cancelled_broadcast_awaits_owned_children(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, _, _, _, token, campaign, app = ws_runtime
+        first_socket, first_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        second_socket, second_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        coordinator = _FirstBroadcastSendCoordinator()
+        broadcast_task: asyncio.Task[None] | None = None
+        cancellation_propagated = False
+        try:
+            await self._await_connected(first_socket)
+            await self._await_connected(second_socket)
+            first_socket.broadcast_send_coordinator = coordinator
+            second_socket.broadcast_send_coordinator = coordinator
+            broadcast_task = asyncio.create_task(
+                server._broadcast_event(
+                    campaign.id,
+                    {"type": "synthetic_protected_event"},
+                )
+            )
+            await _ws_wait(
+                coordinator.first_stalled.wait(),
+                "expected one owned broadcast child to reach the barrier",
+            )
+            await _ws_wait(
+                coordinator.peer_delivered.wait(),
+                "expected the unblocked owned child to deliver",
+            )
+            broadcast_task.cancel()
+            try:
+                await asyncio.wait_for(broadcast_task, timeout=3.0)
+            except asyncio.CancelledError:
+                cancellation_propagated = True
+            except asyncio.TimeoutError:
+                pytest.fail(
+                    "expected parent cancellation to settle owned children",
+                    pytrace=False,
+                )
+
+            await _ws_wait(
+                coordinator.first_cancelled.wait(),
+                "expected held child to receive parent cancellation",
+            )
+            contexts = list(server._ws_connections.get(campaign.id, set()))
+            owned_cleanup_complete = (
+                cancellation_propagated
+                and broadcast_task.done()
+                and broadcast_task.cancelled()
+                and coordinator.active_count == 0
+                and coordinator.settled_count == 2
+                and len(contexts) == 2
+                and all(not connection.send_lock.locked() for connection in contexts)
+            )
+            _require_fixed(
+                owned_cleanup_complete,
+                "expected cancelled broadcast to await every owned child",
+            )
+        finally:
+            coordinator.release_first.set()
+            first_socket.broadcast_send_coordinator = None
+            second_socket.broadcast_send_coordinator = None
+            if broadcast_task is not None and not broadcast_task.done():
+                broadcast_task.cancel()
+                try:
+                    await asyncio.wait_for(broadcast_task, timeout=3.0)
+                except asyncio.CancelledError:
+                    pass
+                except asyncio.TimeoutError:
+                    pytest.fail(
+                        "expected cancelled broadcast cleanup",
+                        pytrace=False,
+                    )
+            await _settle_main_websocket(first_socket, first_task)
+            await _settle_main_websocket(second_socket, second_task)
+
+    @pytest.mark.asyncio
+    async def test_campaign_registry_prevents_cross_campaign_delivery(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, _, _, token, campaign, app = ws_runtime
+        from ares.core.campaign import Campaign
+
+        other_campaign = Campaign(
+            name="Synthetic Other WebSocket Campaign",
+            operator="separate-campaign-owner",
+        )
+        await database.save_campaign(other_campaign)
+        first_socket, first_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        other_socket, other_task = await _launch_main_websocket(
+            app,
+            other_campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(first_socket)
+            await self._await_connected(other_socket)
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "synthetic_protected_event"},
+            )
+            delivered_type = await _ws_wait(
+                first_socket.sent.get(),
+                "expected same-campaign protected delivery",
+            )
+            isolated = (
+                delivered_type == "synthetic_protected_event"
+                and other_socket.sent.empty()
+                and other_socket.sent_types == ["connected"]
+            )
+            _require_fixed(
+                isolated,
+                "expected no cross-campaign WebSocket delivery",
+            )
+        finally:
+            await _settle_main_websocket(first_socket, first_task)
+            await _settle_main_websocket(other_socket, other_task)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_and_disconnect_are_serialized_without_orphan(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, _, _, _, token, campaign, app = ws_runtime
+        socket, route_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        broadcast_task: asyncio.Task[None] | None = None
+        try:
+            await self._await_connected(socket)
+            socket.block_next_send = True
+            broadcast_task = asyncio.create_task(
+                server._broadcast_event(
+                    campaign.id,
+                    {"type": "synthetic_protected_event"},
+                )
+            )
+            await _ws_wait(
+                socket.send_started.wait(),
+                "expected protected send barrier to be reached",
+            )
+            await socket.client_disconnect()
+            await _ws_wait(
+                socket.disconnect_observed.wait(),
+                "expected route to observe client disconnect",
+            )
+            route_waits_for_send = not route_task.done()
+            socket.send_release.set()
+            await _ws_wait(
+                broadcast_task,
+                "expected serialized broadcast to complete",
+            )
+            await _ws_wait(
+                route_task,
+                "expected serialized disconnect cleanup to complete",
+            )
+            serialized_cleanup = (
+                route_waits_for_send
+                and socket.sent_types
+                == ["connected", "synthetic_protected_event"]
+                and not server._ws_connections.get(campaign.id)
+                and not broadcast_task.cancelled()
+                and not route_task.cancelled()
+            )
+            _require_fixed(
+                serialized_cleanup,
+                "expected one serialized send and deterministic disconnect cleanup",
+            )
+        finally:
+            socket.send_release.set()
+            if broadcast_task is not None and not broadcast_task.done():
+                await _ws_wait(
+                    broadcast_task,
+                    "expected pending broadcast cleanup",
+                )
+            await _settle_main_websocket(socket, route_task)

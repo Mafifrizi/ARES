@@ -20,6 +20,7 @@ import os
 import time
 from collections.abc import AsyncGenerator, Iterable, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -47,12 +48,14 @@ from ares.api.findings import redact_finding_response_rows
 from ares.api.rbac import (
     RATE_LIMITS,
     AuthenticatedUser,
+    PrincipalDecisionStatus,
     _limiter,
     get_current_user,
     rate_limit,
     require_any_auth,
     require_operator,
     require_team_lead,
+    resolve_bearer_principal,
 )
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
@@ -243,8 +246,20 @@ def _setup_otel(app: FastAPI, settings: Any) -> None:
 _engine: AresEngine | None = None
 _db: AresDatabase | None = None
 
-# WebSocket connection registry: campaign_id → set of WebSocket connections
-_ws_connections: dict[str, set[WebSocket]] = {}
+# WebSocket registry: campaign_id → opaque authenticated connection contexts.
+@dataclass(eq=False)
+class _CampaignWebSocketConnection:
+    """Opaque main-WebSocket state; credentials must never appear in repr/logs."""
+
+    websocket: WebSocket = field(repr=False)
+    campaign_id: str = field(repr=False)
+    credential_kind: str
+    credential: str = field(repr=False)
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    closed: bool = False
+
+
+_ws_connections: dict[str, set[_CampaignWebSocketConnection]] = {}
 _active_engagements: dict[str, str] = {}  # engagement_id → campaign_id
 _engagement_tasks: dict[str, asyncio.Task[None]] = {}
 _MAX_CONCURRENT_ENGAGEMENTS = 3  # operator-configurable via ARES_MAX_ENGAGEMENTS
@@ -1712,11 +1727,10 @@ async def start_autonomous_engagement(
         from ares.strategy import OperatorNotifier, StrategyEngine
 
         async def _notify(msg: dict) -> None:
-            for ws in list(_ws_connections.get(body.campaign_id, [])):
-                try:
-                    await ws.send_json({"type": "strategy_event", "data": msg})
-                except Exception as exc:
-                    logger.debug("strategy_event_ws_send_failed", error=str(exc))
+            await _broadcast_event(
+                body.campaign_id,
+                {"type": "strategy_event", "data": msg},
+            )
 
         notifier = OperatorNotifier(notify_fn=_notify)
         se = StrategyEngine(
@@ -1749,7 +1763,8 @@ async def start_autonomous_engagement(
             )
         except Exception as exc:
             logger.error(
-                "autonomous_engagement_error", id=engagement_id, error=str(exc)[:200]
+                "autonomous_engagement_failed",
+                error_type=type(exc).__name__,
             )
             await _notify(
                 {
@@ -1798,6 +1813,169 @@ async def list_active_engagements(
     }
 
 
+_WS_AUTH_CLOSE_CODE = 4001
+_WS_BACKEND_CLOSE_CODE = 1013
+_WS_AUTH_CLOSE_REASON = "Authentication or authorization failed"
+_WS_BACKEND_CLOSE_REASON = "Authentication service unavailable"
+
+
+def _websocket_database(connection: _CampaignWebSocketConnection) -> Any | None:
+    app_instance = connection.websocket.scope.get("app")
+    state = getattr(app_instance, "state", None)
+    return getattr(state, "db", None)
+
+
+async def _authorize_campaign_websocket(
+    connection: _CampaignWebSocketConnection,
+) -> PrincipalDecisionStatus:
+    """Revalidate identity, current role, scopes, and campaign access."""
+    db = _websocket_database(connection)
+    if db is None:
+        logger.warning("campaign_websocket_auth_backend_unavailable")
+        return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
+
+    if connection.credential_kind == "bearer":
+        settings = get_settings()
+        decision = await resolve_bearer_principal(
+            connection.credential,
+            db=db,
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+        )
+        if decision.status is not PrincipalDecisionStatus.AUTHORIZED:
+            return decision.status
+        if decision.principal is None:
+            return PrincipalDecisionStatus.INVALID
+        actor = AuthenticatedUser(
+            username=decision.principal.username,
+            role=decision.principal.role,
+        )
+    elif connection.credential_kind == "api_key":
+        try:
+            data = await db.verify_api_key(connection.credential)
+        except Exception as exc:
+            logger.warning(
+                "campaign_websocket_api_key_lookup_failed",
+                error_type=type(exc).__name__,
+            )
+            return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
+        if not isinstance(data, Mapping):
+            return PrincipalDecisionStatus.INVALID
+        username = data.get("username")
+        role = data.get("role")
+        if not isinstance(username, str) or not isinstance(role, str):
+            return PrincipalDecisionStatus.INVALID
+        actor = AuthenticatedUser(
+            username=username,
+            role=role,
+            auth_type="api_key",
+            api_key_id=data.get("key_id") or data.get("id"),
+            api_key_scopes=_normalize_api_key_scopes(data.get("scopes")),
+        )
+        if not actor.has_api_scope("read", "write", "admin"):
+            return PrincipalDecisionStatus.INVALID
+    else:
+        return PrincipalDecisionStatus.INVALID
+
+    try:
+        campaign = await db.get_campaign(connection.campaign_id)
+    except Exception as exc:
+        logger.warning(
+            "campaign_websocket_campaign_lookup_failed",
+            error_type=type(exc).__name__,
+        )
+        return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
+    if not isinstance(campaign, Mapping):
+        return PrincipalDecisionStatus.INVALID
+    if actor.role != "team_lead" and campaign.get("operator") != actor.username:
+        return PrincipalDecisionStatus.INVALID
+    return PrincipalDecisionStatus.AUTHORIZED
+
+
+def _websocket_close_details(
+    status: PrincipalDecisionStatus,
+) -> tuple[int, str]:
+    if status is PrincipalDecisionStatus.BACKEND_UNAVAILABLE:
+        return _WS_BACKEND_CLOSE_CODE, _WS_BACKEND_CLOSE_REASON
+    return _WS_AUTH_CLOSE_CODE, _WS_AUTH_CLOSE_REASON
+
+
+def _unregister_websocket(connection: _CampaignWebSocketConnection) -> None:
+    connections = _ws_connections.get(connection.campaign_id)
+    if connections is None:
+        return
+    connections.discard(connection)
+    if not connections:
+        _ws_connections.pop(connection.campaign_id, None)
+
+
+async def _close_websocket_handshake(
+    websocket: WebSocket,
+    status: PrincipalDecisionStatus,
+) -> None:
+    code, reason = _websocket_close_details(status)
+    try:
+        await websocket.close(code=code, reason=reason)
+    except Exception as exc:
+        logger.debug(
+            "campaign_websocket_handshake_close_failed",
+            error_type=type(exc).__name__,
+        )
+
+
+async def _close_registered_websocket_locked(
+    connection: _CampaignWebSocketConnection,
+    status: PrincipalDecisionStatus,
+) -> None:
+    if connection.closed:
+        _unregister_websocket(connection)
+        return
+    connection.closed = True
+    _unregister_websocket(connection)
+    code, reason = _websocket_close_details(status)
+    try:
+        await connection.websocket.close(code=code, reason=reason)
+    except Exception as exc:
+        logger.debug(
+            "campaign_websocket_close_failed",
+            error_type=type(exc).__name__,
+        )
+
+
+async def _send_protected_websocket_event(
+    connection: _CampaignWebSocketConnection,
+    event: dict[str, Any],
+) -> bool:
+    """Atomically revalidate and either send one event or retire the connection."""
+    async with connection.send_lock:
+        if connection.closed:
+            _unregister_websocket(connection)
+            return False
+        status = await _authorize_campaign_websocket(connection)
+        if status is not PrincipalDecisionStatus.AUTHORIZED:
+            await _close_registered_websocket_locked(connection, status)
+            return False
+        try:
+            await connection.websocket.send_json(event)
+        except Exception as exc:
+            connection.closed = True
+            _unregister_websocket(connection)
+            logger.debug(
+                "campaign_websocket_send_failed",
+                error_type=type(exc).__name__,
+            )
+            return False
+        return True
+
+
+async def _disconnect_websocket(
+    connection: _CampaignWebSocketConnection,
+) -> None:
+    async with connection.send_lock:
+        connection.closed = True
+        _unregister_websocket(connection)
+
+
 @app.websocket("/ws/campaigns/{campaign_id}/events")
 async def campaign_events(
     websocket: WebSocket,
@@ -1817,83 +1995,71 @@ async def campaign_events(
       2. Token is short-lived (ARES_JWT_EXPIRE_MINUTES, default 60 min)
       3. nginx access logs should be stored with restricted permissions
     """
-    # Auth check before accepting — extract actor identity for ownership check
-    actor: AuthenticatedUser | None = None
-    if token:
-        try:
-            settings = get_settings()
-            from ares.core.security import decode_access_token
-
-            payload = decode_access_token(
-                token, settings.secret_key_value, settings.ares_jwt_algorithm
-            )
-            if payload:
-                # Check token revocation — same logic as HTTP get_current_user
-                jti = payload.get("jti")
-                if jti and _db and await _db.is_access_token_revoked(jti):
-                    await websocket.close(code=4001, reason="Token revoked")
-                    return
-                actor = AuthenticatedUser(
-                    username=payload.get("sub", ""),
-                    role=payload.get("role", "operator"),
-                )
-        except Exception as exc:
-            logger.debug("ws_token_auth_failed", error=str(exc))
-    if not actor and api_key and _db:
-        user = await _db.verify_api_key(api_key)
-        if user:
-            actor = AuthenticatedUser(username=user["username"], role=user["role"])
-
-    if not actor:
-        await websocket.close(code=4001, reason="Unauthorized")
+    # Explicit bearer credentials remain first and terminal; API keys are only
+    # considered when no bearer credential was supplied.
+    if token is not None:
+        credential_kind = "bearer"
+        credential = token
+    elif api_key is not None:
+        credential_kind = "api_key"
+        credential = api_key
+    else:
+        await _close_websocket_handshake(
+            websocket,
+            PrincipalDecisionStatus.INVALID,
+        )
         return
 
-    # Campaign ownership check — same semantics as HTTP endpoints (404 to avoid enumeration)
-    if _db:
-        campaign = await _db.get_campaign(campaign_id)
-        if not campaign:
-            await websocket.close(code=4004, reason="Campaign not found")
-            return
-        if actor.role != "team_lead" and campaign.get("operator") != actor.username:
-            await websocket.close(code=4004, reason="Campaign not found")
-            return
+    connection = _CampaignWebSocketConnection(
+        websocket=websocket,
+        campaign_id=campaign_id,
+        credential_kind=credential_kind,
+        credential=credential,
+    )
+    status = await _authorize_campaign_websocket(connection)
+    if status is not PrincipalDecisionStatus.AUTHORIZED:
+        await _close_websocket_handshake(websocket, status)
+        return
 
     await websocket.accept()
-    if campaign_id not in _ws_connections:
-        _ws_connections[campaign_id] = set()
-    _ws_connections[campaign_id].add(websocket)
-    logger.info("ws_connected", campaign_id=campaign_id)
+    _ws_connections.setdefault(campaign_id, set()).add(connection)
+    logger.info("campaign_websocket_connected")
 
     try:
-        await websocket.send_json({"type": "connected", "campaign_id": campaign_id})
+        if not await _send_protected_websocket_event(
+            connection,
+            {"type": "connected", "campaign_id": campaign_id},
+        ):
+            return
         while True:
             # Keep alive — wait for disconnect or ping
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 if data == "ping":
-                    await websocket.send_json({"type": "pong"})
+                    if not await _send_protected_websocket_event(
+                        connection,
+                        {"type": "pong"},
+                    ):
+                        break
             except asyncio.TimeoutError:
-                try:
-                    await websocket.send_json({"type": "keepalive"})
-                except (RuntimeError, ConnectionError):
-                    break  # connection gone — exit loop cleanly
-    except WebSocketDisconnect:
-        logger.info("ws_disconnected", campaign_id=campaign_id)
+                if not await _send_protected_websocket_event(
+                    connection,
+                    {"type": "keepalive"},
+                ):
+                    break
+    except (WebSocketDisconnect, RuntimeError, ConnectionError):
+        logger.info("campaign_websocket_disconnected")
     finally:
-        _ws_connections.get(campaign_id, set()).discard(websocket)
+        await _disconnect_websocket(connection)
 
 
 async def _broadcast_event(campaign_id: str, event: dict[str, Any]) -> None:
     """Broadcast event to all WebSocket subscribers of a campaign."""
-    dead: set[WebSocket] = set()
-    # Iterate over a snapshot — prevents RuntimeError if set is modified during await
-    for ws in set(_ws_connections.get(campaign_id, set())):
-        try:
-            await ws.send_json(event)
-        except (RuntimeError, ConnectionError):
-            dead.add(ws)
-    for ws in dead:
-        _ws_connections.get(campaign_id, set()).discard(ws)
+    # Snapshot before spawning because connections may unregister during awaits.
+    connections = set(_ws_connections.get(campaign_id, set()))
+    async with asyncio.TaskGroup() as tasks:
+        for connection in connections:
+            tasks.create_task(_send_protected_websocket_event(connection, event))
 
 
 # ── CVSS summary endpoint ────────────────────────────────────────────────────
