@@ -621,6 +621,28 @@ and `WS /ws/campaigns/{campaign_id}/events?token=<token>`. Legacy
 `/dashboard/api/*` and `/dashboard/ws/live` routes are not the primary data
 source.
 
+The supported dashboard is `/dashboard` on the main ARES application. The
+older `ares.api.dashboard.app:dashboard_app` FastAPI application is not mounted
+by that supported topology. Under normal ASGI lifespan processing, direct
+legacy startup is denied by default; development or test execution requires
+both `ARES_LEGACY_DASHBOARD_ENABLED=true` and `ARES_DEBUG=true`. All supported
+main-application, CLI, Docker, and Compose launch paths use the main ARES
+application and normal lifecycle processing. Never enable the legacy
+application in production.
+
+Running the legacy target with ASGI lifespan disabled, including
+`--lifespan off`, is unsupported. Unmanaged direct ASGI dispatch that sends
+HTTP or WebSocket request scopes without entering lifespan is also unsupported
+and bypasses this startup guard. This L2 guard contains accidental or default
+exposure through supported launchers; it is not a security boundary against a
+malicious or privileged deployment operator deliberately bypassing ASGI
+lifespan.
+
+Legacy opt-in does not add modern authentication, campaign-ownership,
+WebSocket, credential-transport, or deployment parity. In particular, its
+query-token and global live-WebSocket risks remain. Final retirement of the
+legacy application is the preferred long-term outcome.
+
 Dashboard shell behavior:
 
 - The left sidebar routes between pages, and the topbar menu collapses or

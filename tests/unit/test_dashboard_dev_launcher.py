@@ -1,10 +1,279 @@
 from __future__ import annotations
 
+import importlib
 import subprocess
 from pathlib import Path
 
 import pytest
 import typer
+
+
+_LEGACY_DASHBOARD_DISABLED = (
+    "Legacy dashboard ASGI application is disabled. "
+    "Use the dashboard served by the main ARES application; "
+    "explicit development opt-in is required."
+)
+
+
+def _require_fixed(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message, pytrace=False)
+
+
+def _set_legacy_dashboard_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    enabled: bool,
+    debug: bool,
+) -> None:
+    from ares.core.config import clear_settings_cache
+
+    monkeypatch.setenv(
+        "ARES_LEGACY_DASHBOARD_ENABLED",
+        "true" if enabled else "false",
+    )
+    monkeypatch.setenv("ARES_DEBUG", "true" if debug else "false")
+    clear_settings_cache()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("enabled", "debug", "expected_started"),
+    [
+        (False, False, False),
+        (False, True, False),
+        (True, False, False),
+        (True, True, True),
+    ],
+)
+async def test_legacy_dashboard_lifespan_requires_both_opt_ins(
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    debug: bool,
+    expected_started: bool,
+) -> None:
+    from ares.api.dashboard.app import dashboard_app
+    from ares.core.config import clear_settings_cache
+
+    _set_legacy_dashboard_policy(monkeypatch, enabled=enabled, debug=debug)
+    started = False
+    error_type_ok = False
+    error_message_ok = False
+    try:
+        try:
+            async with dashboard_app.router.lifespan_context(dashboard_app):
+                started = True
+        except Exception as exc:
+            error_type_ok = type(exc) is RuntimeError
+            error_message_ok = str(exc) == _LEGACY_DASHBOARD_DISABLED
+
+        if expected_started:
+            _require_fixed(started, "expected opted-in legacy lifespan to start")
+            _require_fixed(
+                not error_type_ok and not error_message_ok,
+                "opted-in legacy lifespan raised an unexpected startup error",
+            )
+        else:
+            _require_fixed(not started, "legacy lifespan started without both opt-ins")
+            _require_fixed(error_type_ok, "legacy lifespan raised the wrong error type")
+            _require_fixed(
+                error_message_ok,
+                "legacy lifespan did not use the fixed startup error",
+            )
+    finally:
+        clear_settings_cache()
+
+
+@pytest.mark.asyncio
+async def test_legacy_dashboard_enablement_defaults_to_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.dashboard.app import dashboard_app
+    from ares.core.config import clear_settings_cache, get_settings
+
+    monkeypatch.delenv("ARES_LEGACY_DASHBOARD_ENABLED", raising=False)
+    monkeypatch.setenv("ARES_DEBUG", "true")
+    clear_settings_cache()
+    disabled_by_default = False
+    denied = False
+    try:
+        disabled_by_default = not get_settings().ares_legacy_dashboard_enabled
+        try:
+            async with dashboard_app.router.lifespan_context(dashboard_app):
+                pass
+        except Exception as exc:
+            denied = (
+                type(exc) is RuntimeError
+                and str(exc) == _LEGACY_DASHBOARD_DISABLED
+            )
+
+        _require_fixed(
+            disabled_by_default,
+            "legacy dashboard enablement did not default to false",
+        )
+        _require_fixed(denied, "debug mode enabled the legacy dashboard by default")
+    finally:
+        clear_settings_cache()
+
+
+@pytest.mark.asyncio
+async def test_invalid_legacy_dashboard_setting_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.dashboard.app import dashboard_app
+    from ares.core.config import clear_settings_cache
+
+    monkeypatch.setenv("ARES_LEGACY_DASHBOARD_ENABLED", "not-a-boolean")
+    monkeypatch.setenv("ARES_DEBUG", "true")
+    clear_settings_cache()
+    started = False
+    rejected = False
+    try:
+        try:
+            async with dashboard_app.router.lifespan_context(dashboard_app):
+                started = True
+        except Exception:
+            rejected = True
+
+        _require_fixed(not started, "invalid legacy configuration started the app")
+        _require_fixed(rejected, "invalid legacy configuration was not rejected")
+    finally:
+        clear_settings_cache()
+
+
+@pytest.mark.asyncio
+async def test_legacy_imports_and_main_topology_remain_available_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.core.config import clear_settings_cache
+
+    _set_legacy_dashboard_policy(monkeypatch, enabled=False, debug=False)
+    try:
+        dashboard_package = importlib.import_module("ares.api.dashboard")
+        dashboard_module = importlib.import_module("ares.api.dashboard.app")
+        server_module = importlib.import_module("ares.api.server")
+
+        import_ok = (
+            dashboard_package.dashboard_app is dashboard_module.dashboard_app
+            and callable(dashboard_package.broadcast_finding)
+        )
+        legacy_is_mounted = any(
+            getattr(route, "app", None) is dashboard_module.dashboard_app
+            for route in server_module.app.routes
+        )
+        separate_lifespans = (
+            server_module.app.router.lifespan_context
+            is not dashboard_module.dashboard_app.router.lifespan_context
+        )
+
+        _require_fixed(import_ok, "legacy imports were blocked by the execution guard")
+        _require_fixed(
+            not legacy_is_mounted,
+            "main application unexpectedly mounted the legacy dashboard",
+        )
+        _require_fixed(
+            separate_lifespans,
+            "main application unexpectedly uses the legacy dashboard lifespan",
+        )
+    finally:
+        clear_settings_cache()
+
+
+@pytest.mark.asyncio
+async def test_legacy_state_assignment_cannot_bypass_guard_or_open_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.dashboard import app as dashboard_module
+    from ares.core.config import clear_settings_cache
+
+    _set_legacy_dashboard_policy(monkeypatch, enabled=False, debug=False)
+    state = dashboard_module.dashboard_app.state
+    had_db = hasattr(state, "db")
+    previous_db = getattr(state, "db", None)
+    shared_db = object()
+    resource_calls = 0
+
+    async def resource_probe():
+        nonlocal resource_calls
+        resource_calls += 1
+
+    monkeypatch.setattr(dashboard_module, "_get_db", resource_probe)
+    state.db = shared_db
+    denied = False
+    try:
+        try:
+            async with dashboard_module.dashboard_app.router.lifespan_context(
+                dashboard_module.dashboard_app
+            ):
+                pass
+        except Exception as exc:
+            denied = (
+                type(exc) is RuntimeError
+                and str(exc) == _LEGACY_DASHBOARD_DISABLED
+            )
+
+        _require_fixed(denied, "shared database state bypassed the legacy guard")
+        _require_fixed(
+            resource_calls == 0,
+            "legacy resource initialization ran before the guard",
+        )
+        _require_fixed(
+            state.db is shared_db,
+            "denied legacy startup changed shared database ownership",
+        )
+    finally:
+        if had_db:
+            state.db = previous_db
+        else:
+            del state.db
+        clear_settings_cache()
+
+
+@pytest.mark.asyncio
+async def test_legacy_enabled_lifecycle_preserves_shared_state_and_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.dashboard.app import dashboard_app
+    from ares.core.config import clear_settings_cache
+
+    state = dashboard_app.state
+    had_db = hasattr(state, "db")
+    previous_db = getattr(state, "db", None)
+    shared_db = object()
+    state.db = shared_db
+    denied = False
+    entered = 0
+    try:
+        _set_legacy_dashboard_policy(monkeypatch, enabled=False, debug=False)
+        try:
+            async with dashboard_app.router.lifespan_context(dashboard_app):
+                pass
+        except Exception as exc:
+            denied = (
+                type(exc) is RuntimeError
+                and str(exc) == _LEGACY_DASHBOARD_DISABLED
+            )
+
+        _set_legacy_dashboard_policy(monkeypatch, enabled=True, debug=True)
+        async with dashboard_app.router.lifespan_context(dashboard_app):
+            entered += 1
+            _require_fixed(
+                state.db is shared_db,
+                "enabled legacy startup replaced shared database state",
+            )
+
+        _require_fixed(denied, "default legacy startup was not denied")
+        _require_fixed(entered == 1, "enabled legacy lifespan did not enter once")
+        _require_fixed(
+            state.db is shared_db,
+            "legacy shutdown closed or replaced a resource it did not own",
+        )
+    finally:
+        if had_db:
+            state.db = previous_db
+        else:
+            del state.db
+        clear_settings_cache()
 
 
 def _make_repo(root: Path, *, node_modules: bool = True) -> None:

@@ -128,9 +128,29 @@ performed from an authenticated browser/JWT session.
 - `POST /auth/token` — login (takes credentials, returns token)
 - `GET /health` — health check (no sensitive data)
 
-**Dashboard sub-application** (`/dashboard/*`) uses the same JWT / API-key
-tokens but validates them independently via `Authorization: Bearer` header
-or `?token=<jwt>` query param (WebSocket only).
+The supported dashboard is the React application served by the main ARES
+FastAPI application at `/dashboard`. The older
+`ares.api.dashboard.app:dashboard_app` FastAPI application is not mounted by
+that topology. The executable guard's control objective is to prevent
+accidental or default deployment of the legacy surface. Under normal ASGI
+lifespan processing, legacy startup is denied unless both
+`ARES_LEGACY_DASHBOARD_ENABLED=true` and `ARES_DEBUG=true`; the legacy flag
+must never be enabled in production. Supported main-application, CLI, Docker,
+and Compose launch paths use the main ARES application and normal lifecycle
+processing, so they remain fail-closed by default.
+
+The guard trusts the supported ASGI server to execute application lifespan.
+Running the legacy target with lifespan disabled, including `--lifespan off`,
+is unsupported. Directly dispatching HTTP or WebSocket request scopes without
+managing lifespan is likewise unsupported and bypasses the startup guard. This
+is operational containment for supported startup behavior, not parity
+hardening or a security boundary against a malicious or privileged deployment
+operator who deliberately bypasses ASGI lifespan.
+
+The explicit opt-in does not give the legacy application modern
+authentication, campaign-ownership, WebSocket, credential-transport, or
+deployment parity. Query-token exposure and its global live-WebSocket design
+remain. Full retirement is the preferred final control.
 
 Tokens are issued by `POST /auth/token` with valid operator credentials (bcrypt-hashed password). Default expiry: 1 hour.
 

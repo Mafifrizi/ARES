@@ -81,6 +81,7 @@ class AresSettings(BaseSettings):
     ares_jwt_expire_minutes: int = Field(60, ge=5)
     ares_rate_limit_rpm: int = Field(60, ge=1)
     ares_debug: bool = False
+    ares_legacy_dashboard_enabled: bool = False
 
     # Database
     ares_database_url: str = "sqlite+aiosqlite:///./ares.db"

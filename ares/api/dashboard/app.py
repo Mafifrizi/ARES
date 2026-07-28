@@ -14,6 +14,8 @@ Routes:
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +85,29 @@ async def _require_dashboard_auth(
 
 logger = get_logger("ares.dashboard")
 
-dashboard_app = FastAPI(title="ARES Dashboard", docs_url=None, redoc_url=None)
+_LEGACY_DASHBOARD_DISABLED = (
+    "Legacy dashboard ASGI application is disabled. "
+    "Use the dashboard served by the main ARES application; "
+    "explicit development opt-in is required."
+)
+
+
+@asynccontextmanager
+async def _legacy_dashboard_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    from ares.core.config import get_settings
+
+    settings = get_settings()
+    if not (settings.ares_legacy_dashboard_enabled and settings.ares_debug):
+        raise RuntimeError(_LEGACY_DASHBOARD_DISABLED)
+    yield
+
+
+dashboard_app = FastAPI(
+    title="ARES Dashboard",
+    docs_url=None,
+    redoc_url=None,
+    lifespan=_legacy_dashboard_lifespan,
+)
 
 # WebSocket connections for live streaming
 live_connections: list[WebSocket] = []  # public — exported for testing
