@@ -6,22 +6,357 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Awaitable
+from typing import Any, Awaitable, TypeVar
 from urllib.parse import unquote
 
 import aiosqlite
 from ares.core.logger import get_logger
+from ares.db.websocket_tickets import (
+    ApiKeyTicketSource,
+    BearerTicketSource,
+    ConsumedWebSocketTicket,
+    WebSocketTicketCredentialKind,
+    WebSocketTicketPrincipal,
+    WEBSOCKET_TICKET_TTL_SECONDS,
+    format_sqlite_utc,
+    generate_websocket_ticket,
+    hash_websocket_ticket,
+    is_canonical_websocket_ticket,
+    is_valid_websocket_principal_role,
+    normalize_api_key_scopes,
+    parse_sqlite_utc,
+)
 
 logger = get_logger("ares.db")
 
 from ares.core.campaign import Campaign, Finding
 from ares.core.security import DataEncryptor, hash_password, verify_password
 from ares.db.schema import CREATE_TABLES, SCHEMA_VERSION
+
+_TicketResultT = TypeVar("_TicketResultT")
+
+_WEBSOCKET_TICKET_COLUMNS = (
+    (0, "ticket_hash", "TEXT", 1, None, 1, 0),
+    (1, "campaign_id", "TEXT", 1, None, 0, 0),
+    (2, "user_id", "TEXT", 1, None, 0, 0),
+    (3, "credential_kind", "TEXT", 1, None, 0, 0),
+    (4, "bearer_subject", "TEXT", 0, None, 0, 0),
+    (5, "bearer_jti", "TEXT", 0, None, 0, 0),
+    (6, "bearer_expires_at", "TEXT", 0, None, 0, 0),
+    (7, "api_key_id", "TEXT", 0, None, 0, 0),
+    (8, "required_scope", "TEXT", 0, None, 0, 0),
+    (9, "created_at", "TEXT", 1, None, 0, 0),
+    (10, "expires_at", "TEXT", 1, None, 0, 0),
+    (11, "consumed_at", "TEXT", 0, None, 0, 0),
+)
+_WEBSOCKET_TICKET_FOREIGN_KEYS = (
+    (0, "api_key_id", "api_keys", "id", "NO ACTION", "CASCADE", "NONE"),
+    (0, "campaign_id", "campaigns", "id", "NO ACTION", "CASCADE", "NONE"),
+    (0, "user_id", "users", "id", "NO ACTION", "CASCADE", "NONE"),
+)
+_WEBSOCKET_TICKET_CHECKS = {
+    "ck_ws_ticket_hash": """
+        length(ticket_hash)=64
+        AND ticket_hash NOT GLOB '*[^0-9a-f]*'
+    """,
+    "ck_ws_ticket_kind": """
+        credential_kind IN ('bearer', 'api_key')
+    """,
+    "ck_ws_ticket_created_at": """
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at)=created_at
+    """,
+    "ck_ws_ticket_expires_at": """
+        strftime('%Y-%m-%dT%H:%M:%fZ', expires_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ', expires_at)=expires_at
+    """,
+    "ck_ws_ticket_consumed_at": """
+        consumed_at IS NULL OR (
+            strftime('%Y-%m-%dT%H:%M:%fZ', consumed_at) IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M:%fZ', consumed_at)=consumed_at
+        )
+    """,
+    "ck_ws_ticket_time_order": """
+        julianday(expires_at) > julianday(created_at)
+        AND (
+            consumed_at IS NULL
+            OR julianday(consumed_at) < julianday(expires_at)
+        )
+    """,
+    "ck_ws_ticket_source_shape": """
+        (
+            credential_kind='bearer'
+            AND bearer_subject IS NOT NULL
+            AND length(trim(bearer_subject)) > 0
+            AND bearer_subject=trim(bearer_subject)
+            AND bearer_jti IS NOT NULL
+            AND length(trim(bearer_jti)) > 0
+            AND bearer_jti=trim(bearer_jti)
+            AND bearer_expires_at IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            ) IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            )=bearer_expires_at
+            AND api_key_id IS NULL
+            AND required_scope IS NULL
+        )
+        OR
+        (
+            credential_kind='api_key'
+            AND bearer_subject IS NULL
+            AND bearer_jti IS NULL
+            AND bearer_expires_at IS NULL
+            AND api_key_id IS NOT NULL
+            AND length(trim(api_key_id)) > 0
+            AND api_key_id=trim(api_key_id)
+            AND required_scope='read'
+        )
+    """,
+}
+_WEBSOCKET_TICKET_FOREIGN_KEY_NAMES = {
+    "fk_ws_ticket_campaign",
+    "fk_ws_ticket_user",
+    "fk_ws_ticket_api_key",
+}
+_WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS = {
+    "fk_ws_ticket_campaign": (
+        "campaign_id",
+        "campaigns",
+        "id",
+        "NO ACTION",
+        "CASCADE",
+    ),
+    "fk_ws_ticket_user": (
+        "user_id",
+        "users",
+        "id",
+        "NO ACTION",
+        "CASCADE",
+    ),
+    "fk_ws_ticket_api_key": (
+        "api_key_id",
+        "api_keys",
+        "id",
+        "NO ACTION",
+        "CASCADE",
+    ),
+}
+
+
+def _normalize_sql_fragment(fragment: str) -> str:
+    """Normalize formatting while preserving quoted SQL literal contents."""
+    normalized: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(fragment):
+        character = fragment[index]
+        if quote is not None:
+            normalized.append(character)
+            if character == quote:
+                if index + 1 < len(fragment) and fragment[index + 1] == quote:
+                    normalized.append(fragment[index + 1])
+                    index += 1
+                else:
+                    quote = None
+        elif character in ("'", '"', "`"):
+            quote = character
+            normalized.append(character)
+        elif character == "[":
+            quote = "]"
+            normalized.append(character)
+        elif not character.isspace():
+            normalized.append(character.lower())
+        index += 1
+    return "".join(normalized)
+
+
+def _extract_named_checks(table_sql: str) -> tuple[dict[str, str], int]:
+    pattern = re.compile(
+        r"""\bconstraint\s+
+            (?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))
+            \s+check\s*\(
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+    checks: dict[str, str] = {}
+    check_count = len(re.findall(r"\bcheck\s*\(", table_sql, re.IGNORECASE))
+    for match in pattern.finditer(table_sql):
+        name = next(group for group in match.groups() if group is not None)
+        depth = 1
+        quote: str | None = None
+        index = match.end()
+        expression_start = index
+        while index < len(table_sql):
+            character = table_sql[index]
+            if quote is not None:
+                if character == quote:
+                    if (
+                        index + 1 < len(table_sql)
+                        and table_sql[index + 1] == quote
+                    ):
+                        index += 1
+                    else:
+                        quote = None
+            elif character in ("'", '"', "`"):
+                quote = character
+            elif character == "[":
+                quote = "]"
+            elif character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        if depth != 0 or name in checks:
+            return {}, check_count
+        checks[name] = _normalize_sql_fragment(
+            table_sql[expression_start:index]
+        )
+    return checks, check_count
+
+
+def _extract_named_constraints(table_sql: str) -> tuple[str, ...]:
+    pattern = re.compile(
+        r"""\bconstraint\s+
+            (?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+    return tuple(
+        next(group for group in match.groups() if group is not None)
+        for match in pattern.finditer(table_sql)
+    )
+
+
+def _split_sql_list(body: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    quote: str | None = None
+    index = 0
+    while index < len(body):
+        character = body[index]
+        if quote is not None:
+            if character == quote:
+                if index + 1 < len(body) and body[index + 1] == quote:
+                    index += 1
+                else:
+                    quote = None
+        elif character in ("'", '"', "`"):
+            quote = character
+        elif character == "[":
+            quote = "]"
+        elif character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        elif character == "," and depth == 0:
+            parts.append(body[start:index])
+            start = index + 1
+        index += 1
+    parts.append(body[start:])
+    return tuple(parts)
+
+
+def _foreign_key_action(fragment: str, action: str) -> str:
+    match = re.search(
+        rf"on{action}(noaction|restrict|cascade|setnull|setdefault)",
+        fragment,
+    )
+    if match is None:
+        return "NO ACTION"
+    return {
+        "noaction": "NO ACTION",
+        "restrict": "RESTRICT",
+        "cascade": "CASCADE",
+        "setnull": "SET NULL",
+        "setdefault": "SET DEFAULT",
+    }[match.group(1)]
+
+
+def _extract_named_foreign_keys(
+    table_sql: str,
+) -> dict[str, tuple[str, str, str, str, str]]:
+    opening = table_sql.find("(")
+    closing = table_sql.rfind(")")
+    if opening < 0 or closing <= opening:
+        return {}
+    foreign_keys: dict[str, tuple[str, str, str, str, str]] = {}
+    for raw_fragment in _split_sql_list(table_sql[opening + 1:closing]):
+        fragment = _normalize_sql_fragment(raw_fragment)
+        fragment = (
+            fragment.replace('"', "")
+            .replace("`", "")
+            .replace("[", "")
+            .replace("]", "")
+        )
+        name_match = re.search(
+            r"""\bconstraint\s+
+                (?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|
+                ([A-Za-z_][A-Za-z0-9_]*))
+            """,
+            raw_fragment,
+            re.IGNORECASE | re.VERBOSE,
+        )
+        if name_match is None:
+            continue
+        name = next(
+            group
+            for group in name_match.groups()
+            if group is not None
+        ).lower()
+        if name not in _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES:
+            continue
+        table_level = re.search(
+            r"foreignkey\(([a-z_][a-z0-9_]*)\)"
+            r"references([a-z_][a-z0-9_]*)"
+            r"\(([a-z_][a-z0-9_]*)\)",
+            fragment,
+        )
+        if table_level is not None:
+            local_column, target_table, target_column = table_level.groups()
+        else:
+            local_match = re.match(
+                r"""\s*
+                    (?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|
+                    ([A-Za-z_][A-Za-z0-9_]*))
+                """,
+                raw_fragment,
+                re.VERBOSE,
+            )
+            reference_match = re.search(
+                r"references([a-z_][a-z0-9_]*)"
+                r"\(([a-z_][a-z0-9_]*)\)",
+                fragment,
+            )
+            if local_match is None or reference_match is None:
+                return {}
+            local_column = next(
+                group
+                for group in local_match.groups()
+                if group is not None
+            ).lower()
+            target_table, target_column = reference_match.groups()
+        if name in foreign_keys:
+            return {}
+        foreign_keys[name] = (
+            local_column,
+            target_table,
+            target_column,
+            _foreign_key_action(fragment, "update"),
+            _foreign_key_action(fragment, "delete"),
+        )
+    return foreign_keys
 
 
 async def _await_task_completion(
@@ -358,11 +693,34 @@ class AresDatabase:
         return await db.connect()
 
     async def _init_schema(self) -> None:
+        async with self._conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='websocket_tickets'"
+        ) as cursor:
+            ticket_table_exists = await cursor.fetchone() is not None
+        if ticket_table_exists:
+            await self._validate_websocket_ticket_schema()
+
         alembic_applied = await self._run_alembic_migrations()
         if not alembic_applied:
-            await self._conn.executescript(CREATE_TABLES)
-            await self._conn.commit()
+            schema_body_marker = "PRAGMA foreign_keys = ON;"
+            if CREATE_TABLES.count(schema_body_marker) != 1:
+                raise RuntimeError("SQLite schema bootstrap is unavailable")
+            schema_body = CREATE_TABLES.split(
+                schema_body_marker,
+                maxsplit=1,
+            )[1]
+            try:
+                await self._conn.executescript(
+                    f"BEGIN IMMEDIATE;\n{schema_body}"
+                )
+                await self._validate_websocket_ticket_schema()
+                await self._conn.commit()
+            except BaseException:
+                await self._conn.rollback()
+                raise
         await self._reconcile_sqlite_schema()
+        await self._validate_websocket_ticket_schema()
         logger.info(
             "db_ready",
             database=self._database_label,
@@ -411,11 +769,300 @@ class AresDatabase:
         )
         await self._conn.commit()
 
+    async def _validate_websocket_ticket_schema(self) -> None:
+        """Reject a partially present ticket table instead of using it silently."""
+        connection = self._conn
+        if connection is None:
+            raise RuntimeError("Database not connected")
+
+        async with connection.execute(
+            "PRAGMA index_list(websocket_tickets)"
+        ) as cursor:
+            index_rows = await cursor.fetchall()
+        primary_index_rows = tuple(
+            row
+            for row in index_rows
+            if str(row["origin"]).lower() == "pk"
+        )
+        if len(primary_index_rows) != 1:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        primary_index_row = primary_index_rows[0]
+        if (
+            int(primary_index_row["unique"]) != 1
+            or int(primary_index_row["partial"]) != 0
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        primary_index_name = str(primary_index_row["name"])
+        if not primary_index_name:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        async with connection.execute(
+            """
+            SELECT type, name, tbl_name, sql
+            FROM sqlite_schema
+            WHERE tbl_name='websocket_tickets'
+            ORDER BY type, name
+            """
+        ) as cursor:
+            attached_objects = await cursor.fetchall()
+        expected_index_definitions = {
+            "idx_ws_tickets_api_key": frozenset(
+                {
+                    "createindexidx_ws_tickets_api_key"
+                    "onwebsocket_tickets(api_key_id)",
+                    "createindexifnotexistsidx_ws_tickets_api_key"
+                    "onwebsocket_tickets(api_key_id)",
+                }
+            ),
+            "idx_ws_tickets_campaign": frozenset(
+                {
+                    "createindexidx_ws_tickets_campaign"
+                    "onwebsocket_tickets(campaign_id)",
+                    "createindexifnotexistsidx_ws_tickets_campaign"
+                    "onwebsocket_tickets(campaign_id)",
+                }
+            ),
+            "idx_ws_tickets_expires": frozenset(
+                {
+                    "createindexidx_ws_tickets_expires"
+                    "onwebsocket_tickets(expires_at)",
+                    "createindexifnotexistsidx_ws_tickets_expires"
+                    "onwebsocket_tickets(expires_at)",
+                }
+            ),
+            "idx_ws_tickets_user": frozenset(
+                {
+                    "createindexidx_ws_tickets_user"
+                    "onwebsocket_tickets(user_id)",
+                    "createindexifnotexistsidx_ws_tickets_user"
+                    "onwebsocket_tickets(user_id)",
+                }
+            ),
+        }
+        if primary_index_name in expected_index_definitions:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        if len(attached_objects) != len(expected_index_definitions) + 2:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        table_count = 0
+        primary_index_count = 0
+        explicit_index_names: set[str] = set()
+        for row in attached_objects:
+            object_type = str(row["type"])
+            object_name = str(row["name"])
+            table_name = str(row["tbl_name"])
+            definition = row["sql"]
+            if (
+                object_type == "table"
+                and object_name == "websocket_tickets"
+                and table_name == "websocket_tickets"
+                and definition is not None
+            ):
+                table_count += 1
+            elif (
+                object_type == "index"
+                and object_name == primary_index_name
+                and table_name == "websocket_tickets"
+                and definition is None
+            ):
+                primary_index_count += 1
+            elif (
+                object_type == "index"
+                and object_name in expected_index_definitions
+                and table_name == "websocket_tickets"
+                and definition is not None
+                and _normalize_sql_fragment(str(definition))
+                in expected_index_definitions[object_name]
+            ):
+                explicit_index_names.add(object_name)
+            else:
+                raise RuntimeError("Incompatible WebSocket ticket schema")
+        if (
+            table_count != 1
+            or primary_index_count != 1
+            or explicit_index_names != set(expected_index_definitions)
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        async with connection.execute(
+            "PRAGMA table_xinfo(websocket_tickets)"
+        ) as cursor:
+            columns = await cursor.fetchall()
+        actual_columns = tuple(
+            (
+                int(row["cid"]),
+                str(row["name"]),
+                str(row["type"]).upper(),
+                int(row["notnull"]),
+                row["dflt_value"],
+                int(row["pk"]),
+                int(row["hidden"]),
+            )
+            for row in columns
+        )
+        if actual_columns != _WEBSOCKET_TICKET_COLUMNS:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        async with connection.execute(
+            "PRAGMA foreign_key_list(websocket_tickets)"
+        ) as cursor:
+            foreign_keys = tuple(
+                sorted(
+                    (
+                        int(row["seq"]),
+                        str(row["from"]),
+                        str(row["table"]),
+                        str(row["to"]),
+                        str(row["on_update"]).upper(),
+                        str(row["on_delete"]).upper(),
+                        str(row["match"]).upper(),
+                    )
+                    for row in await cursor.fetchall()
+                )
+            )
+        if foreign_keys != _WEBSOCKET_TICKET_FOREIGN_KEYS:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        actual_indexes: dict[
+            str,
+            tuple[int, str, int, tuple[tuple[Any, ...], ...]],
+        ] = {}
+        for row in index_rows:
+            index_name = str(row["name"])
+            quoted_name = index_name.replace('"', '""')
+            async with connection.execute(
+                f'PRAGMA index_xinfo("{quoted_name}")'
+            ) as cursor:
+                index_columns = tuple(
+                    (
+                        int(index_row["seqno"]),
+                        int(index_row["cid"]),
+                        index_row["name"],
+                        int(index_row["desc"]),
+                        str(index_row["coll"]).upper(),
+                        int(index_row["key"]),
+                    )
+                    for index_row in await cursor.fetchall()
+                )
+            actual_indexes[index_name] = (
+                int(row["unique"]),
+                str(row["origin"]).lower(),
+                int(row["partial"]),
+                index_columns,
+            )
+        if len(actual_indexes) != len(index_rows):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        primary_index = actual_indexes.pop(primary_index_name, None)
+        expected_primary_index = (
+            1,
+            "pk",
+            0,
+            (
+                (0, 0, "ticket_hash", 0, "BINARY", 1),
+                (1, -1, None, 0, "BINARY", 0),
+            ),
+        )
+        expected_indexes = {
+            "idx_ws_tickets_expires": (
+                0,
+                "c",
+                0,
+                (
+                    (0, 10, "expires_at", 0, "BINARY", 1),
+                    (1, -1, None, 0, "BINARY", 0),
+                ),
+            ),
+            "idx_ws_tickets_user": (
+                0,
+                "c",
+                0,
+                (
+                    (0, 2, "user_id", 0, "BINARY", 1),
+                    (1, -1, None, 0, "BINARY", 0),
+                ),
+            ),
+            "idx_ws_tickets_campaign": (
+                0,
+                "c",
+                0,
+                (
+                    (0, 1, "campaign_id", 0, "BINARY", 1),
+                    (1, -1, None, 0, "BINARY", 0),
+                ),
+            ),
+            "idx_ws_tickets_api_key": (
+                0,
+                "c",
+                0,
+                (
+                    (0, 7, "api_key_id", 0, "BINARY", 1),
+                    (1, -1, None, 0, "BINARY", 0),
+                ),
+            ),
+        }
+        if (
+            primary_index != expected_primary_index
+            or actual_indexes != expected_indexes
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        async with connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='websocket_tickets'"
+        ) as cursor:
+            table_row = await cursor.fetchone()
+        table_sql = str(table_row["sql"] if table_row else "")
+        normalized_table_sql = _normalize_sql_fragment(table_sql)
+        if (
+            not normalized_table_sql.startswith(
+                "createtablewebsocket_tickets("
+            )
+            and not normalized_table_sql.startswith(
+                "createtableifnotexistswebsocket_tickets("
+            )
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        if (
+            "withoutrowid" in normalized_table_sql
+            or "strict" in normalized_table_sql
+            or "collate" in normalized_table_sql
+            or "onconflict" in normalized_table_sql
+            or "deferrable" in normalized_table_sql
+            or "initiallydeferred" in normalized_table_sql
+            or "initiallyimmediate" in normalized_table_sql
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        named_checks, check_count = _extract_named_checks(table_sql)
+        expected_checks = {
+            name: _normalize_sql_fragment(expression)
+            for name, expression in _WEBSOCKET_TICKET_CHECKS.items()
+        }
+        if named_checks != expected_checks or check_count != len(
+            expected_checks
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        expected_constraint_names = tuple(
+            sorted(
+                set(expected_checks)
+                | _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES
+            )
+        )
+        if tuple(sorted(_extract_named_constraints(table_sql))) != (
+            expected_constraint_names
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        if (
+            _extract_named_foreign_keys(table_sql)
+            != _WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
     async def _run_alembic_migrations(self) -> bool:
         if self._is_sqlite_uri:
             logger.debug(
                 "alembic_skipped_for_sqlite_uri",
-                database=self._database_label,
             )
             return False
 
@@ -1199,6 +1846,494 @@ class AresDatabase:
         await self._conn.commit()
         return changed > 0
 
+    async def _open_websocket_ticket_connection(self) -> aiosqlite.Connection:
+        return await aiosqlite.connect(
+            self._db_path,
+            uri=self._is_sqlite_uri,
+            timeout=30.0,
+        )
+
+    async def _commit_websocket_ticket_operation(
+        self,
+        connection: aiosqlite.Connection,
+    ) -> None:
+        await connection.commit()
+
+    async def _finish_websocket_ticket_cleanup(
+        self,
+        operation: Awaitable[Any],
+        action: str,
+        *,
+        cancellation_baseline: int,
+        caught_cancellations: list[int],
+    ) -> None:
+        cleanup_task = asyncio.ensure_future(operation)
+        self._name_owned_task(
+            cleanup_task,
+            f"ares-sqlite-websocket-ticket-{action}",
+        )
+        try:
+            await _await_task_completion(
+                cleanup_task,
+                cancellation_baseline=cancellation_baseline,
+                caught_cancellations=caught_cancellations,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as cleanup_error:
+            logger.warning(
+                "websocket_ticket_cleanup_failed",
+                action=action,
+                error_type=type(cleanup_error).__name__,
+            )
+
+    async def _run_websocket_ticket_transaction(
+        self,
+        operation: Callable[
+            [aiosqlite.Connection],
+            Awaitable[_TicketResultT],
+        ],
+    ) -> _TicketResultT:
+        async with self._lifecycle_lock:
+            self._require_connected()
+            connection: aiosqlite.Connection | None = None
+            transaction_started = False
+            commit_started = False
+            committed = False
+            commit_cancellation_baseline = 0
+            commit_cancellations = [0]
+            noncommit_close_cancellations = [0]
+            try:
+                open_cancellation_baseline = _cancel_count()
+                open_cancellations = [0]
+                open_task = asyncio.ensure_future(
+                    self._open_websocket_ticket_connection()
+                )
+                self._name_owned_task(
+                    open_task,
+                    "ares-sqlite-websocket-ticket-connect",
+                )
+                connection = await _await_task_completion(
+                    open_task,
+                    cancellation_baseline=open_cancellation_baseline,
+                    caught_cancellations=open_cancellations,
+                )
+                if open_cancellations[0]:
+                    await self._finish_websocket_ticket_cleanup(
+                        connection.close(),
+                        "cancelled-connect-close",
+                        cancellation_baseline=open_cancellation_baseline,
+                        caught_cancellations=open_cancellations,
+                    )
+                    connection = None
+                    raise asyncio.CancelledError
+
+                connection.row_factory = aiosqlite.Row
+                await connection.execute("PRAGMA foreign_keys = ON")
+                await connection.execute("BEGIN IMMEDIATE")
+                transaction_started = True
+                result = await operation(connection)
+
+                commit_started = True
+                commit_cancellation_baseline = _cancel_count()
+                commit_task = asyncio.create_task(
+                    self._commit_websocket_ticket_operation(connection),
+                    name="ares-sqlite-websocket-ticket-commit",
+                )
+                await _await_task_completion(
+                    commit_task,
+                    cancellation_baseline=commit_cancellation_baseline,
+                    caught_cancellations=commit_cancellations,
+                )
+                committed = True
+                transaction_started = False
+            except BaseException:
+                if (
+                    connection is not None
+                    and transaction_started
+                    and not committed
+                ):
+                    cleanup_cancellation_baseline = _cancel_count()
+                    cleanup_cancellations = [0]
+                    cleanup_action = (
+                        "rollback-after-commit-failure"
+                        if commit_started
+                        else "rollback-before-commit"
+                    )
+                    await self._finish_websocket_ticket_cleanup(
+                        connection.rollback(),
+                        cleanup_action,
+                        cancellation_baseline=cleanup_cancellation_baseline,
+                        caught_cancellations=cleanup_cancellations,
+                    )
+                raise
+            finally:
+                if connection is not None:
+                    close_cancellation_baseline = (
+                        commit_cancellation_baseline
+                        if committed
+                        else _cancel_count()
+                    )
+                    close_cancellations = (
+                        commit_cancellations
+                        if committed
+                        else noncommit_close_cancellations
+                    )
+                    await self._finish_websocket_ticket_cleanup(
+                        connection.close(),
+                        "close",
+                        cancellation_baseline=close_cancellation_baseline,
+                        caught_cancellations=close_cancellations,
+                    )
+
+            if committed:
+                _remove_suppressed_cancellations(
+                    cancellation_baseline=commit_cancellation_baseline,
+                    caught_cancellations=commit_cancellations[0],
+                )
+            elif noncommit_close_cancellations[0]:
+                raise asyncio.CancelledError
+            return result
+
+    @staticmethod
+    async def _purge_websocket_ticket_rows(
+        connection: aiosqlite.Connection,
+    ) -> int:
+        async with connection.execute(
+            "DELETE FROM websocket_tickets "
+            "WHERE expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+        ) as cursor:
+            canonical_count = max(0, cursor.rowcount)
+        async with connection.execute(
+            """DELETE FROM websocket_tickets
+               WHERE strftime(
+                   '%Y-%m-%dT%H:%M:%fZ', expires_at
+               ) IS NULL
+                  OR strftime(
+                      '%Y-%m-%dT%H:%M:%fZ', expires_at
+                  ) != expires_at"""
+        ) as cursor:
+            malformed_count = max(0, cursor.rowcount)
+        return canonical_count + malformed_count
+
+    async def issue_websocket_ticket(
+        self,
+        campaign_id: str,
+        source: BearerTicketSource | ApiKeyTicketSource,
+    ) -> tuple[str, int] | None:
+        raw_ticket = generate_websocket_ticket()
+        ticket_hash = hash_websocket_ticket(raw_ticket)
+
+        async def _issue(
+            connection: aiosqlite.Connection,
+        ) -> tuple[str, int] | None:
+            await self._purge_websocket_ticket_rows(connection)
+            if isinstance(source, BearerTicketSource):
+                source_expiry = format_sqlite_utc(source.expires_at)
+                async with connection.execute(
+                    """
+                    INSERT INTO websocket_tickets (
+                        ticket_hash, campaign_id, user_id, credential_kind,
+                        bearer_subject, bearer_jti, bearer_expires_at,
+                        api_key_id, required_scope, created_at, expires_at,
+                        consumed_at
+                    )
+                    SELECT ?, c.id, u.id, 'bearer', u.username, ?, ?,
+                           NULL, NULL,
+                           strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                           strftime(
+                               '%Y-%m-%dT%H:%M:%fZ',
+                               'now',
+                               '+30 seconds'
+                           ),
+                           NULL
+                    FROM users AS u
+                    JOIN campaigns AS c ON c.id=?
+                    WHERE u.id=?
+                      AND u.username=?
+                      AND u.is_active=1
+                      AND u.role IN (
+                          'team_lead', 'operator', 'recon', 'reporter'
+                      )
+                      AND julianday(?) > julianday('now')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM revoked_access_tokens AS rat
+                          WHERE rat.jti=?
+                      )
+                      AND (
+                          u.role='team_lead'
+                          OR c.operator=u.username
+                      )
+                    """,
+                    (
+                        ticket_hash,
+                        source.jti,
+                        source_expiry,
+                        campaign_id,
+                        source.user_id,
+                        source.subject,
+                        source_expiry,
+                        source.jti,
+                    ),
+                ) as cursor:
+                    changed = cursor.rowcount
+            elif isinstance(source, ApiKeyTicketSource):
+                async with connection.execute(
+                    """
+                    INSERT INTO websocket_tickets (
+                        ticket_hash, campaign_id, user_id, credential_kind,
+                        bearer_subject, bearer_jti, bearer_expires_at,
+                        api_key_id, required_scope, created_at, expires_at,
+                        consumed_at
+                    )
+                    SELECT ?, c.id, u.id, 'api_key', NULL, NULL, NULL,
+                           ak.id, 'read',
+                           strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                           strftime(
+                               '%Y-%m-%dT%H:%M:%fZ',
+                               'now',
+                               '+30 seconds'
+                           ),
+                           NULL
+                    FROM api_keys AS ak
+                    JOIN users AS u ON u.id=ak.user_id
+                    JOIN campaigns AS c ON c.id=?
+                    WHERE ak.id=?
+                      AND u.id=?
+                      AND ak.is_active=1
+                      AND u.is_active=1
+                      AND u.role IN (
+                          'team_lead', 'operator', 'recon', 'reporter'
+                      )
+                      AND (
+                          ak.expires_at IS NULL
+                          OR (
+                              julianday(ak.expires_at) IS NOT NULL
+                              AND julianday(ak.expires_at) > julianday('now')
+                          )
+                      )
+                      AND (
+                          (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                              LIKE '% read %'
+                          OR (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                              LIKE '% write %'
+                          OR (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                              LIKE '% admin %'
+                      )
+                      AND (
+                          u.role='team_lead'
+                          OR c.operator=u.username
+                      )
+                    """,
+                    (
+                        ticket_hash,
+                        campaign_id,
+                        source.api_key_id,
+                        source.user_id,
+                    ),
+                ) as cursor:
+                    changed = cursor.rowcount
+            else:
+                raise TypeError("Unsupported WebSocket ticket source")
+            if changed != 1:
+                return None
+            return raw_ticket, WEBSOCKET_TICKET_TTL_SECONDS
+
+        return await self._run_websocket_ticket_transaction(_issue)
+
+    async def consume_websocket_ticket(
+        self,
+        raw_ticket: str,
+        campaign_id: str,
+    ) -> ConsumedWebSocketTicket | None:
+        if not is_canonical_websocket_ticket(raw_ticket):
+            return None
+        ticket_hash = hash_websocket_ticket(raw_ticket)
+
+        async def _consume(
+            connection: aiosqlite.Connection,
+        ) -> ConsumedWebSocketTicket | None:
+            async with connection.execute(
+                """
+                UPDATE websocket_tickets
+                SET consumed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE ticket_hash=?
+                  AND campaign_id=?
+                  AND consumed_at IS NULL
+                  AND strftime(
+                      '%Y-%m-%dT%H:%M:%fZ', expires_at
+                  ) IS NOT NULL
+                  AND strftime(
+                      '%Y-%m-%dT%H:%M:%fZ', expires_at
+                  )=expires_at
+                  AND julianday(expires_at) > julianday('now')
+                """,
+                (ticket_hash, campaign_id),
+            ) as cursor:
+                changed = cursor.rowcount
+            if changed != 1:
+                return None
+            async with connection.execute(
+                """
+                SELECT campaign_id, user_id, credential_kind,
+                       bearer_subject, bearer_jti, bearer_expires_at,
+                       api_key_id, required_scope
+                FROM websocket_tickets
+                WHERE ticket_hash=?
+                """,
+                (ticket_hash,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                raise RuntimeError("Consumed WebSocket ticket row is missing")
+            kind = WebSocketTicketCredentialKind(row["credential_kind"])
+            bearer_expiry = (
+                parse_sqlite_utc(row["bearer_expires_at"])
+                if row["bearer_expires_at"] is not None
+                else None
+            )
+            return ConsumedWebSocketTicket(
+                campaign_id=row["campaign_id"],
+                user_id=row["user_id"],
+                credential_kind=kind,
+                bearer_subject=row["bearer_subject"],
+                bearer_jti=row["bearer_jti"],
+                bearer_expires_at=bearer_expiry,
+                api_key_id=row["api_key_id"],
+                required_scope=row["required_scope"],
+            )
+
+        return await self._run_websocket_ticket_transaction(_consume)
+
+    async def resolve_websocket_ticket_principal(
+        self,
+        handle: ConsumedWebSocketTicket,
+    ) -> WebSocketTicketPrincipal | None:
+        async with self._lifecycle_lock:
+            connection = self._require_connected()
+            if handle.credential_kind is WebSocketTicketCredentialKind.BEARER:
+                if (
+                    handle.bearer_subject is None
+                    or handle.bearer_jti is None
+                    or handle.bearer_expires_at is None
+                ):
+                    return None
+                source_expiry = format_sqlite_utc(
+                    handle.bearer_expires_at
+                )
+                async with connection.execute(
+                    """
+                    SELECT u.id, u.username, u.role
+                    FROM users AS u
+                    JOIN campaigns AS c ON c.id=?
+                    WHERE u.id=?
+                      AND u.username=?
+                      AND u.is_active=1
+                      AND u.role IN (
+                          'team_lead', 'operator', 'recon', 'reporter'
+                      )
+                      AND julianday(?) > julianday('now')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM revoked_access_tokens AS rat
+                          WHERE rat.jti=?
+                      )
+                      AND (
+                          u.role='team_lead'
+                          OR c.operator=u.username
+                      )
+                    """,
+                    (
+                        handle.campaign_id,
+                        handle.user_id,
+                        handle.bearer_subject,
+                        source_expiry,
+                        handle.bearer_jti,
+                    ),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None or not is_valid_websocket_principal_role(
+                    row["role"]
+                ):
+                    return None
+                return WebSocketTicketPrincipal(
+                    user_id=row["id"],
+                    username=row["username"],
+                    role=row["role"],
+                    credential_kind=WebSocketTicketCredentialKind.BEARER,
+                )
+
+            if (
+                handle.credential_kind
+                is not WebSocketTicketCredentialKind.API_KEY
+                or handle.api_key_id is None
+                or handle.required_scope != "read"
+            ):
+                return None
+            async with connection.execute(
+                """
+                SELECT u.id, u.username, u.role, ak.id AS api_key_id,
+                       ak.scopes
+                FROM api_keys AS ak
+                JOIN users AS u ON u.id=ak.user_id
+                JOIN campaigns AS c ON c.id=?
+                WHERE ak.id=?
+                  AND u.id=?
+                  AND ak.is_active=1
+                  AND u.is_active=1
+                  AND u.role IN (
+                      'team_lead', 'operator', 'recon', 'reporter'
+                  )
+                  AND (
+                      ak.expires_at IS NULL
+                      OR (
+                          julianday(ak.expires_at) IS NOT NULL
+                          AND julianday(ak.expires_at) > julianday('now')
+                      )
+                  )
+                  AND (
+                      (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                          LIKE '% read %'
+                      OR (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                          LIKE '% write %'
+                      OR (' ' || replace(ak.scopes, ',', ' ') || ' ')
+                          LIKE '% admin %'
+                  )
+                  AND (
+                      u.role='team_lead'
+                      OR c.operator=u.username
+                  )
+                """,
+                (
+                    handle.campaign_id,
+                    handle.api_key_id,
+                    handle.user_id,
+                ),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None or not is_valid_websocket_principal_role(
+                row["role"]
+            ):
+                return None
+            scopes = normalize_api_key_scopes(row["scopes"])
+            if not set(scopes).intersection({"read", "write", "admin"}):
+                return None
+            return WebSocketTicketPrincipal(
+                user_id=row["id"],
+                username=row["username"],
+                role=row["role"],
+                credential_kind=WebSocketTicketCredentialKind.API_KEY,
+                api_key_id=row["api_key_id"],
+                api_key_scopes=scopes,
+            )
+
+    async def purge_expired_websocket_tickets(self) -> int:
+        async def _purge(connection: aiosqlite.Connection) -> int:
+            return await self._purge_websocket_ticket_rows(connection)
+
+        return await self._run_websocket_ticket_transaction(_purge)
+
     # ── Refresh Tokens (v5) ───────────────────────────────────────────────────
 
     async def create_refresh_token(
@@ -1540,6 +2675,7 @@ class AresDatabase:
         ) as cur:
             n = cur.rowcount
         await self._conn.commit()
+        await self.purge_expired_websocket_tickets()
         return n
 
 # Backward-compat alias

@@ -16,7 +16,7 @@ Tables (v5 additions marked ★):
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 CREATE_TABLES = """
 PRAGMA journal_mode = WAL;
@@ -216,6 +216,95 @@ CREATE TABLE IF NOT EXISTS revoked_access_tokens (
     expires_at  TEXT NOT NULL                -- auto-cleaned when past expiry
 );
 CREATE INDEX IF NOT EXISTS idx_rat_expires ON revoked_access_tokens(expires_at);
+
+-- One-time, campaign-bound WebSocket handshake tickets.
+CREATE TABLE IF NOT EXISTS websocket_tickets (
+    ticket_hash       TEXT NOT NULL PRIMARY KEY
+                      CONSTRAINT ck_ws_ticket_hash CHECK (
+                          length(ticket_hash)=64
+                          AND ticket_hash NOT GLOB '*[^0-9a-f]*'
+                      ),
+    campaign_id       TEXT NOT NULL
+                      CONSTRAINT fk_ws_ticket_campaign
+                      REFERENCES campaigns(id) ON DELETE CASCADE,
+    user_id           TEXT NOT NULL
+                      CONSTRAINT fk_ws_ticket_user
+                      REFERENCES users(id) ON DELETE CASCADE,
+    credential_kind   TEXT NOT NULL
+                      CONSTRAINT ck_ws_ticket_kind CHECK (
+                          credential_kind IN ('bearer', 'api_key')
+                      ),
+    bearer_subject    TEXT,
+    bearer_jti        TEXT,
+    bearer_expires_at TEXT,
+    api_key_id        TEXT
+                      CONSTRAINT fk_ws_ticket_api_key
+                      REFERENCES api_keys(id) ON DELETE CASCADE,
+    required_scope    TEXT,
+    created_at        TEXT NOT NULL,
+    expires_at        TEXT NOT NULL,
+    consumed_at       TEXT,
+    CONSTRAINT ck_ws_ticket_created_at CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ', created_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at)=created_at
+    ),
+    CONSTRAINT ck_ws_ticket_expires_at CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ', expires_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ', expires_at)=expires_at
+    ),
+    CONSTRAINT ck_ws_ticket_consumed_at CHECK (
+        consumed_at IS NULL OR (
+            strftime('%Y-%m-%dT%H:%M:%fZ', consumed_at) IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M:%fZ', consumed_at)=consumed_at
+        )
+    ),
+    CONSTRAINT ck_ws_ticket_time_order CHECK (
+        julianday(expires_at) > julianday(created_at)
+        AND (
+            consumed_at IS NULL
+            OR julianday(consumed_at) < julianday(expires_at)
+        )
+    ),
+    CONSTRAINT ck_ws_ticket_source_shape CHECK (
+        (
+            credential_kind='bearer'
+            AND bearer_subject IS NOT NULL
+            AND length(trim(bearer_subject)) > 0
+            AND bearer_subject=trim(bearer_subject)
+            AND bearer_jti IS NOT NULL
+            AND length(trim(bearer_jti)) > 0
+            AND bearer_jti=trim(bearer_jti)
+            AND bearer_expires_at IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            ) IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            )=bearer_expires_at
+            AND api_key_id IS NULL
+            AND required_scope IS NULL
+        )
+        OR
+        (
+            credential_kind='api_key'
+            AND bearer_subject IS NULL
+            AND bearer_jti IS NULL
+            AND bearer_expires_at IS NULL
+            AND api_key_id IS NOT NULL
+            AND length(trim(api_key_id)) > 0
+            AND api_key_id=trim(api_key_id)
+            AND required_scope='read'
+        )
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_expires
+    ON websocket_tickets(expires_at);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_user
+    ON websocket_tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_campaign
+    ON websocket_tickets(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
+    ON websocket_tickets(api_key_id);
 """
 
 # ── Migration: v4 → v5 ────────────────────────────────────────────────────────

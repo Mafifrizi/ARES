@@ -27,6 +27,7 @@ Production checklist:
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import secrets
@@ -36,6 +37,19 @@ from typing import Any
 
 from ares.core.logger import get_logger
 from ares.core.security import DataEncryptor, hash_password, verify_password
+from ares.db.websocket_tickets import (
+    ApiKeyTicketSource,
+    BearerTicketSource,
+    ConsumedWebSocketTicket,
+    WebSocketTicketCredentialKind,
+    WebSocketTicketPrincipal,
+    WEBSOCKET_TICKET_TTL_SECONDS,
+    generate_websocket_ticket,
+    hash_websocket_ticket,
+    is_canonical_websocket_ticket,
+    is_valid_websocket_principal_role,
+    normalize_api_key_scopes,
+)
 
 logger = get_logger("ares.db.postgres")
 
@@ -228,6 +242,83 @@ CREATE TABLE IF NOT EXISTS revoked_access_tokens (
     expires_at  TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pg_rat_expires ON revoked_access_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS websocket_tickets (
+    ticket_hash       TEXT NOT NULL PRIMARY KEY
+                      CONSTRAINT ck_ws_ticket_hash CHECK (
+                          ticket_hash ~ '^[0-9a-f]{64}$'
+                      ),
+    campaign_id       TEXT NOT NULL
+                      CONSTRAINT fk_ws_ticket_campaign
+                      REFERENCES campaigns(id) ON DELETE CASCADE,
+    user_id           TEXT NOT NULL
+                      CONSTRAINT fk_ws_ticket_user
+                      REFERENCES users(id) ON DELETE CASCADE,
+    credential_kind   TEXT NOT NULL
+                      CONSTRAINT ck_ws_ticket_kind CHECK (
+                          credential_kind IN ('bearer', 'api_key')
+                      ),
+    bearer_subject    TEXT,
+    bearer_jti        TEXT,
+    bearer_expires_at TIMESTAMPTZ,
+    api_key_id        TEXT
+                      CONSTRAINT fk_ws_ticket_api_key
+                      REFERENCES api_keys(id) ON DELETE CASCADE,
+    required_scope    TEXT,
+    created_at        TIMESTAMPTZ NOT NULL,
+    expires_at        TIMESTAMPTZ NOT NULL,
+    consumed_at       TIMESTAMPTZ,
+    CONSTRAINT ck_ws_ticket_created_at CHECK (created_at < expires_at),
+    CONSTRAINT ck_ws_ticket_expires_at CHECK (expires_at > created_at),
+    CONSTRAINT ck_ws_ticket_consumed_at CHECK (
+        consumed_at IS NULL OR consumed_at < expires_at
+    ),
+    CONSTRAINT ck_ws_ticket_bearer_expires_finite CHECK (
+        bearer_expires_at IS NULL OR isfinite(bearer_expires_at)
+    ),
+    CONSTRAINT ck_ws_ticket_created_finite CHECK (isfinite(created_at)),
+    CONSTRAINT ck_ws_ticket_expires_finite CHECK (isfinite(expires_at)),
+    CONSTRAINT ck_ws_ticket_consumed_finite CHECK (
+        consumed_at IS NULL OR isfinite(consumed_at)
+    ),
+    CONSTRAINT ck_ws_ticket_time_order CHECK (
+        expires_at > created_at
+        AND (consumed_at IS NULL OR consumed_at < expires_at)
+    ),
+    CONSTRAINT ck_ws_ticket_source_shape CHECK (
+        (
+            credential_kind='bearer'
+            AND bearer_subject IS NOT NULL
+            AND length(btrim(bearer_subject)) > 0
+            AND bearer_subject=btrim(bearer_subject)
+            AND bearer_jti IS NOT NULL
+            AND length(btrim(bearer_jti)) > 0
+            AND bearer_jti=btrim(bearer_jti)
+            AND bearer_expires_at IS NOT NULL
+            AND api_key_id IS NULL
+            AND required_scope IS NULL
+        )
+        OR
+        (
+            credential_kind='api_key'
+            AND bearer_subject IS NULL
+            AND bearer_jti IS NULL
+            AND bearer_expires_at IS NULL
+            AND api_key_id IS NOT NULL
+            AND length(btrim(api_key_id)) > 0
+            AND api_key_id=btrim(api_key_id)
+            AND required_scope='read'
+        )
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_expires
+    ON websocket_tickets(expires_at);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_user
+    ON websocket_tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_campaign
+    ON websocket_tickets(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
+    ON websocket_tickets(api_key_id);
 """
 
 
@@ -272,15 +363,39 @@ class PostgresDatabase:
                 "asyncpg is required for PostgreSQL support. "
                 "Install: pip install ares-redteam[postgres]"
             ) from exc
-        self._pool = await asyncpg.create_pool(
+        pool = await asyncpg.create_pool(
             self._dsn,
             min_size=self._pool_min,
             max_size=self._pool_max,
             command_timeout=30,
         )
-        await self._init_schema()
-        logger.info("pg_db_ready", dsn=self._dsn[:40] + "…")
+        self._pool = pool
+        try:
+            await self._init_schema()
+        except Exception as primary:
+            await self._close_failed_startup_pool(pool, primary)
+            raise
+        except asyncio.CancelledError as primary:
+            await self._close_failed_startup_pool(pool, primary)
+            raise
+        logger.info("pg_db_ready")
         return self
+
+    async def _close_failed_startup_pool(
+        self,
+        pool: Any,
+        primary: BaseException,
+    ) -> None:
+        try:
+            await pool.close()
+        except Exception as cleanup_error:
+            primary.add_note(
+                "PostgreSQL startup cleanup failure "
+                f"[pool-close: {type(cleanup_error).__name__}]"
+            )
+        finally:
+            if self._pool is pool:
+                self._pool = None
 
     async def __aenter__(self) -> "PostgresDatabase":
         return await self.connect()
@@ -303,8 +418,577 @@ class PostgresDatabase:
 
     async def _init_schema(self) -> None:
         async with self._pool.acquire() as conn:
-            await conn.execute(_PG_CREATE_TABLES)
+            async with conn.transaction():
+                ticket_table_exists = bool(
+                    await conn.fetchval(
+                        """
+                        SELECT EXISTS(
+                            SELECT 1
+                            FROM pg_class AS rel
+                            JOIN pg_namespace AS nsp
+                              ON nsp.oid=rel.relnamespace
+                            WHERE nsp.nspname=current_schema()
+                              AND rel.relname='websocket_tickets'
+                        )
+                        """
+                    )
+                )
+                if ticket_table_exists:
+                    await self._validate_websocket_ticket_schema(conn)
+                await conn.execute(_PG_CREATE_TABLES)
+                await self._validate_websocket_ticket_schema(conn)
         logger.info("pg_schema_ready")
+
+    @staticmethod
+    async def _validate_websocket_ticket_schema(connection: Any) -> None:
+        """Reject any ticket catalog that differs from the owned schema."""
+        relation = await connection.fetchrow(
+            """
+            SELECT rel.oid::bigint AS table_oid,
+                   nsp.oid::bigint AS schema_oid,
+                   nsp.nspname AS schema_name,
+                   rel.relkind,
+                   rel.relpersistence,
+                   rel.relispartition,
+                   rel.relrowsecurity,
+                   rel.relforcerowsecurity,
+                   (
+                       SELECT COUNT(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhrelid=rel.oid
+                   ) AS parent_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhparent=rel.oid
+                   ) AS child_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM pg_policy AS policy
+                       WHERE policy.polrelid=rel.oid
+                   ) AS policy_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM pg_trigger AS trg
+                       WHERE trg.tgrelid=rel.oid
+                         AND NOT trg.tgisinternal
+                   ) AS user_trigger_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM pg_rewrite AS rewrite
+                       WHERE rewrite.ev_class=rel.oid
+                   ) AS user_rule_count
+            FROM pg_class AS rel
+            JOIN pg_namespace AS nsp ON nsp.oid=rel.relnamespace
+            WHERE nsp.nspname=current_schema()
+              AND rel.relname='websocket_tickets'
+            """
+        )
+        if relation is None:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+        table_oid = int(relation["table_oid"])
+        schema_oid = int(relation["schema_oid"])
+        schema_name = str(relation["schema_name"])
+        relation_contract = (
+            str(relation["relkind"]),
+            str(relation["relpersistence"]),
+            bool(relation["relispartition"]),
+            bool(relation["relrowsecurity"]),
+            bool(relation["relforcerowsecurity"]),
+            int(relation["parent_count"]),
+            int(relation["child_count"]),
+            int(relation["policy_count"]),
+            int(relation["user_trigger_count"]),
+            int(relation["user_rule_count"]),
+        )
+        if relation_contract != (
+            "r",
+            "p",
+            False,
+            False,
+            False,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        rows = await connection.fetch(
+            """
+            SELECT att.attname AS column_name,
+                   pg_catalog.format_type(att.atttypid, att.atttypmod) AS data_type,
+                   att.attnotnull,
+                   att.attidentity,
+                   att.attgenerated,
+                   att.attcollation=typ.typcollation AS collation_is_default,
+                   pg_get_expr(def.adbin, def.adrelid) AS column_default
+            FROM pg_attribute AS att
+            JOIN pg_type AS typ ON typ.oid=att.atttypid
+            LEFT JOIN pg_attrdef AS def
+              ON def.adrelid=att.attrelid AND def.adnum=att.attnum
+            WHERE att.attrelid=$1::oid
+              AND att.attnum > 0
+              AND NOT att.attisdropped
+            ORDER BY att.attnum
+            """,
+            table_oid,
+        )
+        actual_columns = [
+            (
+                str(row["column_name"]),
+                str(row["data_type"]),
+                bool(row["attnotnull"]),
+                str(row["attidentity"]),
+                str(row["attgenerated"]),
+                bool(row["collation_is_default"]),
+                None if row["column_default"] is None else str(row["column_default"]),
+            )
+            for row in rows
+        ]
+        expected_columns = [
+            ("ticket_hash", "text", True, "", "", True, None),
+            ("campaign_id", "text", True, "", "", True, None),
+            ("user_id", "text", True, "", "", True, None),
+            ("credential_kind", "text", True, "", "", True, None),
+            ("bearer_subject", "text", False, "", "", True, None),
+            ("bearer_jti", "text", False, "", "", True, None),
+            (
+                "bearer_expires_at",
+                "timestamp with time zone",
+                False,
+                "",
+                "",
+                True,
+                None,
+            ),
+            ("api_key_id", "text", False, "", "", True, None),
+            ("required_scope", "text", False, "", "", True, None),
+            (
+                "created_at",
+                "timestamp with time zone",
+                True,
+                "",
+                "",
+                True,
+                None,
+            ),
+            (
+                "expires_at",
+                "timestamp with time zone",
+                True,
+                "",
+                "",
+                True,
+                None,
+            ),
+            (
+                "consumed_at",
+                "timestamp with time zone",
+                False,
+                "",
+                "",
+                True,
+                None,
+            ),
+        ]
+        if actual_columns != expected_columns:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        constraint_rows = await connection.fetch(
+            """
+            SELECT con.conname, con.contype,
+                   con.conrelid::bigint AS table_oid,
+                   con.confrelid::bigint AS referenced_oid,
+                   con.conindid::bigint AS constraint_index_oid,
+                   con.convalidated,
+                   con.condeferrable, con.condeferred,
+                   pg_get_constraintdef(con.oid, true) AS definition,
+                   ref_nsp.oid::bigint AS referenced_schema_oid,
+                   ref_nsp.nspname AS referenced_schema,
+                   ref_rel.relname AS referenced_table,
+                   ARRAY(
+                       SELECT local_att.attname
+                       FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+                       JOIN pg_attribute AS local_att
+                         ON local_att.attrelid=con.conrelid
+                        AND local_att.attnum=key.attnum
+                       ORDER BY key.ordinality
+                   ) AS local_columns,
+                   ARRAY(
+                       SELECT remote_att.attname
+                       FROM unnest(con.confkey) WITH ORDINALITY AS key(attnum, ordinality)
+                       JOIN pg_attribute AS remote_att
+                         ON remote_att.attrelid=con.confrelid
+                        AND remote_att.attnum=key.attnum
+                       ORDER BY key.ordinality
+                   ) AS remote_columns,
+                   con.confupdtype, con.confdeltype
+            FROM pg_constraint AS con
+            LEFT JOIN pg_class AS ref_rel ON ref_rel.oid=con.confrelid
+            LEFT JOIN pg_namespace AS ref_nsp ON ref_nsp.oid=ref_rel.relnamespace
+            WHERE con.conrelid=$1::oid
+            ORDER BY con.conname
+            """,
+            table_oid,
+        )
+        actual_constraints = {
+            str(row["conname"]): row
+            for row in constraint_rows
+        }
+        expected_constraint_names = {
+            "ck_ws_ticket_bearer_expires_finite",
+            "ck_ws_ticket_consumed_at",
+            "ck_ws_ticket_consumed_finite",
+            "ck_ws_ticket_created_at",
+            "ck_ws_ticket_created_finite",
+            "ck_ws_ticket_expires_at",
+            "ck_ws_ticket_expires_finite",
+            "ck_ws_ticket_hash",
+            "ck_ws_ticket_kind",
+            "ck_ws_ticket_source_shape",
+            "ck_ws_ticket_time_order",
+            "fk_ws_ticket_api_key",
+            "fk_ws_ticket_campaign",
+            "fk_ws_ticket_user",
+            "websocket_tickets_pkey",
+        }
+        if set(actual_constraints) != expected_constraint_names:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        index_rows = await connection.fetch(
+            """
+            SELECT ind.indrelid::bigint AS table_oid,
+                   ind.indexrelid::bigint AS index_oid,
+                   idx.relnamespace::bigint AS index_schema_oid,
+                   idx_nsp.nspname AS index_schema,
+                   idx.relname AS index_name,
+                   idx.relkind AS index_relkind,
+                   idx.relpersistence AS index_relpersistence,
+                   idx.relispartition AS index_is_partition,
+                   am.amname AS access_method,
+                   ind.indisunique,
+                   ind.indisprimary,
+                   ind.indisvalid,
+                   ind.indisready,
+                   ind.indislive,
+                   ind.indnkeyatts,
+                   ind.indnatts,
+                   ARRAY(
+                       SELECT CASE
+                           WHEN key.attnum=0 THEN NULL
+                           ELSE att.attname
+                       END
+                       FROM unnest(ind.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY key.ordinality
+                   ) AS columns,
+                   ARRAY(
+                       SELECT option
+                       FROM unnest(ind.indoption) WITH ORDINALITY AS item(option, ordinality)
+                       ORDER BY item.ordinality
+                   ) AS column_options,
+                   ARRAY(
+                       SELECT opc.opcname
+                       FROM unnest(ind.indclass) WITH ORDINALITY AS item(opclass, ordinality)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       ORDER BY item.ordinality
+                   ) AS operator_classes,
+                   ARRAY(
+                       SELECT opc.oid::bigint
+                       FROM unnest(ind.indclass) WITH ORDINALITY AS item(opclass, ordinality)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       ORDER BY item.ordinality
+                   ) AS operator_class_oids,
+                   ARRAY(
+                       SELECT opc_nsp.nspname
+                       FROM unnest(ind.indclass) WITH ORDINALITY AS item(opclass, ordinality)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       JOIN pg_namespace AS opc_nsp
+                         ON opc_nsp.oid=opc.opcnamespace
+                       ORDER BY item.ordinality
+                   ) AS operator_class_namespaces,
+                   ARRAY(
+                       SELECT item.collation=att.attcollation
+                       FROM unnest(ind.indcollation) WITH ORDINALITY
+                            AS item(collation, ordinality)
+                       JOIN unnest(ind.indkey) WITH ORDINALITY
+                            AS key(attnum, ordinality)
+                         ON key.ordinality=item.ordinality
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY item.ordinality
+                   ) AS column_collations_match,
+                   pg_get_expr(ind.indexprs, ind.indrelid) AS expressions,
+                   pg_get_expr(ind.indpred, ind.indrelid) AS predicate,
+                   pg_get_indexdef(ind.indexrelid) AS definition
+            FROM pg_index AS ind
+            JOIN pg_class AS idx ON idx.oid=ind.indexrelid
+            JOIN pg_namespace AS idx_nsp ON idx_nsp.oid=idx.relnamespace
+            JOIN pg_am AS am ON am.oid=idx.relam
+            WHERE ind.indrelid=$1::oid
+            ORDER BY idx.relname
+            """,
+            table_oid,
+        )
+        canonical_opclass_rows = await connection.fetch(
+            """
+            SELECT opc.opcname, opc.oid::bigint AS opclass_oid
+            FROM pg_opclass AS opc
+            JOIN pg_namespace AS nsp ON nsp.oid=opc.opcnamespace
+            JOIN pg_am AS am ON am.oid=opc.opcmethod
+            WHERE nsp.nspname='pg_catalog'
+              AND am.amname='btree'
+              AND opc.opcname=ANY($1::text[])
+            """,
+            ["text_ops", "timestamptz_ops"],
+        )
+        canonical_opclasses = {
+            str(row["opcname"]): int(row["opclass_oid"])
+            for row in canonical_opclass_rows
+        }
+        if set(canonical_opclasses) != {"text_ops", "timestamptz_ops"}:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        index_oids: set[int] = set()
+        for row in index_rows:
+            operator_classes = tuple(
+                str(opclass) for opclass in row["operator_classes"]
+            )
+            operator_class_oids = tuple(
+                int(opclass_oid) for opclass_oid in row["operator_class_oids"]
+            )
+            canonical_oids = tuple(
+                canonical_opclasses.get(opclass, -1)
+                for opclass in operator_classes
+            )
+            index_oid = int(row["index_oid"])
+            identity_is_exact = (
+                int(row["table_oid"]) == table_oid
+                and int(row["index_schema_oid"]) == schema_oid
+                and str(row["index_schema"]) == schema_name
+                and str(row["index_relkind"]) == "i"
+                and str(row["index_relpersistence"]) == "p"
+                and not bool(row["index_is_partition"])
+                and tuple(
+                    str(namespace)
+                    for namespace in row["operator_class_namespaces"]
+                )
+                == ("pg_catalog",) * len(operator_classes)
+                and operator_class_oids == canonical_oids
+                and index_oid > 0
+                and index_oid not in index_oids
+            )
+            if not identity_is_exact:
+                raise RuntimeError("Incompatible WebSocket ticket schema")
+            index_oids.add(index_oid)
+
+        actual_indexes = {
+            str(row["index_name"]): (
+                str(row["access_method"]),
+                bool(row["indisunique"]),
+                bool(row["indisprimary"]),
+                bool(row["indisvalid"]),
+                bool(row["indisready"]),
+                bool(row["indislive"]),
+                int(row["indnkeyatts"]),
+                int(row["indnatts"]),
+                tuple(
+                    None if column is None else str(column)
+                    for column in row["columns"]
+                ),
+                tuple(int(option) for option in row["column_options"]),
+                tuple(str(opclass) for opclass in row["operator_classes"]),
+                tuple(bool(value) for value in row["column_collations_match"]),
+                None if row["expressions"] is None else str(row["expressions"]),
+                None if row["predicate"] is None else str(row["predicate"]),
+            )
+            for row in index_rows
+        }
+        expected_indexes = {
+            "idx_ws_tickets_api_key": (
+                "btree", False, False, True, True, True,
+                1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
+            ),
+            "idx_ws_tickets_campaign": (
+                "btree", False, False, True, True, True,
+                1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
+            ),
+            "idx_ws_tickets_expires": (
+                "btree", False, False, True, True, True,
+                1, 1, ("expires_at",), (0,), ("timestamptz_ops",), (True,),
+                None, None,
+            ),
+            "idx_ws_tickets_user": (
+                "btree", False, False, True, True, True,
+                1, 1, ("user_id",), (0,), ("text_ops",), (True,), None, None,
+            ),
+            "websocket_tickets_pkey": (
+                "btree", True, True, True, True, True,
+                1, 1, ("ticket_hash",), (0,), ("text_ops",), (True,), None, None,
+            ),
+        }
+        if actual_indexes != expected_indexes:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        expected_constraint_fragments = {
+            "websocket_tickets_pkey": ("p", "PRIMARY KEY (ticket_hash)"),
+            "fk_ws_ticket_campaign": (
+                "f",
+                "FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE",
+            ),
+            "fk_ws_ticket_user": (
+                "f",
+                "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            ),
+            "fk_ws_ticket_api_key": (
+                "f",
+                "FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
+            ),
+        }
+        for name, definition in expected_constraint_fragments.items():
+            row = actual_constraints[name]
+            if (
+                str(row["contype"]) != definition[0]
+                or not bool(row["convalidated"])
+                or bool(row["condeferrable"])
+                or bool(row["condeferred"])
+                or " ".join(str(row["definition"]).split()) != definition[1]
+            ):
+                raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        referenced_schema = str(await connection.fetchval("SELECT current_schema()"))
+        expected_foreign_keys = {
+            "fk_ws_ticket_campaign": (
+                ("campaign_id",), referenced_schema, "campaigns", ("id",), "a", "c",
+            ),
+            "fk_ws_ticket_user": (
+                ("user_id",), referenced_schema, "users", ("id",), "a", "c",
+            ),
+            "fk_ws_ticket_api_key": (
+                ("api_key_id",), referenced_schema, "api_keys", ("id",), "a", "c",
+            ),
+        }
+        referenced_rows = await connection.fetch(
+            """
+            SELECT rel.relname, rel.oid::bigint AS relation_oid
+            FROM pg_class AS rel
+            WHERE rel.relnamespace=$1::oid
+              AND rel.relname=ANY($2::text[])
+            """,
+            schema_oid,
+            ["api_keys", "campaigns", "users"],
+        )
+        referenced_oids = {
+            str(row["relname"]): int(row["relation_oid"])
+            for row in referenced_rows
+        }
+        if set(referenced_oids) != {"api_keys", "campaigns", "users"}:
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        if any(
+            int(row["table_oid"]) != table_oid
+            for row in actual_constraints.values()
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        for name, expected in expected_foreign_keys.items():
+            row = actual_constraints[name]
+            actual = (
+                tuple(str(column) for column in row["local_columns"]),
+                str(row["referenced_schema"]),
+                str(row["referenced_table"]),
+                tuple(str(column) for column in row["remote_columns"]),
+                str(row["confupdtype"]),
+                str(row["confdeltype"]),
+            )
+            reference_identity_is_exact = (
+                row["referenced_schema_oid"] is not None
+                and int(row["referenced_schema_oid"]) == schema_oid
+                and int(row["referenced_oid"])
+                == referenced_oids[expected[2]]
+            )
+            if actual != expected or not reference_identity_is_exact:
+                raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        primary = actual_constraints["websocket_tickets_pkey"]
+        if (
+            tuple(str(column) for column in primary["local_columns"])
+            != ("ticket_hash",)
+            or tuple(primary["remote_columns"])
+            or primary["referenced_schema"] is not None
+            or primary["referenced_table"] is not None
+            or int(primary["constraint_index_oid"])
+            != next(
+                int(row["index_oid"])
+                for row in index_rows
+                if str(row["index_name"]) == "websocket_tickets_pkey"
+            )
+        ):
+            raise RuntimeError("Incompatible WebSocket ticket schema")
+
+        expected_check_definitions = {
+            "ck_ws_ticket_hash": (
+                "CHECK (ticket_hash ~ '^[0-9a-f]{64}$'::text)"
+            ),
+            "ck_ws_ticket_kind": (
+                "CHECK (credential_kind = ANY "
+                "(ARRAY['bearer'::text, 'api_key'::text]))"
+            ),
+            "ck_ws_ticket_created_at": "CHECK (created_at < expires_at)",
+            "ck_ws_ticket_expires_at": "CHECK (expires_at > created_at)",
+            "ck_ws_ticket_consumed_at": (
+                "CHECK (consumed_at IS NULL OR consumed_at < expires_at)"
+            ),
+            "ck_ws_ticket_bearer_expires_finite": (
+                "CHECK (bearer_expires_at IS NULL "
+                "OR isfinite(bearer_expires_at))"
+            ),
+            "ck_ws_ticket_created_finite": "CHECK (isfinite(created_at))",
+            "ck_ws_ticket_expires_finite": "CHECK (isfinite(expires_at))",
+            "ck_ws_ticket_consumed_finite": (
+                "CHECK (consumed_at IS NULL OR isfinite(consumed_at))"
+            ),
+            "ck_ws_ticket_time_order": (
+                "CHECK (expires_at > created_at AND "
+                "(consumed_at IS NULL OR consumed_at < expires_at))"
+            ),
+            "ck_ws_ticket_source_shape": (
+                "CHECK (credential_kind = 'bearer'::text "
+                "AND bearer_subject IS NOT NULL "
+                "AND length(btrim(bearer_subject)) > 0 "
+                "AND bearer_subject = btrim(bearer_subject) "
+                "AND bearer_jti IS NOT NULL "
+                "AND length(btrim(bearer_jti)) > 0 "
+                "AND bearer_jti = btrim(bearer_jti) "
+                "AND bearer_expires_at IS NOT NULL "
+                "AND api_key_id IS NULL "
+                "AND required_scope IS NULL "
+                "OR credential_kind = 'api_key'::text "
+                "AND bearer_subject IS NULL "
+                "AND bearer_jti IS NULL "
+                "AND bearer_expires_at IS NULL "
+                "AND api_key_id IS NOT NULL "
+                "AND length(btrim(api_key_id)) > 0 "
+                "AND api_key_id = btrim(api_key_id) "
+                "AND required_scope = 'read'::text)"
+            ),
+        }
+        for name, expected_definition in expected_check_definitions.items():
+            row = actual_constraints[name]
+            if (
+                str(row["contype"]) != "c"
+                or not bool(row["convalidated"])
+                or bool(row["condeferrable"])
+                or bool(row["condeferred"])
+                or " ".join(str(row["definition"]).split())
+                != expected_definition
+            ):
+                raise RuntimeError("Incompatible WebSocket ticket schema")
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -937,6 +1621,253 @@ class PostgresDatabase:
 
     # ── Refresh Tokens ─────────────────────────────────────────────────────────
 
+    # ── One-time WebSocket tickets ───────────────────────────────────────────
+
+    def _require_websocket_ticket_pool(self) -> Any:
+        if self._pool is None:
+            raise RuntimeError("PostgreSQL database is not connected")
+        return self._pool
+
+    @staticmethod
+    async def _purge_websocket_ticket_rows(connection: Any) -> None:
+        await connection.execute(
+            "DELETE FROM websocket_tickets WHERE expires_at <= now()"
+        )
+
+    async def issue_websocket_ticket(
+        self,
+        campaign_id: str,
+        source: BearerTicketSource | ApiKeyTicketSource,
+    ) -> tuple[str, int] | None:
+        raw_ticket = generate_websocket_ticket()
+        ticket_hash = hash_websocket_ticket(raw_ticket)
+        pool = self._require_websocket_ticket_pool()
+        issued = False
+
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await self._purge_websocket_ticket_rows(connection)
+                if isinstance(source, BearerTicketSource):
+                    row = await connection.fetchrow(
+                        """
+                        INSERT INTO websocket_tickets(
+                            ticket_hash, campaign_id, user_id,
+                            credential_kind, bearer_subject, bearer_jti,
+                            bearer_expires_at, created_at, expires_at
+                        )
+                        SELECT $1, c.id, u.id, 'bearer', $4, $5, $6,
+                               now(), now() + interval '30 seconds'
+                        FROM users AS u
+                        JOIN campaigns AS c ON c.id=$2
+                        WHERE u.id=$3
+                          AND u.username=$4
+                          AND u.is_active=1
+                          AND u.role IN ('team_lead','operator','recon','reporter')
+                          AND $6 > now()
+                          AND NOT EXISTS (
+                              SELECT 1 FROM revoked_access_tokens AS rat
+                              WHERE rat.jti=$5
+                          )
+                          AND (
+                              u.role='team_lead'
+                              OR c.operator=u.username
+                          )
+                        RETURNING ticket_hash
+                        """,
+                        ticket_hash,
+                        campaign_id,
+                        source.user_id,
+                        source.subject,
+                        source.jti,
+                        source.expires_at,
+                    )
+                else:
+                    row = await connection.fetchrow(
+                        """
+                        INSERT INTO websocket_tickets(
+                            ticket_hash, campaign_id, user_id,
+                            credential_kind, api_key_id, required_scope,
+                            created_at, expires_at
+                        )
+                        SELECT $1, c.id, u.id, 'api_key', ak.id, 'read',
+                               now(), now() + interval '30 seconds'
+                        FROM api_keys AS ak
+                        JOIN users AS u ON u.id=ak.user_id
+                        JOIN campaigns AS c ON c.id=$2
+                        WHERE ak.id=$4
+                          AND ak.user_id=$3
+                          AND ak.is_active=1
+                          AND (ak.expires_at IS NULL OR ak.expires_at > now())
+                          AND u.is_active=1
+                          AND u.role IN ('team_lead','operator','recon','reporter')
+                          AND (
+                              regexp_split_to_array(
+                                  btrim(COALESCE(ak.scopes, '')),
+                                  '[[:space:],]+'
+                              ) && ARRAY['read','write','admin']
+                          )
+                          AND (
+                              u.role='team_lead'
+                              OR c.operator=u.username
+                          )
+                        RETURNING ticket_hash
+                        """,
+                        ticket_hash,
+                        campaign_id,
+                        source.user_id,
+                        source.api_key_id,
+                    )
+                issued = row is not None
+
+        if not issued:
+            return None
+        return raw_ticket, WEBSOCKET_TICKET_TTL_SECONDS
+
+    async def consume_websocket_ticket(
+        self,
+        raw_ticket: str,
+        campaign_id: str,
+    ) -> ConsumedWebSocketTicket | None:
+        if not is_canonical_websocket_ticket(raw_ticket):
+            return None
+
+        ticket_hash = hash_websocket_ticket(raw_ticket)
+        pool = self._require_websocket_ticket_pool()
+        consumed: ConsumedWebSocketTicket | None = None
+
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    UPDATE websocket_tickets
+                    SET consumed_at=now()
+                    WHERE ticket_hash=$1
+                      AND campaign_id=$2
+                      AND consumed_at IS NULL
+                      AND expires_at > now()
+                    RETURNING campaign_id, user_id, credential_kind,
+                              bearer_subject, bearer_jti,
+                              bearer_expires_at, api_key_id,
+                              required_scope
+                    """,
+                    ticket_hash,
+                    campaign_id,
+                )
+                if row is not None:
+                    consumed = ConsumedWebSocketTicket(
+                        campaign_id=row["campaign_id"],
+                        user_id=row["user_id"],
+                        credential_kind=WebSocketTicketCredentialKind(
+                            row["credential_kind"]
+                        ),
+                        bearer_subject=row["bearer_subject"],
+                        bearer_jti=row["bearer_jti"],
+                        bearer_expires_at=row["bearer_expires_at"],
+                        api_key_id=row["api_key_id"],
+                        required_scope=row["required_scope"],
+                    )
+
+        return consumed
+
+    async def resolve_websocket_ticket_principal(
+        self,
+        consumed: ConsumedWebSocketTicket,
+    ) -> WebSocketTicketPrincipal | None:
+        pool = self._require_websocket_ticket_pool()
+        async with pool.acquire() as connection:
+            if consumed.credential_kind is WebSocketTicketCredentialKind.BEARER:
+                row = await connection.fetchrow(
+                    """
+                    SELECT u.id, u.username, u.role
+                    FROM users AS u
+                    JOIN campaigns AS c ON c.id=$1
+                    WHERE u.id=$2
+                      AND u.username=$3
+                      AND u.is_active=1
+                      AND u.role IN ('team_lead','operator','recon','reporter')
+                      AND $4 > now()
+                      AND NOT EXISTS (
+                          SELECT 1 FROM revoked_access_tokens AS rat
+                          WHERE rat.jti=$5
+                      )
+                      AND (
+                          u.role='team_lead'
+                          OR c.operator=u.username
+                      )
+                    """,
+                    consumed.campaign_id,
+                    consumed.user_id,
+                    consumed.bearer_subject,
+                    consumed.bearer_expires_at,
+                    consumed.bearer_jti,
+                )
+            else:
+                row = await connection.fetchrow(
+                    """
+                    SELECT u.id, u.username, u.role, ak.id AS api_key_id,
+                           ak.scopes
+                    FROM api_keys AS ak
+                    JOIN users AS u ON u.id=ak.user_id
+                    JOIN campaigns AS c ON c.id=$1
+                    WHERE ak.id=$3
+                      AND ak.user_id=$2
+                      AND ak.is_active=1
+                      AND (ak.expires_at IS NULL OR ak.expires_at > now())
+                      AND u.is_active=1
+                      AND u.role IN ('team_lead','operator','recon','reporter')
+                      AND (
+                          regexp_split_to_array(
+                              btrim(COALESCE(ak.scopes, '')),
+                              '[[:space:],]+'
+                          ) && ARRAY['read','write','admin']
+                      )
+                      AND (
+                          u.role='team_lead'
+                          OR c.operator=u.username
+                      )
+                    """,
+                    consumed.campaign_id,
+                    consumed.user_id,
+                    consumed.api_key_id,
+                )
+
+        if row is None:
+            return None
+        if not is_valid_websocket_principal_role(row["role"]):
+            return None
+        if consumed.credential_kind is WebSocketTicketCredentialKind.BEARER:
+            return WebSocketTicketPrincipal(
+                user_id=row["id"],
+                username=row["username"],
+                role=row["role"],
+                credential_kind=WebSocketTicketCredentialKind.BEARER,
+            )
+        scopes = normalize_api_key_scopes(row["scopes"])
+        if not set(scopes).intersection({"read", "write", "admin"}):
+            return None
+        return WebSocketTicketPrincipal(
+            user_id=row["id"],
+            username=row["username"],
+            role=row["role"],
+            credential_kind=WebSocketTicketCredentialKind.API_KEY,
+            api_key_id=row["api_key_id"],
+            api_key_scopes=scopes,
+        )
+
+    async def purge_expired_websocket_tickets(self) -> int:
+        pool = self._require_websocket_ticket_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                result = await connection.execute(
+                    "DELETE FROM websocket_tickets WHERE expires_at <= now()"
+                )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
+
+    # ── Refresh tokens ───────────────────────────────────────────────────────
+
     async def create_refresh_token(self, user_id: str, expires_days: int = 30) -> str:
         raw_token  = secrets.token_urlsafe(48)                          # returned to client
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()     # stored in DB
@@ -1028,6 +1959,7 @@ class PostgresDatabase:
             result = await conn.execute(
                 "DELETE FROM refresh_tokens WHERE is_revoked=1 OR expires_at < now() - interval '7 days'"
             )
+        await self.purge_expired_websocket_tickets()
         # asyncpg returns "DELETE N" as a string
         try:
             return int(result.split()[-1])
