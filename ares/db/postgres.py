@@ -321,6 +321,257 @@ CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
     ON websocket_tickets(api_key_id);
 """
 
+_POSTGRES_MANAGED_REVISION = "0008"
+_POSTGRES_OLDER_REVISIONS = frozenset(
+    {"0001", "0002", "0003", "0004", "0005", "0006", "0007"}
+)
+_POSTGRES_MIGRATION_REQUIRED_ERROR = "PostgreSQL schema migration required"
+_POSTGRES_MANAGED_SCHEMA_ERROR = "Incompatible managed PostgreSQL schema"
+_POSTGRES_SCHEMA_VALIDATION_ERROR = "PostgreSQL schema validation failed"
+
+
+class _PostgresMigrationRequiredError(RuntimeError):
+    pass
+
+
+class _PostgresManagedSchemaError(RuntimeError):
+    pass
+
+
+_POSTGRES_MANAGED_TABLES = frozenset(
+    {
+        "campaigns",
+        "module_runs",
+        "findings",
+        "hosts",
+        "credentials",
+        "loot",
+        "audit_log",
+        "users",
+        "api_keys",
+        "refresh_tokens",
+        "revoked_access_tokens",
+        "rate_limit_events",
+        "websocket_tickets",
+    }
+)
+
+_POSTGRES_MANAGED_INDEXES = (
+    ("module_runs", "idx_module_runs_campaign", ("campaign_id",)),
+    ("module_runs", "idx_module_runs_completed", ("completed_at",)),
+    ("findings", "idx_findings_campaign", ("campaign_id",)),
+    ("findings", "idx_findings_severity", ("severity",)),
+    ("findings", "idx_findings_fp", ("false_positive",)),
+    ("findings", "idx_findings_mitre", ("mitre_technique",)),
+    ("findings", "idx_findings_cvss", ("cvss_score",)),
+    ("hosts", "idx_hosts_campaign", ("campaign_id",)),
+    ("hosts", "idx_hosts_ip", ("ip_address",)),
+    ("hosts", "idx_hosts_domain", ("domain",)),
+    ("credentials", "idx_creds_campaign", ("campaign_id",)),
+    ("credentials", "idx_creds_username", ("username",)),
+    ("credentials", "idx_creds_type", ("cred_type",)),
+    ("loot", "idx_loot_campaign", ("campaign_id",)),
+    ("loot", "idx_loot_type", ("loot_type",)),
+    ("audit_log", "idx_audit_campaign", ("campaign_id",)),
+    ("audit_log", "idx_audit_actor", ("actor",)),
+    ("audit_log", "idx_audit_action", ("action",)),
+    ("users", "idx_users_username", ("username",)),
+    ("users", "idx_users_role", ("role",)),
+    ("api_keys", "idx_apikeys_user", ("user_id",)),
+    ("api_keys", "idx_apikeys_prefix", ("key_prefix",)),
+    ("refresh_tokens", "idx_refresh_user", ("user_id",)),
+    ("refresh_tokens", "idx_refresh_exp", ("expires_at",)),
+    ("revoked_access_tokens", "idx_rat_expires", ("expires_at",)),
+    ("rate_limit_events", "idx_rle_ip", ("ip_address",)),
+    ("rate_limit_events", "idx_rle_timestamp", ("timestamp",)),
+    ("rate_limit_events", "idx_rle_blocked", ("blocked",)),
+)
+
+_POSTGRES_MANAGED_PRIMARY_KEYS = (
+    ("campaigns", "campaigns_pkey", ("id",)),
+    ("module_runs", "module_runs_pkey", ("id",)),
+    ("findings", "findings_pkey", ("id",)),
+    ("hosts", "hosts_pkey", ("id",)),
+    ("credentials", "credentials_pkey", ("id",)),
+    ("loot", "loot_pkey", ("id",)),
+    ("audit_log", "audit_log_pkey", ("id",)),
+    ("users", "users_pkey", ("id",)),
+    ("api_keys", "api_keys_pkey", ("id",)),
+    ("refresh_tokens", "refresh_tokens_pkey", ("id",)),
+    (
+        "revoked_access_tokens",
+        "revoked_access_tokens_pkey",
+        ("jti",),
+    ),
+    ("rate_limit_events", "rate_limit_events_pkey", ("id",)),
+)
+
+_POSTGRES_MANAGED_FOREIGN_KEYS = (
+    (
+        "module_runs",
+        "fk_module_runs_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "findings",
+        "fk_findings_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "hosts",
+        "fk_hosts_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "credentials",
+        "fk_credentials_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "credentials",
+        "fk_credentials_host",
+        ("host_id",),
+        "hosts",
+        ("id",),
+        "SET NULL",
+        "n",
+    ),
+    (
+        "loot",
+        "fk_loot_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "loot",
+        "fk_loot_host",
+        ("host_id",),
+        "hosts",
+        ("id",),
+        "SET NULL",
+        "n",
+    ),
+    (
+        "audit_log",
+        "fk_audit_campaign",
+        ("campaign_id",),
+        "campaigns",
+        ("id",),
+        "SET NULL",
+        "n",
+    ),
+    (
+        "api_keys",
+        "fk_api_keys_user",
+        ("user_id",),
+        "users",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "refresh_tokens",
+        "fk_refresh_tokens_user",
+        ("user_id",),
+        "users",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+)
+
+_POSTGRES_MANAGED_UNIQUES = (
+    ("hosts", "uq_hosts_campaign_ip", ("campaign_id", "ip_address")),
+    ("users", "uq_users_username", ("username",)),
+)
+
+_POSTGRES_MANAGED_FINITE_CHECKS = (
+    ("campaigns", "created_at", False),
+    ("campaigns", "updated_at", False),
+    ("module_runs", "completed_at", False),
+    ("findings", "discovered_at", False),
+    ("hosts", "first_seen", False),
+    ("hosts", "last_seen", False),
+    ("credentials", "captured_at", False),
+    ("loot", "captured_at", False),
+    ("audit_log", "timestamp", False),
+    ("users", "created_at", False),
+    ("users", "last_login", True),
+    ("api_keys", "last_used", True),
+    ("api_keys", "expires_at", True),
+    ("api_keys", "created_at", False),
+    ("refresh_tokens", "expires_at", False),
+    ("refresh_tokens", "created_at", False),
+    ("refresh_tokens", "used_at", True),
+    ("rate_limit_events", "timestamp", False),
+    ("revoked_access_tokens", "revoked_at", False),
+    ("revoked_access_tokens", "expires_at", False),
+)
+
+
+def _postgres_finite_check_name(table: str, column: str) -> str:
+    if table == "module_runs":
+        return "ck_module_runs_completed_at_finite"
+    if table == "audit_log":
+        return "ck_audit_log_timestamp_finite"
+    if table == "rate_limit_events":
+        return "ck_rate_limit_events_timestamp_finite"
+    return f"ck_{table}_{column}_finite"
+
+
+def _postgres_constraint_definition(value: object) -> str:
+    return " ".join(str(value).split())
+
+
+def _postgres_index_opclass(table: str, column: str) -> str:
+    if (table, column) in {
+        ("findings", "false_positive"),
+        ("rate_limit_events", "blocked"),
+    }:
+        return "int4_ops"
+    if (table, column) == ("findings", "cvss_score"):
+        return "float8_ops"
+    if (table, column) in {
+        ("module_runs", "completed_at"),
+        ("refresh_tokens", "expires_at"),
+        ("revoked_access_tokens", "expires_at"),
+        ("rate_limit_events", "timestamp"),
+    }:
+        return "timestamptz_ops"
+    return "text_ops"
+
+
+def _classify_postgres_revision(values: tuple[object, ...]) -> str:
+    if len(values) != 1 or not isinstance(values[0], str):
+        raise _PostgresManagedSchemaError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+    revision = values[0]
+    if revision == _POSTGRES_MANAGED_REVISION:
+        return revision
+    if revision in _POSTGRES_OLDER_REVISIONS:
+        raise _PostgresMigrationRequiredError(
+            _POSTGRES_MIGRATION_REQUIRED_ERROR
+        )
+    raise _PostgresManagedSchemaError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
 
 class PostgresDatabase:
     """
@@ -416,27 +667,1340 @@ class PostgresDatabase:
         if self._pool:
             await self._pool.close()
 
+    @staticmethod
+    async def _managed_schema_revision(connection: Any) -> str | None:
+        relation_rows = await connection.fetch(
+            """
+            SELECT rel.oid::bigint AS table_oid,
+                   nsp.nspname AS schema_name,
+                   relation_type.oid::bigint AS type_oid,
+                   type_nsp.nspname AS type_schema,
+                   relation_type.typname AS type_name,
+                   relation_type.typtype,
+                   relation_type.typrelid::bigint AS type_relation_oid,
+                   rel.relkind,
+                   rel.relpersistence,
+                   rel.relispartition,
+                   rel.relrowsecurity,
+                   rel.relforcerowsecurity,
+                   (
+                       SELECT count(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhrelid=rel.oid
+                   ) AS parent_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhparent=rel.oid
+                   ) AS child_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_policy AS policy
+                       WHERE policy.polrelid=rel.oid
+                   ) AS policy_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_trigger AS trigger_record
+                       WHERE trigger_record.tgrelid=rel.oid
+                         AND NOT trigger_record.tgisinternal
+                   ) AS user_trigger_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_rewrite AS rewrite
+                       WHERE rewrite.ev_class=rel.oid
+                   ) AS user_rule_count
+            FROM pg_class AS rel
+            JOIN pg_namespace AS nsp ON nsp.oid=rel.relnamespace
+            LEFT JOIN pg_type AS relation_type
+              ON relation_type.oid=rel.reltype
+            LEFT JOIN pg_namespace AS type_nsp
+              ON type_nsp.oid=relation_type.typnamespace
+            WHERE nsp.nspname=current_schema()
+              AND rel.relname='alembic_version'
+            """
+        )
+        if not relation_rows:
+            return None
+        if len(relation_rows) != 1:
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+        relation = relation_rows[0]
+        try:
+            table_oid = int(relation["table_oid"])
+            schema_name = relation["schema_name"]
+            type_oid = int(relation["type_oid"])
+            type_contract = (
+                relation["type_schema"],
+                relation["type_name"],
+                str(relation["typtype"]),
+                int(relation["type_relation_oid"]),
+            )
+            relation_contract = (
+                str(relation["relkind"]),
+                str(relation["relpersistence"]),
+                 bool(relation["relispartition"]),
+                 bool(relation["relrowsecurity"]),
+                 bool(relation["relforcerowsecurity"]),
+                 int(relation["parent_count"]),
+                 int(relation["child_count"]),
+                 int(relation["policy_count"]),
+                 int(relation["user_trigger_count"]),
+                 int(relation["user_rule_count"]),
+             )
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        if (
+            not isinstance(schema_name, str)
+            or not schema_name
+            or type_oid <= 0
+            or type_contract
+            != (schema_name, "alembic_version", "c", table_oid)
+            or relation_contract
+            != ("r", "p", False, False, False, 0, 0, 0, 0, 0)
+        ):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        column_rows = await connection.fetch(
+            """
+            SELECT att.attnum,
+                   att.attname AS column_name,
+                   pg_catalog.format_type(
+                       att.atttypid,
+                       att.atttypmod
+                   ) AS data_type,
+                   att.attnotnull,
+                   att.attidentity,
+                   att.attgenerated,
+                   att.attisdropped,
+                   att.attinhcount,
+                   att.attislocal,
+                   att.atthasmissing,
+                   att.attmissingval::text AS missing_value,
+                   att.attcollation=type_record.typcollation
+                       AS collation_is_default,
+                   pg_get_expr(def.adbin, def.adrelid) AS column_default
+            FROM pg_attribute AS att
+            LEFT JOIN pg_type AS type_record
+              ON type_record.oid=att.atttypid
+            LEFT JOIN pg_attrdef AS def
+              ON def.adrelid=att.attrelid
+             AND def.adnum=att.attnum
+            WHERE att.attrelid=$1::oid
+              AND att.attnum > 0
+            ORDER BY att.attnum
+            """,
+            table_oid,
+        )
+        try:
+            columns = tuple(
+                (
+                    int(row["attnum"]),
+                    str(row["column_name"]),
+                    str(row["data_type"]),
+                    bool(row["attnotnull"]),
+                    str(row["attidentity"]),
+                    str(row["attgenerated"]),
+                    bool(row["attisdropped"]),
+                    int(row["attinhcount"]),
+                    bool(row["attislocal"]),
+                    bool(row["atthasmissing"]),
+                    row["missing_value"],
+                    bool(row["collation_is_default"]),
+                    row["column_default"],
+                )
+                for row in column_rows
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        if columns != (
+            (
+                1,
+                "version_num",
+                "character varying(32)",
+                True,
+                "",
+                "",
+                False,
+                0,
+                True,
+                False,
+                None,
+                True,
+                None,
+            ),
+        ):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        primary_rows = await connection.fetch(
+            """
+            SELECT con.conname,
+                   con.contype,
+                   con.convalidated,
+                   con.condeferrable,
+                   con.condeferred,
+                   ARRAY(
+                       SELECT att.attname
+                       FROM unnest(con.conkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       JOIN pg_attribute AS att
+                         ON att.attrelid=con.conrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS columns
+            FROM pg_constraint AS con
+            WHERE con.conrelid=$1::oid
+            ORDER BY con.conname
+            """,
+            table_oid,
+        )
+        try:
+            primary_contract = tuple(
+                (
+                    str(row["conname"]),
+                    str(row["contype"]),
+                    bool(row["convalidated"]),
+                    bool(row["condeferrable"]),
+                    bool(row["condeferred"]),
+                    tuple(str(column) for column in row["columns"]),
+                )
+                for row in primary_rows
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        if primary_contract != (
+            (
+                "alembic_version_pkc",
+                "p",
+                True,
+                False,
+                False,
+                ("version_num",),
+            ),
+        ):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        version_index_rows = await connection.fetch(
+            """
+            SELECT index_rel.relname AS index_name,
+                   index_rel.relkind AS index_relkind,
+                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relispartition AS index_is_partition,
+                   access_method.amname AS access_method,
+                   ind.indisunique,
+                   ind.indisprimary,
+                   ind.indisvalid,
+                   ind.indisready,
+                   ind.indislive,
+                   ind.indnkeyatts,
+                   ind.indnatts,
+                   con.conname AS constraint_name,
+                   ARRAY(
+                       SELECT att.attname
+                       FROM unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS columns,
+                   ARRAY(
+                       SELECT option
+                       FROM unnest(ind.indoption)
+                            WITH ORDINALITY AS item(option, position)
+                       ORDER BY item.position
+                   ) AS column_options,
+                   ARRAY(
+                       SELECT opc.opcname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       ORDER BY item.position
+                   ) AS operator_classes,
+                   ARRAY(
+                       SELECT opc_nsp.nspname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       JOIN pg_namespace AS opc_nsp
+                         ON opc_nsp.oid=opc.opcnamespace
+                       ORDER BY item.position
+                   ) AS operator_class_namespaces,
+                   ARRAY(
+                       SELECT item.collation=att.attcollation
+                       FROM unnest(ind.indcollation)
+                            WITH ORDINALITY AS item(collation, position)
+                       JOIN unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                         ON key.position=item.position
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY item.position
+                   ) AS column_collations_match,
+                   pg_get_expr(ind.indexprs, ind.indrelid) AS expressions,
+                   pg_get_expr(ind.indpred, ind.indrelid) AS predicate
+            FROM pg_index AS ind
+            JOIN pg_class AS index_rel ON index_rel.oid=ind.indexrelid
+            JOIN pg_am AS access_method ON access_method.oid=index_rel.relam
+            LEFT JOIN pg_constraint AS con
+              ON con.conindid=ind.indexrelid
+            WHERE ind.indrelid=$1::oid
+            ORDER BY index_rel.relname
+            """,
+            table_oid,
+        )
+        try:
+            version_indexes = tuple(
+                (
+                    str(row["index_name"]),
+                    str(row["index_relkind"]),
+                    str(row["index_relpersistence"]),
+                    bool(row["index_is_partition"]),
+                    str(row["access_method"]),
+                    bool(row["indisunique"]),
+                    bool(row["indisprimary"]),
+                    bool(row["indisvalid"]),
+                    bool(row["indisready"]),
+                    bool(row["indislive"]),
+                    int(row["indnkeyatts"]),
+                    int(row["indnatts"]),
+                    row["constraint_name"],
+                    tuple(str(column) for column in row["columns"]),
+                    tuple(int(option) for option in row["column_options"]),
+                    tuple(
+                        str(opclass) for opclass in row["operator_classes"]
+                    ),
+                    tuple(
+                        str(namespace)
+                        for namespace in row["operator_class_namespaces"]
+                    ),
+                    tuple(
+                        bool(value)
+                        for value in row["column_collations_match"]
+                    ),
+                    row["expressions"],
+                    row["predicate"],
+                )
+                for row in version_index_rows
+            )
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        if version_indexes != (
+            (
+                "alembic_version_pkc",
+                "i",
+                "p",
+                False,
+                "btree",
+                True,
+                True,
+                True,
+                True,
+                True,
+                1,
+                1,
+                "alembic_version_pkc",
+                ("version_num",),
+                (0,),
+                ("text_ops",),
+                ("pg_catalog",),
+                (True,),
+                None,
+                None,
+            ),
+        ):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        quoted_schema = '"' + schema_name.replace('"', '""') + '"'
+        revision_rows = await connection.fetch(
+            f'SELECT version_num FROM {quoted_schema}."alembic_version"'  # noqa: S608
+        )
+        try:
+            values = tuple(row["version_num"] for row in revision_rows)
+        except (KeyError, TypeError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        return _classify_postgres_revision(values)
+
+    @staticmethod
+    async def _validate_managed_schema(connection: Any) -> None:
+        table_rows = await connection.fetch(
+            """
+            SELECT rel.oid::bigint AS table_oid,
+                   rel.relname AS table_name,
+                   nsp.nspname AS table_schema,
+                   relation_type.oid::bigint AS type_oid,
+                   type_nsp.nspname AS type_schema,
+                   relation_type.typname AS type_name,
+                   relation_type.typtype,
+                   relation_type.typrelid::bigint AS type_relation_oid,
+                   rel.relkind,
+                   rel.relpersistence,
+                   rel.relispartition,
+                   rel.relrowsecurity,
+                   rel.relforcerowsecurity,
+                   (
+                       SELECT count(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhrelid=rel.oid
+                   ) AS parent_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_inherits AS inherited
+                       WHERE inherited.inhparent=rel.oid
+                   ) AS child_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_policy AS policy
+                       WHERE policy.polrelid=rel.oid
+                   ) AS policy_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_trigger AS trigger_record
+                       WHERE trigger_record.tgrelid=rel.oid
+                         AND NOT trigger_record.tgisinternal
+                   ) AS user_trigger_count,
+                   (
+                       SELECT count(*)
+                       FROM pg_rewrite AS rewrite
+                       WHERE rewrite.ev_class=rel.oid
+                   ) AS user_rule_count
+            FROM pg_class AS rel
+            JOIN pg_namespace AS nsp ON nsp.oid=rel.relnamespace
+            JOIN pg_type AS relation_type ON relation_type.oid=rel.reltype
+            JOIN pg_namespace AS type_nsp
+              ON type_nsp.oid=relation_type.typnamespace
+            WHERE nsp.nspname=current_schema()
+              AND rel.relname=ANY($1::text[])
+            ORDER BY rel.relname
+            """,
+            sorted(_POSTGRES_MANAGED_TABLES),
+        )
+        try:
+            table_contract = {
+                str(row["table_name"]): (
+                    int(row["table_oid"]),
+                    str(row["relkind"]),
+                    str(row["relpersistence"]),
+                    bool(row["relispartition"]),
+                    bool(row["relrowsecurity"]),
+                    bool(row["relforcerowsecurity"]),
+                    int(row["parent_count"]),
+                    int(row["child_count"]),
+                    int(row["policy_count"]),
+                    int(row["user_trigger_count"]),
+                    int(row["user_rule_count"]),
+                    str(row["table_schema"]),
+                    int(row["type_oid"]),
+                    str(row["type_schema"]),
+                    str(row["type_name"]),
+                    str(row["typtype"]),
+                    int(row["type_relation_oid"]),
+                )
+                for row in table_rows
+            }
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        if set(table_contract) != _POSTGRES_MANAGED_TABLES:
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+        for table, metadata in table_contract.items():
+            expected = (
+                ("r", "p", False)
+                if table == "websocket_tickets"
+                else (
+                    "r",
+                    "p",
+                    False,
+                    False,
+                    False,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            actual = (
+                metadata[1:4]
+                if table == "websocket_tickets"
+                else metadata[1:11]
+            )
+            (
+                table_schema,
+                type_oid,
+                type_schema,
+                type_name,
+                type_kind,
+                type_relation_oid,
+            ) = metadata[11:]
+            if (
+                actual != expected
+                or not table_schema
+                or type_oid <= 0
+                or type_schema != table_schema
+                or type_name != table
+                or type_kind != "c"
+                or type_relation_oid != metadata[0]
+            ):
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        non_ticket_tables = sorted(
+            _POSTGRES_MANAGED_TABLES - {"websocket_tickets"}
+        )
+        legacy_index_rows = await connection.fetch(
+            """
+            SELECT table_rel.relname AS table_name,
+                   index_rel.relname AS index_name
+            FROM pg_index AS ind
+            JOIN pg_class AS table_rel ON table_rel.oid=ind.indrelid
+            JOIN pg_namespace AS table_nsp
+              ON table_nsp.oid=table_rel.relnamespace
+            JOIN pg_class AS index_rel ON index_rel.oid=ind.indexrelid
+            WHERE table_nsp.nspname=current_schema()
+              AND table_rel.relname=ANY($1::text[])
+              AND left(index_rel.relname, 7)='idx_pg_'
+            ORDER BY table_rel.relname, index_rel.relname
+            """,
+            sorted(_POSTGRES_MANAGED_TABLES),
+        )
+        if legacy_index_rows:
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        index_rows = await connection.fetch(
+            """
+            SELECT table_rel.relname AS table_name,
+                   index_rel.relname AS index_name,
+                   index_rel.relkind AS index_relkind,
+                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relispartition AS index_is_partition,
+                   access_method.amname AS access_method,
+                   ind.indisunique,
+                   ind.indisprimary,
+                   ind.indisvalid,
+                   ind.indisready,
+                   ind.indislive,
+                   ind.indnkeyatts,
+                   ind.indnatts,
+                   ARRAY(
+                       SELECT attribute.attname
+                       FROM unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       LEFT JOIN pg_attribute AS attribute
+                         ON attribute.attrelid=ind.indrelid
+                        AND attribute.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS index_columns,
+                   ARRAY(
+                       SELECT CASE
+                           WHEN key.attnum=0 THEN NULL
+                           ELSE att.attname
+                       END
+                       FROM unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS columns,
+                   ARRAY(
+                       SELECT option
+                       FROM unnest(ind.indoption)
+                            WITH ORDINALITY AS item(option, position)
+                       ORDER BY item.position
+                   ) AS column_options,
+                   ARRAY(
+                       SELECT opc.opcname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       ORDER BY item.position
+                   ) AS operator_classes,
+                   ARRAY(
+                       SELECT opc_nsp.nspname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       JOIN pg_namespace AS opc_nsp
+                         ON opc_nsp.oid=opc.opcnamespace
+                       ORDER BY item.position
+                   ) AS operator_class_namespaces,
+                   ARRAY(
+                       SELECT item.collation=att.attcollation
+                       FROM unnest(ind.indcollation)
+                            WITH ORDINALITY AS item(collation, position)
+                       JOIN unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                         ON key.position=item.position
+                       LEFT JOIN pg_attribute AS att
+                         ON att.attrelid=ind.indrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY item.position
+                   ) AS column_collations_match,
+                   pg_get_expr(ind.indexprs, ind.indrelid) AS expressions,
+                   pg_get_expr(ind.indpred, ind.indrelid) AS predicate
+            FROM pg_index AS ind
+            JOIN pg_class AS table_rel ON table_rel.oid=ind.indrelid
+            JOIN pg_namespace AS table_nsp
+              ON table_nsp.oid=table_rel.relnamespace
+            JOIN pg_class AS index_rel ON index_rel.oid=ind.indexrelid
+            JOIN pg_am AS access_method
+              ON access_method.oid=index_rel.relam
+            WHERE table_nsp.nspname=current_schema()
+              AND table_rel.relname=ANY($1::text[])
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_constraint AS con
+                  WHERE con.conindid=ind.indexrelid
+              )
+            ORDER BY table_rel.relname, index_rel.relname
+            """,
+            non_ticket_tables,
+        )
+        try:
+            index_contract = {
+                (str(row["table_name"]), str(row["index_name"])): (
+                    tuple(str(column) for column in row["columns"]),
+                    bool(row["indisunique"]),
+                    row["predicate"],
+                    str(row["index_relkind"]),
+                    str(row["index_relpersistence"]),
+                    bool(row["index_is_partition"]),
+                    str(row["access_method"]),
+                    bool(row["indisprimary"]),
+                    bool(row["indisvalid"]),
+                    bool(row["indisready"]),
+                    bool(row["indislive"]),
+                    int(row["indnkeyatts"]),
+                    int(row["indnatts"]),
+                    tuple(int(option) for option in row["column_options"]),
+                    tuple(
+                        str(opclass) for opclass in row["operator_classes"]
+                    ),
+                    tuple(
+                        str(namespace)
+                        for namespace in row["operator_class_namespaces"]
+                    ),
+                    tuple(
+                        bool(value)
+                        for value in row["column_collations_match"]
+                    ),
+                    row["expressions"],
+                )
+                for row in index_rows
+            }
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        expected_indexes = {
+            (table, name): columns
+            for table, name, columns in _POSTGRES_MANAGED_INDEXES
+        }
+        if set(index_contract) != set(expected_indexes):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+        for key, columns in expected_indexes.items():
+            actual = index_contract[key]
+            if actual != (
+                columns,
+                False,
+                None,
+                "i",
+                "p",
+                False,
+                "btree",
+                False,
+                True,
+                True,
+                True,
+                len(columns),
+                len(columns),
+                (0,) * len(columns),
+                tuple(
+                    _postgres_index_opclass(key[0], column)
+                    for column in columns
+                ),
+                ("pg_catalog",) * len(columns),
+                (True,) * len(columns),
+                None,
+            ):
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        primary_rows = await connection.fetch(
+            """
+            SELECT source.relname AS table_name,
+                   con.conname,
+                   con.contype,
+                   con.convalidated,
+                   con.condeferrable,
+                   con.condeferred,
+                   con.conindid::bigint AS constraint_index_oid,
+                   ARRAY(
+                       SELECT att.attname
+                       FROM unnest(con.conkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       JOIN pg_attribute AS att
+                         ON att.attrelid=con.conrelid
+                        AND att.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS local_columns,
+                   index_rel.relkind AS index_relkind,
+                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relispartition AS index_is_partition,
+                   ind.indisunique,
+                   ind.indisprimary,
+                   ind.indisvalid,
+                   ind.indisready,
+                   ind.indislive
+            FROM pg_constraint AS con
+            JOIN pg_class AS source ON source.oid=con.conrelid
+            JOIN pg_namespace AS source_nsp
+              ON source_nsp.oid=source.relnamespace
+            JOIN pg_class AS index_rel ON index_rel.oid=con.conindid
+            JOIN pg_index AS ind ON ind.indexrelid=con.conindid
+            WHERE source_nsp.nspname=current_schema()
+              AND source.relname=ANY($1::text[])
+              AND con.contype='p'
+            ORDER BY source.relname, con.conname
+            """,
+            non_ticket_tables,
+        )
+        try:
+            primary_contract = {
+                (str(row["table_name"]), str(row["conname"])): (
+                    str(row["contype"]),
+                    bool(row["convalidated"]),
+                    bool(row["condeferrable"]),
+                    bool(row["condeferred"]),
+                    tuple(str(value) for value in row["local_columns"]),
+                    int(row["constraint_index_oid"]),
+                    str(row["index_relkind"]),
+                    str(row["index_relpersistence"]),
+                    bool(row["index_is_partition"]),
+                    bool(row["indisunique"]),
+                    bool(row["indisprimary"]),
+                    bool(row["indisvalid"]),
+                    bool(row["indisready"]),
+                    bool(row["indislive"]),
+                )
+                for row in primary_rows
+            }
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+        expected_primary_keys = {
+            (table, name): columns
+            for table, name, columns in _POSTGRES_MANAGED_PRIMARY_KEYS
+        }
+        if set(primary_contract) != set(expected_primary_keys):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+        for key, columns in expected_primary_keys.items():
+            actual = primary_contract[key]
+            if actual != (
+                "p",
+                True,
+                False,
+                False,
+                columns,
+                actual[5],
+                "i",
+                "p",
+                False,
+                True,
+                True,
+                True,
+                True,
+                True,
+            ) or actual[5] <= 0:
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        await PostgresDatabase._validate_managed_constraints(
+            connection,
+            non_ticket_tables,
+        )
+        await PostgresDatabase._validate_managed_serials(connection)
+
+    @staticmethod
+    async def _validate_managed_constraints(
+        connection: Any,
+        non_ticket_tables: list[str],
+    ) -> None:
+        rows = await connection.fetch(
+            """
+            SELECT source_nsp.nspname AS source_schema,
+                   source.relname AS table_name,
+                   con.conname,
+                   con.contype,
+                   con.convalidated,
+                   con.condeferrable,
+                   con.condeferred,
+                   con.conindid::bigint AS constraint_index_oid,
+                   pg_get_constraintdef(con.oid, true) AS definition,
+                   reference_nsp.nspname AS referenced_schema,
+                   reference.relname AS referenced_table,
+                   con.confupdtype,
+                   con.confdeltype,
+                   ARRAY(
+                       SELECT attribute.attname
+                       FROM unnest(con.conkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       JOIN pg_attribute AS attribute
+                         ON attribute.attrelid=con.conrelid
+                        AND attribute.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS local_columns,
+                   ARRAY(
+                       SELECT attribute.attname
+                       FROM unnest(con.confkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       JOIN pg_attribute AS attribute
+                         ON attribute.attrelid=con.confrelid
+                        AND attribute.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS remote_columns,
+                   index_nsp.nspname AS index_schema,
+                   index_rel.relname AS index_name,
+                   index_rel.relkind AS index_relkind,
+                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relispartition AS index_is_partition,
+                   access_method.amname AS access_method,
+                   ind.indisunique,
+                   ind.indisprimary,
+                   ind.indisvalid,
+                   ind.indisready,
+                   ind.indislive,
+                   ind.indnkeyatts,
+                   ind.indnatts,
+                   ARRAY(
+                       SELECT attribute.attname
+                       FROM unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                       LEFT JOIN pg_attribute AS attribute
+                         ON attribute.attrelid=ind.indrelid
+                        AND attribute.attnum=key.attnum
+                       ORDER BY key.position
+                   ) AS index_columns,
+                   ARRAY(
+                       SELECT option
+                       FROM unnest(ind.indoption)
+                            WITH ORDINALITY AS item(option, position)
+                       ORDER BY item.position
+                   ) AS column_options,
+                   ARRAY(
+                       SELECT opc.opcname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       ORDER BY item.position
+                   ) AS operator_classes,
+                   ARRAY(
+                       SELECT opc_nsp.nspname
+                       FROM unnest(ind.indclass)
+                            WITH ORDINALITY AS item(opclass, position)
+                       JOIN pg_opclass AS opc ON opc.oid=item.opclass
+                       JOIN pg_namespace AS opc_nsp
+                         ON opc_nsp.oid=opc.opcnamespace
+                       ORDER BY item.position
+                   ) AS operator_class_namespaces,
+                   ARRAY(
+                       SELECT item.collation=attribute.attcollation
+                       FROM unnest(ind.indcollation)
+                            WITH ORDINALITY AS item(collation, position)
+                       JOIN unnest(ind.indkey)
+                            WITH ORDINALITY AS key(attnum, position)
+                         ON key.position=item.position
+                       LEFT JOIN pg_attribute AS attribute
+                         ON attribute.attrelid=ind.indrelid
+                        AND attribute.attnum=key.attnum
+                       ORDER BY item.position
+                   ) AS column_collations_match,
+                   pg_get_expr(ind.indexprs, ind.indrelid) AS expressions,
+                   pg_get_expr(ind.indpred, ind.indrelid) AS predicate
+            FROM pg_constraint AS con
+            JOIN pg_class AS source ON source.oid=con.conrelid
+            JOIN pg_namespace AS source_nsp
+              ON source_nsp.oid=source.relnamespace
+            LEFT JOIN pg_class AS reference
+              ON reference.oid=con.confrelid
+            LEFT JOIN pg_namespace AS reference_nsp
+              ON reference_nsp.oid=reference.relnamespace
+            LEFT JOIN pg_class AS index_rel
+              ON index_rel.oid=con.conindid
+            LEFT JOIN pg_namespace AS index_nsp
+              ON index_nsp.oid=index_rel.relnamespace
+            LEFT JOIN pg_index AS ind
+              ON ind.indexrelid=con.conindid
+            LEFT JOIN pg_am AS access_method
+              ON access_method.oid=index_rel.relam
+            WHERE source_nsp.nspname=current_schema()
+              AND source.relname=ANY($1::text[])
+              AND con.contype <> 'p'
+            ORDER BY source.relname, con.conname
+            """,
+            non_ticket_tables,
+        )
+        try:
+            actual = {
+                (str(row["table_name"]), str(row["conname"])): row
+                for row in rows
+            }
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+
+        expected_foreign = {
+            (table, name): (
+                local,
+                parent,
+                remote,
+                on_delete,
+                delete_code,
+            )
+            for (
+                table,
+                name,
+                local,
+                parent,
+                remote,
+                on_delete,
+                delete_code,
+            ) in _POSTGRES_MANAGED_FOREIGN_KEYS
+        }
+        expected_unique = {
+            (table, name): columns
+            for table, name, columns in _POSTGRES_MANAGED_UNIQUES
+        }
+        expected_checks = {
+            (
+                table,
+                _postgres_finite_check_name(table, column),
+            ): (
+                f"CHECK ({column} IS NULL OR isfinite({column}))"
+                if nullable
+                else f"CHECK (isfinite({column}))"
+            )
+            for table, column, nullable in (
+                _POSTGRES_MANAGED_FINITE_CHECKS
+            )
+        }
+        expected_checks[
+            (
+                "rate_limit_events",
+                "ck_rate_limit_events_blocked_bool",
+            )
+        ] = "CHECK (blocked = ANY (ARRAY[0, 1]))"
+        expected_keys = (
+            set(expected_foreign)
+            | set(expected_unique)
+            | set(expected_checks)
+        )
+        if len(rows) != len(actual) or set(actual) != expected_keys:
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+        for key, contract in actual.items():
+            try:
+                source_schema = str(contract["source_schema"])
+                common = (
+                    bool(contract["convalidated"]),
+                    bool(contract["condeferrable"]),
+                    bool(contract["condeferred"]),
+                )
+                definition = _postgres_constraint_definition(
+                    contract["definition"]
+                )
+                local_columns = tuple(
+                    str(column) for column in contract["local_columns"]
+                )
+                remote_columns = tuple(
+                    str(column) for column in contract["remote_columns"]
+                )
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError(
+                    _POSTGRES_MANAGED_SCHEMA_ERROR
+                ) from None
+            if not source_schema or common != (True, False, False):
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+            if key in expected_checks:
+                if (
+                    str(contract["contype"]) != "c"
+                    or definition != expected_checks[key]
+                    or local_columns == ()
+                    or remote_columns
+                    or int(contract["constraint_index_oid"]) != 0
+                ):
+                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+                continue
+
+            if key in expected_foreign:
+                (
+                    expected_local,
+                    parent,
+                    expected_remote,
+                    on_delete,
+                    delete_code,
+                ) = expected_foreign[key]
+                expected_definition = (
+                    f"FOREIGN KEY ({', '.join(expected_local)}) "
+                    f"REFERENCES {parent}({', '.join(expected_remote)}) "
+                    f"ON DELETE {on_delete}"
+                )
+                if (
+                    str(contract["contype"]) != "f"
+                    or definition != expected_definition
+                    or local_columns != expected_local
+                    or remote_columns != expected_remote
+                    or str(contract["referenced_schema"])
+                    != source_schema
+                    or str(contract["referenced_table"]) != parent
+                    or str(contract["confupdtype"]) != "a"
+                    or str(contract["confdeltype"]) != delete_code
+                ):
+                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+                try:
+                    foreign_index_contract = (
+                        int(contract["constraint_index_oid"]),
+                        str(contract["index_schema"]),
+                        str(contract["index_name"]),
+                        str(contract["index_relkind"]),
+                        str(contract["index_relpersistence"]),
+                        bool(contract["index_is_partition"]),
+                        str(contract["access_method"]),
+                        bool(contract["indisunique"]),
+                        bool(contract["indisprimary"]),
+                        bool(contract["indisvalid"]),
+                        bool(contract["indisready"]),
+                        bool(contract["indislive"]),
+                        int(contract["indnkeyatts"]),
+                        int(contract["indnatts"]),
+                        tuple(
+                            str(column)
+                            for column in contract["index_columns"]
+                        ),
+                        tuple(
+                            int(option)
+                            for option in contract["column_options"]
+                        ),
+                        tuple(
+                            str(opclass)
+                            for opclass in contract["operator_classes"]
+                        ),
+                        tuple(
+                            str(namespace)
+                            for namespace in contract[
+                                "operator_class_namespaces"
+                            ]
+                        ),
+                        tuple(
+                            bool(value)
+                            for value in contract[
+                                "column_collations_match"
+                            ]
+                        ),
+                        contract["expressions"],
+                        contract["predicate"],
+                    )
+                except (KeyError, TypeError, ValueError):
+                    raise RuntimeError(
+                        _POSTGRES_MANAGED_SCHEMA_ERROR
+                    ) from None
+                if foreign_index_contract != (
+                    foreign_index_contract[0],
+                    source_schema,
+                    f"{parent}_pkey",
+                    "i",
+                    "p",
+                    False,
+                    "btree",
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                    len(expected_remote),
+                    len(expected_remote),
+                    expected_remote,
+                    (0,) * len(expected_remote),
+                    ("text_ops",) * len(expected_remote),
+                    ("pg_catalog",) * len(expected_remote),
+                    (True,) * len(expected_remote),
+                    None,
+                    None,
+                ) or foreign_index_contract[0] <= 0:
+                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+                continue
+
+            columns = expected_unique[key]
+            expected_definition = f"UNIQUE ({', '.join(columns)})"
+            try:
+                unique_contract = (
+                    str(contract["contype"]),
+                    definition,
+                    local_columns,
+                    contract["referenced_schema"],
+                    contract["referenced_table"],
+                    remote_columns,
+                    str(contract["index_schema"]),
+                    str(contract["index_name"]),
+                    str(contract["index_relkind"]),
+                    str(contract["index_relpersistence"]),
+                    bool(contract["index_is_partition"]),
+                    str(contract["access_method"]),
+                    bool(contract["indisunique"]),
+                    bool(contract["indisprimary"]),
+                    bool(contract["indisvalid"]),
+                    bool(contract["indisready"]),
+                    bool(contract["indislive"]),
+                    int(contract["indnkeyatts"]),
+                    int(contract["indnatts"]),
+                    tuple(
+                        str(column)
+                        for column in contract["index_columns"]
+                    ),
+                    tuple(
+                        int(option)
+                        for option in contract["column_options"]
+                    ),
+                    tuple(
+                        str(opclass)
+                        for opclass in contract["operator_classes"]
+                    ),
+                    tuple(
+                        str(namespace)
+                        for namespace in (
+                            contract["operator_class_namespaces"]
+                        )
+                    ),
+                    tuple(
+                        bool(value)
+                        for value in contract[
+                            "column_collations_match"
+                        ]
+                    ),
+                    contract["expressions"],
+                    contract["predicate"],
+                )
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError(
+                    _POSTGRES_MANAGED_SCHEMA_ERROR
+                ) from None
+            if unique_contract != (
+                "u",
+                expected_definition,
+                columns,
+                None,
+                None,
+                (),
+                source_schema,
+                key[1],
+                "i",
+                "p",
+                False,
+                "btree",
+                True,
+                False,
+                True,
+                True,
+                True,
+                len(columns),
+                len(columns),
+                columns,
+                (0,) * len(columns),
+                ("text_ops",) * len(columns),
+                ("pg_catalog",) * len(columns),
+                (True,) * len(columns),
+                None,
+                None,
+            ) or int(contract["constraint_index_oid"]) <= 0:
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+
+    @staticmethod
+    async def _validate_managed_serials(connection: Any) -> None:
+        rows = await connection.fetch(
+            """
+            SELECT sequence_nsp.nspname AS sequence_schema,
+                   sequence_rel.relname AS sequence_name,
+                   sequence_rel.relkind,
+                   sequence_rel.relpersistence,
+                   format_type(sequence_def.seqtypid, NULL) AS data_type,
+                   sequence_def.seqstart,
+                   sequence_def.seqincrement,
+                   sequence_def.seqmax,
+                   sequence_def.seqmin,
+                   sequence_def.seqcache,
+                   sequence_def.seqcycle,
+                   owner_nsp.nspname AS owner_schema,
+                   owner_rel.relname AS owner_table,
+                   owner_att.attname AS owner_column,
+                   dependency.deptype,
+                   format_type(
+                       owner_att.atttypid,
+                       owner_att.atttypmod
+                   ) AS owner_data_type,
+                   owner_att.attnotnull,
+                   owner_att.attidentity,
+                   owner_att.attgenerated,
+                   owner_att.attcollation=owner_type.typcollation
+                       AS collation_is_default,
+                   pg_get_expr(
+                       owner_default.adbin,
+                       owner_default.adrelid
+                   ) AS column_default
+            FROM pg_class AS sequence_rel
+            JOIN pg_namespace AS sequence_nsp
+              ON sequence_nsp.oid=sequence_rel.relnamespace
+            JOIN pg_sequence AS sequence_def
+              ON sequence_def.seqrelid=sequence_rel.oid
+            LEFT JOIN pg_depend AS dependency
+              ON dependency.classid='pg_class'::regclass
+             AND dependency.objid=sequence_rel.oid
+             AND dependency.objsubid=0
+             AND dependency.refclassid='pg_class'::regclass
+             AND dependency.deptype IN ('a', 'i')
+            LEFT JOIN pg_class AS owner_rel
+              ON owner_rel.oid=dependency.refobjid
+            LEFT JOIN pg_namespace AS owner_nsp
+              ON owner_nsp.oid=owner_rel.relnamespace
+            LEFT JOIN pg_attribute AS owner_att
+              ON owner_att.attrelid=dependency.refobjid
+             AND owner_att.attnum=dependency.refobjsubid
+            LEFT JOIN pg_type AS owner_type
+              ON owner_type.oid=owner_att.atttypid
+            LEFT JOIN pg_attrdef AS owner_default
+              ON owner_default.adrelid=owner_att.attrelid
+             AND owner_default.adnum=owner_att.attnum
+            WHERE sequence_nsp.nspname=current_schema()
+              AND sequence_rel.relname=ANY($1::text[])
+            ORDER BY sequence_rel.relname
+            """,
+            ["audit_log_id_seq", "rate_limit_events_id_seq"],
+        )
+        expected = {
+            "audit_log_id_seq": (
+                "audit_log",
+                "id",
+                "nextval('audit_log_id_seq'::regclass)",
+            ),
+            "rate_limit_events_id_seq": (
+                "rate_limit_events",
+                "id",
+                "nextval('rate_limit_events_id_seq'::regclass)",
+            ),
+        }
+        if len(rows) != len(expected):
+            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+        seen: set[str] = set()
+        for row in rows:
+            try:
+                name = str(row["sequence_name"])
+                owner = expected.get(name)
+                contract = (
+                    str(row["relkind"]),
+                    str(row["relpersistence"]),
+                    str(row["data_type"]),
+                    int(row["seqstart"]),
+                    int(row["seqincrement"]),
+                    int(row["seqmax"]),
+                    int(row["seqmin"]),
+                    int(row["seqcache"]),
+                    bool(row["seqcycle"]),
+                    str(row["owner_schema"]),
+                    str(row["owner_table"]),
+                    str(row["owner_column"]),
+                    str(row["deptype"]),
+                    str(row["owner_data_type"]),
+                    bool(row["attnotnull"]),
+                    str(row["attidentity"]),
+                    str(row["attgenerated"]),
+                    bool(row["collation_is_default"]),
+                    row["column_default"],
+                )
+            except (KeyError, TypeError, ValueError):
+                raise RuntimeError(
+                    _POSTGRES_MANAGED_SCHEMA_ERROR
+                ) from None
+            if owner is None or name in seen:
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            if contract != (
+                "S",
+                "p",
+                "integer",
+                1,
+                1,
+                2147483647,
+                1,
+                1,
+                False,
+                str(row["sequence_schema"]),
+                owner[0],
+                owner[1],
+                "a",
+                "integer",
+                True,
+                "",
+                "",
+                True,
+                owner[2],
+            ):
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            seen.add(name)
+
     async def _init_schema(self) -> None:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                ticket_table_exists = bool(
-                    await conn.fetchval(
-                        """
-                        SELECT EXISTS(
-                            SELECT 1
-                            FROM pg_class AS rel
-                            JOIN pg_namespace AS nsp
-                              ON nsp.oid=rel.relnamespace
-                            WHERE nsp.nspname=current_schema()
-                              AND rel.relname='websocket_tickets'
+                try:
+                    revision = await self._managed_schema_revision(conn)
+                except (
+                    _PostgresManagedSchemaError,
+                    _PostgresMigrationRequiredError,
+                ):
+                    raise
+                except RuntimeError as exc:
+                    if str(exc) == _POSTGRES_MANAGED_SCHEMA_ERROR:
+                        raise _PostgresManagedSchemaError(
+                            _POSTGRES_MANAGED_SCHEMA_ERROR
+                        ) from None
+                    raise RuntimeError(
+                        _POSTGRES_SCHEMA_VALIDATION_ERROR
+                    ) from None
+                except Exception:
+                    raise RuntimeError(
+                        _POSTGRES_SCHEMA_VALIDATION_ERROR
+                    ) from None
+                if revision is not None:
+                    try:
+                        await self._validate_managed_schema(conn)
+                        await self._validate_websocket_ticket_schema(conn)
+                    except _PostgresManagedSchemaError:
+                        raise
+                    except RuntimeError as exc:
+                        if str(exc) == _POSTGRES_MANAGED_SCHEMA_ERROR:
+                            raise _PostgresManagedSchemaError(
+                                _POSTGRES_MANAGED_SCHEMA_ERROR
+                            ) from None
+                        if str(exc) == (
+                            "Incompatible WebSocket ticket schema"
+                        ):
+                            raise
+                        raise RuntimeError(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR
+                        ) from None
+                    except Exception:
+                        raise RuntimeError(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR
+                        ) from None
+                else:
+                    ticket_table_exists = bool(
+                        await conn.fetchval(
+                            """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM pg_class AS rel
+                                JOIN pg_namespace AS nsp
+                                  ON nsp.oid=rel.relnamespace
+                                WHERE nsp.nspname=current_schema()
+                                  AND rel.relname='websocket_tickets'
+                            )
+                            """
                         )
-                        """
                     )
-                )
-                if ticket_table_exists:
+                    if ticket_table_exists:
+                        await self._validate_websocket_ticket_schema(conn)
+                    await conn.execute(_PG_CREATE_TABLES)
                     await self._validate_websocket_ticket_schema(conn)
-                await conn.execute(_PG_CREATE_TABLES)
-                await self._validate_websocket_ticket_schema(conn)
         logger.info("pg_schema_ready")
 
     @staticmethod

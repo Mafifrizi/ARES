@@ -1393,12 +1393,12 @@ async def _runtime_bootstrap(path: Path) -> bool:
         await database.close()
 
 
-def test_migration_head_is_real_empty_base_to_0007() -> None:
+def test_migration_head_is_real_empty_base_to_0008() -> None:
     with _temporary_database("empty-head") as path:
         initially_empty = _application_tables(path) == ()
         initial_revision_absent = _version(path) is None
-        _upgrade(path, "0007")
-        revision_is_current = _version(path) == "0007"
+        _upgrade(path, "head")
+        revision_is_current = _version(path) == "0008"
         exact_contract = _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
         enforcement_holds = _exercise_ticket_enforcement(path)
 
@@ -1407,18 +1407,18 @@ def test_migration_head_is_real_empty_base_to_0007() -> None:
             "fresh migration database was not empty",
         )
         _require_fixed(SCHEMA_VERSION == 7, "SQLite schema version is not seven")
-        _require_fixed(revision_is_current, "Alembic head is not revision 0007")
+        _require_fixed(revision_is_current, "Alembic head is not revision 0008")
         _require_fixed(
             exact_contract,
-            "fresh revision 0007 ticket fingerprint diverged",
+            "fresh revision 0008 ticket fingerprint diverged",
         )
         _require_fixed(
             enforcement_holds,
-            "fresh revision 0007 enforcement diverged",
+            "fresh revision 0008 enforcement diverged",
         )
 
 
-def test_sqlite_0006_to_0007_to_0006_to_0007_preserves_parent_data() -> None:
+def test_sqlite_0007_ownership_and_0008_compatibility_preserve_data() -> None:
     with _temporary_database("round-trip") as path:
         _upgrade(path, "0006")
         parent_before = _non_ticket_snapshot(path)
@@ -1467,9 +1467,27 @@ def test_sqlite_0006_to_0007_to_0006_to_0007_preserves_parent_data() -> None:
         )
         connection = _connect(path)
         try:
+            _insert_bearer_ticket(
+                connection,
+                digest_character="b",
+                expires_at="2099-01-01T00:00:30.000Z",
+            )
+            connection.commit()
             final_parent_count = _parent_row_count(connection)
         finally:
             connection.close()
+        ticket_contract_before_0008 = _ticket_contract(path)
+        ticket_data_before_0008 = _ticket_data_snapshot(path)
+
+        _upgrade(path, "0008")
+        ticket_contract_after_0008 = _ticket_contract(path)
+        ticket_data_after_0008 = _ticket_data_snapshot(path)
+        revision_0008_is_compatible = (
+            _version(path) == "0008"
+            and ticket_contract_before_0008 == _EXPECTED_TICKET_CONTRACT
+            and ticket_contract_after_0008 == ticket_contract_before_0008
+            and ticket_data_after_0008 == ticket_data_before_0008
+        )
 
         _require_fixed(upgraded_exact, "revision 0007 upgrade was incomplete")
         _require_fixed(
@@ -1480,19 +1498,24 @@ def test_sqlite_0006_to_0007_to_0006_to_0007_preserves_parent_data() -> None:
             reupgraded_exact and final_parent_count == parent_count_before,
             "revision 0007 re-upgrade did not converge",
         )
+        _require_fixed(
+            revision_0008_is_compatible,
+            "revision 0008 changed the revision 0007 ticket contract",
+        )
 
 
 def test_runtime_bootstrap_and_alembic_have_exact_ticket_parity() -> None:
     with _temporary_database("migration") as migration_path:
         with _temporary_database("runtime") as runtime_path:
-            _upgrade(migration_path, "0007")
+            _upgrade(migration_path, "head")
             repeated_is_stable = asyncio.run(
                 _runtime_bootstrap(runtime_path)
             )
             migration_contract = _ticket_contract(migration_path)
             runtime_contract = _ticket_contract(runtime_path)
             both_exact = (
-                migration_contract == _EXPECTED_TICKET_CONTRACT
+                _version(migration_path) == "0008"
+                and migration_contract == _EXPECTED_TICKET_CONTRACT
                 and runtime_contract == _EXPECTED_TICKET_CONTRACT
                 and migration_contract == runtime_contract
             )

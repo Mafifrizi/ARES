@@ -40,7 +40,7 @@ _SAFE_EXCEPTION_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _POSTGRES_OPERATION_TIMEOUT_SECONDS = 15.0
 _MIGRATION_PROCESS_TIMEOUT_SECONDS = 45.0
 _MIGRATION_ACTIONS = frozenset({"upgrade", "downgrade"})
-_MIGRATION_REVISIONS = frozenset({"0006", "0007"})
+_MIGRATION_REVISIONS = frozenset({"0006", "0007", "0008"})
 _OWNED_MIGRATION_PROCESSES: set[Any] = set()
 
 
@@ -2922,7 +2922,7 @@ async def test_postgres_issue_returns_only_after_transaction_exit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_postgres_revision_0007_upgrade_and_downgrade(
+async def test_postgres_revision_0007_ownership_and_0008_compatibility(
 ) -> None:
     migration_catalog: dict[str, object] | None = None
     async with _postgres_harness(initialize_runtime=False) as harness:
@@ -3129,11 +3129,97 @@ async def test_postgres_revision_0007_upgrade_and_downgrade(
                 for name in ("users", "campaigns", "api_keys")
             )
             and _ticket_catalog_matches_fixed_contract(reupgraded_catalog)
-            and reupgraded_catalog == migration_catalog
         )
         _require_fixed(
             final_state_is_exact,
             "PostgreSQL ticket re-upgrade contract changed",
+        )
+
+        connection = await _connect()
+        try:
+            await connection.execute(
+                """
+                INSERT INTO websocket_tickets(
+                    ticket_hash, campaign_id, user_id, credential_kind,
+                    api_key_id, required_scope, created_at, expires_at
+                )
+                VALUES(
+                    $1, $2, $3, 'api_key', $4, 'read',
+                    now(), now() + interval '30 seconds'
+                )
+                """,
+                "e" * 64,
+                seed_campaign,
+                seed_user,
+                seed_key,
+            )
+            ticket_catalog_before_0008 = (
+                await _ticket_catalog_fingerprint(connection)
+            )
+            ticket_rows_before_0008 = await connection.fetch(
+                """
+                SELECT ticket_hash, campaign_id, user_id, credential_kind,
+                       bearer_subject, bearer_jti, bearer_expires_at,
+                       api_key_id, required_scope, created_at, expires_at,
+                       consumed_at
+                FROM websocket_tickets
+                ORDER BY ticket_hash
+                """
+            )
+        finally:
+            await _attempt_cleanup(
+                "migration-pre-0008-close",
+                connection.close,
+                [],
+            )
+
+        _run_ticket_migration(harness.database_name, "upgrade", "0008")
+        connection = await _connect()
+        try:
+            migration_catalog = await _ticket_catalog_fingerprint(connection)
+            ticket_rows_after_0008 = await connection.fetch(
+                """
+                SELECT ticket_hash, campaign_id, user_id, credential_kind,
+                       bearer_subject, bearer_jti, bearer_expires_at,
+                       api_key_id, required_scope, created_at, expires_at,
+                       consumed_at
+                FROM websocket_tickets
+                ORDER BY ticket_hash
+                """
+            )
+            head_state = await connection.fetchrow(
+                """
+                SELECT
+                    (SELECT version_num FROM alembic_version) AS revision,
+                    (SELECT COUNT(*) FROM users WHERE id=$1) AS users,
+                    (SELECT COUNT(*) FROM campaigns WHERE id=$2) AS campaigns,
+                    (SELECT COUNT(*) FROM api_keys WHERE id=$3) AS api_keys
+                """,
+                seed_user,
+                seed_campaign,
+                seed_key,
+            )
+        finally:
+            await _attempt_cleanup(
+                "migration-0008-close",
+                connection.close,
+                [],
+            )
+        revision_0008_is_compatible = (
+            head_state is not None
+            and head_state["revision"] == "0008"
+            and all(
+                int(head_state[name]) == 1
+                for name in ("users", "campaigns", "api_keys")
+            )
+            and _ticket_catalog_matches_fixed_contract(migration_catalog)
+            and migration_catalog == ticket_catalog_before_0008
+            and tuple(ticket_rows_after_0008)
+            == tuple(ticket_rows_before_0008)
+        )
+        _require_fixed(
+            revision_0008_is_compatible,
+            "revision 0008 changed the revision 0007 ticket contract",
         )
 
     async with _postgres_harness() as runtime_harness:
@@ -3142,7 +3228,7 @@ async def test_postgres_revision_0007_upgrade_and_downgrade(
     parity = (
         migration_catalog is not None
         and _ticket_catalog_matches_fixed_contract(runtime_catalog)
-        and runtime_catalog == migration_catalog
+        and _ticket_catalog_matches_fixed_contract(migration_catalog)
     )
     _require_fixed(
         parity,
