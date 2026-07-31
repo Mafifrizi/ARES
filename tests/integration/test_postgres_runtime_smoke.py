@@ -33,6 +33,21 @@ def _require_fixed(condition: bool, message: str) -> None:
         pytest.fail(message, pytrace=False)
 
 
+def _canonical_ticket_relation_metadata() -> dict[str, object]:
+    return {
+        "relkind": "r",
+        "relpersistence": "p",
+        "relispartition": False,
+        "parent_count": 0,
+        "child_count": 0,
+        "relrowsecurity": False,
+        "relforcerowsecurity": False,
+        "policy_count": 0,
+        "user_trigger_count": 0,
+        "user_rule_count": 0,
+    }
+
+
 def _postgres_test_config() -> dict[str, str | int]:
     values = {name: os.environ.get(name) for name in _POSTGRES_ENV}
     configured = [name for name, value in values.items() if value]
@@ -142,6 +157,247 @@ def test_postgres_startup_diagnostic_statement_contract() -> None:
     )
 
 
+def test_postgres_ticket_relation_diagnostic_property_contract() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_RELATION_PROPERTY_BITS,
+        _POSTGRES_TICKET_RELATION_PROPERTY_MASK,
+        _postgres_ticket_relation_diagnostic_masks,
+        _postgres_ticket_relation_is_canonical,
+    )
+
+    expected_fields = frozenset(_canonical_ticket_relation_metadata())
+    bits = tuple(_POSTGRES_TICKET_RELATION_PROPERTY_BITS.values())
+    property_contract_is_exact = (
+        frozenset(_POSTGRES_TICKET_RELATION_PROPERTY_BITS)
+        == expected_fields
+        and len(bits) == len(set(bits)) == 10
+        and sum(bits) == _POSTGRES_TICKET_RELATION_PROPERTY_MASK == 0x3FF
+        and all(bit > 0 and bit & (bit - 1) == 0 for bit in bits)
+    )
+    _require_fixed(
+        property_contract_is_exact,
+        "Relation diagnostic properties require unique bounded bits",
+    )
+
+    canonical = _canonical_ticket_relation_metadata()
+    canonical_masks = _postgres_ticket_relation_diagnostic_masks(
+        canonical
+    )
+    _require_fixed(
+        _postgres_ticket_relation_is_canonical(canonical)
+        and canonical_masks == (0, 0, 0, 0),
+        "Canonical relation metadata must produce zero masks",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "violating_value"),
+    [
+        pytest.param("relkind", "v", id="kind"),
+        pytest.param("relpersistence", "u", id="persistence"),
+        pytest.param("relispartition", True, id="partition"),
+        pytest.param("parent_count", 1, id="parent"),
+        pytest.param("child_count", 1, id="child"),
+        pytest.param("relrowsecurity", True, id="rls"),
+        pytest.param("relforcerowsecurity", True, id="forced-rls"),
+        pytest.param("policy_count", 1, id="policy"),
+        pytest.param("user_trigger_count", 1, id="user-trigger"),
+        pytest.param("user_rule_count", 1, id="user-rule"),
+    ],
+)
+def test_postgres_ticket_relation_single_property_masks(
+    field: str,
+    violating_value: object,
+) -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_RELATION_PROPERTY_BITS,
+        _postgres_ticket_relation_diagnostic_masks,
+        _postgres_ticket_relation_is_canonical,
+    )
+
+    relation = _canonical_ticket_relation_metadata()
+    relation[field] = violating_value
+    masks = _postgres_ticket_relation_diagnostic_masks(relation)
+    expected_bit = _POSTGRES_TICKET_RELATION_PROPERTY_BITS[field]
+    _require_fixed(
+        masks == (expected_bit, 0, 0, 0)
+        and not _postgres_ticket_relation_is_canonical(relation),
+        "A relation mutation must set only its assigned mismatch bit",
+    )
+
+
+def test_postgres_ticket_relation_combined_and_alternate_masks() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_RELATION_AGGREGATE_ONLY,
+        _postgres_ticket_relation_diagnostic_invariant,
+        _postgres_ticket_relation_diagnostic_masks,
+        _postgres_ticket_relation_is_canonical,
+    )
+
+    combined = {
+        field: (
+            "v"
+            if field == "relkind"
+            else "u"
+            if field == "relpersistence"
+            else True
+            if field in {
+                "relispartition",
+                "relrowsecurity",
+                "relforcerowsecurity",
+            }
+            else 1
+        )
+        for field in _canonical_ticket_relation_metadata()
+    }
+    combined_masks = _postgres_ticket_relation_diagnostic_masks(
+        combined
+    )
+    _require_fixed(
+        combined_masks == (0x3FF, 0, 0, 0)
+        and not _postgres_ticket_relation_is_canonical(combined),
+        "Combined relation mutations must not short-circuit",
+    )
+
+    alternate = _canonical_ticket_relation_metadata()
+    alternate["relkind"] = b"r"
+    alternate["relpersistence"] = b"p"
+    alternate_masks = _postgres_ticket_relation_diagnostic_masks(
+        alternate
+    )
+    alternate_invariant = _postgres_ticket_relation_diagnostic_invariant(
+        alternate_masks
+    )
+    _require_fixed(
+        alternate_masks == (0x003, 0x003, 0, 0)
+        and alternate_invariant
+        == "ticket-relation-metadata:m=003;a=003;x=000;n=000"
+        and not _postgres_ticket_relation_is_canonical(alternate),
+        "Alternate internal-character representations need exact masks",
+    )
+
+    wrong_internal = _canonical_ticket_relation_metadata()
+    wrong_internal["relkind"] = b"v"
+    wrong_internal["relpersistence"] = b"u"
+    _require_fixed(
+        _postgres_ticket_relation_diagnostic_masks(wrong_internal)
+        == (0x003, 0, 0, 0),
+        "Wrong internal-character values must not be alternate matches",
+    )
+    _require_fixed(
+        _postgres_ticket_relation_diagnostic_invariant((0, 0, 0, 0))
+        == _POSTGRES_TICKET_RELATION_AGGREGATE_ONLY,
+        "Zero masks after rejection require the aggregate-only tripwire",
+    )
+
+
+def test_postgres_ticket_relation_missing_and_unexpected_masks() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_RELATION_PROPERTY_BITS,
+        _postgres_ticket_relation_diagnostic_masks,
+        _postgres_ticket_relation_is_canonical,
+    )
+
+    missing_cases_are_exact = True
+    unexpected_cases_are_exact = True
+    for field in _canonical_ticket_relation_metadata():
+        bit = _POSTGRES_TICKET_RELATION_PROPERTY_BITS[field]
+
+        missing = _canonical_ticket_relation_metadata()
+        missing.pop(field)
+        missing_cases_are_exact = (
+            missing_cases_are_exact
+            and _postgres_ticket_relation_diagnostic_masks(missing)
+            == (0, 0, 0, bit)
+            and not _postgres_ticket_relation_is_canonical(missing)
+        )
+
+        unexpected = _canonical_ticket_relation_metadata()
+        unexpected[field] = object()
+        unexpected_cases_are_exact = (
+            unexpected_cases_are_exact
+            and _postgres_ticket_relation_diagnostic_masks(unexpected)
+            == (0, 0, bit, 0)
+            and not _postgres_ticket_relation_is_canonical(unexpected)
+        )
+
+    _require_fixed(
+        missing_cases_are_exact,
+        "Missing relation properties must set only missing bits",
+    )
+    _require_fixed(
+        unexpected_cases_are_exact,
+        "Unexpected relation property types must set only type bits",
+    )
+
+
+def test_postgres_ticket_relation_diagnostic_rendering_is_closed() -> None:
+    from ares.db.postgres import (
+        _is_postgres_ticket_relation_diagnostic,
+        _postgres_startup_diagnostic_label,
+        _postgres_ticket_relation_diagnostic_invariant,
+        _PostgresStartupDiagnosticError,
+    )
+
+    canary = "relation-diagnostic-canary-not-for-output"
+    high_bit_result = _postgres_ticket_relation_diagnostic_invariant(
+        (0x400, 0, 0, 0)
+    )
+    overlap_result = _postgres_ticket_relation_diagnostic_invariant(
+        (0x001, 0, 0x001, 0)
+    )
+    valid_invariant = _postgres_ticket_relation_diagnostic_invariant(
+        (0x003, 0x003, 0, 0)
+    )
+    invalid_error = _PostgresStartupDiagnosticError(
+        "Incompatible WebSocket ticket schema",
+        diagnostic_stage="fallback-validation",
+        diagnostic_invariant=canary,
+    )
+    valid_error = _PostgresStartupDiagnosticError(
+        "Incompatible WebSocket ticket schema",
+        diagnostic_stage="fallback-validation",
+        diagnostic_invariant=valid_invariant,
+    )
+    valid_label = _postgres_startup_diagnostic_label(valid_error)
+    invalid_label = _postgres_startup_diagnostic_label(invalid_error)
+    closed_rendering = (
+        high_bit_result == "ticket-validation-unclassified"
+        and overlap_result == "ticket-validation-unclassified"
+        and _is_postgres_ticket_relation_diagnostic(valid_invariant)
+        and not _is_postgres_ticket_relation_diagnostic(
+            "ticket-relation-metadata:m=400;a=000;x=000;n=000"
+        )
+        and valid_label
+        == (
+            "fallback-validation:"
+            "ticket-relation-metadata:m=003;a=003;x=000;n=000:none"
+        )
+        and invalid_label == "unclassified"
+    )
+    _require_fixed(
+        closed_rendering,
+        "Relation diagnostic rendering must reject unknown masks",
+    )
+    rendered = " ".join(
+        (
+            high_bit_result,
+            overlap_result,
+            valid_invariant,
+            valid_label,
+            invalid_label,
+            str(valid_error),
+            repr(valid_error),
+            str(invalid_error),
+            repr(invalid_error),
+        )
+    )
+    _require_fixed(
+        canary not in rendered,
+        "Relation diagnostics must not expose source values",
+    )
+
+
 @pytest.mark.asyncio
 async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None:
     from ares.db.postgres import (
@@ -158,6 +414,10 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         async def fetch(self, *_args: object) -> object:
             raise PostgresError(canary)
 
+    class _RelationQueryFailureConnection:
+        async def fetchrow(self, *_args: object) -> object:
+            raise PostgresError(canary)
+
     try:
         await PostgresDatabase._managed_schema_revision(
             _OwnershipFailureConnection()
@@ -166,6 +426,15 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         ownership_failure: BaseException = exc
     else:
         pytest.fail("Ownership failure must be diagnosed", pytrace=False)
+
+    try:
+        await PostgresDatabase._validate_websocket_ticket_schema(
+            _RelationQueryFailureConnection()
+        )
+    except Exception as exc:
+        relation_query_failure: BaseException = exc
+    else:
+        pytest.fail("Relation query failure must be diagnosed", pytrace=False)
 
     ddl_cause = PostgresError(canary)
     ddl_failure = _postgres_startup_error(
@@ -192,6 +461,7 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         _postgres_startup_diagnostic_label(validation_failure),
         _postgres_startup_diagnostic_label(typed_unknown_failure),
         _postgres_startup_diagnostic_label(unknown_failure),
+        _postgres_startup_diagnostic_label(relation_query_failure),
     )
     labels_are_exact = labels == (
         "ownership:ownership-relation-query:database",
@@ -199,6 +469,7 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         "fallback-validation:ticket-columns:none",
         "unclassified",
         "unclassified",
+        "managed-validation:ticket-relation-query:database",
     )
     _require_fixed(
         labels_are_exact,
@@ -223,6 +494,8 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
             repr(ddl_failure),
             str(validation_failure),
             repr(validation_failure),
+            str(relation_query_failure),
+            repr(relation_query_failure),
         )
     )
     _require_fixed(

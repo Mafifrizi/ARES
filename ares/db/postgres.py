@@ -385,9 +385,198 @@ _POSTGRES_STARTUP_STAGES = frozenset(
 _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES = frozenset(
     {"none", "timeout", "connection", "database", "runtime", "other"}
 )
+_POSTGRES_TICKET_RELATION_PROPERTY_BITS = {
+    "relkind": 0x001,
+    "relpersistence": 0x002,
+    "relispartition": 0x004,
+    "parent_count": 0x008,
+    "child_count": 0x010,
+    "relrowsecurity": 0x020,
+    "relforcerowsecurity": 0x040,
+    "policy_count": 0x080,
+    "user_trigger_count": 0x100,
+    "user_rule_count": 0x200,
+}
+_POSTGRES_TICKET_RELATION_PROPERTY_MASK = 0x3FF
+_POSTGRES_TICKET_RELATION_AGGREGATE_ONLY = (
+    "ticket-relation-metadata:aggregate-comparison-only"
+)
+_POSTGRES_TICKET_RELATION_METADATA_PREFIX = (
+    "ticket-relation-metadata:"
+)
+_POSTGRES_TICKET_RELATION_MISSING = object()
+_POSTGRES_TICKET_RELATION_UNREADABLE = object()
+
+
+def _postgres_ticket_relation_value(
+    relation: Any,
+    field: str,
+) -> object:
+    try:
+        return relation[field]
+    except (KeyError, IndexError):
+        return _POSTGRES_TICKET_RELATION_MISSING
+    except Exception:
+        return _POSTGRES_TICKET_RELATION_UNREADABLE
+
+
+def _postgres_ticket_relation_is_canonical(relation: Any) -> bool:
+    try:
+        relation_contract = (
+            str(relation["relkind"]),
+            str(relation["relpersistence"]),
+            bool(relation["relispartition"]),
+            bool(relation["relrowsecurity"]),
+            bool(relation["relforcerowsecurity"]),
+            int(relation["parent_count"]),
+            int(relation["child_count"]),
+            int(relation["policy_count"]),
+            int(relation["user_trigger_count"]),
+            int(relation["user_rule_count"]),
+        )
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    return relation_contract == (
+        "r",
+        "p",
+        False,
+        False,
+        False,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def _postgres_ticket_relation_diagnostic_masks(
+    relation: Any,
+) -> tuple[int, int, int, int]:
+    mismatched = 0
+    alternate = 0
+    unexpected = 0
+    missing = 0
+
+    for field, expected in (
+        ("relkind", "r"),
+        ("relpersistence", "p"),
+    ):
+        bit = _POSTGRES_TICKET_RELATION_PROPERTY_BITS[field]
+        value = _postgres_ticket_relation_value(relation, field)
+        if value is _POSTGRES_TICKET_RELATION_MISSING:
+            missing |= bit
+        elif value is _POSTGRES_TICKET_RELATION_UNREADABLE:
+            unexpected |= bit
+        elif type(value) is str:
+            if value != expected:
+                mismatched |= bit
+        elif type(value) is bytes and len(value) == 1:
+            mismatched |= bit
+            if value == expected.encode("ascii"):
+                alternate |= bit
+        else:
+            unexpected |= bit
+
+    for field in (
+        "relispartition",
+        "relrowsecurity",
+        "relforcerowsecurity",
+    ):
+        bit = _POSTGRES_TICKET_RELATION_PROPERTY_BITS[field]
+        value = _postgres_ticket_relation_value(relation, field)
+        if value is _POSTGRES_TICKET_RELATION_MISSING:
+            missing |= bit
+        elif value is _POSTGRES_TICKET_RELATION_UNREADABLE:
+            unexpected |= bit
+        elif type(value) is not bool:
+            unexpected |= bit
+        elif value:
+            mismatched |= bit
+
+    for field in (
+        "parent_count",
+        "child_count",
+        "policy_count",
+        "user_trigger_count",
+        "user_rule_count",
+    ):
+        bit = _POSTGRES_TICKET_RELATION_PROPERTY_BITS[field]
+        value = _postgres_ticket_relation_value(relation, field)
+        if value is _POSTGRES_TICKET_RELATION_MISSING:
+            missing |= bit
+        elif value is _POSTGRES_TICKET_RELATION_UNREADABLE:
+            unexpected |= bit
+        elif type(value) is not int:
+            unexpected |= bit
+        elif value != 0:
+            mismatched |= bit
+
+    return mismatched, alternate, unexpected, missing
+
+
+def _postgres_ticket_relation_diagnostic_invariant(
+    masks: tuple[int, int, int, int],
+) -> str:
+    if (
+        type(masks) is not tuple
+        or len(masks) != 4
+        or any(type(value) is not int for value in masks)
+    ):
+        return "ticket-validation-unclassified"
+    mismatched, alternate, unexpected, missing = masks
+    if any(
+        value < 0
+        or value & ~_POSTGRES_TICKET_RELATION_PROPERTY_MASK
+        for value in masks
+    ):
+        return "ticket-validation-unclassified"
+    if (
+        alternate & ~mismatched
+        or unexpected & (mismatched | alternate | missing)
+        or missing & (mismatched | alternate | unexpected)
+    ):
+        return "ticket-validation-unclassified"
+    if not (mismatched or alternate or unexpected or missing):
+        return _POSTGRES_TICKET_RELATION_AGGREGATE_ONLY
+    return (
+        f"{_POSTGRES_TICKET_RELATION_METADATA_PREFIX}"
+        f"m={mismatched:03x};a={alternate:03x};"
+        f"x={unexpected:03x};n={missing:03x}"
+    )
+
+
+def _is_postgres_ticket_relation_diagnostic(invariant: str) -> bool:
+    if invariant == _POSTGRES_TICKET_RELATION_AGGREGATE_ONLY:
+        return True
+    prefix = _POSTGRES_TICKET_RELATION_METADATA_PREFIX
+    if not invariant.startswith(prefix):
+        return False
+    parts = invariant[len(prefix):].split(";")
+    if len(parts) != 4:
+        return False
+    expected_keys = ("m", "a", "x", "n")
+    values: list[int] = []
+    for part, expected_key in zip(parts, expected_keys, strict=True):
+        key, separator, encoded = part.partition("=")
+        if (
+            separator != "="
+            or key != expected_key
+            or len(encoded) != 3
+            or any(character not in "0123456789abcdef" for character in encoded)
+        ):
+            return False
+        values.append(int(encoded, 16))
+    return (
+        _postgres_ticket_relation_diagnostic_invariant(tuple(values))
+        == invariant
+    )
+
+
 _POSTGRES_TICKET_INVARIANTS = frozenset(
     {
         "ticket-relation-present",
+        "ticket-relation-query",
         "ticket-relation-metadata",
         "ticket-columns",
         "ticket-constraint-inventory",
@@ -478,7 +667,12 @@ class _PostgresStartupDiagnosticError(RuntimeError):
         )
         self.diagnostic_invariant = (
             diagnostic_invariant
-            if diagnostic_invariant in _POSTGRES_STARTUP_INVARIANTS
+            if (
+                diagnostic_invariant in _POSTGRES_STARTUP_INVARIANTS
+                or _is_postgres_ticket_relation_diagnostic(
+                    diagnostic_invariant
+                )
+            )
             else "ownership-unclassified"
         )
         self.operational_category = (
@@ -501,7 +695,13 @@ def _postgres_startup_diagnostic_label(error: BaseException) -> str:
         return "unclassified"
     if (
         error.diagnostic_stage not in _POSTGRES_STARTUP_STAGES
-        or error.diagnostic_invariant not in _POSTGRES_STARTUP_INVARIANTS
+        or (
+            error.diagnostic_invariant
+            not in _POSTGRES_STARTUP_INVARIANTS
+            and not _is_postgres_ticket_relation_diagnostic(
+                error.diagnostic_invariant
+            )
+        )
         or error.operational_category
         not in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
     ):
@@ -2394,9 +2594,10 @@ class PostgresDatabase:
     @staticmethod
     async def _validate_websocket_ticket_schema(connection: Any) -> None:
         """Reject any ticket catalog that differs from the owned schema."""
-        relation = await connection.fetchrow(
-            """
-            SELECT rel.oid::bigint AS table_oid,
+        try:
+            relation = await connection.fetchrow(
+                """
+                SELECT rel.oid::bigint AS table_oid,
                    nsp.oid::bigint AS schema_oid,
                    nsp.nspname AS schema_name,
                    rel.relkind,
@@ -2432,10 +2633,19 @@ class PostgresDatabase:
                    ) AS user_rule_count
             FROM pg_class AS rel
             JOIN pg_namespace AS nsp ON nsp.oid=rel.relnamespace
-            WHERE nsp.nspname=current_schema()
-              AND rel.relname='websocket_tickets'
-            """
-        )
+                WHERE nsp.nspname=current_schema()
+                  AND rel.relname='websocket_tickets'
+                """
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise _postgres_startup_error(
+                "Incompatible WebSocket ticket schema",
+                stage="managed-validation",
+                invariant="ticket-relation-query",
+                cause=exc,
+            ) from None
         if relation is None:
             raise _postgres_ticket_schema_error(
                 "ticket-relation-present"
@@ -2443,32 +2653,12 @@ class PostgresDatabase:
         table_oid = int(relation["table_oid"])
         schema_oid = int(relation["schema_oid"])
         schema_name = str(relation["schema_name"])
-        relation_contract = (
-            str(relation["relkind"]),
-            str(relation["relpersistence"]),
-            bool(relation["relispartition"]),
-            bool(relation["relrowsecurity"]),
-            bool(relation["relforcerowsecurity"]),
-            int(relation["parent_count"]),
-            int(relation["child_count"]),
-            int(relation["policy_count"]),
-            int(relation["user_trigger_count"]),
-            int(relation["user_rule_count"]),
-        )
-        if relation_contract != (
-            "r",
-            "p",
-            False,
-            False,
-            False,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ):
+        if not _postgres_ticket_relation_is_canonical(relation):
+            diagnostic = _postgres_ticket_relation_diagnostic_invariant(
+                _postgres_ticket_relation_diagnostic_masks(relation)
+            )
             raise _postgres_ticket_schema_error(
-                "ticket-relation-metadata"
+                diagnostic
             )
 
         rows = await connection.fetch(
