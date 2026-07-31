@@ -321,6 +321,254 @@ CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
     ON websocket_tickets(api_key_id);
 """
 
+_POSTGRES_FALLBACK_DDL_CODES = (
+    "campaigns-table",
+    "module-runs-table",
+    "module-runs-campaign-index",
+    "module-runs-completed-index",
+    "findings-table",
+    "findings-campaign-index",
+    "findings-severity-index",
+    "findings-false-positive-index",
+    "hosts-table",
+    "hosts-campaign-index",
+    "hosts-ip-index",
+    "credentials-table",
+    "credentials-campaign-index",
+    "loot-table",
+    "audit-log-table",
+    "audit-log-campaign-index",
+    "users-table",
+    "users-username-index",
+    "api-keys-table",
+    "api-keys-user-index",
+    "api-keys-prefix-index",
+    "refresh-tokens-table",
+    "refresh-tokens-user-index",
+    "refresh-tokens-expiry-index",
+    "revoked-access-tokens-table",
+    "revoked-access-tokens-expiry-index",
+    "websocket-tickets-table",
+    "websocket-tickets-expiry-index",
+    "websocket-tickets-user-index",
+    "websocket-tickets-campaign-index",
+    "websocket-tickets-api-key-index",
+)
+
+
+def _postgres_fallback_statement_spans() -> tuple[
+    tuple[str, int, int], ...
+]:
+    spans: list[tuple[str, int, int]] = []
+    start = 0
+    for code in _POSTGRES_FALLBACK_DDL_CODES:
+        end = _PG_CREATE_TABLES.find(";", start)
+        if end < 0:
+            raise RuntimeError("Invalid PostgreSQL fallback DDL contract")
+        spans.append((code, start + 1, end + 1))
+        start = end + 1
+    if _PG_CREATE_TABLES[start:].strip():
+        raise RuntimeError("Invalid PostgreSQL fallback DDL contract")
+    return tuple(spans)
+
+
+_POSTGRES_FALLBACK_STATEMENT_SPANS = _postgres_fallback_statement_spans()
+_POSTGRES_STARTUP_STAGES = frozenset(
+    {
+        "ownership",
+        "fallback-ddl",
+        "fallback-validation",
+        "managed-validation",
+        "unclassified",
+    }
+)
+_POSTGRES_STARTUP_OPERATIONAL_CATEGORIES = frozenset(
+    {"none", "timeout", "connection", "database", "runtime", "other"}
+)
+_POSTGRES_TICKET_INVARIANTS = frozenset(
+    {
+        "ticket-relation-present",
+        "ticket-relation-metadata",
+        "ticket-columns",
+        "ticket-constraint-inventory",
+        "ticket-canonical-opclasses",
+        "ticket-index-identity",
+        "ticket-index-inventory",
+        "ticket-constraint-definition-primary",
+        "ticket-constraint-definition-campaign",
+        "ticket-constraint-definition-user",
+        "ticket-constraint-definition-api-key",
+        "ticket-reference-inventory",
+        "ticket-constraint-table-binding",
+        "ticket-foreign-key-campaign",
+        "ticket-foreign-key-user",
+        "ticket-foreign-key-api-key",
+        "ticket-primary-key-binding",
+        "ticket-check-hash",
+        "ticket-check-kind",
+        "ticket-check-created-at",
+        "ticket-check-expires-at",
+        "ticket-check-consumed-at",
+        "ticket-check-bearer-expires-finite",
+        "ticket-check-created-finite",
+        "ticket-check-expires-finite",
+        "ticket-check-consumed-finite",
+        "ticket-check-time-order",
+        "ticket-check-source-shape",
+        "ticket-validation-unclassified",
+    }
+)
+_POSTGRES_OWNERSHIP_INVARIANTS = frozenset(
+    {
+        "ownership-relation-query",
+        "ownership-relation-metadata",
+        "ownership-revision-query",
+        "ownership-revision-cardinality",
+        "ownership-revision-value",
+        "ownership-known-older-revision",
+        "ownership-unclassified",
+    }
+)
+_POSTGRES_STARTUP_INVARIANTS = (
+    frozenset(_POSTGRES_FALLBACK_DDL_CODES)
+    | _POSTGRES_TICKET_INVARIANTS
+    | _POSTGRES_OWNERSHIP_INVARIANTS
+    | frozenset({"fallback-ddl-unclassified", "managed-validation-unclassified"})
+)
+_POSTGRES_STARTUP_TRACE_CODES = frozenset(
+    {"fallback-entered", "fallback-ddl-complete", "startup-ready"}
+)
+
+
+def _postgres_operational_category(error: BaseException) -> str:
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, ConnectionError):
+        return "connection"
+    error_type_names = {
+        base.__name__
+        for base in type(error).__mro__
+    }
+    if error_type_names & {
+        "PostgresError",
+        "InterfaceError",
+        "ConnectionDoesNotExistError",
+        "CannotConnectNowError",
+    }:
+        return "database"
+    if isinstance(error, RuntimeError):
+        return "runtime"
+    return "other"
+
+
+class _PostgresStartupDiagnosticError(RuntimeError):
+    def __init__(
+        self,
+        public_message: str,
+        *,
+        diagnostic_stage: str,
+        diagnostic_invariant: str,
+        operational_category: str = "none",
+    ) -> None:
+        super().__init__(public_message)
+        self.diagnostic_stage = (
+            diagnostic_stage
+            if diagnostic_stage in _POSTGRES_STARTUP_STAGES
+            else "unclassified"
+        )
+        self.diagnostic_invariant = (
+            diagnostic_invariant
+            if diagnostic_invariant in _POSTGRES_STARTUP_INVARIANTS
+            else "ownership-unclassified"
+        )
+        self.operational_category = (
+            operational_category
+            if operational_category
+            in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
+            else "other"
+        )
+
+
+def _postgres_startup_diagnostic_label(error: BaseException) -> str:
+    if not isinstance(error, _PostgresStartupDiagnosticError):
+        return "unclassified"
+    if error.diagnostic_invariant in {
+        "ownership-unclassified",
+        "fallback-ddl-unclassified",
+        "managed-validation-unclassified",
+        "ticket-validation-unclassified",
+    }:
+        return "unclassified"
+    if (
+        error.diagnostic_stage not in _POSTGRES_STARTUP_STAGES
+        or error.diagnostic_invariant not in _POSTGRES_STARTUP_INVARIANTS
+        or error.operational_category
+        not in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
+    ):
+        return "unclassified"
+    return (
+        f"{error.diagnostic_stage}:"
+        f"{error.diagnostic_invariant}:"
+        f"{error.operational_category}"
+    )
+
+
+def _postgres_startup_error(
+    public_message: str,
+    *,
+    stage: str,
+    invariant: str,
+    cause: BaseException | None = None,
+) -> _PostgresStartupDiagnosticError:
+    category = (
+        "none"
+        if cause is None
+        else _postgres_operational_category(cause)
+    )
+    return _PostgresStartupDiagnosticError(
+        public_message,
+        diagnostic_stage=stage,
+        diagnostic_invariant=invariant,
+        operational_category=category,
+    )
+
+
+def _postgres_fallback_failure_invariant(error: BaseException) -> str:
+    raw_position = getattr(error, "position", None)
+    if not isinstance(raw_position, (int, str)):
+        return "fallback-ddl-unclassified"
+    try:
+        position = int(raw_position)
+    except (TypeError, ValueError):
+        return "fallback-ddl-unclassified"
+    for code, start, end in _POSTGRES_FALLBACK_STATEMENT_SPANS:
+        if start <= position <= end:
+            return code
+    return "fallback-ddl-unclassified"
+
+
+def _postgres_restage_startup_error(
+    error: _PostgresStartupDiagnosticError,
+    stage: str,
+) -> _PostgresStartupDiagnosticError:
+    return _PostgresStartupDiagnosticError(
+        str(error),
+        diagnostic_stage=stage,
+        diagnostic_invariant=error.diagnostic_invariant,
+        operational_category=error.operational_category,
+    )
+
+
+def _postgres_ticket_schema_error(
+    invariant: str,
+) -> _PostgresStartupDiagnosticError:
+    return _postgres_startup_error(
+        "Incompatible WebSocket ticket schema",
+        stage="managed-validation",
+        invariant=invariant,
+    )
+
+
 _POSTGRES_MANAGED_REVISION = "0008"
 _POSTGRES_OLDER_REVISIONS = frozenset(
     {"0001", "0002", "0003", "0004", "0005", "0006", "0007"}
@@ -330,11 +578,11 @@ _POSTGRES_MANAGED_SCHEMA_ERROR = "Incompatible managed PostgreSQL schema"
 _POSTGRES_SCHEMA_VALIDATION_ERROR = "PostgreSQL schema validation failed"
 
 
-class _PostgresMigrationRequiredError(RuntimeError):
+class _PostgresMigrationRequiredError(_PostgresStartupDiagnosticError):
     pass
 
 
-class _PostgresManagedSchemaError(RuntimeError):
+class _PostgresManagedSchemaError(_PostgresStartupDiagnosticError):
     pass
 
 
@@ -561,16 +809,32 @@ def _postgres_index_opclass(table: str, column: str) -> str:
 
 
 def _classify_postgres_revision(values: tuple[object, ...]) -> str:
-    if len(values) != 1 or not isinstance(values[0], str):
-        raise _PostgresManagedSchemaError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+    if len(values) != 1:
+        raise _PostgresManagedSchemaError(
+            _POSTGRES_MANAGED_SCHEMA_ERROR,
+            diagnostic_stage="ownership",
+            diagnostic_invariant="ownership-revision-cardinality",
+        )
+    if not isinstance(values[0], str):
+        raise _PostgresManagedSchemaError(
+            _POSTGRES_MANAGED_SCHEMA_ERROR,
+            diagnostic_stage="ownership",
+            diagnostic_invariant="ownership-revision-value",
+        )
     revision = values[0]
     if revision == _POSTGRES_MANAGED_REVISION:
         return revision
     if revision in _POSTGRES_OLDER_REVISIONS:
         raise _PostgresMigrationRequiredError(
-            _POSTGRES_MIGRATION_REQUIRED_ERROR
+            _POSTGRES_MIGRATION_REQUIRED_ERROR,
+            diagnostic_stage="ownership",
+            diagnostic_invariant="ownership-known-older-revision",
         )
-    raise _PostgresManagedSchemaError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+    raise _PostgresManagedSchemaError(
+        _POSTGRES_MANAGED_SCHEMA_ERROR,
+        diagnostic_stage="ownership",
+        diagnostic_invariant="ownership-revision-value",
+    )
 
 
 class PostgresDatabase:
@@ -603,6 +867,7 @@ class PostgresDatabase:
         self._pool_min = pool_min
         self._pool_max = pool_max
         self._pool: Any = None   # asyncpg.Pool
+        self._startup_trace: list[str] = []
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -629,6 +894,7 @@ class PostgresDatabase:
         except asyncio.CancelledError as primary:
             await self._close_failed_startup_pool(pool, primary)
             raise
+        self._record_startup_trace("startup-ready")
         logger.info("pg_db_ready")
         return self
 
@@ -640,13 +906,19 @@ class PostgresDatabase:
         try:
             await pool.close()
         except Exception as cleanup_error:
+            cleanup_category = _postgres_operational_category(cleanup_error)
             primary.add_note(
                 "PostgreSQL startup cleanup failure "
-                f"[pool-close: {type(cleanup_error).__name__}]"
+                f"[pool-close: {cleanup_category}]"
             )
         finally:
             if self._pool is pool:
                 self._pool = None
+
+    def _record_startup_trace(self, code: str) -> None:
+        if code not in _POSTGRES_STARTUP_TRACE_CODES:
+            raise RuntimeError("Invalid PostgreSQL startup trace identifier")
+        self._startup_trace.append(code)
 
     async def __aenter__(self) -> "PostgresDatabase":
         return await self.connect()
@@ -669,9 +941,10 @@ class PostgresDatabase:
 
     @staticmethod
     async def _managed_schema_revision(connection: Any) -> str | None:
-        relation_rows = await connection.fetch(
-            """
-            SELECT rel.oid::bigint AS table_oid,
+        try:
+            relation_rows = await connection.fetch(
+                """
+                SELECT rel.oid::bigint AS table_oid,
                    nsp.nspname AS schema_name,
                    relation_type.oid::bigint AS type_oid,
                    type_nsp.nspname AS type_schema,
@@ -715,14 +988,27 @@ class PostgresDatabase:
               ON relation_type.oid=rel.reltype
             LEFT JOIN pg_namespace AS type_nsp
               ON type_nsp.oid=relation_type.typnamespace
-            WHERE nsp.nspname=current_schema()
-              AND rel.relname='alembic_version'
-            """
-        )
+                WHERE nsp.nspname=current_schema()
+                  AND rel.relname='alembic_version'
+                """
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise _postgres_startup_error(
+                _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                stage="ownership",
+                invariant="ownership-relation-query",
+                cause=exc,
+            ) from None
         if not relation_rows:
             return None
         if len(relation_rows) != 1:
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            )
         relation = relation_rows[0]
         try:
             table_oid = int(relation["table_oid"])
@@ -747,7 +1033,11 @@ class PostgresDatabase:
                  int(relation["user_rule_count"]),
              )
         except (KeyError, TypeError, ValueError):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            ) from None
         if (
             not isinstance(schema_name, str)
             or not schema_name
@@ -757,7 +1047,11 @@ class PostgresDatabase:
             or relation_contract
             != ("r", "p", False, False, False, 0, 0, 0, 0, 0)
         ):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            )
 
         column_rows = await connection.fetch(
             """
@@ -810,7 +1104,11 @@ class PostgresDatabase:
                 for row in column_rows
             )
         except (KeyError, TypeError, ValueError):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            ) from None
         if columns != (
             (
                 1,
@@ -828,7 +1126,11 @@ class PostgresDatabase:
                 None,
             ),
         ):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            )
 
         primary_rows = await connection.fetch(
             """
@@ -865,7 +1167,11 @@ class PostgresDatabase:
                 for row in primary_rows
             )
         except (KeyError, TypeError, ValueError):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            ) from None
         if primary_contract != (
             (
                 "alembic_version_pkc",
@@ -876,7 +1182,11 @@ class PostgresDatabase:
                 ("version_num",),
             ),
         ):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            )
 
         version_index_rows = await connection.fetch(
             """
@@ -983,7 +1293,11 @@ class PostgresDatabase:
                 for row in version_index_rows
             )
         except (KeyError, TypeError, ValueError):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            ) from None
         if version_indexes != (
             (
                 "alembic_version_pkc",
@@ -1008,16 +1322,34 @@ class PostgresDatabase:
                 None,
             ),
         ):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-relation-metadata",
+            )
 
         quoted_schema = '"' + schema_name.replace('"', '""') + '"'
-        revision_rows = await connection.fetch(
-            f'SELECT version_num FROM {quoted_schema}."alembic_version"'  # noqa: S608
-        )
+        try:
+            revision_rows = await connection.fetch(
+                f'SELECT version_num FROM {quoted_schema}."alembic_version"'  # noqa: S608
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise _postgres_startup_error(
+                _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                stage="ownership",
+                invariant="ownership-revision-query",
+                cause=exc,
+            ) from None
         try:
             values = tuple(row["version_num"] for row in revision_rows)
         except (KeyError, TypeError):
-            raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            raise _PostgresManagedSchemaError(
+                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                diagnostic_stage="ownership",
+                diagnostic_invariant="ownership-revision-cardinality",
+            ) from None
         return _classify_postgres_revision(values)
 
     @staticmethod
@@ -1946,61 +2278,117 @@ class PostgresDatabase:
                 except (
                     _PostgresManagedSchemaError,
                     _PostgresMigrationRequiredError,
+                    _PostgresStartupDiagnosticError,
                 ):
                     raise
-                except RuntimeError as exc:
-                    if str(exc) == _POSTGRES_MANAGED_SCHEMA_ERROR:
-                        raise _PostgresManagedSchemaError(
-                            _POSTGRES_MANAGED_SCHEMA_ERROR
-                        ) from None
-                    raise RuntimeError(
-                        _POSTGRES_SCHEMA_VALIDATION_ERROR
-                    ) from None
-                except Exception:
-                    raise RuntimeError(
-                        _POSTGRES_SCHEMA_VALIDATION_ERROR
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    raise _postgres_startup_error(
+                        _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                        stage="ownership",
+                        invariant="ownership-relation-metadata",
+                        cause=exc,
                     ) from None
                 if revision is not None:
                     try:
                         await self._validate_managed_schema(conn)
                         await self._validate_websocket_ticket_schema(conn)
-                    except _PostgresManagedSchemaError:
+                    except _PostgresMigrationRequiredError:
+                        raise
+                    except _PostgresStartupDiagnosticError as exc:
+                        raise _postgres_restage_startup_error(
+                            exc,
+                            "managed-validation",
+                        ) from None
+                    except asyncio.CancelledError:
                         raise
                     except RuntimeError as exc:
                         if str(exc) == _POSTGRES_MANAGED_SCHEMA_ERROR:
                             raise _PostgresManagedSchemaError(
-                                _POSTGRES_MANAGED_SCHEMA_ERROR
+                                _POSTGRES_MANAGED_SCHEMA_ERROR,
+                                diagnostic_stage="managed-validation",
+                                diagnostic_invariant=(
+                                    "managed-validation-unclassified"
+                                ),
                             ) from None
-                        if str(exc) == (
-                            "Incompatible WebSocket ticket schema"
-                        ):
-                            raise
-                        raise RuntimeError(
-                            _POSTGRES_SCHEMA_VALIDATION_ERROR
+                        raise _postgres_startup_error(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                            stage="managed-validation",
+                            invariant="managed-validation-unclassified",
+                            cause=exc,
                         ) from None
-                    except Exception:
-                        raise RuntimeError(
-                            _POSTGRES_SCHEMA_VALIDATION_ERROR
+                    except Exception as exc:
+                        raise _postgres_startup_error(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                            stage="managed-validation",
+                            invariant="managed-validation-unclassified",
+                            cause=exc,
                         ) from None
                 else:
-                    ticket_table_exists = bool(
-                        await conn.fetchval(
-                            """
-                            SELECT EXISTS(
-                                SELECT 1
-                                FROM pg_class AS rel
-                                JOIN pg_namespace AS nsp
-                                  ON nsp.oid=rel.relnamespace
-                                WHERE nsp.nspname=current_schema()
-                                  AND rel.relname='websocket_tickets'
+                    self._record_startup_trace("fallback-entered")
+                    try:
+                        ticket_table_exists = bool(
+                            await conn.fetchval(
+                                """
+                                SELECT EXISTS(
+                                    SELECT 1
+                                    FROM pg_class AS rel
+                                    JOIN pg_namespace AS nsp
+                                      ON nsp.oid=rel.relnamespace
+                                    WHERE nsp.nspname=current_schema()
+                                      AND rel.relname='websocket_tickets'
+                                )
+                                """
                             )
-                            """
                         )
-                    )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        raise _postgres_startup_error(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                            stage="fallback-validation",
+                            invariant="ticket-relation-present",
+                            cause=exc,
+                        ) from None
                     if ticket_table_exists:
+                        try:
+                            await self._validate_websocket_ticket_schema(conn)
+                        except _PostgresStartupDiagnosticError as exc:
+                            raise _postgres_restage_startup_error(
+                                exc,
+                                "fallback-validation",
+                            ) from None
+                    try:
+                        await conn.execute(_PG_CREATE_TABLES)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        raise _postgres_startup_error(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                            stage="fallback-ddl",
+                            invariant=_postgres_fallback_failure_invariant(
+                                exc
+                            ),
+                            cause=exc,
+                        ) from None
+                    self._record_startup_trace("fallback-ddl-complete")
+                    try:
                         await self._validate_websocket_ticket_schema(conn)
-                    await conn.execute(_PG_CREATE_TABLES)
-                    await self._validate_websocket_ticket_schema(conn)
+                    except _PostgresStartupDiagnosticError as exc:
+                        raise _postgres_restage_startup_error(
+                            exc,
+                            "fallback-validation",
+                        ) from None
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        raise _postgres_startup_error(
+                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
+                            stage="fallback-validation",
+                            invariant="ticket-validation-unclassified",
+                            cause=exc,
+                        ) from None
         logger.info("pg_schema_ready")
 
     @staticmethod
@@ -2049,7 +2437,9 @@ class PostgresDatabase:
             """
         )
         if relation is None:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-relation-present"
+            )
         table_oid = int(relation["table_oid"])
         schema_oid = int(relation["schema_oid"])
         schema_name = str(relation["schema_name"])
@@ -2077,7 +2467,9 @@ class PostgresDatabase:
             0,
             0,
         ):
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-relation-metadata"
+            )
 
         rows = await connection.fetch(
             """
@@ -2158,7 +2550,7 @@ class PostgresDatabase:
             ),
         ]
         if actual_columns != expected_columns:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error("ticket-columns")
 
         constraint_rows = await connection.fetch(
             """
@@ -2219,7 +2611,9 @@ class PostgresDatabase:
             "websocket_tickets_pkey",
         }
         if set(actual_constraints) != expected_constraint_names:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-constraint-inventory"
+            )
 
         index_rows = await connection.fetch(
             """
@@ -2316,7 +2710,9 @@ class PostgresDatabase:
             for row in canonical_opclass_rows
         }
         if set(canonical_opclasses) != {"text_ops", "timestamptz_ops"}:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-canonical-opclasses"
+            )
 
         index_oids: set[int] = set()
         for row in index_rows:
@@ -2348,7 +2744,9 @@ class PostgresDatabase:
                 and index_oid not in index_oids
             )
             if not identity_is_exact:
-                raise RuntimeError("Incompatible WebSocket ticket schema")
+                raise _postgres_ticket_schema_error(
+                    "ticket-index-identity"
+                )
             index_oids.add(index_oid)
 
         actual_indexes = {
@@ -2397,7 +2795,9 @@ class PostgresDatabase:
             ),
         }
         if actual_indexes != expected_indexes:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-index-inventory"
+            )
 
         expected_constraint_fragments = {
             "websocket_tickets_pkey": ("p", "PRIMARY KEY (ticket_hash)"),
@@ -2414,6 +2814,20 @@ class PostgresDatabase:
                 "FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
             ),
         }
+        constraint_fragment_invariants = {
+            "websocket_tickets_pkey": (
+                "ticket-constraint-definition-primary"
+            ),
+            "fk_ws_ticket_campaign": (
+                "ticket-constraint-definition-campaign"
+            ),
+            "fk_ws_ticket_user": (
+                "ticket-constraint-definition-user"
+            ),
+            "fk_ws_ticket_api_key": (
+                "ticket-constraint-definition-api-key"
+            ),
+        }
         for name, definition in expected_constraint_fragments.items():
             row = actual_constraints[name]
             if (
@@ -2423,7 +2837,9 @@ class PostgresDatabase:
                 or bool(row["condeferred"])
                 or " ".join(str(row["definition"]).split()) != definition[1]
             ):
-                raise RuntimeError("Incompatible WebSocket ticket schema")
+                raise _postgres_ticket_schema_error(
+                    constraint_fragment_invariants[name]
+                )
 
         referenced_schema = str(await connection.fetchval("SELECT current_schema()"))
         expected_foreign_keys = {
@@ -2452,14 +2868,23 @@ class PostgresDatabase:
             for row in referenced_rows
         }
         if set(referenced_oids) != {"api_keys", "campaigns", "users"}:
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-reference-inventory"
+            )
 
         if any(
             int(row["table_oid"]) != table_oid
             for row in actual_constraints.values()
         ):
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-constraint-table-binding"
+            )
 
+        foreign_key_invariants = {
+            "fk_ws_ticket_campaign": "ticket-foreign-key-campaign",
+            "fk_ws_ticket_user": "ticket-foreign-key-user",
+            "fk_ws_ticket_api_key": "ticket-foreign-key-api-key",
+        }
         for name, expected in expected_foreign_keys.items():
             row = actual_constraints[name]
             actual = (
@@ -2477,7 +2902,9 @@ class PostgresDatabase:
                 == referenced_oids[expected[2]]
             )
             if actual != expected or not reference_identity_is_exact:
-                raise RuntimeError("Incompatible WebSocket ticket schema")
+                raise _postgres_ticket_schema_error(
+                    foreign_key_invariants[name]
+                )
 
         primary = actual_constraints["websocket_tickets_pkey"]
         if (
@@ -2493,7 +2920,9 @@ class PostgresDatabase:
                 if str(row["index_name"]) == "websocket_tickets_pkey"
             )
         ):
-            raise RuntimeError("Incompatible WebSocket ticket schema")
+            raise _postgres_ticket_schema_error(
+                "ticket-primary-key-binding"
+            )
 
         expected_check_definitions = {
             "ck_ws_ticket_hash": (
@@ -2542,6 +2971,27 @@ class PostgresDatabase:
                 "AND required_scope = 'read'::text)"
             ),
         }
+        check_invariants = {
+            "ck_ws_ticket_hash": "ticket-check-hash",
+            "ck_ws_ticket_kind": "ticket-check-kind",
+            "ck_ws_ticket_created_at": "ticket-check-created-at",
+            "ck_ws_ticket_expires_at": "ticket-check-expires-at",
+            "ck_ws_ticket_consumed_at": "ticket-check-consumed-at",
+            "ck_ws_ticket_bearer_expires_finite": (
+                "ticket-check-bearer-expires-finite"
+            ),
+            "ck_ws_ticket_created_finite": (
+                "ticket-check-created-finite"
+            ),
+            "ck_ws_ticket_expires_finite": (
+                "ticket-check-expires-finite"
+            ),
+            "ck_ws_ticket_consumed_finite": (
+                "ticket-check-consumed-finite"
+            ),
+            "ck_ws_ticket_time_order": "ticket-check-time-order",
+            "ck_ws_ticket_source_shape": "ticket-check-source-shape",
+        }
         for name, expected_definition in expected_check_definitions.items():
             row = actual_constraints[name]
             if (
@@ -2552,7 +3002,9 @@ class PostgresDatabase:
                 or " ".join(str(row["definition"]).split())
                 != expected_definition
             ):
-                raise RuntimeError("Incompatible WebSocket ticket schema")
+                raise _postgres_ticket_schema_error(
+                    check_invariants[name]
+                )
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 

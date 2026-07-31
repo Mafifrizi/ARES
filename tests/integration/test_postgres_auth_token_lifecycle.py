@@ -80,8 +80,19 @@ def _runtime_dsn(config: dict[str, str | int], database: str) -> str:
 
 
 def _sanitized_setup_failure(action: str, exc: Exception) -> RuntimeError:
+    from ares.db.postgres import _postgres_operational_category
+
+    if action == "runtime-initialize":
+        from ares.db.postgres import _postgres_startup_diagnostic_label
+
+        diagnostic = _postgres_startup_diagnostic_label(exc)
+        return RuntimeError(
+            "PostgreSQL token-test setup failed "
+            f"[runtime-initialize:{diagnostic}]"
+        )
+    category = _postgres_operational_category(exc)
     return RuntimeError(
-        f"PostgreSQL token-test setup failed [{action}: {type(exc).__name__}]"
+        f"PostgreSQL token-test setup failed [{action}:{category}]"
     )
 
 

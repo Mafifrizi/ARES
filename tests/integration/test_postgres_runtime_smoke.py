@@ -24,6 +24,15 @@ class _RollbackProbe(RuntimeError):
     """Intentional exception used to verify a real transaction rollback."""
 
 
+class PostgresError(RuntimeError):
+    """Synthetic database-category error for diagnostic-only tests."""
+
+
+def _require_fixed(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message, pytrace=False)
+
+
 def _postgres_test_config() -> dict[str, str | int]:
     values = {name: os.environ.get(name) for name in _POSTGRES_ENV}
     configured = [name for name, value in values.items() if value]
@@ -64,7 +73,20 @@ def _runtime_dsn(config: dict[str, str | int], database: str) -> str:
 
 
 def _sanitized_setup_failure(action: str, exc: Exception) -> RuntimeError:
-    return RuntimeError(f"PostgreSQL smoke setup failed [{action}: {type(exc).__name__}]")
+    from ares.db.postgres import _postgres_operational_category
+
+    if action == "runtime-initialize":
+        from ares.db.postgres import _postgres_startup_diagnostic_label
+
+        diagnostic = _postgres_startup_diagnostic_label(exc)
+        return RuntimeError(
+            "PostgreSQL smoke setup failed "
+            f"[runtime-initialize:{diagnostic}]"
+        )
+    category = _postgres_operational_category(exc)
+    return RuntimeError(
+        f"PostgreSQL smoke setup failed [{action}:{category}]"
+    )
 
 
 async def _attempt_cleanup(
@@ -76,6 +98,186 @@ async def _attempt_cleanup(
         await cleanup()
     except Exception as exc:
         failures.append(f"{action}: {type(exc).__name__}")
+
+
+def test_postgres_startup_diagnostic_statement_contract() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_FALLBACK_DDL_CODES,
+        _POSTGRES_FALLBACK_STATEMENT_SPANS,
+        _postgres_fallback_failure_invariant,
+    )
+
+    codes_are_unique = (
+        len(_POSTGRES_FALLBACK_DDL_CODES)
+        == len(set(_POSTGRES_FALLBACK_DDL_CODES))
+        == len(_POSTGRES_FALLBACK_STATEMENT_SPANS)
+    )
+    _require_fixed(
+        codes_are_unique,
+        "Fallback statements require unique diagnostic identifiers",
+    )
+    every_statement_maps = True
+    spans_are_ordered = True
+    previous_end = 0
+    for code, start, end in _POSTGRES_FALLBACK_STATEMENT_SPANS:
+        failure = PostgresError("diagnostic canary")
+        failure.position = start + ((end - start) // 2)
+        every_statement_maps = (
+            every_statement_maps
+            and _postgres_fallback_failure_invariant(failure) == code
+        )
+        spans_are_ordered = (
+            spans_are_ordered
+            and start > previous_end
+            and end >= start
+        )
+        previous_end = end
+    _require_fixed(
+        every_statement_maps,
+        "Every fallback statement must map to its fixed identifier",
+    )
+    _require_fixed(
+        spans_are_ordered,
+        "Fallback diagnostic statement spans must be ordered",
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None:
+    from ares.db.postgres import (
+        PostgresDatabase,
+        _postgres_restage_startup_error,
+        _postgres_startup_diagnostic_label,
+        _postgres_startup_error,
+        _postgres_ticket_schema_error,
+    )
+
+    canary = "diagnostic-canary-not-for-output"
+
+    class _OwnershipFailureConnection:
+        async def fetch(self, *_args: object) -> object:
+            raise PostgresError(canary)
+
+    try:
+        await PostgresDatabase._managed_schema_revision(
+            _OwnershipFailureConnection()
+        )
+    except Exception as exc:
+        ownership_failure: BaseException = exc
+    else:
+        pytest.fail("Ownership failure must be diagnosed", pytrace=False)
+
+    ddl_cause = PostgresError(canary)
+    ddl_failure = _postgres_startup_error(
+        "PostgreSQL schema validation failed",
+        stage="fallback-ddl",
+        invariant="campaigns-table",
+        cause=ddl_cause,
+    )
+    validation_failure = _postgres_restage_startup_error(
+        _postgres_ticket_schema_error("ticket-columns"),
+        "fallback-validation",
+    )
+    typed_unknown_failure = _postgres_startup_error(
+        "PostgreSQL schema validation failed",
+        stage="fallback-validation",
+        invariant="ticket-validation-unclassified",
+        cause=RuntimeError(canary),
+    )
+    unknown_failure = RuntimeError(canary)
+
+    labels = (
+        _postgres_startup_diagnostic_label(ownership_failure),
+        _postgres_startup_diagnostic_label(ddl_failure),
+        _postgres_startup_diagnostic_label(validation_failure),
+        _postgres_startup_diagnostic_label(typed_unknown_failure),
+        _postgres_startup_diagnostic_label(unknown_failure),
+    )
+    labels_are_exact = labels == (
+        "ownership:ownership-relation-query:database",
+        "fallback-ddl:campaigns-table:database",
+        "fallback-validation:ticket-columns:none",
+        "unclassified",
+        "unclassified",
+    )
+    _require_fixed(
+        labels_are_exact,
+        "Startup diagnostic stages must remain distinct and fixed",
+    )
+    public_messages_are_generic = (
+        str(ownership_failure) == "PostgreSQL schema validation failed"
+        and str(ddl_failure) == "PostgreSQL schema validation failed"
+        and str(validation_failure)
+        == "Incompatible WebSocket ticket schema"
+    )
+    _require_fixed(
+        public_messages_are_generic,
+        "Startup diagnostics must preserve generic public messages",
+    )
+    rendered = " ".join(
+        (
+            *labels,
+            str(ownership_failure),
+            repr(ownership_failure),
+            str(ddl_failure),
+            repr(ddl_failure),
+            str(validation_failure),
+            repr(validation_failure),
+        )
+    )
+    _require_fixed(
+        canary not in rendered,
+        "Startup diagnostics must not expose source content",
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_startup_cleanup_preserves_primary_diagnostic() -> None:
+    from ares.db.postgres import (
+        PostgresDatabase,
+        _postgres_startup_diagnostic_label,
+        _postgres_startup_error,
+    )
+
+    canary = "cleanup-canary-not-for-output"
+
+    class _FailingPool:
+        async def close(self) -> None:
+            raise RuntimeError(canary)
+
+    database = PostgresDatabase("synthetic")
+    pool = _FailingPool()
+    database._pool = pool
+    primary = _postgres_startup_error(
+        "PostgreSQL schema validation failed",
+        stage="fallback-validation",
+        invariant="ticket-index-inventory",
+    )
+    await database._close_failed_startup_pool(pool, primary)
+
+    primary_is_preserved = (
+        _postgres_startup_diagnostic_label(primary)
+        == "fallback-validation:ticket-index-inventory:none"
+    )
+    _require_fixed(
+        primary_is_preserved,
+        "Cleanup failure must not replace the primary diagnostic",
+    )
+    notes = tuple(getattr(primary, "__notes__", ()))
+    notes_are_sanitized = (
+        len(notes) == 1
+        and notes[0]
+        == "PostgreSQL startup cleanup failure [pool-close: runtime]"
+        and canary not in " ".join(notes)
+    )
+    _require_fixed(
+        notes_are_sanitized,
+        "Cleanup diagnostics must remain fixed and sanitized",
+    )
+    _require_fixed(
+        database._pool is None,
+        "Failed startup cleanup must clear the candidate pool",
+    )
 
 
 @pytest.mark.asyncio
@@ -126,6 +328,61 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
         except Exception as exc:
             raise _sanitized_setup_failure("database-create", exc) from None
 
+        target_probe = None
+        try:
+            target_probe = await asyncpg.connect(
+                host=config["host"],
+                port=config["port"],
+                user=config["user"],
+                database=test_database,
+            )
+            initial_application_count = int(
+                await target_probe.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema=current_schema()
+                    """
+                )
+            )
+            initial_version_relation = bool(
+                await target_probe.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM pg_class AS rel
+                        JOIN pg_namespace AS nsp
+                          ON nsp.oid=rel.relnamespace
+                        WHERE nsp.nspname=current_schema()
+                          AND rel.relname='alembic_version'
+                    )
+                    """
+                )
+            )
+        except Exception as exc:
+            raise _sanitized_setup_failure(
+                "empty-catalog-probe",
+                exc,
+            ) from None
+        finally:
+            if target_probe is not None:
+                try:
+                    await target_probe.close()
+                except Exception as exc:
+                    raise _sanitized_setup_failure(
+                        "empty-catalog-probe-close",
+                        exc,
+                    ) from None
+
+        _require_fixed(
+            initial_application_count == 0,
+            "Runtime smoke database must begin without application tables",
+        )
+        _require_fixed(
+            not initial_version_relation,
+            "Runtime smoke database must begin without Alembic ownership",
+        )
+
         database = PostgresDatabase(
             _runtime_dsn(config, test_database),
             pool_min=1,
@@ -136,8 +393,35 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
         except Exception as exc:
             raise _sanitized_setup_failure("runtime-initialize", exc) from None
         runtime_connected = True
+        initial_trace_is_exact = tuple(database._startup_trace) == (
+            "fallback-entered",
+            "fallback-ddl-complete",
+            "startup-ready",
+        )
+        _require_fixed(
+            initial_trace_is_exact,
+            "Unversioned runtime startup must complete the fallback path",
+        )
 
         async with database._pool.acquire() as connection:
+            version_relation_exists = bool(
+                await connection.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM pg_class AS rel
+                        JOIN pg_namespace AS nsp
+                          ON nsp.oid=rel.relnamespace
+                        WHERE nsp.nspname=current_schema()
+                          AND rel.relname='alembic_version'
+                    )
+                    """
+                )
+            )
+            _require_fixed(
+                not version_relation_exists,
+                "Runtime fallback must not stamp Alembic ownership",
+            )
             table_rows = await connection.fetch(
                 """
                 SELECT table_name
@@ -252,6 +536,39 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
 
         async with database._pool.acquire() as reusable_connection:
             assert await reusable_connection.fetchval("SELECT 1") == 1
+
+        await database.close()
+        runtime_connected = False
+        database = PostgresDatabase(
+            _runtime_dsn(config, test_database),
+            pool_min=1,
+            pool_max=2,
+        )
+        try:
+            await database.connect()
+        except Exception as exc:
+            raise _sanitized_setup_failure(
+                "runtime-reconnect",
+                exc,
+            ) from None
+        runtime_connected = True
+        reconnect_trace_is_exact = tuple(database._startup_trace) == (
+            "fallback-entered",
+            "fallback-ddl-complete",
+            "startup-ready",
+        )
+        _require_fixed(
+            reconnect_trace_is_exact,
+            "Unversioned runtime reconnect must complete the fallback path",
+        )
+        async with database._pool.acquire() as reusable_connection:
+            reusable_after_reconnect = (
+                await reusable_connection.fetchval("SELECT 1") == 1
+            )
+        _require_fixed(
+            reusable_after_reconnect,
+            "Runtime pool must remain reusable after reconnect",
+        )
     finally:
         primary_failure = sys.exception()
 
