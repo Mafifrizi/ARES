@@ -695,6 +695,65 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
                 not version_relation_exists,
                 "Runtime fallback must not stamp Alembic ownership",
             )
+            relation_metadata = await connection.fetchrow(
+                """
+                SELECT rel.relkind::text AS relkind,
+                       rel.relpersistence::text AS relpersistence,
+                       rel.relispartition,
+                       rel.relrowsecurity,
+                       rel.relforcerowsecurity,
+                       (
+                           SELECT COUNT(*)
+                           FROM pg_inherits
+                           WHERE inhrelid=rel.oid
+                       ) AS parent_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM pg_inherits
+                           WHERE inhparent=rel.oid
+                       ) AS child_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM pg_policy
+                           WHERE polrelid=rel.oid
+                       ) AS policy_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM pg_trigger
+                           WHERE tgrelid=rel.oid
+                             AND NOT tgisinternal
+                       ) AS user_trigger_count,
+                       (
+                           SELECT COUNT(*)
+                           FROM pg_rewrite
+                           WHERE ev_class=rel.oid
+                             AND rulename <> '_RETURN'
+                       ) AS user_rule_count
+                FROM pg_class AS rel
+                JOIN pg_namespace AS nsp ON nsp.oid=rel.relnamespace
+                WHERE nsp.nspname=current_schema()
+                  AND rel.relname='websocket_tickets'
+                """
+            )
+            relation_metadata_is_canonical = (
+                relation_metadata is not None
+                and type(relation_metadata["relkind"]) is str
+                and relation_metadata["relkind"] == "r"
+                and type(relation_metadata["relpersistence"]) is str
+                and relation_metadata["relpersistence"] == "p"
+                and relation_metadata["relispartition"] is False
+                and relation_metadata["relrowsecurity"] is False
+                and relation_metadata["relforcerowsecurity"] is False
+                and relation_metadata["parent_count"] == 0
+                and relation_metadata["child_count"] == 0
+                and relation_metadata["policy_count"] == 0
+                and relation_metadata["user_trigger_count"] == 0
+                and relation_metadata["user_rule_count"] == 0
+            )
+            _require_fixed(
+                relation_metadata_is_canonical,
+                "Runtime ticket relation metadata must be canonical",
+            )
             table_rows = await connection.fetch(
                 """
                 SELECT table_name
