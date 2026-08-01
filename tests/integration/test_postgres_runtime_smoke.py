@@ -48,6 +48,275 @@ def _canonical_ticket_relation_metadata() -> dict[str, object]:
     }
 
 
+def _canonical_ticket_columns() -> list[dict[str, object]]:
+    definitions = (
+        ("ticket_hash", "text", True),
+        ("campaign_id", "text", True),
+        ("user_id", "text", True),
+        ("credential_kind", "text", True),
+        ("bearer_subject", "text", False),
+        ("bearer_jti", "text", False),
+        ("bearer_expires_at", "timestamp with time zone", False),
+        ("api_key_id", "text", False),
+        ("required_scope", "text", False),
+        ("created_at", "timestamp with time zone", True),
+        ("expires_at", "timestamp with time zone", True),
+        ("consumed_at", "timestamp with time zone", False),
+    )
+    return [
+        {
+            "column_name": name,
+            "data_type": data_type,
+            "attnotnull": not_null,
+            "attidentity": "",
+            "attgenerated": "",
+            "collation_is_default": True,
+            "column_default": None,
+        }
+        for name, data_type, not_null in definitions
+    ]
+
+
+def _expected_ticket_column_contract() -> list[
+    tuple[str, str, bool, str, str, bool, str | None]
+]:
+    return [
+        (
+            str(row["column_name"]),
+            str(row["data_type"]),
+            bool(row["attnotnull"]),
+            "",
+            "",
+            True,
+            None,
+        )
+        for row in _canonical_ticket_columns()
+    ]
+
+
+def _canonical_ticket_constraints() -> list[dict[str, object]]:
+    checks = {
+        "ck_ws_ticket_hash": "CHECK (ticket_hash ~ '^[0-9a-f]{64}$'::text)",
+        "ck_ws_ticket_kind": (
+            "CHECK (credential_kind = ANY "
+            "(ARRAY['bearer'::text, 'api_key'::text]))"
+        ),
+        "ck_ws_ticket_created_at": "CHECK (created_at < expires_at)",
+        "ck_ws_ticket_expires_at": "CHECK (expires_at > created_at)",
+        "ck_ws_ticket_consumed_at": (
+            "CHECK (consumed_at IS NULL OR consumed_at < expires_at)"
+        ),
+        "ck_ws_ticket_bearer_expires_finite": (
+            "CHECK (bearer_expires_at IS NULL OR isfinite(bearer_expires_at))"
+        ),
+        "ck_ws_ticket_created_finite": "CHECK (isfinite(created_at))",
+        "ck_ws_ticket_expires_finite": "CHECK (isfinite(expires_at))",
+        "ck_ws_ticket_consumed_finite": (
+            "CHECK (consumed_at IS NULL OR isfinite(consumed_at))"
+        ),
+        "ck_ws_ticket_time_order": (
+            "CHECK (expires_at > created_at AND "
+            "(consumed_at IS NULL OR consumed_at < expires_at))"
+        ),
+        "ck_ws_ticket_source_shape": (
+            "CHECK (credential_kind = 'bearer'::text "
+            "AND bearer_subject IS NOT NULL "
+            "AND length(btrim(bearer_subject)) > 0 "
+            "AND bearer_subject = btrim(bearer_subject) "
+            "AND bearer_jti IS NOT NULL "
+            "AND length(btrim(bearer_jti)) > 0 "
+            "AND bearer_jti = btrim(bearer_jti) "
+            "AND bearer_expires_at IS NOT NULL "
+            "AND api_key_id IS NULL AND required_scope IS NULL "
+            "OR credential_kind = 'api_key'::text "
+            "AND bearer_subject IS NULL AND bearer_jti IS NULL "
+            "AND bearer_expires_at IS NULL AND api_key_id IS NOT NULL "
+            "AND length(btrim(api_key_id)) > 0 "
+            "AND api_key_id = btrim(api_key_id) "
+            "AND required_scope = 'read'::text)"
+        ),
+    }
+    rows: list[dict[str, object]] = []
+    for name, definition in checks.items():
+        rows.append(
+            {
+                "conname": name,
+                "contype": b"c",
+                "table_oid": 1,
+                "referenced_oid": 0,
+                "constraint_index_oid": 0,
+                "convalidated": True,
+                "condeferrable": False,
+                "condeferred": False,
+                "definition": definition,
+                "referenced_schema_oid": None,
+                "referenced_schema": None,
+                "referenced_table": None,
+                "local_columns": [],
+                "remote_columns": [],
+                "confupdtype": b"a",
+                "confdeltype": b"a",
+            }
+        )
+    references = (
+        (
+            "fk_ws_ticket_api_key",
+            "api_key_id",
+            "api_keys",
+            201,
+            "FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
+        ),
+        (
+            "fk_ws_ticket_campaign",
+            "campaign_id",
+            "campaigns",
+            202,
+            "FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE",
+        ),
+        (
+            "fk_ws_ticket_user",
+            "user_id",
+            "users",
+            203,
+            "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+        ),
+    )
+    for name, column, table, referenced_oid, definition in references:
+        rows.append(
+            {
+                "conname": name,
+                "contype": b"f",
+                "table_oid": 1,
+                "referenced_oid": referenced_oid,
+                "constraint_index_oid": 0,
+                "convalidated": True,
+                "condeferrable": False,
+                "condeferred": False,
+                "definition": definition,
+                "referenced_schema_oid": 2,
+                "referenced_schema": "public",
+                "referenced_table": table,
+                "local_columns": [column],
+                "remote_columns": ["id"],
+                "confupdtype": b"a",
+                "confdeltype": b"c",
+            }
+        )
+    rows.append(
+        {
+            "conname": "websocket_tickets_pkey",
+            "contype": b"p",
+            "table_oid": 1,
+            "referenced_oid": 0,
+            "constraint_index_oid": 105,
+            "convalidated": True,
+            "condeferrable": False,
+            "condeferred": False,
+            "definition": "PRIMARY KEY (ticket_hash)",
+            "referenced_schema_oid": None,
+            "referenced_schema": None,
+            "referenced_table": None,
+            "local_columns": ["ticket_hash"],
+            "remote_columns": [],
+            "confupdtype": b"a",
+            "confdeltype": b"a",
+        }
+    )
+    return sorted(rows, key=lambda row: str(row["conname"]))
+
+
+def _canonical_ticket_indexes() -> list[dict[str, object]]:
+    definitions = (
+        ("idx_ws_tickets_api_key", "api_key_id", "text_ops", 11, False),
+        ("idx_ws_tickets_campaign", "campaign_id", "text_ops", 11, False),
+        (
+            "idx_ws_tickets_expires",
+            "expires_at",
+            "timestamptz_ops",
+            12,
+            False,
+        ),
+        ("idx_ws_tickets_user", "user_id", "text_ops", 11, False),
+        ("websocket_tickets_pkey", "ticket_hash", "text_ops", 11, True),
+    )
+    rows: list[dict[str, object]] = []
+    for ordinal, (name, column, opclass, opclass_oid, primary) in enumerate(
+        definitions,
+        start=101,
+    ):
+        rows.append(
+            {
+                "table_oid": 1,
+                "index_oid": 105 if primary else ordinal,
+                "index_schema_oid": 2,
+                "index_schema": "public",
+                "index_name": name,
+                "index_relkind": b"i",
+                "index_relpersistence": b"p",
+                "index_is_partition": False,
+                "access_method": "btree",
+                "indisunique": primary,
+                "indisprimary": primary,
+                "indisvalid": True,
+                "indisready": True,
+                "indislive": True,
+                "indnkeyatts": 1,
+                "indnatts": 1,
+                "columns": [column],
+                "column_options": [0],
+                "operator_classes": [opclass],
+                "operator_class_oids": [opclass_oid],
+                "operator_class_namespaces": ["pg_catalog"],
+                "column_collations_match": [True],
+                "expressions": None,
+                "predicate": None,
+                "definition": "closed-source-defined-index",
+            }
+        )
+    return rows
+
+
+class _CompleteTicketCensusConnection:
+    async def fetchrow(self, query: str, *_args: object) -> object:
+        if "FROM pg_class AS rel" not in query:
+            raise RuntimeError("closed-test-query")
+        return {
+            "table_oid": 1,
+            "schema_oid": 2,
+            "schema_name": "public",
+            **_canonical_ticket_relation_metadata(),
+        }
+
+    async def fetch(self, query: str, *_args: object) -> object:
+        if "FROM pg_attribute AS att" in query:
+            rows = _canonical_ticket_columns()
+            for row in rows:
+                row["attidentity"] = b"\x00"
+                row["attgenerated"] = b"\x00"
+            return rows
+        if "FROM pg_constraint AS con" in query:
+            return _canonical_ticket_constraints()
+        if "FROM pg_index AS ind" in query:
+            return _canonical_ticket_indexes()
+        if "FROM pg_opclass AS opc" in query:
+            return [
+                {"opcname": "text_ops", "opclass_oid": 11},
+                {"opcname": "timestamptz_ops", "opclass_oid": 12},
+            ]
+        if "SELECT rel.relname" in query:
+            return [
+                {"relname": "api_keys", "relation_oid": 201},
+                {"relname": "campaigns", "relation_oid": 202},
+                {"relname": "users", "relation_oid": 203},
+            ]
+        raise RuntimeError("closed-test-query")
+
+    async def fetchval(self, query: str, *_args: object) -> object:
+        if "current_schema" in query:
+            return "public"
+        raise RuntimeError("closed-test-query")
+
+
 def _postgres_test_config() -> dict[str, str | int]:
     values = {name: os.environ.get(name) for name in _POSTGRES_ENV}
     configured = [name for name, value in values.items() if value]
@@ -398,10 +667,197 @@ def test_postgres_ticket_relation_diagnostic_rendering_is_closed() -> None:
     )
 
 
+def test_postgres_ticket_census_covers_every_rejection_predicate() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_CENSUS_REJECTION_FIELDS,
+        _POSTGRES_TICKET_INVARIANTS,
+    )
+
+    covered_once = (
+        set(_POSTGRES_TICKET_CENSUS_REJECTION_FIELDS)
+        == set(_POSTGRES_TICKET_INVARIANTS)
+        and len(_POSTGRES_TICKET_CENSUS_REJECTION_FIELDS)
+        == len(_POSTGRES_TICKET_INVARIANTS)
+        and all(
+            isinstance(field, str) and field
+            for field in _POSTGRES_TICKET_CENSUS_REJECTION_FIELDS.values()
+        )
+    )
+    _require_fixed(
+        covered_once,
+        "Every ticket-schema rejection requires one closed census field",
+    )
+
+
+def test_postgres_ticket_census_all_zero_and_closed_rendering() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_TICKET_CENSUS_FIELDS,
+        _is_postgres_ticket_schema_census,
+        _new_postgres_ticket_schema_census,
+        _postgres_startup_diagnostic_label,
+        _postgres_ticket_schema_census_invariant,
+        _PostgresStartupDiagnosticError,
+    )
+
+    census = _new_postgres_ticket_schema_census()
+    invariant = _postgres_ticket_schema_census_invariant(census)
+    all_sections_present = all(
+        f"{section}=" in invariant
+        for section, _fields in _POSTGRES_TICKET_CENSUS_FIELDS
+    )
+    error = _PostgresStartupDiagnosticError(
+        "Incompatible WebSocket ticket schema",
+        diagnostic_stage="fallback-validation",
+        diagnostic_invariant=invariant,
+    )
+    label = _postgres_startup_diagnostic_label(error)
+    _require_fixed(
+        all_sections_present
+        and _is_postgres_ticket_schema_census(invariant)
+        and label == f"fallback-validation:{invariant}:none",
+        "The canonical census requires every deterministic zero section",
+    )
+
+    malformed = (
+        invariant.replace("r=m000", "r=m400", 1),
+        invariant + ";extra=q00",
+        invariant.replace(";c=", ";canary=", 1),
+        invariant.replace("g0", "g2", 1),
+    )
+    _require_fixed(
+        not any(_is_postgres_ticket_schema_census(item) for item in malformed),
+        "Unknown census values must not enter startup diagnostics",
+    )
+
+
+def test_postgres_ticket_column_census_distinguishes_every_dimension() -> None:
+    from ares.db.postgres import _postgres_ticket_column_census
+
+    expected = _expected_ticket_column_contract()
+    canonical = _canonical_ticket_columns()
+    zero = _postgres_ticket_column_census(canonical, expected)
+    _require_fixed(
+        not any(zero.values()),
+        "Canonical ticket columns must produce a zero census",
+    )
+
+    codec = [dict(row) for row in canonical]
+    for row in codec:
+        row["attidentity"] = b"\x00"
+        row["attgenerated"] = b"\x00"
+    codec_result = _postgres_ticket_column_census(codec, expected)
+    _require_fixed(
+        codec_result["a"] == 0xFFF
+        and sum(codec_result.values()) == 0xFFF,
+        "Known internal-character codecs require only alternate bits",
+    )
+
+    mutations: tuple[tuple[str, object, str], ...] = (
+        ("data_type", "integer", "t"),
+        ("attnotnull", False, "u"),
+        ("column_default", "now()", "d"),
+        ("collation_is_default", False, "l"),
+        ("attidentity", "d", "i"),
+    )
+    dimensions_are_distinct = True
+    for source_field, value, census_field in mutations:
+        rows = [dict(row) for row in canonical]
+        rows[0][source_field] = value
+        result = _postgres_ticket_column_census(rows, expected)
+        dimensions_are_distinct = (
+            dimensions_are_distinct
+            and result[census_field] == 0x001
+            and sum(result.values()) == 0x001
+        )
+    _require_fixed(
+        dimensions_are_distinct,
+        "Column mutations require distinct bounded census dimensions",
+    )
+
+    missing = _postgres_ticket_column_census(canonical[1:], expected)
+    extra_rows = [dict(row) for row in canonical]
+    extra = dict(canonical[-1])
+    extra["column_name"] = "closed-test-extra"
+    extra_rows.append(extra)
+    extra_result = _postgres_ticket_column_census(extra_rows, expected)
+    reordered_rows = [dict(row) for row in canonical]
+    reordered_rows[0], reordered_rows[1] = reordered_rows[1], reordered_rows[0]
+    reordered = _postgres_ticket_column_census(reordered_rows, expected)
+    unexpected_rows = [dict(row) for row in canonical]
+    unexpected_rows[0]["attidentity"] = object()
+    unexpected = _postgres_ticket_column_census(unexpected_rows, expected)
+    _require_fixed(
+        missing["m"] == 0x001
+        and missing["o"] != 0
+        and extra_result["e"] == 1
+        and reordered["o"] == 0x003
+        and unexpected["x"] == 0x001,
+        "Missing, extra, order, and shape failures require distinct fields",
+    )
+
+
+def test_postgres_ticket_census_reports_cross_group_mutations_together() -> None:
+    from ares.db.postgres import (
+        _new_postgres_ticket_schema_census,
+        _postgres_ticket_schema_census_invariant,
+    )
+
+    census = _new_postgres_ticket_schema_census()
+    census["c"]["t"] = 0x001
+    census["q"]["s"] = 0x0002
+    census["f"]["d"] = 0x4
+    census["i"]["a"] = 0x08
+    invariant = _postgres_ticket_schema_census_invariant(census)
+    all_mutations_survive = all(
+        fragment in invariant
+        for fragment in ("t001", "s0002", "d4", "a08")
+    )
+    _require_fixed(
+        all_mutations_survive,
+        "Independent later-group mutations must survive one census payload",
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_ticket_validator_censuses_all_later_groups() -> None:
+    from ares.db.postgres import (
+        PostgresDatabase,
+        _is_postgres_ticket_schema_census,
+        _PostgresStartupDiagnosticError,
+    )
+
+    try:
+        await PostgresDatabase._validate_websocket_ticket_schema(
+            _CompleteTicketCensusConnection()
+        )
+    except _PostgresStartupDiagnosticError as exc:
+        invariant = exc.diagnostic_invariant
+    else:
+        pytest.fail("Alternate catalog codecs must remain rejected", pytrace=False)
+
+    complete = (
+        _is_postgres_ticket_schema_census(invariant)
+        and "c=m000,e0,o000,t000,u000,d000,l000,i000,afff,x000,g0"
+        in invariant
+        and "q=m0000,e0,t0000,v0000,f0000,d0000,s0000,b0000,a7fff,x0000,g0"
+        in invariant
+        and "h=t000,v000,f000,d000,s000,a7ff,x000,g0" in invariant
+        and "f=l0,s0,t0,r0,u0,d0,i0,a7,x0,g0" in invariant
+        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h1f,x00,g0"
+        in invariant
+        and ";o=m0,e0,x0,g0;z=q00,x00" in invariant
+    )
+    _require_fixed(
+        complete,
+        "A column rejection must retain canonical and alternate later groups",
+    )
+
+
 @pytest.mark.asyncio
 async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None:
     from ares.db.postgres import (
         PostgresDatabase,
+        _is_postgres_ticket_schema_census,
         _postgres_restage_startup_error,
         _postgres_startup_diagnostic_label,
         _postgres_startup_error,
@@ -463,16 +919,28 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         _postgres_startup_diagnostic_label(unknown_failure),
         _postgres_startup_diagnostic_label(relation_query_failure),
     )
-    labels_are_exact = labels == (
+    census_prefix = "managed-validation:"
+    census_suffix = ":none"
+    relation_census = labels[5]
+    relation_invariant = (
+        relation_census[len(census_prefix):-len(census_suffix)]
+        if relation_census.startswith(census_prefix)
+        and relation_census.endswith(census_suffix)
+        else ""
+    )
+    labels_are_exact = labels[:5] == (
         "ownership:ownership-relation-query:database",
         "fallback-ddl:campaigns-table:database",
         "fallback-validation:ticket-columns:none",
         "unclassified",
         "unclassified",
-        "managed-validation:ticket-relation-query:database",
+    ) and _is_postgres_ticket_schema_census(relation_invariant)
+    complete_query_failure = (
+        ";z=q7f,x00" in relation_invariant
+        and "r=m000,a000,x000,n3ff,g0" in relation_invariant
     )
     _require_fixed(
-        labels_are_exact,
+        labels_are_exact and complete_query_failure,
         "Startup diagnostic stages must remain distinct and fixed",
     )
     public_messages_are_generic = (

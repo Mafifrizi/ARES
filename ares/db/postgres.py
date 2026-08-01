@@ -573,6 +573,235 @@ def _is_postgres_ticket_relation_diagnostic(invariant: str) -> bool:
     )
 
 
+_POSTGRES_TICKET_CENSUS_FIELDS = (
+    ("r", (("m", 0x3FF, 3), ("a", 0x3FF, 3), ("x", 0x3FF, 3),
+           ("n", 0x3FF, 3), ("g", 0x1, 1))),
+    ("c", (("m", 0xFFF, 3), ("e", 0x1, 1), ("o", 0xFFF, 3),
+           ("t", 0xFFF, 3), ("u", 0xFFF, 3), ("d", 0xFFF, 3),
+           ("l", 0xFFF, 3), ("i", 0xFFF, 3), ("a", 0xFFF, 3),
+           ("x", 0xFFF, 3), ("g", 0x1, 1))),
+    ("q", (("m", 0x7FFF, 4), ("e", 0x1, 1), ("t", 0x7FFF, 4),
+           ("v", 0x7FFF, 4), ("f", 0x7FFF, 4), ("d", 0x7FFF, 4),
+           ("s", 0x7FFF, 4), ("b", 0x7FFF, 4), ("a", 0x7FFF, 4),
+           ("x", 0x7FFF, 4), ("g", 0x1, 1))),
+    ("p", (("l", 0x1, 1), ("r", 0x1, 1), ("n", 0x1, 1),
+           ("i", 0x1, 1), ("a", 0x1, 1), ("x", 0x1, 1),
+           ("g", 0x1, 1))),
+    ("h", (("t", 0x7FF, 3), ("v", 0x7FF, 3), ("f", 0x7FF, 3),
+           ("d", 0x7FF, 3), ("s", 0x7FF, 3), ("a", 0x7FF, 3),
+           ("x", 0x7FF, 3), ("g", 0x1, 1))),
+    ("f", (("l", 0x7, 1), ("s", 0x7, 1), ("t", 0x7, 1),
+           ("r", 0x7, 1), ("u", 0x7, 1), ("d", 0x7, 1),
+           ("i", 0x7, 1), ("a", 0x7, 1), ("x", 0x7, 1),
+           ("g", 0x1, 1))),
+    ("i", (("m", 0x1F, 2), ("e", 0x1, 1), ("o", 0x1F, 2),
+           ("b", 0x1F, 2), ("u", 0x1F, 2), ("p", 0x1F, 2),
+           ("v", 0x1F, 2), ("r", 0x1F, 2), ("l", 0x1F, 2),
+           ("k", 0x1F, 2), ("n", 0x1F, 2), ("c", 0x1F, 2),
+           ("d", 0x1F, 2), ("a", 0x1F, 2), ("j", 0x1F, 2),
+           ("s", 0x1F, 2), ("t", 0x1F, 2), ("y", 0x1F, 2),
+           ("h", 0x1F, 2), ("x", 0x1F, 2), ("g", 0x1, 1))),
+    ("o", (("m", 0x3, 1), ("e", 0x1, 1), ("x", 0x3, 1),
+           ("g", 0x1, 1))),
+    ("z", (("q", 0x7F, 2), ("x", 0x7F, 2))),
+)
+
+
+def _new_postgres_ticket_schema_census() -> dict[str, dict[str, int]]:
+    return {
+        section: {field: 0 for field, _maximum, _width in fields}
+        for section, fields in _POSTGRES_TICKET_CENSUS_FIELDS
+    }
+
+
+def _postgres_ticket_schema_census_invariant(
+    census: dict[str, dict[str, int]],
+) -> str:
+    sections: list[str] = []
+    for section, fields in _POSTGRES_TICKET_CENSUS_FIELDS:
+        values = census.get(section)
+        if not isinstance(values, dict):
+            return "ticket-validation-unclassified"
+        encoded: list[str] = []
+        for field, maximum, width in fields:
+            value = values.get(field)
+            if type(value) is not int or not 0 <= value <= maximum:
+                return "ticket-validation-unclassified"
+            encoded.append(f"{field}{value:0{width}x}")
+        sections.append(f"{section}=" + ",".join(encoded))
+    return "ticket-census:" + ";".join(sections)
+
+
+def _is_postgres_ticket_schema_census(invariant: str) -> bool:
+    if not invariant.startswith("ticket-census:"):
+        return False
+    census = _new_postgres_ticket_schema_census()
+    sections = invariant.removeprefix("ticket-census:").split(";")
+    if len(sections) != len(_POSTGRES_TICKET_CENSUS_FIELDS):
+        return False
+    for encoded_section, (section, fields) in zip(
+        sections, _POSTGRES_TICKET_CENSUS_FIELDS, strict=True
+    ):
+        key, separator, encoded_fields = encoded_section.partition("=")
+        parts = encoded_fields.split(",")
+        if separator != "=" or key != section or len(parts) != len(fields):
+            return False
+        for part, (field, maximum, width) in zip(parts, fields, strict=True):
+            encoded = part.removeprefix(field)
+            if (
+                not part.startswith(field)
+                or len(encoded) != width
+                or any(character not in "0123456789abcdef" for character in encoded)
+            ):
+                return False
+            value = int(encoded, 16)
+            if value > maximum:
+                return False
+            census[section][field] = value
+    return _postgres_ticket_schema_census_invariant(census) == invariant
+
+
+def _postgres_internal_character(
+    value: object,
+) -> tuple[str | None, bool, bool]:
+    if type(value) is str:
+        return value, False, False
+    if type(value) is bytes and len(value) == 0:
+        return "", True, False
+    if type(value) is bytes and len(value) == 1:
+        raw = value[0]
+        if raw == 0:
+            return "", True, False
+        if 1 <= raw <= 0x7F:
+            return chr(raw), True, False
+    return None, False, True
+
+
+_POSTGRES_TICKET_CENSUS_REJECTION_FIELDS = {
+    "ticket-relation-present": "r.n",
+    "ticket-relation-query": "z.q",
+    "ticket-relation-metadata": "r.m",
+    "ticket-columns": "c",
+    "ticket-constraint-inventory": "q.m",
+    "ticket-canonical-opclasses": "o.m",
+    "ticket-index-identity": "i.y",
+    "ticket-index-inventory": "i",
+    "ticket-constraint-definition-primary": "q",
+    "ticket-constraint-definition-campaign": "q",
+    "ticket-constraint-definition-user": "q",
+    "ticket-constraint-definition-api-key": "q",
+    "ticket-reference-inventory": "f.i",
+    "ticket-constraint-table-binding": "q.b",
+    "ticket-foreign-key-campaign": "f",
+    "ticket-foreign-key-user": "f",
+    "ticket-foreign-key-api-key": "f",
+    "ticket-primary-key-binding": "p",
+    "ticket-check-hash": "h",
+    "ticket-check-kind": "h",
+    "ticket-check-created-at": "h",
+    "ticket-check-expires-at": "h",
+    "ticket-check-consumed-at": "h",
+    "ticket-check-bearer-expires-finite": "h",
+    "ticket-check-created-finite": "h",
+    "ticket-check-expires-finite": "h",
+    "ticket-check-consumed-finite": "h",
+    "ticket-check-time-order": "h",
+    "ticket-check-source-shape": "h",
+    "ticket-validation-unclassified": "z.x",
+}
+
+
+def _postgres_ticket_column_census(
+    rows: object,
+    expected: list[tuple[str, str, bool, str, str, bool, str | None]],
+) -> dict[str, int]:
+    section = _new_postgres_ticket_schema_census()["c"]
+    if not isinstance(rows, (list, tuple)):
+        section["x"] = 0xFFF
+        return section
+
+    expected_names = tuple(item[0] for item in expected)
+    actual_names: list[str | None] = []
+    by_name: dict[str, object] = {}
+    for row in rows:
+        try:
+            raw_name = row["column_name"]  # type: ignore[index]
+        except (KeyError, TypeError, IndexError):
+            actual_names.append(None)
+            section["x"] = 0xFFF
+            continue
+        if type(raw_name) is not str:
+            actual_names.append(None)
+            section["x"] = 0xFFF
+            continue
+        actual_names.append(raw_name)
+        if raw_name in by_name:
+            section["e"] = 1
+        by_name[raw_name] = row
+
+    actual_name_set = {name for name in actual_names if name is not None}
+    section["e"] |= int(bool(actual_name_set - set(expected_names)))
+    if tuple(actual_names) != expected_names:
+        for ordinal, expected_name in enumerate(expected_names):
+            if ordinal >= len(actual_names) or actual_names[ordinal] != expected_name:
+                section["o"] |= 1 << ordinal
+
+    for ordinal, expected_item in enumerate(expected):
+        bit = 1 << ordinal
+        row = by_name.get(expected_item[0])
+        if row is None:
+            section["m"] |= bit
+            continue
+        try:
+            raw_type = row["data_type"]  # type: ignore[index]
+            raw_nullability = row["attnotnull"]  # type: ignore[index]
+            raw_identity = row["attidentity"]  # type: ignore[index]
+            raw_generated = row["attgenerated"]  # type: ignore[index]
+            raw_collation = row["collation_is_default"]  # type: ignore[index]
+            raw_default = row["column_default"]  # type: ignore[index]
+        except (KeyError, TypeError, IndexError):
+            section["x"] |= bit
+            continue
+
+        if type(raw_type) is not str:
+            section["x"] |= bit
+        elif raw_type != expected_item[1]:
+            section["t"] |= bit
+        if type(raw_nullability) is not bool:
+            section["x"] |= bit
+        elif raw_nullability is not expected_item[2]:
+            section["u"] |= bit
+
+        for raw_internal, expected_internal in (
+            (raw_identity, expected_item[3]),
+            (raw_generated, expected_item[4]),
+        ):
+            semantic, alternate, unexpected = _postgres_internal_character(
+                raw_internal
+            )
+            if unexpected:
+                section["x"] |= bit
+            elif semantic != expected_internal:
+                section["i"] |= bit
+            elif alternate:
+                section["a"] |= bit
+
+        if type(raw_collation) is not bool:
+            section["x"] |= bit
+        elif raw_collation is not expected_item[5]:
+            section["l"] |= bit
+        if raw_default is None:
+            actual_default = None
+        elif type(raw_default) is str:
+            actual_default = raw_default
+        else:
+            actual_default = None
+            section["x"] |= bit
+        if actual_default != expected_item[6]:
+            section["d"] |= bit
+    return section
+
+
 _POSTGRES_TICKET_INVARIANTS = frozenset(
     {
         "ticket-relation-present",
@@ -672,6 +901,9 @@ class _PostgresStartupDiagnosticError(RuntimeError):
                 or _is_postgres_ticket_relation_diagnostic(
                     diagnostic_invariant
                 )
+                or _is_postgres_ticket_schema_census(
+                    diagnostic_invariant
+                )
             )
             else "ownership-unclassified"
         )
@@ -699,6 +931,9 @@ def _postgres_startup_diagnostic_label(error: BaseException) -> str:
             error.diagnostic_invariant
             not in _POSTGRES_STARTUP_INVARIANTS
             and not _is_postgres_ticket_relation_diagnostic(
+                error.diagnostic_invariant
+            )
+            and not _is_postgres_ticket_schema_census(
                 error.diagnostic_invariant
             )
         )
@@ -2594,6 +2829,8 @@ class PostgresDatabase:
     @staticmethod
     async def _validate_websocket_ticket_schema(connection: Any) -> None:
         """Reject any ticket catalog that differs from the owned schema."""
+        census = _new_postgres_ticket_schema_census()
+        rejected = False
         try:
             relation = await connection.fetchrow(
                 """
@@ -2639,30 +2876,35 @@ class PostgresDatabase:
             )
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            raise _postgres_startup_error(
-                "Incompatible WebSocket ticket schema",
-                stage="managed-validation",
-                invariant="ticket-relation-query",
-                cause=exc,
-            ) from None
+        except Exception:
+            relation = None
+            census["z"]["q"] |= 0x01
+            rejected = True
         if relation is None:
-            raise _postgres_ticket_schema_error(
-                "ticket-relation-present"
-            )
-        table_oid = int(relation["table_oid"])
-        schema_oid = int(relation["schema_oid"])
-        schema_name = str(relation["schema_name"])
-        if not _postgres_ticket_relation_is_canonical(relation):
-            diagnostic = _postgres_ticket_relation_diagnostic_invariant(
-                _postgres_ticket_relation_diagnostic_masks(relation)
-            )
-            raise _postgres_ticket_schema_error(
-                diagnostic
-            )
+            census["r"]["n"] = 0x3FF
+            rejected = True
+            table_oid = 0
+            schema_oid = 0
+            schema_name = ""
+        else:
+            table_oid = int(relation["table_oid"])
+            schema_oid = int(relation["schema_oid"])
+            schema_name = str(relation["schema_name"])
+            if not _postgres_ticket_relation_is_canonical(relation):
+                relation_masks = _postgres_ticket_relation_diagnostic_masks(
+                    relation
+                )
+                for field, value in zip(
+                    ("m", "a", "x", "n"), relation_masks, strict=True
+                ):
+                    census["r"][field] = value
+                if relation_masks == (0, 0, 0, 0):
+                    census["r"]["g"] = 1
+                rejected = True
 
-        rows = await connection.fetch(
-            """
+        try:
+            rows = await connection.fetch(
+                """
             SELECT att.attname AS column_name,
                    pg_catalog.format_type(att.atttypid, att.atttypmod) AS data_type,
                    att.attnotnull,
@@ -2678,9 +2920,15 @@ class PostgresDatabase:
               AND att.attnum > 0
               AND NOT att.attisdropped
             ORDER BY att.attnum
-            """,
-            table_oid,
-        )
+                """,
+                table_oid,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            rows = []
+            census["z"]["q"] |= 0x02
+            rejected = True
         actual_columns = [
             (
                 str(row["column_name"]),
@@ -2740,10 +2988,17 @@ class PostgresDatabase:
             ),
         ]
         if actual_columns != expected_columns:
-            raise _postgres_ticket_schema_error("ticket-columns")
+            census["c"] = _postgres_ticket_column_census(
+                rows,
+                expected_columns,
+            )
+            if not any(census["c"].values()):
+                census["c"]["g"] = 1
+            rejected = True
 
-        constraint_rows = await connection.fetch(
-            """
+        try:
+            constraint_rows = await connection.fetch(
+                """
             SELECT con.conname, con.contype,
                    con.conrelid::bigint AS table_oid,
                    con.confrelid::bigint AS referenced_oid,
@@ -2776,9 +3031,15 @@ class PostgresDatabase:
             LEFT JOIN pg_namespace AS ref_nsp ON ref_nsp.oid=ref_rel.relnamespace
             WHERE con.conrelid=$1::oid
             ORDER BY con.conname
-            """,
-            table_oid,
-        )
+                """,
+                table_oid,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            constraint_rows = []
+            census["z"]["q"] |= 0x04
+            rejected = True
         actual_constraints = {
             str(row["conname"]): row
             for row in constraint_rows
@@ -2800,13 +3061,22 @@ class PostgresDatabase:
             "fk_ws_ticket_user",
             "websocket_tickets_pkey",
         }
+        constraint_ordinals = {
+            name: ordinal
+            for ordinal, name in enumerate(sorted(expected_constraint_names))
+        }
         if set(actual_constraints) != expected_constraint_names:
-            raise _postgres_ticket_schema_error(
-                "ticket-constraint-inventory"
+            for name in expected_constraint_names - set(actual_constraints):
+                census["q"]["m"] |= 1 << constraint_ordinals[name]
+            census["q"]["e"] = int(
+                bool(set(actual_constraints) - expected_constraint_names)
+                or len(actual_constraints) != len(constraint_rows)
             )
+            rejected = True
 
-        index_rows = await connection.fetch(
-            """
+        try:
+            index_rows = await connection.fetch(
+                """
             SELECT ind.indrelid::bigint AS table_oid,
                    ind.indexrelid::bigint AS index_oid,
                    idx.relnamespace::bigint AS index_schema_oid,
@@ -2880,11 +3150,18 @@ class PostgresDatabase:
             JOIN pg_am AS am ON am.oid=idx.relam
             WHERE ind.indrelid=$1::oid
             ORDER BY idx.relname
-            """,
-            table_oid,
-        )
-        canonical_opclass_rows = await connection.fetch(
-            """
+                """,
+                table_oid,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            index_rows = []
+            census["z"]["q"] |= 0x08
+            rejected = True
+        try:
+            canonical_opclass_rows = await connection.fetch(
+                """
             SELECT opc.opcname, opc.oid::bigint AS opclass_oid
             FROM pg_opclass AS opc
             JOIN pg_namespace AS nsp ON nsp.oid=opc.opcnamespace
@@ -2892,19 +3169,32 @@ class PostgresDatabase:
             WHERE nsp.nspname='pg_catalog'
               AND am.amname='btree'
               AND opc.opcname=ANY($1::text[])
-            """,
-            ["text_ops", "timestamptz_ops"],
-        )
+                """,
+                ["text_ops", "timestamptz_ops"],
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            canonical_opclass_rows = []
+            census["z"]["q"] |= 0x10
+            rejected = True
         canonical_opclasses = {
             str(row["opcname"]): int(row["opclass_oid"])
             for row in canonical_opclass_rows
         }
         if set(canonical_opclasses) != {"text_ops", "timestamptz_ops"}:
-            raise _postgres_ticket_schema_error(
-                "ticket-canonical-opclasses"
+            census["o"]["m"] = (
+                int("text_ops" not in canonical_opclasses)
+                | (int("timestamptz_ops" not in canonical_opclasses) << 1)
             )
+            census["o"]["e"] = int(
+                bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"})
+            )
+            rejected = True
 
         index_oids: set[int] = set()
+        index_identity_failures: set[str] = set()
+        index_identity_alternates: set[str] = set()
         for row in index_rows:
             operator_classes = tuple(
                 str(opclass) for opclass in row["operator_classes"]
@@ -2917,12 +3207,16 @@ class PostgresDatabase:
                 for opclass in operator_classes
             )
             index_oid = int(row["index_oid"])
-            identity_is_exact = (
+            relkind, relkind_alternate, relkind_unexpected = (
+                _postgres_internal_character(row["index_relkind"])
+            )
+            persistence, persistence_alternate, persistence_unexpected = (
+                _postgres_internal_character(row["index_relpersistence"])
+            )
+            identity_noncodec_is_exact = (
                 int(row["table_oid"]) == table_oid
                 and int(row["index_schema_oid"]) == schema_oid
                 and str(row["index_schema"]) == schema_name
-                and str(row["index_relkind"]) == "i"
-                and str(row["index_relpersistence"]) == "p"
                 and not bool(row["index_is_partition"])
                 and tuple(
                     str(namespace)
@@ -2933,10 +3227,24 @@ class PostgresDatabase:
                 and index_oid > 0
                 and index_oid not in index_oids
             )
+            identity_is_exact = (
+                identity_noncodec_is_exact
+                and type(row["index_relkind"]) is str
+                and relkind == "i"
+                and type(row["index_relpersistence"]) is str
+                and persistence == "p"
+            )
             if not identity_is_exact:
-                raise _postgres_ticket_schema_error(
-                    "ticket-index-identity"
-                )
+                index_identity_failures.add(str(row["index_name"]))
+                if (
+                    not relkind_unexpected
+                    and not persistence_unexpected
+                    and identity_noncodec_is_exact
+                    and relkind == "i"
+                    and persistence == "p"
+                    and (relkind_alternate or persistence_alternate)
+                ):
+                    index_identity_alternates.add(str(row["index_name"]))
             index_oids.add(index_oid)
 
         actual_indexes = {
@@ -2985,9 +3293,51 @@ class PostgresDatabase:
             ),
         }
         if actual_indexes != expected_indexes:
-            raise _postgres_ticket_schema_error(
-                "ticket-index-inventory"
+            expected_index_names = tuple(expected_indexes)
+            index_ordinals = {
+                name: ordinal for ordinal, name in enumerate(expected_index_names)
+            }
+            actual_index_names = tuple(str(row["index_name"]) for row in index_rows)
+            actual_index_name_set = set(actual_index_names)
+            for name in set(expected_index_names) - actual_index_name_set:
+                census["i"]["m"] |= 1 << index_ordinals[name]
+            census["i"]["e"] = int(
+                bool(actual_index_name_set - set(expected_index_names))
+                or len(actual_indexes) != len(index_rows)
             )
+            for ordinal, name in enumerate(expected_index_names):
+                bit = 1 << ordinal
+                if ordinal >= len(actual_index_names) or actual_index_names[ordinal] != name:
+                    census["i"]["o"] |= bit
+                actual = actual_indexes.get(name)
+                if actual is None:
+                    continue
+                expected = expected_indexes[name]
+                for field, position in (
+                    ("b", 0), ("u", 1), ("p", 2), ("v", 3),
+                    ("r", 4), ("l", 5), ("k", 6), ("n", 7),
+                    ("c", 8), ("d", 9), ("a", 10), ("j", 11),
+                    ("s", 12), ("t", 13),
+                ):
+                    if actual[position] != expected[position]:
+                        census["i"][field] |= bit
+            rejected = True
+
+        expected_index_ordinals = {
+            name: ordinal for ordinal, name in enumerate(expected_indexes)
+        }
+        for name in index_identity_failures:
+            ordinal = expected_index_ordinals.get(name)
+            if ordinal is None:
+                census["i"]["e"] = 1
+                continue
+            bit = 1 << ordinal
+            if name in index_identity_alternates:
+                census["i"]["h"] |= bit
+            else:
+                census["i"]["y"] |= bit
+        if index_identity_failures:
+            rejected = True
 
         expected_constraint_fragments = {
             "websocket_tickets_pkey": ("p", "PRIMARY KEY (ticket_hash)"),
@@ -3004,34 +3354,56 @@ class PostgresDatabase:
                 "FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
             ),
         }
-        constraint_fragment_invariants = {
-            "websocket_tickets_pkey": (
-                "ticket-constraint-definition-primary"
-            ),
-            "fk_ws_ticket_campaign": (
-                "ticket-constraint-definition-campaign"
-            ),
-            "fk_ws_ticket_user": (
-                "ticket-constraint-definition-user"
-            ),
-            "fk_ws_ticket_api_key": (
-                "ticket-constraint-definition-api-key"
-            ),
-        }
         for name, definition in expected_constraint_fragments.items():
-            row = actual_constraints[name]
-            if (
-                str(row["contype"]) != definition[0]
-                or not bool(row["convalidated"])
-                or bool(row["condeferrable"])
-                or bool(row["condeferred"])
-                or " ".join(str(row["definition"]).split()) != definition[1]
-            ):
-                raise _postgres_ticket_schema_error(
-                    constraint_fragment_invariants[name]
-                )
+            row = actual_constraints.get(name)
+            if row is None:
+                continue
+            bit = 1 << constraint_ordinals[name]
+            contype, alternate, unexpected = _postgres_internal_character(
+                row["contype"]
+            )
+            mismatch = False
+            if unexpected:
+                census["q"]["x"] |= bit
+                mismatch = True
+            elif contype != definition[0]:
+                census["q"]["t"] |= bit
+                mismatch = True
+            elif alternate:
+                census["q"]["a"] |= bit
+                mismatch = True
+            if not bool(row["convalidated"]):
+                census["q"]["v"] |= bit
+                mismatch = True
+            if bool(row["condeferrable"]):
+                census["q"]["f"] |= bit
+                mismatch = True
+            if bool(row["condeferred"]):
+                census["q"]["d"] |= bit
+                mismatch = True
+            if " ".join(str(row["definition"]).split()) != definition[1]:
+                census["q"]["s"] |= bit
+                mismatch = True
+            rejected = rejected or mismatch
 
-        referenced_schema = str(await connection.fetchval("SELECT current_schema()"))
+        try:
+            raw_referenced_schema = await connection.fetchval(
+                "SELECT current_schema()"
+            )
+            referenced_schema = (
+                raw_referenced_schema
+                if type(raw_referenced_schema) is str
+                else ""
+            )
+            if not referenced_schema:
+                census["z"]["x"] |= 0x20
+                rejected = True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            referenced_schema = ""
+            census["z"]["q"] |= 0x20
+            rejected = True
         expected_foreign_keys = {
             "fk_ws_ticket_campaign": (
                 ("campaign_id",), referenced_schema, "campaigns", ("id",), "a", "c",
@@ -3043,40 +3415,45 @@ class PostgresDatabase:
                 ("api_key_id",), referenced_schema, "api_keys", ("id",), "a", "c",
             ),
         }
-        referenced_rows = await connection.fetch(
-            """
+        try:
+            referenced_rows = await connection.fetch(
+                """
             SELECT rel.relname, rel.oid::bigint AS relation_oid
             FROM pg_class AS rel
             WHERE rel.relnamespace=$1::oid
               AND rel.relname=ANY($2::text[])
-            """,
-            schema_oid,
-            ["api_keys", "campaigns", "users"],
-        )
+                """,
+                schema_oid,
+                ["api_keys", "campaigns", "users"],
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            referenced_rows = []
+            census["z"]["q"] |= 0x40
+            rejected = True
         referenced_oids = {
             str(row["relname"]): int(row["relation_oid"])
             for row in referenced_rows
         }
         if set(referenced_oids) != {"api_keys", "campaigns", "users"}:
-            raise _postgres_ticket_schema_error(
-                "ticket-reference-inventory"
-            )
+            census["f"]["i"] = 0x7
+            rejected = True
 
-        if any(
-            int(row["table_oid"]) != table_oid
-            for row in actual_constraints.values()
-        ):
-            raise _postgres_ticket_schema_error(
-                "ticket-constraint-table-binding"
-            )
+        for name, row in actual_constraints.items():
+            ordinal = constraint_ordinals.get(name)
+            if ordinal is not None and int(row["table_oid"]) != table_oid:
+                census["q"]["b"] |= 1 << ordinal
+                rejected = True
 
-        foreign_key_invariants = {
-            "fk_ws_ticket_campaign": "ticket-foreign-key-campaign",
-            "fk_ws_ticket_user": "ticket-foreign-key-user",
-            "fk_ws_ticket_api_key": "ticket-foreign-key-api-key",
+        foreign_key_ordinals = {
+            name: ordinal for ordinal, name in enumerate(expected_foreign_keys)
         }
         for name, expected in expected_foreign_keys.items():
-            row = actual_constraints[name]
+            row = actual_constraints.get(name)
+            if row is None:
+                continue
+            bit = 1 << foreign_key_ordinals[name]
             actual = (
                 tuple(str(column) for column in row["local_columns"]),
                 str(row["referenced_schema"]),
@@ -3089,30 +3466,64 @@ class PostgresDatabase:
                 row["referenced_schema_oid"] is not None
                 and int(row["referenced_schema_oid"]) == schema_oid
                 and int(row["referenced_oid"])
-                == referenced_oids[expected[2]]
+                == referenced_oids.get(expected[2])
             )
-            if actual != expected or not reference_identity_is_exact:
-                raise _postgres_ticket_schema_error(
-                    foreign_key_invariants[name]
+            for field, actual_value, expected_value in zip(
+                ("l", "s", "t", "r"), actual[:4], expected[:4], strict=True
+            ):
+                if actual_value != expected_value:
+                    census["f"][field] |= bit
+                    rejected = True
+            for field, raw_value, expected_value in (
+                ("u", row["confupdtype"], expected[4]),
+                ("d", row["confdeltype"], expected[5]),
+            ):
+                semantic, alternate, unexpected = _postgres_internal_character(
+                    raw_value
                 )
+                if unexpected:
+                    census["f"]["x"] |= bit
+                    rejected = True
+                elif semantic != expected_value:
+                    census["f"][field] |= bit
+                    rejected = True
+                elif alternate:
+                    census["f"]["a"] |= bit
+                    rejected = True
+            if not reference_identity_is_exact:
+                census["f"]["i"] |= bit
+                rejected = True
 
-        primary = actual_constraints["websocket_tickets_pkey"]
-        if (
-            tuple(str(column) for column in primary["local_columns"])
-            != ("ticket_hash",)
-            or tuple(primary["remote_columns"])
-            or primary["referenced_schema"] is not None
-            or primary["referenced_table"] is not None
-            or int(primary["constraint_index_oid"])
-            != next(
-                int(row["index_oid"])
-                for row in index_rows
+        primary = actual_constraints.get("websocket_tickets_pkey")
+        primary_index = next(
+            (
+                row for row in index_rows
                 if str(row["index_name"]) == "websocket_tickets_pkey"
-            )
-        ):
-            raise _postgres_ticket_schema_error(
-                "ticket-primary-key-binding"
-            )
+            ),
+            None,
+        )
+        if primary is not None:
+            if tuple(str(column) for column in primary["local_columns"]) != (
+                "ticket_hash",
+            ):
+                census["p"]["l"] = 1
+                rejected = True
+            if tuple(primary["remote_columns"]):
+                census["p"]["r"] = 1
+                rejected = True
+            if (
+                primary["referenced_schema"] is not None
+                or primary["referenced_table"] is not None
+            ):
+                census["p"]["n"] = 1
+                rejected = True
+            if (
+                primary_index is None
+                or int(primary["constraint_index_oid"])
+                != int(primary_index["index_oid"])
+            ):
+                census["p"]["i"] = 1
+                rejected = True
 
         expected_check_definitions = {
             "ck_ws_ticket_hash": (
@@ -3161,40 +3572,50 @@ class PostgresDatabase:
                 "AND required_scope = 'read'::text)"
             ),
         }
-        check_invariants = {
-            "ck_ws_ticket_hash": "ticket-check-hash",
-            "ck_ws_ticket_kind": "ticket-check-kind",
-            "ck_ws_ticket_created_at": "ticket-check-created-at",
-            "ck_ws_ticket_expires_at": "ticket-check-expires-at",
-            "ck_ws_ticket_consumed_at": "ticket-check-consumed-at",
-            "ck_ws_ticket_bearer_expires_finite": (
-                "ticket-check-bearer-expires-finite"
-            ),
-            "ck_ws_ticket_created_finite": (
-                "ticket-check-created-finite"
-            ),
-            "ck_ws_ticket_expires_finite": (
-                "ticket-check-expires-finite"
-            ),
-            "ck_ws_ticket_consumed_finite": (
-                "ticket-check-consumed-finite"
-            ),
-            "ck_ws_ticket_time_order": "ticket-check-time-order",
-            "ck_ws_ticket_source_shape": "ticket-check-source-shape",
+        check_ordinals = {
+            name: ordinal for ordinal, name in enumerate(expected_check_definitions)
         }
         for name, expected_definition in expected_check_definitions.items():
-            row = actual_constraints[name]
-            if (
-                str(row["contype"]) != "c"
-                or not bool(row["convalidated"])
-                or bool(row["condeferrable"])
-                or bool(row["condeferred"])
-                or " ".join(str(row["definition"]).split())
-                != expected_definition
-            ):
-                raise _postgres_ticket_schema_error(
-                    check_invariants[name]
-                )
+            row = actual_constraints.get(name)
+            if row is None:
+                continue
+            bit = 1 << check_ordinals[name]
+            constraint_bit = 1 << constraint_ordinals[name]
+            contype, alternate, unexpected = _postgres_internal_character(
+                row["contype"]
+            )
+            if unexpected:
+                census["h"]["x"] |= bit
+                census["q"]["x"] |= constraint_bit
+                rejected = True
+            elif contype != "c":
+                census["h"]["t"] |= bit
+                census["q"]["t"] |= constraint_bit
+                rejected = True
+            elif alternate:
+                census["h"]["a"] |= bit
+                census["q"]["a"] |= constraint_bit
+                rejected = True
+            if not bool(row["convalidated"]):
+                census["h"]["v"] |= bit
+                census["q"]["v"] |= constraint_bit
+                rejected = True
+            if bool(row["condeferrable"]):
+                census["h"]["f"] |= bit
+                census["q"]["f"] |= constraint_bit
+                rejected = True
+            if bool(row["condeferred"]):
+                census["h"]["d"] |= bit
+                census["q"]["d"] |= constraint_bit
+                rejected = True
+            if " ".join(str(row["definition"]).split()) != expected_definition:
+                census["h"]["s"] |= bit
+                census["q"]["s"] |= constraint_bit
+                rejected = True
+
+        if rejected:
+            invariant = _postgres_ticket_schema_census_invariant(census)
+            raise _postgres_ticket_schema_error(invariant)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
