@@ -31,7 +31,8 @@ _POSTGRES_ENV = (
 )
 _SAFE_DATABASE_NAME = re.compile(r"^ares_migration_[0-9a-f]{32}$")
 _SAFE_EXCEPTION_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
-_WORKER_TIMEOUT_SECONDS = 45.0
+_WORKER_READY_SECONDS = 15.0
+_WORKER_TIMEOUT_SECONDS = 25.0
 _WORKER_SETTLE_SECONDS = 5.0
 _POSTGRES_OPERATION_TIMEOUT_SECONDS = 15.0
 _WORKER_POLL_SECONDS = 0.01
@@ -1190,6 +1191,7 @@ def _alembic_worker_entry(channel: Any) -> None:
                 "success-dirty-origin-removed",
                 "migration-error",
                 "block",
+                "never-ready",
                 "protocol-duplicate-ready",
                 "protocol-duplicate-ok",
                 "protocol-malformed",
@@ -1203,6 +1205,8 @@ def _alembic_worker_entry(channel: Any) -> None:
             else:
                 raise RuntimeError("worker-mode-error")
 
+            if mode == "never-ready":
+                threading.Event().wait()
             _worker_send(channel, ("READY",))
             if mode == "protocol-duplicate-ready":
                 _worker_send(channel, ("READY",))
@@ -1511,7 +1515,7 @@ async def _run_worker(
     protocol_failure = False
     terminal: tuple[str, ...] | None = None
     try:
-        ready_deadline = time.monotonic() + _WORKER_SETTLE_SECONDS
+        ready_deadline = time.monotonic() + _WORKER_READY_SECONDS
         ready = await _receive_worker_frame(
             worker,
             deadline=ready_deadline,
@@ -3044,6 +3048,45 @@ async def test_owned_worker_completion_and_error_are_settled() -> None:
     )
 
 
+def test_worker_ready_operation_and_settlement_budgets_are_independent() -> None:
+    worst_case = (
+        _WORKER_READY_SECONDS
+        + _WORKER_TIMEOUT_SECONDS
+        + (2 * _WORKER_SETTLE_SECONDS)
+    )
+    budgets_are_independent = (
+        _WORKER_READY_SECONDS == 15.0
+        and _WORKER_TIMEOUT_SECONDS == 25.0
+        and _WORKER_SETTLE_SECONDS == 5.0
+        and worst_case == 50.0
+        and worst_case < 60.0
+    )
+    _require_fixed(
+        budgets_are_independent,
+        "worker readiness, operation, and settlement budgets must remain bounded",
+    )
+
+
+@pytest.mark.asyncio
+async def test_worker_that_never_reaches_ready_is_settled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_WORKER_READY_SECONDS",
+        0.1,
+    )
+    failed = False
+    try:
+        await _run_worker({"mode": "never-ready"}, timeout=0.1)
+    except RuntimeError:
+        failed = True
+    _require_fixed(
+        failed and not _OWNED_WORKERS,
+        "pre-READY timeout did not settle the owned worker",
+    )
+
+
 @pytest.mark.asyncio
 async def test_owned_worker_timeout_is_terminated() -> None:
     started = asyncio.Event()
@@ -3074,7 +3117,10 @@ async def test_owned_worker_parent_cancellation_is_settled() -> None:
             started=started,
         )
     )
-    await asyncio.wait_for(started.wait(), timeout=5.0)
+    await asyncio.wait_for(
+        started.wait(),
+        timeout=_WORKER_READY_SECONDS,
+    )
     task.cancel()
     cancelled = False
     try:
