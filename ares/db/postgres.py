@@ -677,6 +677,719 @@ def _postgres_internal_character(
     return None, False, True
 
 
+_POSTGRES_Q78_OPERATION_BITS = {
+    "index-catalog": 0x08,
+    "canonical-opclasses": 0x10,
+    "current-schema": 0x20,
+    "referenced-relations": 0x40,
+}
+_POSTGRES_Q78_SUBPHASES = frozenset(
+    {
+        "construct",
+        "dispatch",
+        "server-execute",
+        "server-fetch",
+        "row-cardinality",
+        "field-presence",
+        "asyncpg-codec",
+        "normalize",
+        "aggregate",
+        "compare",
+        "cleanup",
+        "other",
+    }
+)
+_POSTGRES_Q78_SERVER_CATEGORIES = frozenset(
+    {
+        "syntax",
+        "undefined-table",
+        "undefined-column",
+        "undefined-object",
+        "undefined-function-or-operator",
+        "datatype-mismatch",
+        "cardinality",
+        "permission",
+        "transaction",
+        "connection",
+        "other-postgres",
+    }
+)
+_POSTGRES_Q78_CLIENT_CATEGORIES = frozenset(
+    {
+        "missing-field",
+        "wrong-shape",
+        "wrong-type",
+        "key",
+        "index",
+        "value",
+        "attribute",
+        "aggregate-container",
+        "other-client",
+    }
+)
+_POSTGRES_Q78_ABSENT_SQLSTATE = "-----"
+
+
+def _postgres_q78_server_category(sqlstate: str) -> str:
+    if sqlstate == "42601":
+        return "syntax"
+    if sqlstate == "42P01":
+        return "undefined-table"
+    if sqlstate == "42703":
+        return "undefined-column"
+    if sqlstate == "42704":
+        return "undefined-object"
+    if sqlstate in {"42883", "42809"}:
+        return "undefined-function-or-operator"
+    if sqlstate in {"42804", "42846"}:
+        return "datatype-mismatch"
+    if sqlstate.startswith("21"):
+        return "cardinality"
+    if sqlstate == "42501":
+        return "permission"
+    if sqlstate.startswith(("25", "40")):
+        return "transaction"
+    if sqlstate.startswith("08"):
+        return "connection"
+    return "other-postgres"
+
+
+def _postgres_q78_client_category(error: Exception) -> str:
+    if isinstance(error, KeyError):
+        return "key"
+    if isinstance(error, IndexError):
+        return "index"
+    if isinstance(error, TypeError):
+        return "wrong-type"
+    if isinstance(error, ValueError):
+        return "value"
+    if isinstance(error, AttributeError):
+        return "attribute"
+    return "other-client"
+
+
+def _postgres_q78_subphase(error: Exception) -> str:
+    raw_state = getattr(error, "sqlstate", None)
+    if type(raw_state) is str:
+        return "server-execute"
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return "dispatch"
+    if isinstance(error, (KeyError, IndexError, TypeError, ValueError, AttributeError)):
+        return "asyncpg-codec"
+    return "server-fetch"
+
+
+def _postgres_q78_failure(
+    error: Exception,
+    *,
+    subphase: str,
+) -> str:
+    safe_subphase = subphase if subphase in _POSTGRES_Q78_SUBPHASES else "other"
+    raw_state = getattr(error, "sqlstate", None)
+    if (
+        type(raw_state) is str
+        and len(raw_state) == 5
+        and all(character in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" for character in raw_state)
+    ):
+        state = raw_state
+        category = _postgres_q78_server_category(state)
+    else:
+        state = _POSTGRES_Q78_ABSENT_SQLSTATE
+        category = _postgres_q78_client_category(error)
+    return f"q78:{safe_subphase}:state={state}:category={category}"
+
+
+def _is_postgres_q78_failure(value: str) -> bool:
+    parts = value.split(":")
+    if len(parts) != 4 or parts[0] != "q78":
+        return False
+    subphase = parts[1]
+    state_key, separator, state = parts[2].partition("=")
+    category_key, category_separator, category = parts[3].partition("=")
+    if (
+        subphase not in _POSTGRES_Q78_SUBPHASES
+        or separator != "="
+        or state_key != "state"
+        or category_separator != "="
+        or category_key != "category"
+    ):
+        return False
+    if state == _POSTGRES_Q78_ABSENT_SQLSTATE:
+        return category in _POSTGRES_Q78_CLIENT_CATEGORIES
+    return (
+        len(state) == 5
+        and all(character in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" for character in state)
+        and category in _POSTGRES_Q78_SERVER_CATEGORIES
+        and _postgres_q78_server_category(state) == category
+    )
+
+
+_POSTGRES_Q78_SPLIT_INDEX_FIELDS = (
+    ("m", 0x1F, 2), ("e", 0x1, 1), ("o", 0x1F, 2),
+    ("b", 0x1F, 2), ("u", 0x1F, 2), ("p", 0x1F, 2),
+    ("v", 0x1F, 2), ("r", 0x1F, 2), ("l", 0x1F, 2),
+    ("k", 0x1F, 2), ("n", 0x1F, 2), ("c", 0x1F, 2),
+    ("d", 0x1F, 2), ("a", 0x1F, 2), ("j", 0x1F, 2),
+    ("s", 0x1F, 2), ("t", 0x1F, 2), ("y", 0x1F, 2),
+    ("h", 0x1F, 2), ("x", 0x1F, 2), ("g", 0x1, 1),
+)
+
+
+def _postgres_q78_split_invariant(
+    index: dict[str, int],
+    *,
+    primary_binding: int,
+    opclass_missing: int,
+    opclass_extra: int,
+    opclass_shape: int,
+    schema_mismatch: int,
+    schema_shape: int,
+    reference_missing: int,
+    reference_extra: int,
+    reference_order: int,
+    reference_binding: int,
+    reference_shape: int,
+    query_failure: int,
+) -> str:
+    encoded_index: list[str] = []
+    for field, maximum, width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS:
+        value = index.get(field)
+        if type(value) is not int or not 0 <= value <= maximum:
+            return "q78-split-unclassified"
+        encoded_index.append(f"{field}{value:0{width}x}")
+    scalar_values = (
+        primary_binding,
+        opclass_missing,
+        opclass_extra,
+        opclass_shape,
+        schema_mismatch,
+        schema_shape,
+        reference_missing,
+        reference_extra,
+        reference_order,
+        reference_binding,
+        reference_shape,
+        query_failure,
+    )
+    if (
+        any(
+            type(value) is not int or not 0 <= value <= 0x7
+            for value in scalar_values[:-1]
+        )
+        or type(query_failure) is not int
+        or not 0 <= query_failure <= 0xF
+    ):
+        return "q78-split-unclassified"
+    return (
+        "q78-split:i=" + ",".join(encoded_index)
+        + f";p=i{primary_binding:x}"
+        + f";o=m{opclass_missing:x},e{opclass_extra:x},x{opclass_shape:x}"
+        + f";s=m{schema_mismatch:x},x{schema_shape:x}"
+        + (
+            f";f=m{reference_missing:x},e{reference_extra:x},"
+            f"o{reference_order:x},b{reference_binding:x},x{reference_shape:x}"
+        )
+        + f";z=q{query_failure:x}"
+    )
+
+
+def _is_postgres_q78_split(value: str) -> bool:
+    if not value.startswith("q78-split:i="):
+        return False
+    try:
+        index_part, primary_part, opclass_part, schema_part, reference_part, query_part = (
+            value.removeprefix("q78-split:").split(";")
+        )
+        if not index_part.startswith("i="):
+            return False
+        encoded_fields = index_part.removeprefix("i=").split(",")
+        if len(encoded_fields) != len(_POSTGRES_Q78_SPLIT_INDEX_FIELDS):
+            return False
+        index: dict[str, int] = {}
+        for encoded, (field, maximum, width) in zip(
+            encoded_fields, _POSTGRES_Q78_SPLIT_INDEX_FIELDS, strict=True
+        ):
+            raw = encoded.removeprefix(field)
+            if (
+                not encoded.startswith(field)
+                or len(raw) != width
+                or any(character not in "0123456789abcdef" for character in raw)
+            ):
+                return False
+            parsed = int(raw, 16)
+            if parsed > maximum:
+                return False
+            index[field] = parsed
+        scalar_parts = (
+            (primary_part, ("p=i",)),
+            (opclass_part, ("o=m", ",e", ",x")),
+            (schema_part, ("s=m", ",x")),
+            (reference_part, ("f=m", ",e", ",o", ",b", ",x")),
+            (query_part, ("z=q",)),
+        )
+        scalars: list[int] = []
+        for encoded, markers in scalar_parts:
+            position = 0
+            for marker in markers:
+                if not encoded.startswith(marker, position):
+                    return False
+                position += len(marker)
+                allowed = "0123456789abcdef" if marker == "z=q" else "01234567"
+                if position >= len(encoded) or encoded[position] not in allowed:
+                    return False
+                scalars.append(int(encoded[position], 16))
+                position += 1
+            if position != len(encoded):
+                return False
+    except (TypeError, ValueError):
+        return False
+    return (
+        _postgres_q78_split_invariant(
+            index,
+            primary_binding=scalars[0],
+            opclass_missing=scalars[1],
+            opclass_extra=scalars[2],
+            opclass_shape=scalars[3],
+            schema_mismatch=scalars[4],
+            schema_shape=scalars[5],
+            reference_missing=scalars[6],
+            reference_extra=scalars[7],
+            reference_order=scalars[8],
+            reference_binding=scalars[9],
+            reference_shape=scalars[10],
+            query_failure=scalars[11],
+        )
+        == value
+    )
+
+
+def _postgres_q78_index_split_census(
+    rows: object,
+    *,
+    canonical_opclasses: dict[str, int],
+    table_oid: int,
+    schema_oid: int,
+    schema_name: str,
+    constraint_rows: object,
+) -> tuple[dict[str, int], int]:
+    section = {field: 0 for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS}
+    expected = {
+        "idx_ws_tickets_api_key": (
+            "btree", False, False, True, True, True,
+            1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
+        ),
+        "idx_ws_tickets_campaign": (
+            "btree", False, False, True, True, True,
+            1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
+        ),
+        "idx_ws_tickets_expires": (
+            "btree", False, False, True, True, True,
+            1, 1, ("expires_at",), (0,), ("timestamptz_ops",), (True,), None, None,
+        ),
+        "idx_ws_tickets_user": (
+            "btree", False, False, True, True, True,
+            1, 1, ("user_id",), (0,), ("text_ops",), (True,), None, None,
+        ),
+        "websocket_tickets_pkey": (
+            "btree", True, True, True, True, True,
+            1, 1, ("ticket_hash",), (0,), ("text_ops",), (True,), None, None,
+        ),
+    }
+    expected_names = tuple(expected)
+    expected_ordinals = {
+        name: ordinal for ordinal, name in enumerate(expected_names)
+    }
+    if type(rows) not in {list, tuple}:
+        section["x"] = 0x1F
+        return section, 1
+    actual_names: list[str] = []
+    actual: dict[str, tuple[object, ...]] = {}
+    index_oids: set[int] = set()
+    primary_index_oid: int | None = None
+    for raw_row in rows:
+        try:
+            name = raw_row["index_name"]
+            if type(name) is not str:
+                raise TypeError
+            ordinal = expected_ordinals.get(name)
+            bit = 0 if ordinal is None else 1 << ordinal
+            index_oid = int(raw_row["index_oid"])
+            relkind, relkind_alternate, relkind_unexpected = (
+                _postgres_internal_character(raw_row["index_relkind"])
+            )
+            persistence, persistence_alternate, persistence_unexpected = (
+                _postgres_internal_character(raw_row["index_relpersistence"])
+            )
+            operator_classes = tuple(
+                str(value) for value in raw_row["operator_classes"]
+            )
+            operator_class_oids = tuple(
+                int(value) for value in raw_row["operator_class_oids"]
+            )
+            canonical_oids = tuple(
+                canonical_opclasses.get(value, -1) for value in operator_classes
+            )
+            identity_noncodec_is_exact = (
+                int(raw_row["table_oid"]) == table_oid
+                and int(raw_row["index_schema_oid"]) == schema_oid
+                and str(raw_row["index_schema"]) == schema_name
+                and not bool(raw_row["index_is_partition"])
+                and tuple(
+                    str(value)
+                    for value in raw_row["operator_class_namespaces"]
+                )
+                == ("pg_catalog",)
+                and operator_class_oids == canonical_oids
+                and index_oid not in index_oids
+            )
+            identity_is_exact = (
+                identity_noncodec_is_exact
+                and type(raw_row["index_relkind"]) is str
+                and relkind == "i"
+                and type(raw_row["index_relpersistence"]) is str
+                and persistence == "p"
+            )
+            if not identity_is_exact and bit:
+                if (
+                    identity_noncodec_is_exact
+                    and not relkind_unexpected
+                    and not persistence_unexpected
+                    and relkind == "i"
+                    and persistence == "p"
+                    and (relkind_alternate or persistence_alternate)
+                ):
+                    section["h"] |= bit
+                else:
+                    section["y"] |= bit
+            index_oids.add(index_oid)
+            actual_names.append(name)
+            actual[name] = (
+                str(raw_row["access_method"]),
+                bool(raw_row["indisunique"]),
+                bool(raw_row["indisprimary"]),
+                bool(raw_row["indisvalid"]),
+                bool(raw_row["indisready"]),
+                bool(raw_row["indislive"]),
+                int(raw_row["indnkeyatts"]),
+                int(raw_row["indnatts"]),
+                tuple(
+                    None if value is None else str(value)
+                    for value in raw_row["columns"]
+                ),
+                tuple(int(value) for value in raw_row["column_options"]),
+                operator_classes,
+                tuple(bool(value) for value in raw_row["column_collations_match"]),
+                None if raw_row["expressions"] is None else str(raw_row["expressions"]),
+                None if raw_row["predicate"] is None else str(raw_row["predicate"]),
+            )
+            if name == "websocket_tickets_pkey":
+                primary_index_oid = index_oid
+        except (KeyError, IndexError, TypeError, ValueError):
+            section["x"] |= 0x1F
+            continue
+    actual_name_set = set(actual_names)
+    for name in set(expected_names) - actual_name_set:
+        section["m"] |= 1 << expected_ordinals[name]
+    section["e"] = int(
+        bool(actual_name_set - set(expected_names))
+        or len(actual) != len(actual_names)
+    )
+    for ordinal, name in enumerate(expected_names):
+        bit = 1 << ordinal
+        if ordinal >= len(actual_names) or actual_names[ordinal] != name:
+            section["o"] |= bit
+        actual_item = actual.get(name)
+        if actual_item is None:
+            continue
+        expected_item = expected[name]
+        for field, position in (
+            ("b", 0), ("u", 1), ("p", 2), ("v", 3),
+            ("r", 4), ("l", 5), ("k", 6), ("n", 7),
+            ("c", 8), ("d", 9), ("a", 10), ("j", 11),
+            ("s", 12), ("t", 13),
+        ):
+            if actual_item[position] != expected_item[position]:
+                section[field] |= bit
+    if actual != expected and not any(section.values()):
+        section["g"] = 1
+    primary_binding = 1
+    if type(constraint_rows) in {list, tuple} and primary_index_oid is not None:
+        for raw_row in constraint_rows:
+            try:
+                if raw_row["conname"] == "websocket_tickets_pkey":
+                    primary_binding = int(
+                        int(raw_row["constraint_index_oid"])
+                        != primary_index_oid
+                    )
+                    break
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+    return section, primary_binding
+
+
+_POSTGRES_Q78_SPLIT_INDEX_QUERY = """
+SELECT ind.indrelid::bigint AS table_oid,
+       ind.indexrelid::bigint AS index_oid,
+       idx.relnamespace::bigint AS index_schema_oid,
+       idx_nsp.nspname AS index_schema,
+       idx.relname AS index_name,
+       idx.relkind AS index_relkind,
+       idx.relpersistence AS index_relpersistence,
+       idx.relispartition AS index_is_partition,
+       am.amname AS access_method,
+       ind.indisunique,
+       ind.indisprimary,
+       ind.indisvalid,
+       ind.indisready,
+       ind.indislive,
+       ind.indnkeyatts,
+       ind.indnatts,
+       ARRAY(
+           SELECT CASE WHEN key.attnum=0 THEN NULL ELSE att.attname END
+           FROM unnest(ind.indkey::smallint[]) WITH ORDINALITY
+                AS key(attnum, ordinality)
+           LEFT JOIN pg_attribute AS att
+             ON att.attrelid=ind.indrelid AND att.attnum=key.attnum
+           ORDER BY key.ordinality
+       ) AS columns,
+       ARRAY(
+           SELECT option
+           FROM unnest(ind.indoption::smallint[]) WITH ORDINALITY
+                AS item(option, ordinality)
+           ORDER BY item.ordinality
+       ) AS column_options,
+       ARRAY(
+           SELECT opc.opcname
+           FROM unnest(ind.indclass::oid[]) WITH ORDINALITY
+                AS item(opclass, ordinality)
+           JOIN pg_opclass AS opc ON opc.oid=item.opclass
+           ORDER BY item.ordinality
+       ) AS operator_classes,
+       ARRAY(
+           SELECT opc.oid::bigint
+           FROM unnest(ind.indclass::oid[]) WITH ORDINALITY
+                AS item(opclass, ordinality)
+           JOIN pg_opclass AS opc ON opc.oid=item.opclass
+           ORDER BY item.ordinality
+       ) AS operator_class_oids,
+       ARRAY(
+           SELECT opc_nsp.nspname
+           FROM unnest(ind.indclass::oid[]) WITH ORDINALITY
+                AS item(opclass, ordinality)
+           JOIN pg_opclass AS opc ON opc.oid=item.opclass
+           JOIN pg_namespace AS opc_nsp ON opc_nsp.oid=opc.opcnamespace
+           ORDER BY item.ordinality
+       ) AS operator_class_namespaces,
+       ARRAY(
+           SELECT item.collation=att.attcollation
+           FROM unnest(ind.indcollation::oid[]) WITH ORDINALITY
+                AS item(collation, ordinality)
+           JOIN unnest(ind.indkey::smallint[]) WITH ORDINALITY
+                AS key(attnum, ordinality)
+             ON key.ordinality=item.ordinality
+           LEFT JOIN pg_attribute AS att
+             ON att.attrelid=ind.indrelid AND att.attnum=key.attnum
+           ORDER BY item.ordinality
+       ) AS column_collations_match,
+       pg_get_expr(ind.indexprs, ind.indrelid) AS expressions,
+       pg_get_expr(ind.indpred, ind.indrelid) AS predicate,
+       pg_get_indexdef(ind.indexrelid) AS definition
+FROM pg_index AS ind
+JOIN pg_class AS idx ON idx.oid=ind.indexrelid
+JOIN pg_namespace AS idx_nsp ON idx_nsp.oid=idx.relnamespace
+JOIN pg_am AS am ON am.oid=idx.relam
+WHERE ind.indrelid=$1::oid
+ORDER BY idx.relname
+"""
+
+
+async def _postgres_q78_isolated_call(
+    connection: Any,
+    method_name: str,
+    query: str,
+    *args: object,
+) -> object:
+    method = getattr(connection, method_name)
+    transaction_factory = getattr(connection, "transaction", None)
+    if callable(transaction_factory):
+        async with transaction_factory():
+            return await method(query, *args)
+    return await method(query, *args)
+
+
+async def _postgres_q78_split_observation(
+    connection: Any,
+    *,
+    table_oid: int,
+    schema_oid: int,
+    schema_name: str,
+    constraint_rows: object,
+) -> str:
+    query_failure = 0
+    split_index_rows: object = []
+    opclass_rows: object = []
+    raw_schema: object = None
+    referenced_rows: object = []
+    try:
+        split_index_rows = await _postgres_q78_isolated_call(
+            connection,
+            "fetch",
+            _POSTGRES_Q78_SPLIT_INDEX_QUERY,
+            table_oid,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        query_failure |= 0x1
+    try:
+        opclass_rows = await _postgres_q78_isolated_call(
+            connection,
+            "fetch",
+            """
+            SELECT opc.opcname, opc.oid::bigint AS opclass_oid
+            FROM pg_opclass AS opc
+            JOIN pg_namespace AS nsp ON nsp.oid=opc.opcnamespace
+            JOIN pg_am AS am ON am.oid=opc.opcmethod
+            WHERE nsp.nspname='pg_catalog'
+              AND am.amname='btree'
+              AND opc.opcname=ANY($1::text[])
+            """,
+            ["text_ops", "timestamptz_ops"],
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        query_failure |= 0x2
+    try:
+        raw_schema = await _postgres_q78_isolated_call(
+            connection,
+            "fetchval",
+            "SELECT current_schema()",
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        query_failure |= 0x4
+    try:
+        referenced_rows = await _postgres_q78_isolated_call(
+            connection,
+            "fetch",
+            """
+            SELECT rel.relname, rel.oid::bigint AS relation_oid
+            FROM pg_class AS rel
+            WHERE rel.relnamespace=$1::oid
+              AND rel.relname=ANY($2::text[])
+            ORDER BY rel.relname
+            """,
+            schema_oid,
+            ["api_keys", "campaigns", "users"],
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        query_failure |= 0x8
+
+    opclass_missing = 0x3
+    opclass_extra = 0
+    opclass_shape = 0
+    canonical_opclasses: dict[str, int] = {}
+    if type(opclass_rows) in {list, tuple}:
+        try:
+            canonical_opclasses = {
+                str(row["opcname"]): int(row["opclass_oid"])
+                for row in opclass_rows
+            }
+            opclass_missing = (
+                int("text_ops" not in canonical_opclasses)
+                | (int("timestamptz_ops" not in canonical_opclasses) << 1)
+            )
+            opclass_extra = int(
+                bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"})
+            )
+        except (KeyError, IndexError, TypeError, ValueError):
+            opclass_shape = 1
+    else:
+        opclass_shape = 1
+
+    index, primary_binding = _postgres_q78_index_split_census(
+        split_index_rows,
+        canonical_opclasses=canonical_opclasses,
+        table_oid=table_oid,
+        schema_oid=schema_oid,
+        schema_name=schema_name,
+        constraint_rows=constraint_rows,
+    )
+    schema_shape = int(type(raw_schema) is not str)
+    schema_mismatch = int(type(raw_schema) is str and raw_schema != schema_name)
+
+    expected_reference_names = ("api_keys", "campaigns", "users")
+    reference_missing = 0x7
+    reference_extra = 0
+    reference_order = 0
+    reference_binding = 0x7
+    reference_shape = 0
+    reference_oids: dict[str, int] = {}
+    reference_names: list[str] = []
+    if type(referenced_rows) in {list, tuple}:
+        try:
+            reference_names = [str(row["relname"]) for row in referenced_rows]
+            reference_oids = {
+                str(row["relname"]): int(row["relation_oid"])
+                for row in referenced_rows
+            }
+            reference_missing = 0
+            for ordinal, name in enumerate(expected_reference_names):
+                if name not in reference_oids:
+                    reference_missing |= 1 << ordinal
+                if ordinal >= len(reference_names) or reference_names[ordinal] != name:
+                    reference_order |= 1 << ordinal
+            reference_extra = int(
+                bool(set(reference_oids) - set(expected_reference_names))
+                or len(reference_oids) != len(reference_names)
+            )
+            reference_binding = 0
+            expected_constraint_names = (
+                "fk_ws_ticket_api_key",
+                "fk_ws_ticket_campaign",
+                "fk_ws_ticket_user",
+            )
+            if type(constraint_rows) not in {list, tuple}:
+                reference_binding = 0x7
+            else:
+                constraints = {
+                    str(row["conname"]): row for row in constraint_rows
+                }
+                for ordinal, (constraint_name, relation_name) in enumerate(
+                    zip(expected_constraint_names, expected_reference_names, strict=True)
+                ):
+                    row = constraints.get(constraint_name)
+                    if (
+                        row is None
+                        or int(row["referenced_oid"])
+                        != reference_oids.get(relation_name)
+                    ):
+                        reference_binding |= 1 << ordinal
+        except (KeyError, IndexError, TypeError, ValueError):
+            reference_shape = 1
+    else:
+        reference_shape = 1
+    return _postgres_q78_split_invariant(
+        index,
+        primary_binding=primary_binding,
+        opclass_missing=opclass_missing,
+        opclass_extra=opclass_extra,
+        opclass_shape=opclass_shape,
+        schema_mismatch=schema_mismatch,
+        schema_shape=schema_shape,
+        reference_missing=reference_missing,
+        reference_extra=reference_extra,
+        reference_order=reference_order,
+        reference_binding=reference_binding,
+        reference_shape=reference_shape,
+        query_failure=query_failure,
+    )
+
+
 _POSTGRES_TICKET_CENSUS_REJECTION_FIELDS = {
     "ticket-relation-present": "r.n",
     "ticket-relation-query": "z.q",
@@ -887,6 +1600,8 @@ class _PostgresStartupDiagnosticError(RuntimeError):
         diagnostic_stage: str,
         diagnostic_invariant: str,
         operational_category: str = "none",
+        q78_failure: str = "",
+        q78_split: str = "",
     ) -> None:
         super().__init__(public_message)
         self.diagnostic_stage = (
@@ -912,6 +1627,12 @@ class _PostgresStartupDiagnosticError(RuntimeError):
             if operational_category
             in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
             else "other"
+        )
+        self.q78_failure = (
+            q78_failure if _is_postgres_q78_failure(q78_failure) else ""
+        )
+        self.q78_split = (
+            q78_split if _is_postgres_q78_split(q78_split) else ""
         )
 
 
@@ -941,11 +1662,16 @@ def _postgres_startup_diagnostic_label(error: BaseException) -> str:
         not in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
     ):
         return "unclassified"
-    return (
+    label = (
         f"{error.diagnostic_stage}:"
         f"{error.diagnostic_invariant}:"
         f"{error.operational_category}"
     )
+    if error.q78_failure or error.q78_split:
+        if not error.q78_failure or not error.q78_split:
+            return "unclassified"
+        label = f"{label}:{error.q78_failure}:{error.q78_split}"
+    return label
 
 
 def _postgres_startup_error(
@@ -991,17 +1717,29 @@ def _postgres_restage_startup_error(
         diagnostic_stage=stage,
         diagnostic_invariant=error.diagnostic_invariant,
         operational_category=error.operational_category,
+        q78_failure=error.q78_failure,
+        q78_split=error.q78_split,
     )
 
 
 def _postgres_ticket_schema_error(
     invariant: str,
+    *,
+    cause: Exception | None = None,
+    q78_failure: str = "",
+    q78_split: str = "",
 ) -> _PostgresStartupDiagnosticError:
-    return _postgres_startup_error(
+    error = _postgres_startup_error(
         "Incompatible WebSocket ticket schema",
         stage="managed-validation",
         invariant=invariant,
+        cause=cause,
     )
+    error.q78_failure = (
+        q78_failure if _is_postgres_q78_failure(q78_failure) else ""
+    )
+    error.q78_split = q78_split if _is_postgres_q78_split(q78_split) else ""
+    return error
 
 
 _POSTGRES_MANAGED_REVISION = "0008"
@@ -2831,6 +3569,9 @@ class PostgresDatabase:
         """Reject any ticket catalog that differs from the owned schema."""
         census = _new_postgres_ticket_schema_census()
         rejected = False
+        q78_cause: Exception | None = None
+        q78_failure = ""
+        q78_split = ""
         try:
             relation = await connection.fetchrow(
                 """
@@ -3075,7 +3816,37 @@ class PostgresDatabase:
             rejected = True
 
         try:
-            index_rows = await connection.fetch(
+            q78_split = await _postgres_q78_split_observation(
+                connection,
+                table_oid=table_oid,
+                schema_oid=schema_oid,
+                schema_name=schema_name,
+                constraint_rows=constraint_rows,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            q78_split = _postgres_q78_split_invariant(
+                {field: (0x1F if field == "x" else 0)
+                 for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS},
+                primary_binding=1,
+                opclass_missing=3,
+                opclass_extra=0,
+                opclass_shape=1,
+                schema_mismatch=0,
+                schema_shape=1,
+                reference_missing=7,
+                reference_extra=0,
+                reference_order=7,
+                reference_binding=7,
+                reference_shape=1,
+                query_failure=7,
+            )
+
+        try:
+            index_rows = await _postgres_q78_isolated_call(
+                connection,
+                "fetch",
                 """
             SELECT ind.indrelid::bigint AS table_oid,
                    ind.indexrelid::bigint AS index_oid,
@@ -3155,12 +3926,19 @@ class PostgresDatabase:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             index_rows = []
             census["z"]["q"] |= 0x08
             rejected = True
+            q78_cause = exc
+            q78_failure = _postgres_q78_failure(
+                exc,
+                subphase=_postgres_q78_subphase(exc),
+            )
         try:
-            canonical_opclass_rows = await connection.fetch(
+            canonical_opclass_rows = await _postgres_q78_isolated_call(
+                connection,
+                "fetch",
                 """
             SELECT opc.opcname, opc.oid::bigint AS opclass_oid
             FROM pg_opclass AS opc
@@ -3174,10 +3952,16 @@ class PostgresDatabase:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             canonical_opclass_rows = []
             census["z"]["q"] |= 0x10
             rejected = True
+            if not q78_failure:
+                q78_cause = exc
+                q78_failure = _postgres_q78_failure(
+                    exc,
+                    subphase=_postgres_q78_subphase(exc),
+                )
         canonical_opclasses = {
             str(row["opcname"]): int(row["opclass_oid"])
             for row in canonical_opclass_rows
@@ -3387,8 +4171,10 @@ class PostgresDatabase:
             rejected = rejected or mismatch
 
         try:
-            raw_referenced_schema = await connection.fetchval(
-                "SELECT current_schema()"
+            raw_referenced_schema = await _postgres_q78_isolated_call(
+                connection,
+                "fetchval",
+                "SELECT current_schema()",
             )
             referenced_schema = (
                 raw_referenced_schema
@@ -3400,10 +4186,16 @@ class PostgresDatabase:
                 rejected = True
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             referenced_schema = ""
             census["z"]["q"] |= 0x20
             rejected = True
+            if not q78_failure:
+                q78_cause = exc
+                q78_failure = _postgres_q78_failure(
+                    exc,
+                    subphase=_postgres_q78_subphase(exc),
+                )
         expected_foreign_keys = {
             "fk_ws_ticket_campaign": (
                 ("campaign_id",), referenced_schema, "campaigns", ("id",), "a", "c",
@@ -3416,7 +4208,9 @@ class PostgresDatabase:
             ),
         }
         try:
-            referenced_rows = await connection.fetch(
+            referenced_rows = await _postgres_q78_isolated_call(
+                connection,
+                "fetch",
                 """
             SELECT rel.relname, rel.oid::bigint AS relation_oid
             FROM pg_class AS rel
@@ -3428,10 +4222,16 @@ class PostgresDatabase:
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             referenced_rows = []
             census["z"]["q"] |= 0x40
             rejected = True
+            if not q78_failure:
+                q78_cause = exc
+                q78_failure = _postgres_q78_failure(
+                    exc,
+                    subphase=_postgres_q78_subphase(exc),
+                )
         referenced_oids = {
             str(row["relname"]): int(row["relation_oid"])
             for row in referenced_rows
@@ -3615,7 +4415,12 @@ class PostgresDatabase:
 
         if rejected:
             invariant = _postgres_ticket_schema_census_invariant(census)
-            raise _postgres_ticket_schema_error(invariant)
+            raise _postgres_ticket_schema_error(
+                invariant,
+                cause=q78_cause,
+                q78_failure=q78_failure,
+                q78_split=q78_split,
+            )
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 

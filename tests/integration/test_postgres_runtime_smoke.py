@@ -1,6 +1,7 @@
 """Real PostgreSQL runtime smoke test for the optional database backend."""
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
@@ -315,6 +316,58 @@ class _CompleteTicketCensusConnection:
         if "current_schema" in query:
             return "public"
         raise RuntimeError("closed-test-query")
+
+
+class _NoopDiagnosticTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc_info: object) -> None:
+        return None
+
+
+class _Q78ServerProbeError(PostgresError):
+    sqlstate = "42883"
+
+    def __init__(self, canary: str) -> None:
+        super().__init__(canary)
+        self.detail = canary
+        self.hint = canary
+        self.context = canary
+
+
+class _Q78FailureConnection(_CompleteTicketCensusConnection):
+    def __init__(self, canary: str) -> None:
+        self._canary = canary
+        self.queries_are_read_only = True
+
+    def transaction(self) -> _NoopDiagnosticTransaction:
+        return _NoopDiagnosticTransaction()
+
+    async def fetch(self, query: str, *args: object) -> object:
+        normalized = " ".join(query.split()).upper()
+        self.queries_are_read_only = (
+            self.queries_are_read_only
+            and normalized.startswith("SELECT ")
+            and not any(
+                token in normalized
+                for token in (
+                    " INSERT ",
+                    " UPDATE ",
+                    " DELETE ",
+                    " CREATE ",
+                    " ALTER ",
+                    " DROP ",
+                    " ALEMBIC_VERSION ",
+                )
+            )
+        )
+        if (
+            "FROM PG_INDEX AS IND" in normalized
+            and "IND.INDKEY::SMALLINT[]" not in normalized
+        ):
+            raise _Q78ServerProbeError(self._canary)
+        return await super().fetch(query, *args)
 
 
 def _postgres_test_config() -> dict[str, str | int]:
@@ -730,6 +783,164 @@ def test_postgres_ticket_census_all_zero_and_closed_rendering() -> None:
     )
 
 
+def test_postgres_q78_operation_and_failure_contract_is_closed() -> None:
+    from ares.db.postgres import (
+        _POSTGRES_Q78_OPERATION_BITS,
+        _POSTGRES_Q78_SUBPHASES,
+        _is_postgres_q78_failure,
+        _postgres_q78_failure,
+    )
+
+    operation_map_is_exact = _POSTGRES_Q78_OPERATION_BITS == {
+        "index-catalog": 0x08,
+        "canonical-opclasses": 0x10,
+        "current-schema": 0x20,
+        "referenced-relations": 0x40,
+    } and sum(_POSTGRES_Q78_OPERATION_BITS.values()) == 0x78
+    _require_fixed(
+        operation_map_is_exact,
+        "q78 must map exactly to its four source operations",
+    )
+    subphases_are_distinct = True
+    for subphase in _POSTGRES_Q78_SUBPHASES:
+        rendered = _postgres_q78_failure(
+            RuntimeError("closed-client-probe"),
+            subphase=subphase,
+        )
+        subphases_are_distinct = (
+            subphases_are_distinct
+            and _is_postgres_q78_failure(rendered)
+            and rendered.startswith(f"q78:{subphase}:")
+            and "none" not in rendered
+        )
+    _require_fixed(
+        subphases_are_distinct,
+        "Every q78 subphase requires a distinct closed rendering",
+    )
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "category"),
+    [
+        pytest.param("42601", "syntax", id="syntax"),
+        pytest.param("42P01", "undefined-table", id="undefined-table"),
+        pytest.param("42703", "undefined-column", id="undefined-column"),
+        pytest.param("42704", "undefined-object", id="undefined-object"),
+        pytest.param(
+            "42883",
+            "undefined-function-or-operator",
+            id="undefined-function",
+        ),
+        pytest.param("42804", "datatype-mismatch", id="datatype"),
+        pytest.param("21000", "cardinality", id="cardinality"),
+        pytest.param("42501", "permission", id="permission"),
+        pytest.param("25P02", "transaction", id="transaction"),
+        pytest.param("08006", "connection", id="connection"),
+        pytest.param("XX000", "other-postgres", id="other"),
+    ],
+)
+def test_postgres_q78_sqlstate_categories_are_allowlisted(
+    sqlstate: str,
+    category: str,
+) -> None:
+    from ares.db.postgres import (
+        _is_postgres_q78_failure,
+        _postgres_q78_failure,
+    )
+
+    error = PostgresError("closed-server-probe")
+    error.sqlstate = sqlstate
+    rendered = _postgres_q78_failure(error, subphase="server-execute")
+    _require_fixed(
+        _is_postgres_q78_failure(rendered)
+        and rendered
+        == f"q78:server-execute:state={sqlstate}:category={category}",
+        "PostgreSQL q78 failures require fixed SQLSTATE categories",
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_q78_failure_retains_complete_split_observation() -> None:
+    from ares.db.postgres import (
+        PostgresDatabase,
+        _is_postgres_q78_failure,
+        _is_postgres_q78_split,
+        _postgres_startup_diagnostic_label,
+        _PostgresStartupDiagnosticError,
+    )
+
+    canary = "q78-diagnostic-canary-not-for-output"
+    connection = _Q78FailureConnection(canary)
+    try:
+        await PostgresDatabase._validate_websocket_ticket_schema(connection)
+    except _PostgresStartupDiagnosticError as exc:
+        failure = exc.q78_failure
+        split = exc.q78_split
+        label = _postgres_startup_diagnostic_label(exc)
+        invariant = exc.diagnostic_invariant
+        public_message = str(exc)
+    else:
+        pytest.fail("The unchanged q78 operation must remain rejecting", pytrace=False)
+
+    split_is_complete = (
+        _is_postgres_q78_split(split)
+        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h1f,x00,g0"
+        in split
+        and ";p=i0;o=m0,e0,x0;s=m0,x0;f=m0,e0,o0,b0,x0;z=q0"
+        in split
+    )
+    q78_is_exact = (
+        failure
+        == (
+            "q78:server-execute:state=42883:"
+            "category=undefined-function-or-operator"
+        )
+        and _is_postgres_q78_failure(failure)
+        and ";z=q08,x00" in invariant
+        and ";o=m0,e0,x0,g0" in invariant
+    )
+    rendered = " ".join((failure, split, label, invariant, public_message))
+    _require_fixed(
+        q78_is_exact and split_is_complete,
+        "q78 failure must retain a complete independent semantic split",
+    )
+    _require_fixed(
+        connection.queries_are_read_only,
+        "q78 split probes must remain read-only and unstamped",
+    )
+    _require_fixed(
+        canary not in rendered and "none" not in label,
+        "q78 diagnostics must not expose server content or none",
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_q78_cancellation_propagates() -> None:
+    from ares.db.postgres import PostgresDatabase
+
+    class _CancelledQ78Connection(_Q78FailureConnection):
+        async def fetch(self, query: str, *args: object) -> object:
+            normalized = " ".join(query.split()).upper()
+            if (
+                "FROM PG_INDEX AS IND" in normalized
+                and "IND.INDKEY::SMALLINT[]" not in normalized
+            ):
+                raise asyncio.CancelledError
+            return await super().fetch(query, *args)
+
+    propagated = False
+    try:
+        await PostgresDatabase._validate_websocket_ticket_schema(
+            _CancelledQ78Connection("closed-cancellation-probe")
+        )
+    except asyncio.CancelledError:
+        propagated = True
+    _require_fixed(
+        propagated,
+        "q78 cancellation must propagate without classification",
+    )
+
+
 def test_postgres_ticket_column_census_distinguishes_every_dimension() -> None:
     from ares.db.postgres import _postgres_ticket_column_census
 
@@ -919,14 +1130,20 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
         _postgres_startup_diagnostic_label(unknown_failure),
         _postgres_startup_diagnostic_label(relation_query_failure),
     )
-    census_prefix = "managed-validation:"
-    census_suffix = ":none"
-    relation_census = labels[5]
-    relation_invariant = (
-        relation_census[len(census_prefix):-len(census_suffix)]
-        if relation_census.startswith(census_prefix)
-        and relation_census.endswith(census_suffix)
-        else ""
+    relation_invariant = getattr(
+        relation_query_failure,
+        "diagnostic_invariant",
+        "",
+    )
+    relation_q78_failure = getattr(
+        relation_query_failure,
+        "q78_failure",
+        "",
+    )
+    relation_q78_split = getattr(
+        relation_query_failure,
+        "q78_split",
+        "",
     )
     labels_are_exact = labels[:5] == (
         "ownership:ownership-relation-query:database",
@@ -938,6 +1155,10 @@ async def test_postgres_startup_diagnostics_are_distinct_and_sanitized() -> None
     complete_query_failure = (
         ";z=q7f,x00" in relation_invariant
         and "r=m000,a000,x000,n3ff,g0" in relation_invariant
+        and relation_q78_failure
+        == "q78:asyncpg-codec:state=-----:category=attribute"
+        and relation_q78_split.endswith(";z=qf")
+        and "none" not in labels[5]
     )
     _require_fixed(
         labels_are_exact and complete_query_failure,
