@@ -9,6 +9,7 @@ import {
   isSessionCurrent,
   login as loginRequest,
   logout as logoutRequest,
+  logoutAll as logoutAllRequest,
   refreshAccessToken,
   subscribeToSessionInvalidation
 } from "../../api/client";
@@ -146,6 +147,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await logoutRequest();
         } catch {
           // Remote revocation is best effort; local logout must always complete.
+        } finally {
+          invalidateSession(logoutSession);
+        }
+      },
+      logoutAll: async () => {
+        const logoutSession = captureSession();
+        try {
+          await logoutAllRequest();
+        } catch {
+          // Local invalidation is mandatory even if remote revocation is unavailable.
         } finally {
           invalidateSession(logoutSession);
         }

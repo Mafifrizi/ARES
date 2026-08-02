@@ -33,6 +33,15 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestCriticalPass1!")
 _MOCK_PRINCIPAL_ROLES: dict[str, str] = {}
 
 
+@pytest.fixture(autouse=True)
+def _isolate_server_dependencies():
+    yield
+    from ares.api.server import app
+
+    app.dependency_overrides.clear()
+    _MOCK_PRINCIPAL_ROLES.clear()
+
+
 def _settings():
     from ares.core.config import get_settings
     get_settings.cache_clear()
@@ -41,11 +50,12 @@ def _settings():
 
 def _make_token(username: str, role: str, expires_minutes: int = 60) -> str:
     from ares.core.security import create_access_token
+    from ares.core.token_sessions import generate_family_id
 
     _MOCK_PRINCIPAL_ROLES[username] = role
     s = _settings()
     return create_access_token(
-        data={"sub": username, "role": role},
+        data={"sub": username, "sid": generate_family_id(), "ver": 1},
         secret_key=s.secret_key_value,
         expires_minutes=expires_minutes,
     )
@@ -64,19 +74,36 @@ def _make_mock_db():
     db.create_refresh_token      = AsyncMock(return_value="raw-mock-refresh-token")
     db.rotate_refresh_token      = AsyncMock(return_value=(None, None))
     db.revoke_all_refresh_tokens = AsyncMock()
+    from ares.core.token_sessions import (
+        SessionRevocationResult,
+        SessionRevocationStatus,
+    )
+    db.revoke_current_session = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
+    db.revoke_all_sessions = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
     db.revoke_access_token       = AsyncMock()
     db.is_access_token_revoked   = AsyncMock(return_value=False)
 
     async def resolve_access_token_principal(
         subject: str,
         _jti: str,
+        _family_id: str,
+        auth_epoch: int,
     ) -> dict[str, str] | None:
         if db.is_access_token_revoked.return_value is True:
             return None
         role = _MOCK_PRINCIPAL_ROLES.get(subject)
         if role is None:
             return None
-        return {"id": f"mock-user-{subject}", "username": subject, "role": role}
+        return {
+            "id": f"mock-user-{subject}",
+            "username": subject,
+            "role": role,
+            "auth_epoch": auth_epoch,
+        }
 
     db.resolve_access_token_principal = AsyncMock(
         side_effect=resolve_access_token_principal
@@ -279,7 +306,7 @@ class TestTokenRevocation:
             async with self._client(db) as c:
                 r = await c.post("/auth/logout", headers=_auth("alice", "operator"))
             assert r.status_code == 200
-            db.revoke_all_refresh_tokens.assert_called_once()
+            db.revoke_current_session.assert_awaited_once()
         _run(_run_test())
 
 

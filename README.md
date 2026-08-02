@@ -271,8 +271,10 @@ See [docs/modules.md](docs/modules.md).
 
 ### Security Controls
 
-- JWT access tokens with refresh-token rotation.
-- Token revocation on logout.
+- Database-authoritative JWT access with one refresh-token family per login,
+  one-time rotation, strict replay-family revocation, and no JWT role authority.
+- Current-device and all-device logout plus immediate epoch revocation after
+  password, role, or activation security events.
 - API key lifecycle with revoked-key removal from dashboard lists.
 - RBAC roles: team lead, operator, recon, reporter.
 - Encrypted data handling for sensitive credential material.
@@ -625,7 +627,9 @@ Persistent databases are Alembic-managed. Existing
 unversioned generation-6/7 databases require the explicit verified adoption
 workflow; startup never stamps them automatically. See
 [`docs/database-migrations.md`](docs/database-migrations.md) before upgrading a
-deployment.
+deployment. Revision `0009` deliberately resets existing bearer sessions into
+revoked rollout families; plan an atomic backend/frontend maintenance window
+and require users to sign in again.
 
 ---
 

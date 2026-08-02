@@ -18,6 +18,21 @@ from urllib.parse import unquote
 
 import aiosqlite
 from ares.core.logger import get_logger
+from ares.core.token_sessions import (
+    FAMILY_ABSOLUTE_LIFETIME_DAYS,
+    FAMILY_RETENTION_DAYS,
+    AccessTokenFactory,
+    IssuedTokenSession,
+    RefreshRotationResult,
+    RefreshRotationStatus,
+    SessionIssueResult,
+    SessionIssueStatus,
+    SessionRevocationResult,
+    SessionRevocationStatus,
+    generate_family_id,
+    generate_refresh_token,
+    hash_refresh_token,
+)
 from ares.db.websocket_tickets import (
     ApiKeyTicketSource,
     BearerTicketSource,
@@ -41,6 +56,7 @@ from ares.core.security import DataEncryptor, hash_password, verify_password
 from ares.db.schema import CREATE_TABLES, SCHEMA_VERSION
 
 _TicketResultT = TypeVar("_TicketResultT")
+_FamilyResultT = TypeVar("_FamilyResultT")
 
 _WEBSOCKET_TICKET_COLUMNS = (
     (0, "ticket_hash", "TEXT", 1, None, 1, 0),
@@ -55,11 +71,31 @@ _WEBSOCKET_TICKET_COLUMNS = (
     (9, "created_at", "TEXT", 1, None, 0, 0),
     (10, "expires_at", "TEXT", 1, None, 0, 0),
     (11, "consumed_at", "TEXT", 0, None, 0, 0),
+    (12, "bearer_family_id", "TEXT", 0, None, 0, 0),
+    (13, "bearer_auth_epoch", "INTEGER", 0, None, 0, 0),
 )
 _WEBSOCKET_TICKET_FOREIGN_KEYS = (
     (0, "api_key_id", "api_keys", "id", "NO ACTION", "CASCADE", "NONE"),
+    (
+        0,
+        "bearer_family_id",
+        "refresh_token_families",
+        "id",
+        "NO ACTION",
+        "CASCADE",
+        "NONE",
+    ),
     (0, "campaign_id", "campaigns", "id", "NO ACTION", "CASCADE", "NONE"),
     (0, "user_id", "users", "id", "NO ACTION", "CASCADE", "NONE"),
+    (
+        1,
+        "user_id",
+        "refresh_token_families",
+        "user_id",
+        "NO ACTION",
+        "CASCADE",
+        "NONE",
+    ),
 )
 _WEBSOCKET_TICKET_CHECKS = {
     "ck_ws_ticket_hash": """
@@ -106,6 +142,12 @@ _WEBSOCKET_TICKET_CHECKS = {
             AND strftime(
                 '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
             )=bearer_expires_at
+            AND bearer_family_id IS NOT NULL
+            AND length(bearer_family_id)=43
+            AND bearer_family_id NOT GLOB '*[^A-Za-z0-9_-]*'
+            AND bearer_auth_epoch IS NOT NULL
+            AND typeof(bearer_auth_epoch)='integer'
+            AND bearer_auth_epoch >= 1
             AND api_key_id IS NULL
             AND required_scope IS NULL
         )
@@ -115,6 +157,8 @@ _WEBSOCKET_TICKET_CHECKS = {
             AND bearer_subject IS NULL
             AND bearer_jti IS NULL
             AND bearer_expires_at IS NULL
+            AND bearer_family_id IS NULL
+            AND bearer_auth_epoch IS NULL
             AND api_key_id IS NOT NULL
             AND length(trim(api_key_id)) > 0
             AND api_key_id=trim(api_key_id)
@@ -126,6 +170,7 @@ _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES = {
     "fk_ws_ticket_campaign",
     "fk_ws_ticket_user",
     "fk_ws_ticket_api_key",
+    "fk_ws_ticket_bearer_family",
 }
 _WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS = {
     "fk_ws_ticket_campaign": (
@@ -146,6 +191,13 @@ _WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS = {
         "api_key_id",
         "api_keys",
         "id",
+        "NO ACTION",
+        "CASCADE",
+    ),
+    "fk_ws_ticket_bearer_family": (
+        "bearer_family_id,user_id",
+        "refresh_token_families",
+        "id,user_id",
         "NO ACTION",
         "CASCADE",
     ),
@@ -318,9 +370,9 @@ def _extract_named_foreign_keys(
         if name not in _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES:
             continue
         table_level = re.search(
-            r"foreignkey\(([a-z_][a-z0-9_]*)\)"
+            r"foreignkey\(([a-z_][a-z0-9_]*(?:,[a-z_][a-z0-9_]*)*)\)"
             r"references([a-z_][a-z0-9_]*)"
-            r"\(([a-z_][a-z0-9_]*)\)",
+            r"\(([a-z_][a-z0-9_]*(?:,[a-z_][a-z0-9_]*)*)\)",
             fragment,
         )
         if table_level is not None:
@@ -714,11 +766,11 @@ class AresDatabase:
 
             if ownership.diagnostic.startswith("ARES-M2B-ADOPTION-READY:"):
                 raise RuntimeError("SQLite database adoption is required")
-            if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0008":
+            if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009":
                 return
             if ownership.exit_code == AdoptionExit.MIGRATION_REQUIRED:
                 if ownership.predecessor not in {
-                    f"{revision:04d}" for revision in range(1, 8)
+                    f"{revision:04d}" for revision in range(1, 9)
                 }:
                     raise RuntimeError(
                         "Invalid managed SQLite database metadata"
@@ -736,7 +788,7 @@ class AresDatabase:
                     raise RuntimeError(
                         "SQLite managed initialization failed"
                     ) from None
-                if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0008":
+                if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0009":
                     raise RuntimeError("SQLite managed initialization failed")
                 return
 
@@ -883,6 +935,14 @@ class AresDatabase:
                     "onwebsocket_tickets(user_id)",
                     "createindexifnotexistsidx_ws_tickets_user"
                     "onwebsocket_tickets(user_id)",
+                }
+            ),
+            "idx_ws_tickets_bearer_family": frozenset(
+                {
+                    "createindexidx_ws_tickets_bearer_family"
+                    "onwebsocket_tickets(bearer_family_id)",
+                    "createindexifnotexistsidx_ws_tickets_bearer_family"
+                    "onwebsocket_tickets(bearer_family_id)",
                 }
             ),
         }
@@ -1043,6 +1103,15 @@ class AresDatabase:
                 0,
                 (
                     (0, 7, "api_key_id", 0, "BINARY", 1),
+                    (1, -1, None, 0, "BINARY", 0),
+                ),
+            ),
+            "idx_ws_tickets_bearer_family": (
+                0,
+                "c",
+                0,
+                (
+                    (0, 12, "bearer_family_id", 0, "BINARY", 1),
                     (1, -1, None, 0, "BINARY", 0),
                 ),
             ),
@@ -1740,20 +1809,30 @@ class AresDatabase:
         self,
         subject: str,
         jti: str,
+        family_id: str,
+        auth_epoch: int,
     ) -> dict[str, Any] | None:
-        """Resolve current user eligibility and JTI status in one read snapshot."""
+        """Resolve bearer, family, epoch, and JTI authority read-only."""
         connection = self._require_connected()
         async with connection.execute(
-            """SELECT u.id, u.username, u.role
+            """SELECT u.id, u.username, u.role, u.auth_epoch
                FROM users AS u
+               JOIN refresh_token_families AS f
+                 ON f.user_id=u.id
+                AND f.id=?
                WHERE u.username=?
                  AND u.is_active=1
+                 AND u.auth_epoch=?
+                 AND f.auth_epoch=u.auth_epoch
+                 AND f.state='active'
+                 AND f.revoked_at IS NULL
+                 AND julianday(f.absolute_expires_at) > julianday('now')
                  AND NOT EXISTS (
                      SELECT 1
                      FROM revoked_access_tokens AS rat
                      WHERE rat.jti=?
                  )""",
-            (subject, jti),
+            (family_id, subject, auth_epoch, jti),
         ) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
@@ -2082,10 +2161,11 @@ class AresDatabase:
                     INSERT INTO websocket_tickets (
                         ticket_hash, campaign_id, user_id, credential_kind,
                         bearer_subject, bearer_jti, bearer_expires_at,
+                        bearer_family_id, bearer_auth_epoch,
                         api_key_id, required_scope, created_at, expires_at,
                         consumed_at
                     )
-                    SELECT ?, c.id, u.id, 'bearer', u.username, ?, ?,
+                    SELECT ?, c.id, u.id, 'bearer', u.username, ?, ?, ?, ?,
                            NULL, NULL,
                            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                            strftime(
@@ -2095,10 +2175,17 @@ class AresDatabase:
                            ),
                            NULL
                     FROM users AS u
+                    JOIN refresh_token_families AS f
+                      ON f.id=? AND f.user_id=u.id
                     JOIN campaigns AS c ON c.id=?
                     WHERE u.id=?
                       AND u.username=?
                       AND u.is_active=1
+                      AND u.auth_epoch=?
+                      AND f.auth_epoch=u.auth_epoch
+                      AND f.state='active'
+                      AND f.revoked_at IS NULL
+                      AND julianday(f.absolute_expires_at) > julianday('now')
                       AND u.role IN (
                           'team_lead', 'operator', 'recon', 'reporter'
                       )
@@ -2117,9 +2204,13 @@ class AresDatabase:
                         ticket_hash,
                         source.jti,
                         source_expiry,
+                        source.family_id,
+                        source.auth_epoch,
+                        source.family_id,
                         campaign_id,
                         source.user_id,
                         source.subject,
+                        source.auth_epoch,
                         source_expiry,
                         source.jti,
                     ),
@@ -2131,10 +2222,12 @@ class AresDatabase:
                     INSERT INTO websocket_tickets (
                         ticket_hash, campaign_id, user_id, credential_kind,
                         bearer_subject, bearer_jti, bearer_expires_at,
+                        bearer_family_id, bearer_auth_epoch,
                         api_key_id, required_scope, created_at, expires_at,
                         consumed_at
                     )
                     SELECT ?, c.id, u.id, 'api_key', NULL, NULL, NULL,
+                           NULL, NULL,
                            ak.id, 'read',
                            strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                            strftime(
@@ -2215,6 +2308,35 @@ class AresDatabase:
                       '%Y-%m-%dT%H:%M:%fZ', expires_at
                   )=expires_at
                   AND julianday(expires_at) > julianday('now')
+                  AND (
+                      credential_kind='api_key'
+                      OR EXISTS (
+                          SELECT 1
+                          FROM users AS u
+                          JOIN refresh_token_families AS f
+                            ON f.id=websocket_tickets.bearer_family_id
+                           AND f.user_id=u.id
+                          WHERE u.id=websocket_tickets.user_id
+                            AND u.username=websocket_tickets.bearer_subject
+                            AND u.is_active=1
+                            AND u.auth_epoch=
+                                websocket_tickets.bearer_auth_epoch
+                            AND f.auth_epoch=u.auth_epoch
+                            AND f.state='active'
+                            AND f.revoked_at IS NULL
+                            AND julianday(f.absolute_expires_at) >
+                                julianday('now')
+                            AND julianday(
+                                websocket_tickets.bearer_expires_at
+                            ) > julianday('now')
+                            AND NOT EXISTS (
+                                SELECT 1
+                                FROM revoked_access_tokens AS rat
+                                WHERE rat.jti=
+                                    websocket_tickets.bearer_jti
+                            )
+                      )
+                  )
                 """,
                 (ticket_hash, campaign_id),
             ) as cursor:
@@ -2225,6 +2347,7 @@ class AresDatabase:
                 """
                 SELECT campaign_id, user_id, credential_kind,
                        bearer_subject, bearer_jti, bearer_expires_at,
+                       bearer_family_id, bearer_auth_epoch,
                        api_key_id, required_scope
                 FROM websocket_tickets
                 WHERE ticket_hash=?
@@ -2247,6 +2370,8 @@ class AresDatabase:
                 bearer_subject=row["bearer_subject"],
                 bearer_jti=row["bearer_jti"],
                 bearer_expires_at=bearer_expiry,
+                bearer_family_id=row["bearer_family_id"],
+                bearer_auth_epoch=row["bearer_auth_epoch"],
                 api_key_id=row["api_key_id"],
                 required_scope=row["required_scope"],
             )
@@ -2264,6 +2389,8 @@ class AresDatabase:
                     handle.bearer_subject is None
                     or handle.bearer_jti is None
                     or handle.bearer_expires_at is None
+                    or handle.bearer_family_id is None
+                    or handle.bearer_auth_epoch is None
                 ):
                     return None
                 source_expiry = format_sqlite_utc(
@@ -2273,10 +2400,17 @@ class AresDatabase:
                     """
                     SELECT u.id, u.username, u.role
                     FROM users AS u
+                    JOIN refresh_token_families AS f
+                      ON f.id=? AND f.user_id=u.id
                     JOIN campaigns AS c ON c.id=?
                     WHERE u.id=?
                       AND u.username=?
                       AND u.is_active=1
+                      AND u.auth_epoch=?
+                      AND f.auth_epoch=u.auth_epoch
+                      AND f.state='active'
+                      AND f.revoked_at IS NULL
+                      AND julianday(f.absolute_expires_at) > julianday('now')
                       AND u.role IN (
                           'team_lead', 'operator', 'recon', 'reporter'
                       )
@@ -2292,9 +2426,11 @@ class AresDatabase:
                       )
                     """,
                     (
+                        handle.bearer_family_id,
                         handle.campaign_id,
                         handle.user_id,
                         handle.bearer_subject,
+                        handle.bearer_auth_epoch,
                         source_expiry,
                         handle.bearer_jti,
                     ),
@@ -2383,7 +2519,173 @@ class AresDatabase:
 
     # ── Refresh Tokens (v5) ───────────────────────────────────────────────────
 
+    @staticmethod
+    def _family_timestamps() -> tuple[str, str, str]:
+        created = datetime.now(timezone.utc)
+        expires = created + timedelta(days=FAMILY_ABSOLUTE_LIFETIME_DAYS)
+        retain = expires + timedelta(days=FAMILY_RETENTION_DAYS)
+        return (
+            format_sqlite_utc(created),
+            format_sqlite_utc(expires),
+            format_sqlite_utc(retain),
+        )
+
+    async def _run_refresh_family_transaction(
+        self,
+        operation: Callable[[aiosqlite.Connection], Awaitable[_FamilyResultT]],
+    ) -> _FamilyResultT:
+        async with self._lifecycle_lock:
+            self._require_connected()
+            tx = await self._open_refresh_rotation_connection()
+            tx.row_factory = aiosqlite.Row
+            started = False
+            committed = False
+            cancellation_baseline = 0
+            caught_cancellations = [0]
+            try:
+                await tx.execute("PRAGMA foreign_keys = ON")
+                await tx.execute("BEGIN IMMEDIATE")
+                started = True
+                result = await operation(tx)
+                cancellation_baseline = _cancel_count()
+                commit_task = asyncio.create_task(
+                    self._commit_refresh_rotation(tx),
+                    name="ares-sqlite-family-commit",
+                )
+                await _await_task_completion(
+                    commit_task,
+                    cancellation_baseline=cancellation_baseline,
+                    caught_cancellations=caught_cancellations,
+                )
+                committed = True
+                started = False
+            except BaseException:
+                if started and not committed:
+                    rollback_baseline = _cancel_count()
+                    rollback_cancellations = [0]
+                    await self._finish_refresh_rotation_cleanup(
+                        tx.rollback(),
+                        "family-rollback",
+                        cancellation_baseline=rollback_baseline,
+                        caught_cancellations=rollback_cancellations,
+                    )
+                raise
+            finally:
+                close_baseline = cancellation_baseline if committed else _cancel_count()
+                close_cancellations = caught_cancellations if committed else [0]
+                await self._finish_refresh_rotation_cleanup(
+                    tx.close(),
+                    "family-close",
+                    cancellation_baseline=close_baseline,
+                    caught_cancellations=close_cancellations,
+                )
+            if committed:
+                _remove_suppressed_cancellations(
+                    cancellation_baseline=cancellation_baseline,
+                    caught_cancellations=caught_cancellations[0],
+                )
+            return result
+
+    async def _insert_initial_family_token(
+        self,
+        tx: aiosqlite.Connection,
+        *,
+        user_id: str,
+        auth_epoch: int,
+    ) -> tuple[str, str]:
+        family_id = generate_family_id()
+        raw_token = generate_refresh_token()
+        token_hash = hash_refresh_token(raw_token)
+        created, expires, retain = self._family_timestamps()
+        await tx.execute(
+            "INSERT INTO refresh_token_families("
+            "id,user_id,auth_epoch,state,created_at,absolute_expires_at,retain_until) "
+            "VALUES(?,?,?,'active',?,?,?)",
+            (family_id, user_id, auth_epoch, created, expires, retain),
+        )
+        await tx.execute(
+            "INSERT INTO refresh_tokens("
+            "id,user_id,is_revoked,expires_at,created_at,family_id,parent_id,"
+            "generation,state,revoked_at) VALUES(?,?,0,?,?,?,NULL,0,'active',NULL)",
+            (token_hash, user_id, expires, created, family_id),
+        )
+        return family_id, raw_token
+
     async def create_refresh_token(
+        self, user_id: str, expires_days: int = FAMILY_ABSOLUTE_LIFETIME_DAYS
+    ) -> str:
+        if expires_days != FAMILY_ABSOLUTE_LIFETIME_DAYS:
+            raise ValueError("refresh lifetime is fixed")
+
+        async def _create(tx: aiosqlite.Connection) -> str:
+            async with tx.execute(
+                "SELECT auth_epoch FROM users WHERE id=? AND is_active=1",
+                (user_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                raise ValueError("invalid refresh owner")
+            _, raw_token = await self._insert_initial_family_token(
+                tx, user_id=user_id, auth_epoch=int(row["auth_epoch"])
+            )
+            return raw_token
+
+        return await self._run_refresh_family_transaction(_create)
+
+    async def create_login_session(
+        self,
+        username: str,
+        password: str,
+        token_factory: AccessTokenFactory,
+    ) -> SessionIssueResult:
+        async def _login(tx: aiosqlite.Connection) -> SessionIssueResult:
+            async with tx.execute(
+                "SELECT id,username,hashed_password,role,is_active,auth_epoch "
+                "FROM users WHERE username=?",
+                (username,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None or int(row["is_active"]) != 1 or not verify_password(
+                password, row["hashed_password"]
+            ):
+                return SessionIssueResult(SessionIssueStatus.INVALID)
+            family_id, raw_token = await self._insert_initial_family_token(
+                tx,
+                user_id=row["id"],
+                auth_epoch=int(row["auth_epoch"]),
+            )
+            access_token = token_factory(
+                {
+                    "sub": row["username"],
+                    "sid": family_id,
+                    "ver": int(row["auth_epoch"]),
+                }
+            )
+            await tx.execute(
+                "UPDATE users SET last_login=? WHERE id=?",
+                (format_sqlite_utc(datetime.now(timezone.utc)), row["id"]),
+            )
+            await tx.execute(
+                "INSERT INTO audit_log(actor,action,detail) VALUES("
+                "'auth-system','login_family_created','')"
+            )
+            return SessionIssueResult(
+                SessionIssueStatus.ISSUED,
+                IssuedTokenSession(
+                    access_token=access_token,
+                    refresh_token=raw_token,
+                    user_id=row["id"],
+                    subject=row["username"],
+                    family_id=family_id,
+                    auth_epoch=int(row["auth_epoch"]),
+                    refresh_generation=0,
+                    role=row["role"],
+                ),
+            )
+
+        return await self._run_refresh_family_transaction(_login)
+
+    async def _legacy_create_refresh_token(
         self, user_id: str, expires_days: int = 30
     ) -> str:
         import hashlib
@@ -2415,6 +2717,33 @@ class AresDatabase:
         await tx.execute(
             "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
             (token_hash, user_id, expires_at),
+        )
+
+    async def _insert_family_successor(
+        self,
+        tx: aiosqlite.Connection,
+        *,
+        token_hash: str,
+        user_id: str,
+        expires_at: str,
+        created_at: str,
+        family_id: str,
+        parent_id: str,
+        generation: int,
+    ) -> None:
+        await tx.execute(
+            "INSERT INTO refresh_tokens("
+            "id,user_id,is_revoked,expires_at,created_at,family_id,parent_id,"
+            "generation,state,revoked_at) VALUES(?,?,0,?,?,?,?,?,'active',NULL)",
+            (
+                token_hash,
+                user_id,
+                expires_at,
+                created_at,
+                family_id,
+                parent_id,
+                generation,
+            ),
         )
 
     async def _commit_refresh_rotation(
@@ -2451,7 +2780,128 @@ class AresDatabase:
                 error_type=type(cleanup_error).__name__,
             )
 
+    async def rotate_refresh_session(
+        self,
+        old_token: str,
+        token_factory: AccessTokenFactory,
+    ) -> RefreshRotationResult:
+        old_hash = hash_refresh_token(old_token)
+
+        async def _rotate(tx: aiosqlite.Connection) -> RefreshRotationResult:
+            async with tx.execute(
+                "SELECT rt.id,rt.user_id,rt.family_id,rt.generation,rt.state,"
+                "rt.expires_at,f.state AS family_state,f.auth_epoch,"
+                "f.absolute_expires_at,u.username,u.role,u.is_active,"
+                "u.auth_epoch AS user_epoch FROM refresh_tokens AS rt "
+                "JOIN refresh_token_families AS f "
+                "ON f.id=rt.family_id AND f.user_id=rt.user_id "
+                "JOIN users AS u ON u.id=rt.user_id WHERE rt.id=?",
+                (old_hash,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return RefreshRotationResult(RefreshRotationStatus.INVALID)
+
+            now_dt = datetime.now(timezone.utc)
+            now = format_sqlite_utc(now_dt)
+            if row["state"] != "active":
+                if row["family_state"] == "active":
+                    retain = format_sqlite_utc(
+                        max(parse_sqlite_utc(row["absolute_expires_at"]), now_dt)
+                        + timedelta(days=FAMILY_RETENTION_DAYS)
+                    )
+                    await tx.execute(
+                        "UPDATE refresh_token_families SET state='revoked',"
+                        "revoked_at=?,revoke_reason='replay',retain_until=? "
+                        "WHERE id=? AND state='active'",
+                        (now, retain, row["family_id"]),
+                    )
+                    await tx.execute(
+                        "UPDATE refresh_tokens SET state='retired',is_revoked=1,"
+                        "revoked_at=? WHERE family_id=? AND state='active'",
+                        (now, row["family_id"]),
+                    )
+                    await tx.execute(
+                        "INSERT INTO audit_log(actor,action,detail) VALUES("
+                        "'auth-system','refresh_replay_family_revoked','')"
+                    )
+                return RefreshRotationResult(RefreshRotationStatus.REPLAYED)
+
+            if (
+                row["family_state"] != "active"
+                or int(row["is_active"]) != 1
+                or int(row["auth_epoch"]) != int(row["user_epoch"])
+                or row["expires_at"] <= now
+                or row["absolute_expires_at"] <= now
+            ):
+                return RefreshRotationResult(RefreshRotationStatus.INVALID)
+
+            async with tx.execute(
+                "UPDATE refresh_tokens SET state='consumed',is_revoked=1,used_at=? "
+                "WHERE id=? AND state='active' AND is_revoked=0",
+                (now, old_hash),
+            ) as cursor:
+                if cursor.rowcount != 1:
+                    return RefreshRotationResult(RefreshRotationStatus.REPLAYED)
+
+            raw_child = generate_refresh_token()
+            child_hash = hash_refresh_token(raw_child)
+            generation = int(row["generation"]) + 1
+            await self._insert_family_successor(
+                tx,
+                token_hash=child_hash,
+                user_id=row["user_id"],
+                expires_at=row["absolute_expires_at"],
+                created_at=now,
+                family_id=row["family_id"],
+                parent_id=old_hash,
+                generation=generation,
+            )
+            access_token = token_factory(
+                {
+                    "sub": row["username"],
+                    "sid": row["family_id"],
+                    "ver": int(row["auth_epoch"]),
+                }
+            )
+            await tx.execute(
+                "INSERT INTO audit_log(actor,action,detail) VALUES("
+                "'auth-system','refresh_rotated','')"
+            )
+            return RefreshRotationResult(
+                RefreshRotationStatus.ROTATED,
+                IssuedTokenSession(
+                    access_token=access_token,
+                    refresh_token=raw_child,
+                    user_id=row["user_id"],
+                    subject=row["username"],
+                    family_id=row["family_id"],
+                    auth_epoch=int(row["auth_epoch"]),
+                    refresh_generation=generation,
+                    role=row["role"],
+                ),
+            )
+
+        return await self._run_refresh_family_transaction(_rotate)
+
     async def rotate_refresh_token(
+        self, old_token: str
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        result = await self.rotate_refresh_session(old_token, lambda _: "compat-access")
+        if result.status is not RefreshRotationStatus.ROTATED or result.session is None:
+            return None, None
+        return (
+            {
+                "id": result.session.user_id,
+                "username": result.session.subject,
+                "role": result.session.role,
+                "family_id": result.session.family_id,
+                "auth_epoch": result.session.auth_epoch,
+            },
+            result.session.refresh_token,
+        )
+
+    async def _legacy_rotate_refresh_token(
         self, old_token: str
     ) -> tuple[dict[str, Any] | None, str | None]:
         async with self._lifecycle_lock:
@@ -2633,7 +3083,161 @@ class AresDatabase:
         ) as cur:
             return await cur.fetchone() is not None
 
+    @staticmethod
+    async def _revoke_family_rows(
+        tx: aiosqlite.Connection,
+        *,
+        user_id: str,
+        reason: str,
+        family_id: str | None = None,
+    ) -> int:
+        now_dt = datetime.now(timezone.utc)
+        now = format_sqlite_utc(now_dt)
+        if family_id is None:
+            cursor = await tx.execute(
+                "SELECT id,absolute_expires_at FROM refresh_token_families "
+                "WHERE user_id=? AND state='active'",
+                (user_id,),
+            )
+        else:
+            cursor = await tx.execute(
+                "SELECT id,absolute_expires_at FROM refresh_token_families "
+                "WHERE user_id=? AND state='active' AND id=?",
+                (user_id, family_id),
+            )
+        async with cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            retain = format_sqlite_utc(
+                max(parse_sqlite_utc(row["absolute_expires_at"]), now_dt)
+                + timedelta(days=FAMILY_RETENTION_DAYS)
+            )
+            await tx.execute(
+                "UPDATE refresh_token_families SET state='revoked',revoked_at=?,"
+                "revoke_reason=?,retain_until=? WHERE id=? AND state='active'",
+                (now, reason, retain, row["id"]),
+            )
+            await tx.execute(
+                "UPDATE refresh_tokens SET state='retired',is_revoked=1,revoked_at=? "
+                "WHERE family_id=? AND state='active'",
+                (now, row["id"]),
+            )
+        return len(rows)
+
+    async def revoke_current_session(
+        self,
+        *,
+        user_id: str,
+        family_id: str,
+        jti: str,
+        expires_at: datetime,
+    ) -> SessionRevocationResult:
+        async def _revoke(tx: aiosqlite.Connection) -> SessionRevocationResult:
+            async with tx.execute(
+                "SELECT 1 FROM refresh_token_families WHERE id=? AND user_id=?",
+                (family_id, user_id),
+            ) as cursor:
+                known = await cursor.fetchone() is not None
+            if not known:
+                return SessionRevocationResult(SessionRevocationStatus.INVALID)
+            changed = await self._revoke_family_rows(
+                tx,
+                user_id=user_id,
+                family_id=family_id,
+                reason="logout_current",
+            )
+            await tx.execute(
+                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) "
+                "VALUES(?,?,?)",
+                (jti, user_id, format_sqlite_utc(expires_at)),
+            )
+            if changed:
+                await tx.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system','logout_current','')"
+                )
+                return SessionRevocationResult(SessionRevocationStatus.REVOKED)
+            return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)
+
+        return await self._run_refresh_family_transaction(_revoke)
+
+    async def revoke_all_sessions(
+        self,
+        *,
+        user_id: str,
+        jti: str,
+        expires_at: datetime,
+    ) -> SessionRevocationResult:
+        async def _revoke(tx: aiosqlite.Connection) -> SessionRevocationResult:
+            async with tx.execute(
+                "UPDATE users SET auth_epoch=auth_epoch+1 "
+                "WHERE id=? AND is_active=1",
+                (user_id,),
+            ) as cursor:
+                if cursor.rowcount != 1:
+                    return SessionRevocationResult(SessionRevocationStatus.INVALID)
+            await self._revoke_family_rows(
+                tx, user_id=user_id, reason="logout_all"
+            )
+            await tx.execute(
+                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) "
+                "VALUES(?,?,?)",
+                (jti, user_id, format_sqlite_utc(expires_at)),
+            )
+            await tx.execute(
+                "INSERT INTO audit_log(actor,action,detail) VALUES("
+                "'auth-system','logout_all','')"
+            )
+            return SessionRevocationResult(SessionRevocationStatus.REVOKED)
+
+        return await self._run_refresh_family_transaction(_revoke)
+
+    async def apply_user_security_event(
+        self,
+        *,
+        user_id: str,
+        reason: str,
+        new_password_hash: str | None = None,
+        new_role: str | None = None,
+        is_active: bool | None = None,
+    ) -> bool:
+        if reason not in {"password_change", "password_reset", "role_change", "user_status_change"}:
+            raise ValueError("invalid security event")
+
+        async def _apply(tx: aiosqlite.Connection) -> bool:
+            async with tx.execute(
+                "UPDATE users SET auth_epoch=auth_epoch+1,"
+                "hashed_password=COALESCE(?,hashed_password),"
+                "role=COALESCE(?,role),is_active=COALESCE(?,is_active) "
+                "WHERE id=?",
+                (
+                    new_password_hash,
+                    new_role,
+                    None if is_active is None else int(is_active),
+                    user_id,
+                ),
+            ) as cursor:
+                if cursor.rowcount != 1:
+                    return False
+            await self._revoke_family_rows(tx, user_id=user_id, reason=reason)
+            await tx.execute(
+                "INSERT INTO audit_log(actor,action,detail) VALUES("
+                "'auth-system',?,'')",
+                (reason,),
+            )
+            return True
+
+        return await self._run_refresh_family_transaction(_apply)
+
     async def revoke_all_refresh_tokens(self, user_id: str) -> None:
+        async def _revoke(tx: aiosqlite.Connection) -> None:
+            await self._revoke_family_rows(
+                tx, user_id=user_id, reason="operator_revoke"
+            )
+
+        await self._run_refresh_family_transaction(_revoke)
+
+    async def _legacy_revoke_all_refresh_tokens(self, user_id: str) -> None:
         await self._conn.execute(
             "UPDATE refresh_tokens SET is_revoked=1 WHERE user_id=?", (user_id,)
         )
@@ -2716,9 +3320,8 @@ class AresDatabase:
 
     async def purge_expired_tokens(self) -> int:
         async with self._conn.execute(
-            "DELETE FROM refresh_tokens WHERE is_revoked=1 OR "
-            "(julianday(expires_at) IS NOT NULL AND "
-            "julianday(expires_at) < julianday('now', '-7 days'))"
+            "DELETE FROM refresh_token_families "
+            "WHERE julianday(retain_until) <= julianday('now')"
         ) as cur:
             n = cur.rowcount
         await self._conn.commit()

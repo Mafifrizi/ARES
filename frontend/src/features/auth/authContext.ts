@@ -6,6 +6,7 @@ export interface AuthState {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  logoutAll: () => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthState | null>(null);

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import os
 import re
 import sqlite3
@@ -106,15 +108,46 @@ async def _seed_identity(
         (api_key_id, user_id, scopes),
     )
     await connection.commit()
+    now = datetime.now(timezone.utc)
+    family_id = _test_family_id(user_id)
+    await connection.execute(
+        "INSERT INTO refresh_token_families("
+        "id,user_id,auth_epoch,state,created_at,absolute_expires_at,retain_until) "
+        "VALUES(?,?,1,'active',?,?,?)",
+        (
+            family_id,
+            user_id,
+            now.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{now.microsecond // 1000:03d}Z",
+            (now + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{(now + timedelta(days=30)).microsecond // 1000:03d}Z",
+            (now + timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{(now + timedelta(days=60)).microsecond // 1000:03d}Z",
+        ),
+    )
+    await connection.commit()
     return user_id, username, campaign_id, other_campaign_id, api_key_id
 
 
-def _bearer_source(user_id: str, username: str) -> BearerTicketSource:
+def _test_family_id(user_id: str) -> str:
+    digest = hashlib.sha256(b"ARES-WS-TEST-FAMILY\0" + user_id.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def _bearer_source(
+    user_id: str,
+    username: str,
+    *,
+    family_id: str | None = None,
+    auth_epoch: int = 1,
+) -> BearerTicketSource:
     return BearerTicketSource(
         user_id=user_id,
         subject=username,
         jti=f"ticket-jti-{uuid4().hex}",
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        family_id=family_id or _test_family_id(user_id),
+        auth_epoch=auth_epoch,
     )
 
 
@@ -585,6 +618,8 @@ def test_bearer_ticket_source_preserves_identity_and_confidentiality() -> None:
         "subject": "synthetic-bearer-subject",
         "jti": "synthetic-bearer-jti",
         "expires_at": expires_at,
+        "family_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "auth_epoch": 7,
     }
     first = BearerTicketSource(**values)
     second = BearerTicketSource(**values)
@@ -624,6 +659,8 @@ def test_consumed_ticket_preserves_identity_and_confidentiality() -> None:
         "bearer_subject": "synthetic-consumed-subject",
         "bearer_jti": "synthetic-consumed-jti",
         "bearer_expires_at": bearer_expiry,
+        "bearer_family_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "bearer_auth_epoch": 9,
     }
     first_bearer = ConsumedWebSocketTicket(**bearer_values)
     second_bearer = ConsumedWebSocketTicket(**bearer_values)
@@ -636,6 +673,8 @@ def test_consumed_ticket_preserves_identity_and_confidentiality() -> None:
             bearer_values["bearer_subject"],
             bearer_values["bearer_jti"],
             bearer_values["bearer_expires_at"],
+            bearer_values["bearer_family_id"],
+            bearer_values["bearer_auth_epoch"],
         ),
         frozen_field="bearer_jti",
     )

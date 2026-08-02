@@ -3,6 +3,7 @@ import {
   captureSession,
   invalidateSession,
   isSessionCurrent,
+  readCoordinationRecord,
   replaceTokenPairIfCurrent,
   type SessionSnapshot
 } from "./session";
@@ -46,7 +47,11 @@ interface RefreshFlight {
 let refreshFlight: RefreshFlight | null = null;
 
 async function performRefresh(snapshot: SessionSnapshot): Promise<boolean> {
-  if (!snapshot.refreshToken) {
+  if (
+    !snapshot.refreshToken
+    || !snapshot.coordinationKey
+    || snapshot.refreshGeneration === null
+  ) {
     return false;
   }
 
@@ -61,11 +66,22 @@ async function performRefresh(snapshot: SessionSnapshot): Promise<boolean> {
       return false;
     }
     const token = (await response.json()) as TokenResponse;
-    if (!token.access_token || !token.refresh_token) {
+    if (
+      !token.access_token
+      || !token.refresh_token
+      || token.session_coordination_key !== snapshot.coordinationKey
+      || token.refresh_generation !== snapshot.refreshGeneration + 1
+    ) {
       invalidateSession(snapshot);
       return false;
     }
-    return replaceTokenPairIfCurrent(snapshot, token.access_token, token.refresh_token);
+    return replaceTokenPairIfCurrent(
+      snapshot,
+      token.access_token,
+      token.refresh_token,
+      token.session_coordination_key,
+      token.refresh_generation
+    );
   } catch {
     invalidateSession(snapshot);
     return false;
@@ -73,7 +89,12 @@ async function performRefresh(snapshot: SessionSnapshot): Promise<boolean> {
 }
 
 export function refreshAccessToken(snapshot = captureSession()): Promise<boolean> {
-  if (!snapshot.refreshToken) {
+  if (
+    !snapshot.refreshToken
+    || !snapshot.coordinationKey
+    || snapshot.refreshGeneration === null
+  ) {
+    invalidateSession(snapshot);
     return Promise.resolve(false);
   }
   if (
@@ -89,7 +110,33 @@ export function refreshAccessToken(snapshot = captureSession()): Promise<boolean
     refreshToken: snapshot.refreshToken,
     promise: Promise.resolve(false)
   };
-  flight.promise = performRefresh(snapshot).finally(() => {
+  const execute = async () => {
+    const current = captureSession();
+    if (!isSessionCurrent(snapshot) || current.refreshToken !== snapshot.refreshToken) {
+      return false;
+    }
+    const shared = readCoordinationRecord();
+    if (
+      shared === null
+      || shared.key !== snapshot.coordinationKey
+      || shared.tombstone
+      || shared.generation !== snapshot.refreshGeneration
+    ) {
+      invalidateSession(snapshot);
+      return false;
+    }
+    return performRefresh(snapshot);
+  };
+  const lockManager = navigator.locks;
+  const coordinated: Promise<boolean> = (
+    lockManager
+      ? (async () => lockManager.request(
+          `ares-refresh:${snapshot.coordinationKey}`,
+          execute
+        ))()
+      : execute()
+  );
+  flight.promise = coordinated.finally(() => {
     if (refreshFlight === flight) {
       refreshFlight = null;
     }

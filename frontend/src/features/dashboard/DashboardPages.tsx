@@ -330,7 +330,7 @@ function formatRole(role?: string): string {
 }
 
 export function DashboardShell({ children }: { children: ReactNode }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, logoutAll } = useAuth();
   const navigate = useNavigate();
   const writeDashboardSession = useDashboardSessionWriter();
   const [selectedCampaignId, setSelectedCampaignId] = useSessionState("ares.dashboard.selectedCampaignId", "");
@@ -711,6 +711,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               </span>
               <button className="btn btn-topbar" onClick={() => void logout()}>
                 <LogOut size={16} /> Logout
+              </button>
+              <button className="btn btn-topbar" onClick={() => void logoutAll()}>
+                <LogOut size={16} /> Logout all devices
               </button>
             </div>
           </header>

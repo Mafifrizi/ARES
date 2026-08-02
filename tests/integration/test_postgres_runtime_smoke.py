@@ -63,6 +63,8 @@ def _canonical_ticket_columns() -> list[dict[str, object]]:
         ("created_at", "timestamp with time zone", True),
         ("expires_at", "timestamp with time zone", True),
         ("consumed_at", "timestamp with time zone", False),
+        ("bearer_family_id", "text", False),
+        ("bearer_auth_epoch", "bigint", False),
     )
     return [
         {
@@ -128,10 +130,16 @@ def _canonical_ticket_constraints() -> list[dict[str, object]]:
             "AND length(btrim(bearer_jti)) > 0 "
             "AND bearer_jti = btrim(bearer_jti) "
             "AND bearer_expires_at IS NOT NULL "
+            "AND bearer_family_id IS NOT NULL "
+            "AND bearer_auth_epoch IS NOT NULL "
+            "AND bearer_auth_epoch >= 1 "
             "AND api_key_id IS NULL AND required_scope IS NULL "
             "OR credential_kind = 'api_key'::text "
             "AND bearer_subject IS NULL AND bearer_jti IS NULL "
-            "AND bearer_expires_at IS NULL AND api_key_id IS NOT NULL "
+            "AND bearer_expires_at IS NULL "
+            "AND bearer_family_id IS NULL "
+            "AND bearer_auth_epoch IS NULL "
+            "AND api_key_id IS NOT NULL "
             "AND length(btrim(api_key_id)) > 0 "
             "AND api_key_id = btrim(api_key_id) "
             "AND required_scope = 'read'::text)"
@@ -181,8 +189,18 @@ def _canonical_ticket_constraints() -> list[dict[str, object]]:
             203,
             "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
         ),
+        (
+            "fk_ws_ticket_bearer_family",
+            ("bearer_family_id", "user_id"),
+            "refresh_token_families",
+            204,
+            "FOREIGN KEY (bearer_family_id, user_id) "
+            "REFERENCES refresh_token_families(id, user_id) ON DELETE CASCADE",
+        ),
     )
     for name, column, table, referenced_oid, definition in references:
+        local_columns = [column] if isinstance(column, str) else list(column)
+        remote_columns = ["id"] if isinstance(column, str) else ["id", "user_id"]
         rows.append(
             {
                 "conname": name,
@@ -197,8 +215,8 @@ def _canonical_ticket_constraints() -> list[dict[str, object]]:
                 "referenced_schema_oid": 2,
                 "referenced_schema": "public",
                 "referenced_table": table,
-                "local_columns": [column],
-                "remote_columns": ["id"],
+                "local_columns": local_columns,
+                "remote_columns": remote_columns,
                 "confupdtype": b"a",
                 "confdeltype": b"c",
             }
@@ -209,7 +227,7 @@ def _canonical_ticket_constraints() -> list[dict[str, object]]:
             "contype": b"p",
             "table_oid": 1,
             "referenced_oid": 0,
-            "constraint_index_oid": 105,
+            "constraint_index_oid": 106,
             "convalidated": True,
             "condeferrable": False,
             "condeferred": False,
@@ -229,6 +247,7 @@ def _canonical_ticket_constraints() -> list[dict[str, object]]:
 def _canonical_ticket_indexes() -> list[dict[str, object]]:
     definitions = (
         ("idx_ws_tickets_api_key", "api_key_id", "text_ops", 11, False),
+        ("idx_ws_tickets_bearer_family", "bearer_family_id", "text_ops", 11, False),
         ("idx_ws_tickets_campaign", "campaign_id", "text_ops", 11, False),
         (
             "idx_ws_tickets_expires",
@@ -248,7 +267,7 @@ def _canonical_ticket_indexes() -> list[dict[str, object]]:
         rows.append(
             {
                 "table_oid": 1,
-                "index_oid": 105 if primary else ordinal,
+                "index_oid": 106 if primary else ordinal,
                 "index_schema_oid": 2,
                 "index_schema": "public",
                 "index_name": name,
@@ -309,6 +328,7 @@ class _CompleteTicketCensusConnection:
                 {"relname": "api_keys", "relation_oid": 201},
                 {"relname": "campaigns", "relation_oid": 202},
                 {"relname": "users", "relation_oid": 203},
+                {"relname": "refresh_token_families", "relation_oid": 204},
             ]
         raise RuntimeError("closed-test-query")
 
@@ -407,6 +427,28 @@ def _runtime_dsn(config: dict[str, str | int], database: str) -> str:
         f"{host}:{config['port']}/"
         f"{quote(database, safe='')}"
     )
+
+
+async def _initialize_managed_schema(dsn: str) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(
+        dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+    )
+
+    def upgrade(connection: object) -> None:
+        config = Config()
+        config.set_main_option("script_location", "migrations")
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
+
+    try:
+        async with engine.connect() as connection:
+            await connection.run_sync(upgrade)
+    finally:
+        await engine.dispose()
 
 
 def _sanitized_setup_failure(action: str, exc: Exception) -> RuntimeError:
@@ -968,9 +1010,9 @@ async def test_postgres_q78_failure_retains_complete_split_observation() -> None
 
     split_is_complete = (
         _is_postgres_q78_split(split)
-        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h1f,x00,g0"
+        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h3f,x00,g0"
         in split
-        and ";p=i0;o=m0,e0,x0;s=m0,x0;f=m0,e0,o0,b0,x0;z=q0"
+        and ";p=i0;o=m0,e0,x0;s=m0,x0;f=m0,e0,oc,b0,x0;z=q0"
         in split
     )
     q78_is_exact = (
@@ -1065,8 +1107,8 @@ def test_postgres_ticket_column_census_distinguishes_every_dimension() -> None:
         row["attgenerated"] = b"\x00"
     codec_result = _postgres_ticket_column_census(codec, expected)
     _require_fixed(
-        codec_result["a"] == 0xFFF
-        and sum(codec_result.values()) == 0xFFF,
+        codec_result["a"] == 0x3FFF
+        and sum(codec_result.values()) == 0x3FFF,
         "Known internal-character codecs require only alternate bits",
     )
 
@@ -1128,7 +1170,7 @@ def test_postgres_ticket_census_reports_cross_group_mutations_together() -> None
     invariant = _postgres_ticket_schema_census_invariant(census)
     all_mutations_survive = all(
         fragment in invariant
-        for fragment in ("t001", "s0002", "d4", "a08")
+        for fragment in ("t0001", "s0002", "d4", "a08")
     )
     _require_fixed(
         all_mutations_survive,
@@ -1155,13 +1197,13 @@ async def test_postgres_ticket_validator_censuses_all_later_groups() -> None:
 
     complete = (
         _is_postgres_ticket_schema_census(invariant)
-        and "c=m000,e0,o000,t000,u000,d000,l000,i000,afff,x000,g0"
+        and "c=m0000,e0,o0000,t0000,u0000,d0000,l0000,i0000,a3fff,x0000,g0"
         in invariant
-        and "q=m0000,e0,t0000,v0000,f0000,d0000,s0000,b0000,a7fff,x0000,g0"
+        and "q=m0000,e0,t0000,v0000,f0000,d0000,s0000,b0000,affff,x0000,g0"
         in invariant
         and "h=t000,v000,f000,d000,s000,a7ff,x000,g0" in invariant
-        and "f=l0,s0,t0,r0,u0,d0,i0,a7,x0,g0" in invariant
-        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h1f,x00,g0"
+        and "f=l0,s0,t0,r0,u0,d0,i0,af,x0,g0" in invariant
+        and "i=m00,e0,o00,b00,u00,p00,v00,r00,l00,k00,n00,c00,d00,a00,j00,s00,t00,y00,h3f,x00,g0"
         in invariant
         and ";o=m0,e0,x0,g0;z=q00,x00" in invariant
     )
@@ -1373,7 +1415,6 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
         pytest.fail("Generated PostgreSQL smoke database collided with maintenance database")
     user_id = f"smoke-user-{uuid4().hex}"
     rollback_user_id = f"rollback-user-{uuid4().hex}"
-    refresh_row_id = f"smoke-refresh-{uuid4().hex}"
     admin = None
     database = None
     creation_attempted = False
@@ -1452,8 +1493,13 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
             "Runtime smoke database must begin without Alembic ownership",
         )
 
+        dsn = _runtime_dsn(config, test_database)
+        try:
+            await _initialize_managed_schema(dsn)
+        except Exception as exc:
+            raise _sanitized_setup_failure("alembic-upgrade", exc) from None
         database = PostgresDatabase(
-            _runtime_dsn(config, test_database),
+            dsn,
             pool_min=1,
             pool_max=2,
         )
@@ -1462,34 +1508,26 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
         except Exception as exc:
             raise _sanitized_setup_failure("runtime-initialize", exc) from None
         runtime_connected = True
-        initial_trace_is_exact = tuple(database._startup_trace) == (
-            "fallback-entered",
-            "fallback-ddl-complete",
-            "startup-ready",
-        )
+        initial_trace_is_exact = tuple(database._startup_trace) == ("startup-ready",)
         _require_fixed(
             initial_trace_is_exact,
-            "Unversioned runtime startup must complete the fallback path",
+            "Managed runtime startup must validate without fallback DDL",
         )
 
         async with database._pool.acquire() as connection:
-            version_relation_exists = bool(
+            managed_revision_is_current = bool(
                 await connection.fetchval(
                     """
                     SELECT EXISTS(
-                        SELECT 1
-                        FROM pg_class AS rel
-                        JOIN pg_namespace AS nsp
-                          ON nsp.oid=rel.relnamespace
-                        WHERE nsp.nspname=current_schema()
-                          AND rel.relname='alembic_version'
+                        SELECT 1 FROM alembic_version
+                        WHERE version_num='0009'
                     )
                     """
                 )
             )
             _require_fixed(
-                not version_relation_exists,
-                "Runtime fallback must not stamp Alembic ownership",
+                managed_revision_is_current,
+                "Runtime smoke must use exact managed revision 0009",
             )
             relation_metadata = await connection.fetchrow(
                 """
@@ -1557,11 +1595,17 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
                 WHERE table_schema = current_schema()
                   AND table_name = ANY($1::text[])
                 """,
-                ["api_keys", "refresh_tokens", "revoked_access_tokens"],
+                [
+                    "api_keys",
+                    "refresh_tokens",
+                    "refresh_token_families",
+                    "revoked_access_tokens",
+                ],
             )
             assert {row["table_name"] for row in table_rows} == {
                 "api_keys",
                 "refresh_tokens",
+                "refresh_token_families",
                 "revoked_access_tokens",
             }
 
@@ -1595,11 +1639,11 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
             )
             indexes = {row["indexname"] for row in index_rows}
             assert {
-                "idx_pg_apikeys_user",
-                "idx_pg_apikeys_prefix",
-                "idx_pg_refresh_user",
-                "idx_pg_refresh_exp",
-                "idx_pg_rat_expires",
+                "idx_apikeys_user",
+                "idx_apikeys_prefix",
+                "idx_refresh_user",
+                "idx_refresh_exp",
+                "idx_rat_expires",
             } <= indexes
 
             await connection.execute(
@@ -1613,15 +1657,42 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
                 "reporter",
                 "postgres-smoke",
             )
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            from ares.core.token_sessions import (
+                generate_family_id,
+                generate_refresh_token,
+                hash_refresh_token,
+            )
+
+            created_at = datetime.now(timezone.utc)
+            expires_at = created_at + timedelta(days=30)
+            retain_until = expires_at + timedelta(days=30)
+            family_id = generate_family_id()
+            refresh_row_id = hash_refresh_token(generate_refresh_token())
             await connection.execute(
                 """
-                INSERT INTO refresh_tokens(id, user_id, expires_at)
-                VALUES($1, $2, $3)
+                INSERT INTO refresh_token_families(
+                    id,user_id,auth_epoch,state,created_at,
+                    absolute_expires_at,retain_until
+                ) VALUES($1,$2,1,'active',$3,$4,$5)
+                """,
+                family_id,
+                user_id,
+                created_at,
+                expires_at,
+                retain_until,
+            )
+            await connection.execute(
+                """
+                INSERT INTO refresh_tokens(
+                    id,user_id,is_revoked,expires_at,created_at,family_id,
+                    parent_id,generation,state,revoked_at
+                ) VALUES($1,$2,0,$3,$4,$5,NULL,0,'active',NULL)
                 """,
                 refresh_row_id,
                 user_id,
                 expires_at,
+                created_at,
+                family_id,
             )
             round_trip = await connection.fetchval(
                 "SELECT expires_at FROM refresh_tokens WHERE id=$1",
@@ -1681,13 +1752,11 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
             ) from None
         runtime_connected = True
         reconnect_trace_is_exact = tuple(database._startup_trace) == (
-            "fallback-entered",
-            "fallback-ddl-complete",
             "startup-ready",
         )
         _require_fixed(
             reconnect_trace_is_exact,
-            "Unversioned runtime reconnect must complete the fallback path",
+            "Managed runtime reconnect must not execute fallback DDL",
         )
         async with database._pool.acquire() as reusable_connection:
             reusable_after_reconnect = (

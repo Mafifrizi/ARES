@@ -38,6 +38,21 @@ from typing import Any
 
 from ares.core.logger import get_logger
 from ares.core.security import DataEncryptor, hash_password, verify_password
+from ares.core.token_sessions import (
+    FAMILY_ABSOLUTE_LIFETIME_DAYS,
+    FAMILY_RETENTION_DAYS,
+    AccessTokenFactory,
+    IssuedTokenSession,
+    RefreshRotationResult,
+    RefreshRotationStatus,
+    SessionIssueResult,
+    SessionIssueStatus,
+    SessionRevocationResult,
+    SessionRevocationStatus,
+    generate_family_id,
+    generate_refresh_token,
+    hash_refresh_token,
+)
 from ares.db.websocket_tickets import (
     ApiKeyTicketSource,
     BearerTicketSource,
@@ -577,31 +592,31 @@ def _is_postgres_ticket_relation_diagnostic(invariant: str) -> bool:
 _POSTGRES_TICKET_CENSUS_FIELDS = (
     ("r", (("m", 0x3FF, 3), ("a", 0x3FF, 3), ("x", 0x3FF, 3),
            ("n", 0x3FF, 3), ("g", 0x1, 1))),
-    ("c", (("m", 0xFFF, 3), ("e", 0x1, 1), ("o", 0xFFF, 3),
-           ("t", 0xFFF, 3), ("u", 0xFFF, 3), ("d", 0xFFF, 3),
-           ("l", 0xFFF, 3), ("i", 0xFFF, 3), ("a", 0xFFF, 3),
-           ("x", 0xFFF, 3), ("g", 0x1, 1))),
-    ("q", (("m", 0x7FFF, 4), ("e", 0x1, 1), ("t", 0x7FFF, 4),
-           ("v", 0x7FFF, 4), ("f", 0x7FFF, 4), ("d", 0x7FFF, 4),
-           ("s", 0x7FFF, 4), ("b", 0x7FFF, 4), ("a", 0x7FFF, 4),
-           ("x", 0x7FFF, 4), ("g", 0x1, 1))),
+    ("c", (("m", 0x3FFF, 4), ("e", 0x1, 1), ("o", 0x3FFF, 4),
+           ("t", 0x3FFF, 4), ("u", 0x3FFF, 4), ("d", 0x3FFF, 4),
+           ("l", 0x3FFF, 4), ("i", 0x3FFF, 4), ("a", 0x3FFF, 4),
+           ("x", 0x3FFF, 4), ("g", 0x1, 1))),
+    ("q", (("m", 0xFFFF, 4), ("e", 0x1, 1), ("t", 0xFFFF, 4),
+           ("v", 0xFFFF, 4), ("f", 0xFFFF, 4), ("d", 0xFFFF, 4),
+           ("s", 0xFFFF, 4), ("b", 0xFFFF, 4), ("a", 0xFFFF, 4),
+           ("x", 0xFFFF, 4), ("g", 0x1, 1))),
     ("p", (("l", 0x1, 1), ("r", 0x1, 1), ("n", 0x1, 1),
            ("i", 0x1, 1), ("a", 0x1, 1), ("x", 0x1, 1),
            ("g", 0x1, 1))),
     ("h", (("t", 0x7FF, 3), ("v", 0x7FF, 3), ("f", 0x7FF, 3),
            ("d", 0x7FF, 3), ("s", 0x7FF, 3), ("a", 0x7FF, 3),
            ("x", 0x7FF, 3), ("g", 0x1, 1))),
-    ("f", (("l", 0x7, 1), ("s", 0x7, 1), ("t", 0x7, 1),
-           ("r", 0x7, 1), ("u", 0x7, 1), ("d", 0x7, 1),
-           ("i", 0x7, 1), ("a", 0x7, 1), ("x", 0x7, 1),
+    ("f", (("l", 0xF, 1), ("s", 0xF, 1), ("t", 0xF, 1),
+           ("r", 0xF, 1), ("u", 0xF, 1), ("d", 0xF, 1),
+           ("i", 0xF, 1), ("a", 0xF, 1), ("x", 0xF, 1),
            ("g", 0x1, 1))),
-    ("i", (("m", 0x1F, 2), ("e", 0x1, 1), ("o", 0x1F, 2),
-           ("b", 0x1F, 2), ("u", 0x1F, 2), ("p", 0x1F, 2),
-           ("v", 0x1F, 2), ("r", 0x1F, 2), ("l", 0x1F, 2),
-           ("k", 0x1F, 2), ("n", 0x1F, 2), ("c", 0x1F, 2),
-           ("d", 0x1F, 2), ("a", 0x1F, 2), ("j", 0x1F, 2),
-           ("s", 0x1F, 2), ("t", 0x1F, 2), ("y", 0x1F, 2),
-           ("h", 0x1F, 2), ("x", 0x1F, 2), ("g", 0x1, 1))),
+    ("i", (("m", 0x3F, 2), ("e", 0x1, 1), ("o", 0x3F, 2),
+           ("b", 0x3F, 2), ("u", 0x3F, 2), ("p", 0x3F, 2),
+           ("v", 0x3F, 2), ("r", 0x3F, 2), ("l", 0x3F, 2),
+           ("k", 0x3F, 2), ("n", 0x3F, 2), ("c", 0x3F, 2),
+           ("d", 0x3F, 2), ("a", 0x3F, 2), ("j", 0x3F, 2),
+           ("s", 0x3F, 2), ("t", 0x3F, 2), ("y", 0x3F, 2),
+           ("h", 0x3F, 2), ("x", 0x3F, 2), ("g", 0x1, 1))),
     ("o", (("m", 0x3, 1), ("e", 0x1, 1), ("x", 0x3, 1),
            ("g", 0x1, 1))),
     ("z", (("q", 0x7F, 2), ("x", 0x7F, 2))),
@@ -826,13 +841,13 @@ def _is_postgres_q78_failure(value: str) -> bool:
 
 
 _POSTGRES_Q78_SPLIT_INDEX_FIELDS = (
-    ("m", 0x1F, 2), ("e", 0x1, 1), ("o", 0x1F, 2),
-    ("b", 0x1F, 2), ("u", 0x1F, 2), ("p", 0x1F, 2),
-    ("v", 0x1F, 2), ("r", 0x1F, 2), ("l", 0x1F, 2),
-    ("k", 0x1F, 2), ("n", 0x1F, 2), ("c", 0x1F, 2),
-    ("d", 0x1F, 2), ("a", 0x1F, 2), ("j", 0x1F, 2),
-    ("s", 0x1F, 2), ("t", 0x1F, 2), ("y", 0x1F, 2),
-    ("h", 0x1F, 2), ("x", 0x1F, 2), ("g", 0x1, 1),
+    ("m", 0x3F, 2), ("e", 0x1, 1), ("o", 0x3F, 2),
+    ("b", 0x3F, 2), ("u", 0x3F, 2), ("p", 0x3F, 2),
+    ("v", 0x3F, 2), ("r", 0x3F, 2), ("l", 0x3F, 2),
+    ("k", 0x3F, 2), ("n", 0x3F, 2), ("c", 0x3F, 2),
+    ("d", 0x3F, 2), ("a", 0x3F, 2), ("j", 0x3F, 2),
+    ("s", 0x3F, 2), ("t", 0x3F, 2), ("y", 0x3F, 2),
+    ("h", 0x3F, 2), ("x", 0x3F, 2), ("g", 0x1, 1),
 )
 
 
@@ -874,7 +889,7 @@ def _postgres_q78_split_invariant(
     )
     if (
         any(
-            type(value) is not int or not 0 <= value <= 0x7
+            type(value) is not int or not 0 <= value <= 0xF
             for value in scalar_values[:-1]
         )
         or type(query_failure) is not int
@@ -935,7 +950,7 @@ def _is_postgres_q78_split(value: str) -> bool:
                 if not encoded.startswith(marker, position):
                     return False
                 position += len(marker)
-                allowed = "0123456789abcdef" if marker == "z=q" else "01234567"
+                allowed = "0123456789abcdef"
                 if position >= len(encoded) or encoded[position] not in allowed:
                     return False
                 scalars.append(int(encoded[position], 16))
@@ -979,6 +994,10 @@ def _postgres_q78_index_split_census(
             "btree", False, False, True, True, True,
             1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
         ),
+        "idx_ws_tickets_bearer_family": (
+            "btree", False, False, True, True, True,
+            1, 1, ("bearer_family_id",), (0,), ("text_ops",), (True,), None, None,
+        ),
         "idx_ws_tickets_campaign": (
             "btree", False, False, True, True, True,
             1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
@@ -1001,7 +1020,7 @@ def _postgres_q78_index_split_census(
         name: ordinal for ordinal, name in enumerate(expected_names)
     }
     if type(rows) not in {list, tuple}:
-        section["x"] = 0x1F
+        section["x"] = 0x3F
         return section, 1
     actual_names: list[str] = []
     actual: dict[str, tuple[object, ...]] = {}
@@ -1086,7 +1105,7 @@ def _postgres_q78_index_split_census(
             if name == "websocket_tickets_pkey":
                 primary_index_oid = index_oid
         except (KeyError, IndexError, TypeError, ValueError):
-            section["x"] |= 0x1F
+            section["x"] |= 0x3F
             continue
     actual_name_set = set(actual_names)
     for name in set(expected_names) - actual_name_set:
@@ -1283,7 +1302,7 @@ async def _postgres_q78_split_observation(
             ORDER BY rel.relname
             """,
             schema_oid,
-            ["api_keys", "campaigns", "users"],
+            ["api_keys", "campaigns", "refresh_token_families", "users"],
         )
     except asyncio.CancelledError:
         raise
@@ -1323,8 +1342,13 @@ async def _postgres_q78_split_observation(
     schema_shape = int(type(raw_schema) is not str)
     schema_mismatch = int(type(raw_schema) is str and raw_schema != schema_name)
 
-    expected_reference_names = ("api_keys", "campaigns", "users")
-    reference_missing = 0x7
+    expected_reference_names = (
+        "api_keys",
+        "campaigns",
+        "refresh_token_families",
+        "users",
+    )
+    reference_missing = 0xF
     reference_extra = 0
     reference_order = 0
     reference_binding = 0x7
@@ -1352,10 +1376,11 @@ async def _postgres_q78_split_observation(
             expected_constraint_names = (
                 "fk_ws_ticket_api_key",
                 "fk_ws_ticket_campaign",
+                "fk_ws_ticket_bearer_family",
                 "fk_ws_ticket_user",
             )
             if type(constraint_rows) not in {list, tuple}:
-                reference_binding = 0x7
+                reference_binding = 0xF
             else:
                 constraints = {
                     str(row["conname"]): row for row in constraint_rows
@@ -1620,6 +1645,14 @@ class _PostgresStartupDiagnosticError(RuntimeError):
                 or _is_postgres_ticket_schema_census(
                     diagnostic_invariant
                 )
+                or (
+                    diagnostic_invariant.startswith(
+                        ("managed-check-", "managed-foreign-")
+                    )
+                    and len(diagnostic_invariant)
+                    in {len("managed-check-00"), len("managed-foreign-00")}
+                    and diagnostic_invariant[-2:].isdigit()
+                )
             )
             else "ownership-unclassified"
         )
@@ -1743,9 +1776,9 @@ def _postgres_ticket_schema_error(
     return error
 
 
-_POSTGRES_MANAGED_REVISION = "0008"
+_POSTGRES_MANAGED_REVISION = "0009"
 _POSTGRES_OLDER_REVISIONS = frozenset(
-    {"0001", "0002", "0003", "0004", "0005", "0006", "0007"}
+    {"0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"}
 )
 _POSTGRES_MIGRATION_REQUIRED_ERROR = "PostgreSQL schema migration required"
 _POSTGRES_MANAGED_SCHEMA_ERROR = "Incompatible managed PostgreSQL schema"
@@ -1772,6 +1805,7 @@ _POSTGRES_MANAGED_TABLES = frozenset(
         "users",
         "api_keys",
         "refresh_tokens",
+        "refresh_token_families",
         "revoked_access_tokens",
         "rate_limit_events",
         "websocket_tickets",
@@ -1803,6 +1837,26 @@ _POSTGRES_MANAGED_INDEXES = (
     ("api_keys", "idx_apikeys_prefix", ("key_prefix",)),
     ("refresh_tokens", "idx_refresh_user", ("user_id",)),
     ("refresh_tokens", "idx_refresh_exp", ("expires_at",)),
+    (
+        "refresh_token_families",
+        "idx_refresh_family_user_state_exp",
+        ("user_id", "state", "absolute_expires_at"),
+    ),
+    (
+        "refresh_token_families",
+        "idx_refresh_family_retain",
+        ("retain_until",),
+    ),
+    (
+        "refresh_tokens",
+        "idx_refresh_family_generation",
+        ("family_id", "generation"),
+    ),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_one_active",
+        ("family_id",),
+    ),
     ("revoked_access_tokens", "idx_rat_expires", ("expires_at",)),
     ("rate_limit_events", "idx_rle_ip", ("ip_address",)),
     ("rate_limit_events", "idx_rle_timestamp", ("timestamp",)),
@@ -1820,6 +1874,11 @@ _POSTGRES_MANAGED_PRIMARY_KEYS = (
     ("users", "users_pkey", ("id",)),
     ("api_keys", "api_keys_pkey", ("id",)),
     ("refresh_tokens", "refresh_tokens_pkey", ("id",)),
+    (
+        "refresh_token_families",
+        "refresh_token_families_pkey",
+        ("id",),
+    ),
     (
         "revoked_access_tokens",
         "revoked_access_tokens_pkey",
@@ -1919,11 +1978,54 @@ _POSTGRES_MANAGED_FOREIGN_KEYS = (
         "CASCADE",
         "c",
     ),
+    (
+        "refresh_token_families",
+        "fk_refresh_family_user",
+        ("user_id",),
+        "users",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "refresh_tokens",
+        "fk_refresh_token_family_owner",
+        ("family_id", "user_id"),
+        "refresh_token_families",
+        ("id", "user_id"),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "refresh_tokens",
+        "fk_refresh_token_parent",
+        ("family_id", "parent_id"),
+        "refresh_tokens",
+        ("family_id", "id"),
+        "CASCADE",
+        "c",
+    ),
 )
 
 _POSTGRES_MANAGED_UNIQUES = (
     ("hosts", "uq_hosts_campaign_ip", ("campaign_id", "ip_address")),
     ("users", "uq_users_username", ("username",)),
+    (
+        "refresh_token_families",
+        "uq_refresh_family_owner",
+        ("id", "user_id"),
+    ),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_family_hash",
+        ("family_id", "id"),
+    ),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_family_generation",
+        ("family_id", "generation"),
+    ),
+    ("refresh_tokens", "uq_refresh_token_parent", ("parent_id",)),
 )
 
 _POSTGRES_MANAGED_FINITE_CHECKS = (
@@ -1944,6 +2046,11 @@ _POSTGRES_MANAGED_FINITE_CHECKS = (
     ("refresh_tokens", "expires_at", False),
     ("refresh_tokens", "created_at", False),
     ("refresh_tokens", "used_at", True),
+    ("refresh_tokens", "revoked_at", True),
+    ("refresh_token_families", "created_at", False),
+    ("refresh_token_families", "absolute_expires_at", False),
+    ("refresh_token_families", "revoked_at", True),
+    ("refresh_token_families", "retain_until", False),
     ("rate_limit_events", "timestamp", False),
     ("revoked_access_tokens", "revoked_at", False),
     ("revoked_access_tokens", "expires_at", False),
@@ -1957,6 +2064,15 @@ def _postgres_finite_check_name(table: str, column: str) -> str:
         return "ck_audit_log_timestamp_finite"
     if table == "rate_limit_events":
         return "ck_rate_limit_events_timestamp_finite"
+    if table == "refresh_tokens" and column == "revoked_at":
+        return "ck_refresh_token_revoked_finite"
+    if table == "refresh_token_families":
+        return {
+            "created_at": "ck_refresh_family_created_finite",
+            "absolute_expires_at": "ck_refresh_family_expires_finite",
+            "revoked_at": "ck_refresh_family_revoked_finite",
+            "retain_until": "ck_refresh_family_retain_finite",
+        }[column]
     return f"ck_{table}_{column}_finite"
 
 
@@ -1976,10 +2092,14 @@ def _postgres_index_opclass(table: str, column: str) -> str:
     if (table, column) in {
         ("module_runs", "completed_at"),
         ("refresh_tokens", "expires_at"),
+        ("refresh_token_families", "absolute_expires_at"),
+        ("refresh_token_families", "retain_until"),
         ("revoked_access_tokens", "expires_at"),
         ("rate_limit_events", "timestamp"),
     }:
         return "timestamptz_ops"
+    if (table, column) == ("refresh_tokens", "generation"):
+        return "int8_ops"
     return "text_ops"
 
 
@@ -2803,10 +2923,15 @@ class PostgresDatabase:
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
         for key, columns in expected_indexes.items():
             actual = index_contract[key]
+            is_one_active = key == (
+                "refresh_tokens",
+                "uq_refresh_token_one_active",
+            )
+            expected_predicate = "(state = 'active'::text)" if is_one_active else None
             if actual != (
                 columns,
-                False,
-                None,
+                is_one_active,
+                expected_predicate,
                 "i",
                 "p",
                 False,
@@ -3089,6 +3214,74 @@ class PostgresDatabase:
                 "ck_rate_limit_events_blocked_bool",
             )
         ] = "CHECK (blocked = ANY (ARRAY[0, 1]))"
+        expected_checks.update(
+            {
+                ("users", "ck_users_auth_epoch"): (
+                    "CHECK (auth_epoch >= 1)"
+                ),
+                ("refresh_token_families", "ck_refresh_family_id"): (
+                    "CHECK (id ~ '^[A-Za-z0-9_-]{43}$'::text)"
+                ),
+                ("refresh_token_families", "ck_refresh_family_epoch"): (
+                    "CHECK (auth_epoch >= 1)"
+                ),
+                ("refresh_token_families", "ck_refresh_family_state"): (
+                    "CHECK (state = ANY (ARRAY['active'::text, 'revoked'::text]))"
+                ),
+                (
+                    "refresh_token_families",
+                    "ck_refresh_family_revocation_shape",
+                ): (
+                    "CHECK (state = 'active'::text AND revoked_at IS NULL "
+                    "AND revoke_reason IS NULL OR state = 'revoked'::text "
+                    "AND revoked_at IS NOT NULL AND revoke_reason IS NOT NULL)"
+                ),
+                ("refresh_token_families", "ck_refresh_family_reason"): (
+                    "CHECK (revoke_reason IS NULL OR (revoke_reason = ANY "
+                    "(ARRAY['expired'::text, 'logout_all'::text, "
+                    "'logout_current'::text, 'operator_revoke'::text, "
+                    "'password_change'::text, 'password_reset'::text, "
+                    "'replay'::text, 'role_change'::text, "
+                    "'rollout_reset'::text, 'user_status_change'::text])))"
+                ),
+                (
+                    "refresh_token_families",
+                    "ck_refresh_family_expiry_order",
+                ): "CHECK (absolute_expires_at > created_at)",
+                (
+                    "refresh_token_families",
+                    "ck_refresh_family_retention_order",
+                ): (
+                    "CHECK (retain_until > absolute_expires_at AND "
+                    "(revoked_at IS NULL OR retain_until > revoked_at))"
+                ),
+                ("refresh_tokens", "ck_refresh_token_hash"): (
+                    "CHECK (id ~ '^[0-9a-f]{64}$'::text)"
+                ),
+                ("refresh_tokens", "ck_refresh_token_generation"): (
+                    "CHECK (generation >= 0)"
+                ),
+                ("refresh_tokens", "ck_refresh_token_parent_shape"): (
+                    "CHECK (generation = 0 AND parent_id IS NULL "
+                    "OR generation > 0 AND parent_id IS NOT NULL)"
+                ),
+                ("refresh_tokens", "ck_refresh_token_state"): (
+                    "CHECK (state = ANY (ARRAY['active'::text, "
+                    "'consumed'::text, 'retired'::text]))"
+                ),
+                ("refresh_tokens", "ck_refresh_token_state_shape"): (
+                    "CHECK (state = 'active'::text AND is_revoked = 0 "
+                    "AND used_at IS NULL AND revoked_at IS NULL "
+                    "OR state = 'consumed'::text AND is_revoked = 1 "
+                    "AND used_at IS NOT NULL AND revoked_at IS NULL "
+                    "OR state = 'retired'::text AND is_revoked = 1 "
+                    "AND revoked_at IS NOT NULL)"
+                ),
+                ("refresh_tokens", "ck_refresh_token_expiry_order"): (
+                    "CHECK (expires_at > created_at)"
+                ),
+            }
+        )
         expected_keys = (
             set(expected_foreign)
             | set(expected_unique)
@@ -3118,7 +3311,12 @@ class PostgresDatabase:
                 raise RuntimeError(
                     _POSTGRES_MANAGED_SCHEMA_ERROR
                 ) from None
-            if not source_schema or common != (True, False, False):
+            expected_common = (
+                (True, True, True)
+                if key == ("refresh_tokens", "fk_refresh_token_parent")
+                else (True, False, False)
+            )
+            if not source_schema or common != expected_common:
                 raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
 
             if key in expected_checks:
@@ -3129,7 +3327,12 @@ class PostgresDatabase:
                     or remote_columns
                     or int(contract["constraint_index_oid"]) != 0
                 ):
-                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+                    ordinal = sorted(expected_checks).index(key)
+                    raise _PostgresManagedSchemaError(
+                        _POSTGRES_MANAGED_SCHEMA_ERROR,
+                        diagnostic_stage="managed-validation",
+                        diagnostic_invariant=f"managed-check-{ordinal:02d}",
+                    ) from None
                 continue
 
             if key in expected_foreign:
@@ -3145,6 +3348,8 @@ class PostgresDatabase:
                     f"REFERENCES {parent}({', '.join(expected_remote)}) "
                     f"ON DELETE {on_delete}"
                 )
+                if key == ("refresh_tokens", "fk_refresh_token_parent"):
+                    expected_definition += " DEFERRABLE INITIALLY DEFERRED"
                 if (
                     str(contract["contype"]) != "f"
                     or definition != expected_definition
@@ -3204,16 +3409,27 @@ class PostgresDatabase:
                     raise RuntimeError(
                         _POSTGRES_MANAGED_SCHEMA_ERROR
                     ) from None
+                reference_index_name = {
+                    (
+                        "refresh_tokens",
+                        "fk_refresh_token_family_owner",
+                    ): "uq_refresh_family_owner",
+                    (
+                        "refresh_tokens",
+                        "fk_refresh_token_parent",
+                    ): "uq_refresh_token_family_hash",
+                }.get(key, f"{parent}_pkey")
+                reference_is_primary = reference_index_name.endswith("_pkey")
                 if foreign_index_contract != (
                     foreign_index_contract[0],
                     source_schema,
-                    f"{parent}_pkey",
+                    reference_index_name,
                     "i",
                     "p",
                     False,
                     "btree",
                     True,
-                    True,
+                    reference_is_primary,
                     True,
                     True,
                     True,
@@ -3227,7 +3443,12 @@ class PostgresDatabase:
                     None,
                     None,
                 ) or foreign_index_contract[0] <= 0:
-                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
+                    ordinal = sorted(expected_foreign).index(key)
+                    raise _PostgresManagedSchemaError(
+                        _POSTGRES_MANAGED_SCHEMA_ERROR,
+                        diagnostic_stage="managed-validation",
+                        diagnostic_invariant=f"managed-foreign-{ordinal:02d}",
+                    ) from None
                 continue
 
             columns = expected_unique[key]
@@ -3306,7 +3527,10 @@ class PostgresDatabase:
                 len(columns),
                 columns,
                 (0,) * len(columns),
-                ("text_ops",) * len(columns),
+                tuple(
+                    _postgres_index_opclass(key[0], column)
+                    for column in columns
+                ),
                 ("pg_catalog",) * len(columns),
                 (True,) * len(columns),
                 None,
@@ -3501,69 +3725,11 @@ class PostgresDatabase:
                             cause=exc,
                         ) from None
                 else:
-                    self._record_startup_trace("fallback-entered")
-                    try:
-                        ticket_table_exists = bool(
-                            await conn.fetchval(
-                                """
-                                SELECT EXISTS(
-                                    SELECT 1
-                                    FROM pg_class AS rel
-                                    JOIN pg_namespace AS nsp
-                                      ON nsp.oid=rel.relnamespace
-                                    WHERE nsp.nspname=current_schema()
-                                      AND rel.relname='websocket_tickets'
-                                )
-                                """
-                            )
-                        )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        raise _postgres_startup_error(
-                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
-                            stage="fallback-validation",
-                            invariant="ticket-relation-present",
-                            cause=exc,
-                        ) from None
-                    if ticket_table_exists:
-                        try:
-                            await self._validate_websocket_ticket_schema(conn)
-                        except _PostgresStartupDiagnosticError as exc:
-                            raise _postgres_restage_startup_error(
-                                exc,
-                                "fallback-validation",
-                            ) from None
-                    try:
-                        await conn.execute(_PG_CREATE_TABLES)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        raise _postgres_startup_error(
-                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
-                            stage="fallback-ddl",
-                            invariant=_postgres_fallback_failure_invariant(
-                                exc
-                            ),
-                            cause=exc,
-                        ) from None
-                    self._record_startup_trace("fallback-ddl-complete")
-                    try:
-                        await self._validate_websocket_ticket_schema(conn)
-                    except _PostgresStartupDiagnosticError as exc:
-                        raise _postgres_restage_startup_error(
-                            exc,
-                            "fallback-validation",
-                        ) from None
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        raise _postgres_startup_error(
-                            _POSTGRES_SCHEMA_VALIDATION_ERROR,
-                            stage="fallback-validation",
-                            invariant="ticket-validation-unclassified",
-                            cause=exc,
-                        ) from None
+                    raise _PostgresMigrationRequiredError(
+                        _POSTGRES_MIGRATION_REQUIRED_ERROR,
+                        diagnostic_stage="ownership",
+                        diagnostic_invariant="ownership-unversioned",
+                    )
         logger.info("pg_schema_ready")
 
     @staticmethod
@@ -3729,6 +3895,8 @@ class PostgresDatabase:
                 True,
                 None,
             ),
+            ("bearer_family_id", "text", False, "", "", True, None),
+            ("bearer_auth_epoch", "bigint", False, "", "", True, None),
         ]
         if actual_columns != expected_columns:
             census["c"] = _postgres_ticket_column_census(
@@ -3801,6 +3969,7 @@ class PostgresDatabase:
             "ck_ws_ticket_source_shape",
             "ck_ws_ticket_time_order",
             "fk_ws_ticket_api_key",
+            "fk_ws_ticket_bearer_family",
             "fk_ws_ticket_campaign",
             "fk_ws_ticket_user",
             "websocket_tickets_pkey",
@@ -3830,7 +3999,7 @@ class PostgresDatabase:
             raise
         except Exception:
             q78_split = _postgres_q78_split_invariant(
-                {field: (0x1F if field == "x" else 0)
+                {field: (0x3F if field == "x" else 0)
                  for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS},
                 primary_binding=1,
                 opclass_missing=3,
@@ -4061,6 +4230,11 @@ class PostgresDatabase:
                 "btree", False, False, True, True, True,
                 1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
             ),
+            "idx_ws_tickets_bearer_family": (
+                "btree", False, False, True, True, True,
+                1, 1, ("bearer_family_id",), (0,), ("text_ops",), (True,),
+                None, None,
+            ),
             "idx_ws_tickets_campaign": (
                 "btree", False, False, True, True, True,
                 1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
@@ -4140,6 +4314,11 @@ class PostgresDatabase:
                 "f",
                 "FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE",
             ),
+            "fk_ws_ticket_bearer_family": (
+                "f",
+                "FOREIGN KEY (bearer_family_id, user_id) "
+                "REFERENCES refresh_token_families(id, user_id) ON DELETE CASCADE",
+            ),
         }
         for name, definition in expected_constraint_fragments.items():
             row = actual_constraints.get(name)
@@ -4209,6 +4388,14 @@ class PostgresDatabase:
             "fk_ws_ticket_api_key": (
                 ("api_key_id",), referenced_schema, "api_keys", ("id",), "a", "c",
             ),
+            "fk_ws_ticket_bearer_family": (
+                ("bearer_family_id", "user_id"),
+                referenced_schema,
+                "refresh_token_families",
+                ("id", "user_id"),
+                "a",
+                "c",
+            ),
         }
         try:
             referenced_rows = await _postgres_q78_isolated_call(
@@ -4221,7 +4408,7 @@ class PostgresDatabase:
               AND rel.relname=ANY($2::text[])
                 """,
                 schema_oid,
-                ["api_keys", "campaigns", "users"],
+                ["api_keys", "campaigns", "refresh_token_families", "users"],
             )
         except asyncio.CancelledError:
             raise
@@ -4239,8 +4426,13 @@ class PostgresDatabase:
             str(row["relname"]): int(row["relation_oid"])
             for row in referenced_rows
         }
-        if set(referenced_oids) != {"api_keys", "campaigns", "users"}:
-            census["f"]["i"] = 0x7
+        if set(referenced_oids) != {
+            "api_keys",
+            "campaigns",
+            "refresh_token_families",
+            "users",
+        }:
+            census["f"]["i"] = 0xF
             rejected = True
 
         for name, row in actual_constraints.items():
@@ -4363,12 +4555,17 @@ class PostgresDatabase:
                 "AND length(btrim(bearer_jti)) > 0 "
                 "AND bearer_jti = btrim(bearer_jti) "
                 "AND bearer_expires_at IS NOT NULL "
+                "AND bearer_family_id IS NOT NULL "
+                "AND bearer_auth_epoch IS NOT NULL "
+                "AND bearer_auth_epoch >= 1 "
                 "AND api_key_id IS NULL "
                 "AND required_scope IS NULL "
                 "OR credential_kind = 'api_key'::text "
                 "AND bearer_subject IS NULL "
                 "AND bearer_jti IS NULL "
                 "AND bearer_expires_at IS NULL "
+                "AND bearer_family_id IS NULL "
+                "AND bearer_auth_epoch IS NULL "
                 "AND api_key_id IS NOT NULL "
                 "AND length(btrim(api_key_id)) > 0 "
                 "AND api_key_id = btrim(api_key_id) "
@@ -4411,7 +4608,8 @@ class PostgresDatabase:
                 census["h"]["d"] |= bit
                 census["q"]["d"] |= constraint_bit
                 rejected = True
-            if " ".join(str(row["definition"]).split()) != expected_definition:
+            actual_definition = " ".join(str(row["definition"]).split())
+            if actual_definition != expected_definition:
                 census["h"]["s"] |= bit
                 census["q"]["s"] |= constraint_bit
                 rejected = True
@@ -4919,6 +5117,8 @@ class PostgresDatabase:
         self,
         subject: str,
         jti: str,
+        family_id: str,
+        auth_epoch: int,
     ) -> dict[str, Any] | None:
         """Resolve current user eligibility and JTI status in one read snapshot."""
         pool = self._pool
@@ -4929,10 +5129,17 @@ class PostgresDatabase:
             raise RuntimeError("Database pool is closing")
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                """SELECT u.id, u.username, u.role
+                """SELECT u.id, u.username, u.role, u.auth_epoch
                    FROM users AS u
+                   JOIN refresh_token_families AS f
+                     ON f.user_id=u.id AND f.id=$3
                    WHERE u.username=$1
                      AND u.is_active=1
+                     AND u.auth_epoch=$4
+                     AND f.auth_epoch=u.auth_epoch
+                     AND f.state='active'
+                     AND f.revoked_at IS NULL
+                     AND f.absolute_expires_at > now()
                      AND NOT EXISTS (
                          SELECT 1
                          FROM revoked_access_tokens AS rat
@@ -4940,6 +5147,8 @@ class PostgresDatabase:
                      )""",
                 subject,
                 jti,
+                family_id,
+                auth_epoch,
             )
         return self._row_to_dict(row) if row else None
 
@@ -5088,15 +5297,23 @@ class PostgresDatabase:
                         INSERT INTO websocket_tickets(
                             ticket_hash, campaign_id, user_id,
                             credential_kind, bearer_subject, bearer_jti,
-                            bearer_expires_at, created_at, expires_at
+                            bearer_expires_at, bearer_family_id,
+                            bearer_auth_epoch, created_at, expires_at
                         )
-                        SELECT $1, c.id, u.id, 'bearer', $4, $5, $6,
+                        SELECT $1, c.id, u.id, 'bearer', $4, $5, $6, $7, $8,
                                now(), now() + interval '30 seconds'
                         FROM users AS u
+                        JOIN refresh_token_families AS f
+                          ON f.id=$7 AND f.user_id=u.id
                         JOIN campaigns AS c ON c.id=$2
                         WHERE u.id=$3
                           AND u.username=$4
                           AND u.is_active=1
+                          AND u.auth_epoch=$8
+                          AND f.auth_epoch=u.auth_epoch
+                          AND f.state='active'
+                          AND f.revoked_at IS NULL
+                          AND f.absolute_expires_at > now()
                           AND u.role IN ('team_lead','operator','recon','reporter')
                           AND $6 > now()
                           AND NOT EXISTS (
@@ -5115,6 +5332,8 @@ class PostgresDatabase:
                         source.subject,
                         source.jti,
                         source.expires_at,
+                        source.family_id,
+                        source.auth_epoch,
                     )
                 else:
                     row = await connection.fetchrow(
@@ -5180,9 +5399,35 @@ class PostgresDatabase:
                       AND campaign_id=$2
                       AND consumed_at IS NULL
                       AND expires_at > now()
+                      AND (
+                          credential_kind='api_key'
+                          OR EXISTS (
+                              SELECT 1
+                              FROM users AS u
+                              JOIN refresh_token_families AS f
+                                ON f.id=websocket_tickets.bearer_family_id
+                               AND f.user_id=u.id
+                              WHERE u.id=websocket_tickets.user_id
+                                AND u.username=websocket_tickets.bearer_subject
+                                AND u.is_active=1
+                                AND u.auth_epoch=
+                                    websocket_tickets.bearer_auth_epoch
+                                AND f.auth_epoch=u.auth_epoch
+                                AND f.state='active'
+                                AND f.revoked_at IS NULL
+                                AND f.absolute_expires_at > now()
+                                AND websocket_tickets.bearer_expires_at > now()
+                                AND NOT EXISTS (
+                                    SELECT 1
+                                    FROM revoked_access_tokens AS rat
+                                    WHERE rat.jti=websocket_tickets.bearer_jti
+                                )
+                          )
+                      )
                     RETURNING campaign_id, user_id, credential_kind,
                               bearer_subject, bearer_jti,
-                              bearer_expires_at, api_key_id,
+                              bearer_expires_at, bearer_family_id,
+                              bearer_auth_epoch, api_key_id,
                               required_scope
                     """,
                     ticket_hash,
@@ -5198,6 +5443,8 @@ class PostgresDatabase:
                         bearer_subject=row["bearer_subject"],
                         bearer_jti=row["bearer_jti"],
                         bearer_expires_at=row["bearer_expires_at"],
+                        bearer_family_id=row["bearer_family_id"],
+                        bearer_auth_epoch=row["bearer_auth_epoch"],
                         api_key_id=row["api_key_id"],
                         required_scope=row["required_scope"],
                     )
@@ -5215,10 +5462,17 @@ class PostgresDatabase:
                     """
                     SELECT u.id, u.username, u.role
                     FROM users AS u
+                    JOIN refresh_token_families AS f
+                      ON f.id=$6 AND f.user_id=u.id
                     JOIN campaigns AS c ON c.id=$1
                     WHERE u.id=$2
                       AND u.username=$3
                       AND u.is_active=1
+                      AND u.auth_epoch=$7
+                      AND f.auth_epoch=u.auth_epoch
+                      AND f.state='active'
+                      AND f.revoked_at IS NULL
+                      AND f.absolute_expires_at > now()
                       AND u.role IN ('team_lead','operator','recon','reporter')
                       AND $4 > now()
                       AND NOT EXISTS (
@@ -5235,6 +5489,8 @@ class PostgresDatabase:
                     consumed.bearer_subject,
                     consumed.bearer_expires_at,
                     consumed.bearer_jti,
+                    consumed.bearer_family_id,
+                    consumed.bearer_auth_epoch,
                 )
             else:
                 row = await connection.fetchrow(
@@ -5303,68 +5559,278 @@ class PostgresDatabase:
 
     # ── Refresh tokens ───────────────────────────────────────────────────────
 
-    async def create_refresh_token(self, user_id: str, expires_days: int = 30) -> str:
-        raw_token  = secrets.token_urlsafe(48)                          # returned to client
-        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()     # stored in DB
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
+    @staticmethod
+    async def _insert_initial_family_token(
+        conn: Any,
+        *,
+        user_id: str,
+        auth_epoch: int,
+    ) -> tuple[str, str]:
+        family_id = generate_family_id()
+        raw_token = generate_refresh_token()
+        token_hash = hash_refresh_token(raw_token)
+        now = datetime.now(timezone.utc)
+        absolute_expiry = now + timedelta(days=FAMILY_ABSOLUTE_LIFETIME_DAYS)
+        retain_until = absolute_expiry + timedelta(days=FAMILY_RETENTION_DAYS)
+        await conn.execute(
+            "INSERT INTO refresh_token_families("
+            "id,user_id,auth_epoch,state,created_at,absolute_expires_at,"
+            "retain_until) VALUES($1,$2,$3,'active',$4,$5,$6)",
+            family_id,
+            user_id,
+            auth_epoch,
+            now,
+            absolute_expiry,
+            retain_until,
+        )
+        await conn.execute(
+            "INSERT INTO refresh_tokens("
+            "id,user_id,is_revoked,expires_at,created_at,family_id,parent_id,"
+            "generation,state) VALUES($1,$2,0,$3,$4,$5,NULL,0,'active')",
+            token_hash,
+            user_id,
+            absolute_expiry,
+            now,
+            family_id,
+        )
+        return family_id, raw_token
+
+    async def create_refresh_token(
+        self,
+        user_id: str,
+        expires_days: int = FAMILY_ABSOLUTE_LIFETIME_DAYS,
+    ) -> str:
+        if expires_days != FAMILY_ABSOLUTE_LIFETIME_DAYS:
+            raise ValueError("refresh lifetime is fixed")
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await _acquire_refresh_token_user_lock(conn, user_id)
-                await conn.execute(
-                    "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
-                    token_hash, user_id, expires_at,   # store hash, not raw
-                )
-        return raw_token   # client gets raw token; DB stores only SHA-256 hash
-
-    async def rotate_refresh_token(self, old_token: str) -> tuple[dict | None, str | None]:
-        old_hash = hashlib.sha256(old_token.encode()).hexdigest()   # look up by hash
-        user: dict[str, Any] | None = None
-        new_raw: str | None = None
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                user_id = await conn.fetchval(
-                    "SELECT user_id FROM refresh_tokens WHERE id=$1",
-                    old_hash,
-                )
-                if user_id is None:
-                    return None, None
-
-                await _acquire_refresh_token_user_lock(conn, user_id)
                 row = await conn.fetchrow(
-                    """UPDATE refresh_tokens AS rt
-                       SET is_revoked=1, used_at=now()
-                       FROM users AS u
-                       WHERE rt.id=$1
-                         AND rt.user_id=$2
-                         AND rt.is_revoked=0
-                         AND rt.expires_at > now()
-                         AND u.id=rt.user_id
-                         AND u.is_active=1
-                       RETURNING u.id AS uid, u.username, u.role""",
-                    old_hash,
+                    "SELECT auth_epoch FROM users WHERE id=$1 AND is_active=1 "
+                    "FOR UPDATE",
                     user_id,
                 )
                 if row is None:
-                    return None, None
-
-                new_raw = secrets.token_urlsafe(48)
-                new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
-                expires_at = datetime.now(timezone.utc) + timedelta(days=30)
-                await conn.execute(
-                    "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
-                    new_hash, user_id, expires_at,   # store hash
+                    raise ValueError("invalid refresh owner")
+                _, raw_token = await self._insert_initial_family_token(
+                    conn,
+                    user_id=user_id,
+                    auth_epoch=int(row["auth_epoch"]),
                 )
-                user = {
-                    "id": row["uid"],
-                    "username": row["username"],
-                    "role": row["role"],
-                }
-        if user is None or new_raw is None:
-            return None, None
-        return user, new_raw   # return raw to client
+        return raw_token
 
-    async def revoke_access_token(self, jti: str, user_id: str, expires_at: str) -> None:
-        parsed_expires_at = _parse_postgres_timestamptz(expires_at)
+    async def create_login_session(
+        self,
+        username: str,
+        password: str,
+        token_factory: AccessTokenFactory,
+    ) -> SessionIssueResult:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT id,username,hashed_password,role,is_active,auth_epoch "
+                    "FROM users WHERE username=$1 FOR UPDATE",
+                    username,
+                )
+                if row is None or not bool(row["is_active"]) or not verify_password(
+                    password,
+                    row["hashed_password"],
+                ):
+                    return SessionIssueResult(SessionIssueStatus.INVALID)
+                family_id, raw_token = await self._insert_initial_family_token(
+                    conn,
+                    user_id=row["id"],
+                    auth_epoch=int(row["auth_epoch"]),
+                )
+                access_token = token_factory(
+                    {
+                        "sub": row["username"],
+                        "sid": family_id,
+                        "ver": int(row["auth_epoch"]),
+                    }
+                )
+                await conn.execute(
+                    "UPDATE users SET last_login=now() WHERE id=$1",
+                    row["id"],
+                )
+                await conn.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system','login_family_created','')"
+                )
+        return SessionIssueResult(
+            SessionIssueStatus.ISSUED,
+            IssuedTokenSession(
+                access_token=access_token,
+                refresh_token=raw_token,
+                user_id=row["id"],
+                subject=row["username"],
+                family_id=family_id,
+                auth_epoch=int(row["auth_epoch"]),
+                refresh_generation=0,
+                role=row["role"],
+            ),
+        )
+
+    @staticmethod
+    async def _revoke_family_rows(
+        conn: Any,
+        *,
+        family_id: str,
+        reason: str,
+    ) -> bool:
+        family = await conn.fetchrow(
+            "SELECT absolute_expires_at,state FROM refresh_token_families "
+            "WHERE id=$1 FOR UPDATE",
+            family_id,
+        )
+        if family is None:
+            return False
+        if family["state"] == "active":
+            now = datetime.now(timezone.utc)
+            retain_until = max(family["absolute_expires_at"], now) + timedelta(
+                days=FAMILY_RETENTION_DAYS
+            )
+            await conn.execute(
+                "UPDATE refresh_token_families SET state='revoked',revoked_at=$2,"
+                "revoke_reason=$3,retain_until=$4 WHERE id=$1 AND state='active'",
+                family_id,
+                now,
+                reason,
+                retain_until,
+            )
+            await conn.execute(
+                "UPDATE refresh_tokens SET state='retired',is_revoked=1,"
+                "revoked_at=$2 WHERE family_id=$1 AND state='active'",
+                family_id,
+                now,
+            )
+            return True
+        return False
+
+    async def rotate_refresh_session(
+        self,
+        old_token: str,
+        token_factory: AccessTokenFactory,
+    ) -> RefreshRotationResult:
+        old_hash = hash_refresh_token(old_token)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                token = await conn.fetchrow(
+                    "SELECT family_id FROM refresh_tokens WHERE id=$1",
+                    old_hash,
+                )
+                if token is None:
+                    return RefreshRotationResult(RefreshRotationStatus.INVALID)
+                row = await conn.fetchrow(
+                    "SELECT rt.user_id,rt.family_id,rt.generation,rt.state,"
+                    "rt.expires_at,f.auth_epoch,f.state AS family_state,"
+                    "f.absolute_expires_at,u.auth_epoch AS user_epoch,"
+                    "u.username,u.role,u.is_active "
+                    "FROM refresh_token_families AS f "
+                    "JOIN refresh_tokens AS rt ON rt.family_id=f.id AND rt.id=$1 "
+                    "JOIN users AS u ON u.id=f.user_id "
+                    "WHERE f.id=$2 FOR UPDATE OF f,u,rt",
+                    old_hash,
+                    token["family_id"],
+                )
+                if row is None:
+                    return RefreshRotationResult(RefreshRotationStatus.INVALID)
+                if row["state"] != "active":
+                    await self._revoke_family_rows(
+                        conn,
+                        family_id=row["family_id"],
+                        reason="replay",
+                    )
+                    await conn.execute(
+                        "INSERT INTO audit_log(actor,action,detail) VALUES("
+                        "'auth-system','refresh_replay','')"
+                    )
+                    return RefreshRotationResult(RefreshRotationStatus.REPLAYED)
+                if (
+                    row["family_state"] != "active"
+                    or not bool(row["is_active"])
+                    or int(row["auth_epoch"]) != int(row["user_epoch"])
+                    or row["expires_at"] <= datetime.now(timezone.utc)
+                    or row["absolute_expires_at"] <= datetime.now(timezone.utc)
+                ):
+                    return RefreshRotationResult(RefreshRotationStatus.INVALID)
+                updated = await conn.execute(
+                    "UPDATE refresh_tokens SET state='consumed',is_revoked=1,"
+                    "used_at=now() WHERE id=$1 AND state='active' AND is_revoked=0",
+                    old_hash,
+                )
+                if updated != "UPDATE 1":
+                    await self._revoke_family_rows(
+                        conn,
+                        family_id=row["family_id"],
+                        reason="replay",
+                    )
+                    return RefreshRotationResult(RefreshRotationStatus.REPLAYED)
+                raw_child = generate_refresh_token()
+                child_hash = hash_refresh_token(raw_child)
+                generation = int(row["generation"]) + 1
+                await conn.execute(
+                    "INSERT INTO refresh_tokens("
+                    "id,user_id,is_revoked,expires_at,created_at,family_id,parent_id,"
+                    "generation,state) VALUES($1,$2,0,$3,now(),$4,$5,$6,'active')",
+                    child_hash,
+                    row["user_id"],
+                    row["absolute_expires_at"],
+                    row["family_id"],
+                    old_hash,
+                    generation,
+                )
+                access_token = token_factory(
+                    {
+                        "sub": row["username"],
+                        "sid": row["family_id"],
+                        "ver": int(row["auth_epoch"]),
+                    }
+                )
+                await conn.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system','refresh_rotated','')"
+                )
+        return RefreshRotationResult(
+            RefreshRotationStatus.ROTATED,
+            IssuedTokenSession(
+                access_token=access_token,
+                refresh_token=raw_child,
+                user_id=row["user_id"],
+                subject=row["username"],
+                family_id=row["family_id"],
+                auth_epoch=int(row["auth_epoch"]),
+                refresh_generation=generation,
+                role=row["role"],
+            ),
+        )
+
+    async def rotate_refresh_token(
+        self,
+        old_token: str,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        result = await self.rotate_refresh_session(old_token, lambda _claims: "compat")
+        if result.session is None:
+            return None, None
+        session = result.session
+        return {
+            "id": session.user_id,
+            "username": session.subject,
+            "role": session.role,
+            "family_id": session.family_id,
+            "auth_epoch": session.auth_epoch,
+        }, session.refresh_token
+
+    async def revoke_access_token(
+        self,
+        jti: str,
+        user_id: str,
+        expires_at: str | datetime,
+    ) -> None:
+        parsed_expires_at = (
+            expires_at
+            if isinstance(expires_at, datetime)
+            else _parse_postgres_timestamptz(expires_at)
+        )
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) VALUES($1,$2,$3) "
@@ -5384,15 +5850,155 @@ class PostgresDatabase:
     async def revoke_all_refresh_tokens(self, user_id: str) -> None:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                await _acquire_refresh_token_user_lock(conn, user_id)
-                await conn.execute(
-                    "UPDATE refresh_tokens SET is_revoked=1 WHERE user_id=$1", user_id
+                rows = await conn.fetch(
+                    "SELECT id FROM refresh_token_families "
+                    "WHERE user_id=$1 AND state='active' FOR UPDATE",
+                    user_id,
                 )
+                for row in rows:
+                    await self._revoke_family_rows(
+                        conn,
+                        family_id=row["id"],
+                        reason="operator_revoke",
+                    )
+
+    async def revoke_current_session(
+        self,
+        *,
+        user_id: str,
+        family_id: str,
+        jti: str,
+        expires_at: datetime,
+    ) -> SessionRevocationResult:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                owner = await conn.fetchval(
+                    "SELECT 1 FROM refresh_token_families "
+                    "WHERE id=$1 AND user_id=$2 FOR UPDATE",
+                    family_id,
+                    user_id,
+                )
+                if owner is None:
+                    return SessionRevocationResult(SessionRevocationStatus.INVALID)
+                changed = await self._revoke_family_rows(
+                    conn,
+                    family_id=family_id,
+                    reason="logout_current",
+                )
+                await conn.execute(
+                    "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) "
+                    "VALUES($1,$2,$3) ON CONFLICT(jti) DO NOTHING",
+                    jti,
+                    user_id,
+                    expires_at,
+                )
+                if changed:
+                    await conn.execute(
+                        "INSERT INTO audit_log(actor,action,detail) VALUES("
+                        "'auth-system','logout_current','')"
+                    )
+        return SessionRevocationResult(
+            SessionRevocationStatus.REVOKED
+            if changed
+            else SessionRevocationStatus.ALREADY_REVOKED
+        )
+
+    async def revoke_all_sessions(
+        self,
+        *,
+        user_id: str,
+        jti: str,
+        expires_at: datetime,
+    ) -> SessionRevocationResult:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                updated = await conn.fetchval(
+                    "UPDATE users SET auth_epoch=auth_epoch+1 "
+                    "WHERE id=$1 AND is_active=1 RETURNING auth_epoch",
+                    user_id,
+                )
+                if updated is None:
+                    return SessionRevocationResult(SessionRevocationStatus.INVALID)
+                rows = await conn.fetch(
+                    "SELECT id FROM refresh_token_families "
+                    "WHERE user_id=$1 AND state='active' FOR UPDATE",
+                    user_id,
+                )
+                for row in rows:
+                    await self._revoke_family_rows(
+                        conn,
+                        family_id=row["id"],
+                        reason="logout_all",
+                    )
+                await conn.execute(
+                    "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) "
+                    "VALUES($1,$2,$3) ON CONFLICT(jti) DO NOTHING",
+                    jti,
+                    user_id,
+                    expires_at,
+                )
+                await conn.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system','logout_all','')"
+                )
+        return SessionRevocationResult(SessionRevocationStatus.REVOKED)
+
+    async def apply_user_security_event(
+        self,
+        *,
+        user_id: str,
+        reason: str,
+        new_password_hash: str | None = None,
+        new_role: str | None = None,
+        is_active: bool | None = None,
+    ) -> bool:
+        if reason not in {
+            "password_change",
+            "password_reset",
+            "role_change",
+            "user_status_change",
+        }:
+            raise ValueError("invalid security event")
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT id FROM users WHERE id=$1 FOR UPDATE",
+                    user_id,
+                )
+                if row is None:
+                    return False
+                await conn.execute(
+                    "UPDATE users SET auth_epoch=auth_epoch+1,"
+                    "hashed_password=COALESCE($2,hashed_password),"
+                    "role=COALESCE($3,role),"
+                    "is_active=COALESCE($4,is_active) WHERE id=$1",
+                    user_id,
+                    new_password_hash,
+                    new_role,
+                    is_active,
+                )
+                rows = await conn.fetch(
+                    "SELECT id FROM refresh_token_families "
+                    "WHERE user_id=$1 AND state='active' FOR UPDATE",
+                    user_id,
+                )
+                for family in rows:
+                    await self._revoke_family_rows(
+                        conn,
+                        family_id=family["id"],
+                        reason=reason,
+                    )
+                await conn.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system',$1,'')",
+                    reason,
+                )
+        return True
 
     async def purge_expired_tokens(self) -> int:
         async with self._pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM refresh_tokens WHERE is_revoked=1 OR expires_at < now() - interval '7 days'"
+                "DELETE FROM refresh_token_families WHERE retain_until <= now()"
             )
         await self.purge_expired_websocket_tickets()
         # asyncpg returns "DELETE N" as a string

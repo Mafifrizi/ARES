@@ -39,8 +39,14 @@ _CHECK_NAMES = (
 )
 _FOREIGN_KEY_NAMES = (
     "fk_ws_ticket_api_key",
+    "fk_ws_ticket_bearer_family",
     "fk_ws_ticket_campaign",
     "fk_ws_ticket_user",
+)
+_FOREIGN_KEY_NAMES_0007 = tuple(
+    name
+    for name in _FOREIGN_KEY_NAMES
+    if name != "fk_ws_ticket_bearer_family"
 )
 
 
@@ -303,6 +309,14 @@ def _named_foreign_keys_bound(table_sql: str) -> tuple[str, ...]:
             or inline_pattern.search(compact) is not None
         ):
             bound.append(name)
+    family_pattern = re.compile(
+        "constraintfk_ws_ticket_bearer_family"
+        "foreignkey\\(bearer_family_id,user_id\\)"
+        "referencesrefresh_token_families\\(id,user_id\\)"
+        "(?:onupdatenoaction)?ondeletecascade"
+    )
+    if family_pattern.search(compact) is not None:
+        bound.append("fk_ws_ticket_bearer_family")
     return tuple(sorted(bound))
 
 
@@ -358,7 +372,14 @@ def _ticket_contract(path: Path) -> _TicketContract | None:
                         f"PRAGMA foreign_key_list({_TICKET_TABLE})"
                     )
                 ),
-                key=lambda item: item.local_column,
+                key=lambda item: (
+                    item.local_column,
+                    item.target_table,
+                    item.target_column,
+                    item.on_update,
+                    item.on_delete,
+                    item.match,
+                ),
             )
         )
         indexes: list[_IndexContract] = []
@@ -692,14 +713,141 @@ def _expected_ticket_contract() -> _TicketContract:
         managed_primary_key_indexes=managed_primary_key_indexes,
         attached_objects=attached_objects,
         named_constraints=tuple(
-            sorted(_CHECK_NAMES + _FOREIGN_KEY_NAMES)
+            sorted(_CHECK_NAMES + _FOREIGN_KEY_NAMES_0007)
         ),
+        canonical_table=True,
+        named_foreign_keys_bound=tuple(
+            sorted(_FOREIGN_KEY_NAMES_0007)
+        ),
+    )
+
+
+def _expected_current_ticket_contract() -> _TicketContract:
+    previous = _expected_ticket_contract()
+    current_source_shape = _compact_sql(
+        """
+        (
+            credential_kind='bearer'
+            AND bearer_subject IS NOT NULL
+            AND length(trim(bearer_subject)) > 0
+            AND bearer_subject=trim(bearer_subject)
+            AND bearer_jti IS NOT NULL
+            AND length(trim(bearer_jti)) > 0
+            AND bearer_jti=trim(bearer_jti)
+            AND bearer_expires_at IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            ) IS NOT NULL
+            AND strftime(
+                '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
+            )=bearer_expires_at
+            AND bearer_family_id IS NOT NULL
+            AND length(bearer_family_id)=43
+            AND bearer_family_id NOT GLOB '*[^A-Za-z0-9_-]*'
+            AND bearer_auth_epoch IS NOT NULL
+            AND typeof(bearer_auth_epoch)='integer'
+            AND bearer_auth_epoch >= 1
+            AND api_key_id IS NULL
+            AND required_scope IS NULL
+        )
+        OR
+        (
+            credential_kind='api_key'
+            AND bearer_subject IS NULL
+            AND bearer_jti IS NULL
+            AND bearer_expires_at IS NULL
+            AND bearer_family_id IS NULL
+            AND bearer_auth_epoch IS NULL
+            AND api_key_id IS NOT NULL
+            AND length(trim(api_key_id)) > 0
+            AND api_key_id=trim(api_key_id)
+            AND required_scope='read'
+        )
+        """
+    )
+    family_index = _IndexContract(
+        "idx_ws_tickets_bearer_family",
+        False,
+        "c",
+        False,
+        (("bearer_family_id", False, "BINARY"),),
+    )
+    family_object = _AttachedObjectContract(
+        "index",
+        "idx_ws_tickets_bearer_family",
+        _TICKET_TABLE,
+        "createindexidx_ws_tickets_bearer_family"
+        "onwebsocket_tickets(bearer_family_id)",
+    )
+    foreign_keys = previous.foreign_keys + (
+        _ForeignKeyContract(
+            "bearer_family_id",
+            "refresh_token_families",
+            "id",
+            "NO ACTION",
+            "CASCADE",
+            "NONE",
+        ),
+        _ForeignKeyContract(
+            "user_id",
+            "refresh_token_families",
+            "user_id",
+            "NO ACTION",
+            "CASCADE",
+            "NONE",
+        ),
+    )
+    return _TicketContract(
+        columns=previous.columns
+        + (
+            _ColumnContract(
+                12, "bearer_family_id", "TEXT", True, None, 0, 0
+            ),
+            _ColumnContract(
+                13, "bearer_auth_epoch", "INTEGER", True, None, 0, 0
+            ),
+        ),
+        primary_key=previous.primary_key,
+        foreign_keys=tuple(
+            sorted(
+                foreign_keys,
+                key=lambda item: (
+                    item.local_column,
+                    item.target_table,
+                    item.target_column,
+                    item.on_update,
+                    item.on_delete,
+                    item.match,
+                ),
+            )
+        ),
+        checks=tuple(
+            (
+                name,
+                current_source_shape
+                if name == "ck_ws_ticket_source_shape"
+                else expression,
+            )
+            for name, expression in previous.checks
+        ),
+        indexes=tuple(
+            sorted(previous.indexes + (family_index,), key=lambda item: item.name)
+        ),
+        managed_primary_key_indexes=previous.managed_primary_key_indexes,
+        attached_objects=tuple(
+            sorted(
+                previous.attached_objects + (family_object,),
+                key=lambda item: (item.object_type, item.name),
+            )
+        ),
+        named_constraints=tuple(sorted(_CHECK_NAMES + _FOREIGN_KEY_NAMES)),
         canonical_table=True,
         named_foreign_keys_bound=tuple(sorted(_FOREIGN_KEY_NAMES)),
     )
 
 
-_EXPECTED_TICKET_CONTRACT = _expected_ticket_contract()
+_EXPECTED_TICKET_CONTRACT_0007 = _expected_ticket_contract()
+_EXPECTED_TICKET_CONTRACT = _expected_current_ticket_contract()
 
 
 def _schema_snapshot(path: Path) -> tuple[tuple[str, str, str], ...]:
@@ -832,27 +980,75 @@ def _insert_bearer_ticket(
     expires_at: str = "2026-01-01T00:00:30.000Z",
     consumed_at: str | None = None,
 ) -> None:
-    connection.execute(
-        """
-        INSERT INTO websocket_tickets(
-            ticket_hash, campaign_id, user_id, credential_kind,
-            bearer_subject, bearer_jti, bearer_expires_at,
-            api_key_id, required_scope, created_at, expires_at, consumed_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
-        """,
-        (
-            digest_character * 64,
-            campaign_id,
-            "ticket-user",
-            credential_kind,
-            subject,
-            "synthetic-jti",
-            "2026-01-01T00:05:00.000Z",
-            created_at,
-            expires_at,
-            consumed_at,
-        ),
-    )
+    column_names = {
+        str(row[1])
+        for row in connection.execute(
+            "PRAGMA table_info(websocket_tickets)"
+        )
+    }
+    if "bearer_family_id" in column_names:
+        family_id = "A" * 43
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO refresh_token_families(
+                id, user_id, auth_epoch, state, created_at,
+                absolute_expires_at, revoked_at, revoke_reason,
+                retain_until
+            ) VALUES(?, ?, 1, 'active', ?, ?, NULL, NULL, ?)
+            """,
+            (
+                family_id,
+                "ticket-user",
+                "2025-01-01T00:00:00.000Z",
+                "2099-01-01T00:00:00.000Z",
+                "2100-01-01T00:00:00.000Z",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO websocket_tickets(
+                ticket_hash, campaign_id, user_id, credential_kind,
+                bearer_subject, bearer_jti, bearer_expires_at,
+                api_key_id, required_scope, created_at, expires_at,
+                consumed_at, bearer_family_id, bearer_auth_epoch
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 1)
+            """,
+            (
+                digest_character * 64,
+                campaign_id,
+                "ticket-user",
+                credential_kind,
+                subject,
+                "synthetic-jti",
+                "2026-01-01T00:05:00.000Z",
+                created_at,
+                expires_at,
+                consumed_at,
+                family_id,
+            ),
+        )
+    else:
+        connection.execute(
+            """
+            INSERT INTO websocket_tickets(
+                ticket_hash, campaign_id, user_id, credential_kind,
+                bearer_subject, bearer_jti, bearer_expires_at,
+                api_key_id, required_scope, created_at, expires_at, consumed_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+            """,
+            (
+                digest_character * 64,
+                campaign_id,
+                "ticket-user",
+                credential_kind,
+                subject,
+                "synthetic-jti",
+                "2026-01-01T00:05:00.000Z",
+                created_at,
+                expires_at,
+                consumed_at,
+            ),
+        )
 
 
 def _insert_api_key_ticket(
@@ -1393,12 +1589,12 @@ async def _runtime_bootstrap(path: Path) -> bool:
         await database.close()
 
 
-def test_migration_head_is_real_empty_base_to_0008() -> None:
+def test_migration_head_is_real_empty_base_to_0009() -> None:
     with _temporary_database("empty-head") as path:
         initially_empty = _application_tables(path) == ()
         initial_revision_absent = _version(path) is None
         _upgrade(path, "head")
-        revision_is_current = _version(path) == "0008"
+        revision_is_current = _version(path) == "0009"
         exact_contract = _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
         enforcement_holds = _exercise_ticket_enforcement(path)
 
@@ -1406,15 +1602,15 @@ def test_migration_head_is_real_empty_base_to_0008() -> None:
             initially_empty and initial_revision_absent,
             "fresh migration database was not empty",
         )
-        _require_fixed(SCHEMA_VERSION == 7, "SQLite schema version is not seven")
-        _require_fixed(revision_is_current, "Alembic head is not revision 0008")
+        _require_fixed(SCHEMA_VERSION == 8, "SQLite schema version is not eight")
+        _require_fixed(revision_is_current, "Alembic head is not revision 0009")
         _require_fixed(
             exact_contract,
-            "fresh revision 0008 ticket fingerprint diverged",
+            "fresh revision 0009 ticket fingerprint diverged",
         )
         _require_fixed(
             enforcement_holds,
-            "fresh revision 0008 enforcement diverged",
+            "fresh revision 0009 enforcement diverged",
         )
 
 
@@ -1430,7 +1626,9 @@ def test_sqlite_0007_ownership_and_0008_compatibility_preserve_data() -> None:
             connection.close()
 
         _upgrade(path, "0007")
-        upgraded_exact = _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
+        upgraded_exact = (
+            _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT_0007
+        )
         connection = _connect(path)
         try:
             _insert_bearer_ticket(connection)
@@ -1463,7 +1661,7 @@ def test_sqlite_0007_ownership_and_0008_compatibility_preserve_data() -> None:
         _upgrade(path, "0007")
         reupgraded_exact = (
             _version(path) == "0007"
-            and _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
+            and _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT_0007
         )
         connection = _connect(path)
         try:
@@ -1484,7 +1682,8 @@ def test_sqlite_0007_ownership_and_0008_compatibility_preserve_data() -> None:
         ticket_data_after_0008 = _ticket_data_snapshot(path)
         revision_0008_is_compatible = (
             _version(path) == "0008"
-            and ticket_contract_before_0008 == _EXPECTED_TICKET_CONTRACT
+            and ticket_contract_before_0008
+            == _EXPECTED_TICKET_CONTRACT_0007
             and ticket_contract_after_0008 == ticket_contract_before_0008
             and ticket_data_after_0008 == ticket_data_before_0008
         )
@@ -1503,6 +1702,17 @@ def test_sqlite_0007_ownership_and_0008_compatibility_preserve_data() -> None:
             "revision 0008 changed the revision 0007 ticket contract",
         )
 
+        _upgrade(path, "0009")
+        revision_0009_is_current = (
+            _version(path) == "0009"
+            and _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
+            and _ticket_data_snapshot(path) == ticket_data_before_0008
+        )
+        _require_fixed(
+            revision_0009_is_current,
+            "revision 0009 ticket transition changed legacy data",
+        )
+
 
 def test_runtime_bootstrap_and_alembic_have_exact_ticket_parity() -> None:
     with _temporary_database("migration") as migration_path:
@@ -1514,7 +1724,7 @@ def test_runtime_bootstrap_and_alembic_have_exact_ticket_parity() -> None:
             migration_contract = _ticket_contract(migration_path)
             runtime_contract = _ticket_contract(runtime_path)
             both_exact = (
-                _version(migration_path) == "0008"
+                _version(migration_path) == "0009"
                 and migration_contract == _EXPECTED_TICKET_CONTRACT
                 and runtime_contract == _EXPECTED_TICKET_CONTRACT
                 and migration_contract == runtime_contract

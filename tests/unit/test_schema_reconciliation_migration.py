@@ -1,7 +1,6 @@
 """SQLite coverage for revision 0008 schema reconciliation."""
 from __future__ import annotations
 
-import asyncio
 import importlib
 import re
 import sqlite3
@@ -16,8 +15,6 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
-
-from ares.db.database import AresDatabase
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CATALOG_ERROR = "Incompatible catalog for migration 0008"
@@ -223,7 +220,7 @@ def _complete_managed_contract_is_exact(path: Path) -> bool:
     return (
         non_ticket == portability._fixed_sqlite_contract("0006")
         and ticket._ticket_contract(path)
-        == ticket._EXPECTED_TICKET_CONTRACT
+        == ticket._EXPECTED_TICKET_CONTRACT_0007
     )
 
 
@@ -312,10 +309,12 @@ def _attempt_upgrade(path: Path) -> str:
     return ""
 
 
-async def _runtime_bootstrap(path: Path) -> None:
-    database = AresDatabase(f"file:{path.resolve().as_posix()}?mode=rwc")
-    await database.connect()
-    await database.close()
+def _create_supported_unversioned_generation_7(path: Path) -> None:
+    _upgrade(path, "0008")
+    with _connect(path) as connection:
+        connection.execute("DROP TABLE rate_limit_events")
+        connection.execute("DROP TABLE alembic_version")
+        connection.commit()
 
 
 def _rewrite_table_sql(path: Path, table: str, old: str, new: str) -> None:
@@ -746,9 +745,9 @@ def _weaken_blocked_check_with_comment(path: Path) -> None:
         connection.commit()
 
 
-def test_empty_base_upgrades_to_real_0008_head() -> None:
+def test_empty_base_upgrades_to_real_0008_revision() -> None:
     with _database("empty") as path:
-        _upgrade(path, "head")
+        _upgrade(path, "0008")
         with _connect(path) as connection:
             tables = {
                 str(row[0])
@@ -920,9 +919,9 @@ def test_representative_legacy_catalog_converges_and_is_repeat_stable() -> None:
         )
 
 
-def test_runtime_origin_stamped_0007_converges_to_fixed_contract() -> None:
+def test_supported_unversioned_generation_7_converges_to_fixed_contract() -> None:
     with _database("runtime-origin") as path:
-        asyncio.run(_runtime_bootstrap(path))
+        _create_supported_unversioned_generation_7(path)
         with _connect(path) as connection:
             before_order = tuple(
                 str(row[1])
@@ -931,12 +930,9 @@ def test_runtime_origin_stamped_0007_converges_to_fixed_contract() -> None:
                 )
             )
             connection.execute(
-                """
-                CREATE TABLE alembic_version(
-                    version_num VARCHAR(32) NOT NULL,
-                    CONSTRAINT alembic_version_pkc PRIMARY KEY(version_num)
-                )
-                """
+                "CREATE TABLE alembic_version("
+                "version_num VARCHAR(32) NOT NULL,"
+                "CONSTRAINT alembic_version_pkc PRIMARY KEY(version_num))"
             )
             connection.execute(
                 "INSERT INTO alembic_version(version_num) VALUES('0007')"
@@ -953,9 +949,9 @@ def test_runtime_origin_stamped_0007_converges_to_fixed_contract() -> None:
                 )
             )
         _require_fixed(
-            before_order.index("trace_id") < before_order.index("evidence_json")
+            before_order == after_order
             and after_order.index("trace_id") > after_order.index("discovered_at"),
-            "runtime-origin findings order did not converge",
+            "supported generation findings order changed",
         )
         _require_fixed(
             _complete_managed_contract_is_exact(path),

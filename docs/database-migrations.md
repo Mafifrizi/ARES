@@ -8,8 +8,8 @@ an existing unversioned catalog.
 ## Managed and unversioned databases
 
 A managed database has one valid `alembic_version` relation and exactly one
-known revision row. Revision `0008` is current and forward-only. Managed
-revisions `0001` through `0007` use normal Alembic migration; malformed or
+known revision row. Revision `0009` is current and forward-only. Managed
+revisions `0001` through `0008` use normal Alembic migration; malformed or
 unknown version metadata is rejected.
 
 An unversioned database has no Alembic version relation. The adoption verifier
@@ -32,7 +32,7 @@ python -m ares.db.migrations verify-adoption
 
 A supported unversioned catalog reports a fixed readiness identifier ending in
 its proven predecessor (`0006` or `0007`). A current managed database reports
-`ARES-M2B-ALREADY-MANAGED:0008`. No version relation is created by verification.
+`ARES-M2B-ALREADY-MANAGED:0009`. No version relation is created by verification.
 
 After adoption or normal migration, verify the managed contract:
 
@@ -78,7 +78,7 @@ python -m ares.db.migrations adopt --confirm-adoption --confirm-external-backup
 
 PostgreSQL adoption uses one connection, one explicit transaction, and a stable
 transaction-scoped advisory lock. Complete verification occurs under that lock;
-the proven predecessor is stamped and upgraded to `0008` on the same
+the proven predecessor is stamped and upgraded through `0009` on the same
 connection. DDL, data, and version metadata roll back together on failure.
 Concurrent adoption reports a fixed ownership-busy result. Objects in unrelated
 schemas are not changed; unexpected objects in the selected schema are rejected.
@@ -106,5 +106,22 @@ already-managed result.
 
 Diagnostics are fixed identifiers and never contain database URLs, credentials,
 paths, schema identities, SQL, rows, digests, or exception text. Direct or blind
-`alembic stamp 0008` is unsupported. Application rollback does not remove
+`alembic stamp 0009` is unsupported. Application rollback does not remove
 additive schema or migration history.
+
+## Revision 0009 token-family rollout
+
+Revision `0009` adds refresh-token families, one-time lineage, user
+authentication epochs, and bearer-family binding for WebSocket tickets. It is
+additive and forward-only. Existing canonical hashed refresh tokens and bearer
+tickets are preserved but deliberately moved into revoked `rollout_reset`
+families, so every existing browser bearer session must sign in again after the
+upgrade. Unsafe legacy refresh identifiers are rejected before revision
+advancement; they are never deleted or normalized.
+
+Revision `0009` must be deployed during an atomic maintenance window. Stop all
+old workers, back up the database, upgrade, deploy the matching backend and
+frontend, and require reauthentication. Workers that require exact revision
+`0008` cannot run against `0009`; mixed old/new workers are unsupported. A code
+rollback leaves the additive migration installed and requires a compatible
+forward deployment rather than a database downgrade.

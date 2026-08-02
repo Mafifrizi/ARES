@@ -52,14 +52,33 @@ function AuthProbe() {
   return <span>{currentAuth.user?.username ?? "logged-out"}</span>;
 }
 
-function tokenResponse(accessToken: string, refreshToken: string): Response {
+function tokenResponse(
+  accessToken: string,
+  refreshToken: string,
+  generation = 0,
+  coordinationKey = "coordination-a"
+): Response {
   return new Response(JSON.stringify({
     access_token: accessToken,
     refresh_token: refreshToken,
     token_type: "bearer",
     expires_in: 3600,
-    role: "operator"
+    role: "operator",
+    refresh_generation: generation,
+    session_coordination_key: coordinationKey
   }), { status: 200 });
+}
+
+function installStoredSession(refreshToken = "refresh-a"): void {
+  const session = beginIdentityTransition();
+  const installed = installTokenPairIfCurrent(
+    session,
+    "stale-access",
+    refreshToken,
+    "coordination-a",
+    0
+  );
+  requireFixed(installed, "expected authoritative stored session");
 }
 
 function profileResponse(username: string, role = "operator"): Response {
@@ -196,7 +215,7 @@ describe("AuthProvider session isolation", () => {
 
   it("cleans account state and exits loading when startup refresh fails", async () => {
     const queryClient = createQueryClient();
-    setRefreshToken("refresh-a");
+    installStoredSession();
     seedAccountState(queryClient);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
 
@@ -225,11 +244,11 @@ describe("AuthProvider session isolation", () => {
 
   it("cleans account state when startup profile resolution fails", async () => {
     const queryClient = createQueryClient();
-    setRefreshToken("refresh-a");
+    installStoredSession();
     seedAccountState(queryClient);
     vi.stubGlobal("fetch", vi.fn(async (path: string) => {
       if (path === "/auth/refresh") {
-        return tokenResponse("access-a", "refresh-b");
+        return tokenResponse("access-a", "refresh-b", 1);
       }
       if (path === "/auth/me") {
         return new Response(null, { status: 503 });
@@ -295,7 +314,7 @@ describe("AuthProvider session isolation", () => {
       if (path === "/auth/refresh") {
         refreshStarted.resolve();
         await releaseRefresh.promise;
-        return tokenResponse("access-late", "refresh-late");
+        return tokenResponse("access-late", "refresh-late", 1);
       }
       if (path === "/auth/logout") {
         return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
@@ -340,7 +359,7 @@ describe("AuthProvider session isolation", () => {
         if (path === "/auth/token") {
           const username = new URLSearchParams(String(init?.body)).get("username");
           return username === "bob"
-            ? tokenResponse("access-b", "refresh-b")
+            ? tokenResponse("access-b", "refresh-b", 0, "coordination-b")
             : tokenResponse("access-a", "refresh-a");
         }
         if (path === "/auth/me") {
@@ -354,7 +373,7 @@ describe("AuthProvider session isolation", () => {
           refreshStarted.resolve();
           await releaseRefresh.promise;
           return outcome === "success"
-            ? tokenResponse("access-a-late", "refresh-a-late")
+            ? tokenResponse("access-a-late", "refresh-a-late", 1)
             : new Response(null, { status: 401 });
         }
         return new Response(null, { status: 404 });
@@ -434,7 +453,13 @@ describe("AuthProvider session isolation", () => {
         provider.unmount();
         if (sessionOwner === "newer session") {
           const newerSession = beginIdentityTransition();
-          const installed = installTokenPairIfCurrent(newerSession, "access-b", "refresh-b");
+          const installed = installTokenPairIfCurrent(
+            newerSession,
+            "access-b",
+            "refresh-b",
+            "coordination-b",
+            0
+          );
           requireFixed(installed, "expected newer session installation");
         }
         releaseProfile.resolve();
@@ -511,7 +536,7 @@ describe("AuthProvider session isolation", () => {
 
   it("shares startup refresh under StrictMode and applies one current profile", async () => {
     const queryClient = createQueryClient();
-    setRefreshToken("refresh-a");
+    installStoredSession();
     sessionStorage.setItem(
       "ares.dashboard.principal",
       JSON.stringify({ username: "alice", role: "operator" })
@@ -523,7 +548,7 @@ describe("AuthProvider session isolation", () => {
     vi.stubGlobal("fetch", vi.fn(async (path: string) => {
       if (path === "/auth/refresh") {
         refreshCalls += 1;
-        return tokenResponse("access-a", "refresh-b");
+        return tokenResponse("access-a", "refresh-b", 1);
       }
       if (path === "/auth/me") {
         profileCalls += 1;
@@ -556,7 +581,7 @@ describe("AuthProvider session isolation", () => {
             && queryClient.getMutationCache().getAll().length === 0
             && sessionStorage.getItem("ares.dashboard.modules.search") === null
           );
-          return tokenResponse("access-b", "refresh-b");
+          return tokenResponse("access-b", "refresh-b", 0, "coordination-b");
         }
         return tokenResponse("access-a", "refresh-a");
       }
@@ -634,7 +659,7 @@ describe("AuthProvider session isolation", () => {
         return profileResponse("alice");
       }
       if (path === "/auth/refresh" && runtime) {
-        return tokenResponse("access-b", "refresh-b");
+        return tokenResponse("access-b", "refresh-b", 1);
       }
       if (path === "/runtime" && runtime) {
         const authorization = new Headers(init?.headers).get("Authorization");

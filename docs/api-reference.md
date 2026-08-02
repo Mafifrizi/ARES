@@ -29,16 +29,28 @@ username=alice&password=changeme
   "refresh_token": "rt-...",
   "token_type":    "bearer",
   "role":          "operator",
+  "refresh_generation": 0,
+  "session_coordination_key": "non-secret-cross-tab-key",
   "expires_in":    3600
 }
 ```
+
+Each successful login creates an independent device/session family with a
+fixed 30-day absolute lifetime. Access JWTs carry the family identifier and
+current authentication epoch; authorization always resolves the current user,
+role, family, epoch, and JTI from the database. The JWT role claim is not an
+authority source.
 
 ---
 
 ### `POST /auth/refresh`
 
-Rotate refresh token. Old token is revoked; new access + refresh tokens issued.  
-Rate limited per IP (same limit as `/auth/token`).
+Atomically consume the current refresh token and issue generation `n + 1` in
+the same family. Rate limited per IP (same limit as `/auth/token`). A known
+consumed-token replay, including a concurrent loser or retry after a lost
+response, revokes the complete family and returns the same fixed `401` as any
+invalid, expired, unknown, or revoked refresh token. No replacement token can
+be recovered; the user must sign in again.
 
 ```json
 { "refresh_token": "rt-..." }
@@ -48,7 +60,17 @@ Rate limited per IP (same limit as `/auth/token`).
 
 ### `POST /auth/logout`
 
-Revoke current access token (adds JTI to blacklist).
+Revoke the current bearer family and access-token JTI. Other device families
+remain active. API-key authentication is unchanged and this call is
+idempotently successful for API-key callers.
+
+---
+
+### `POST /auth/logout-all`
+
+Increment the current user's authentication epoch, revoke every bearer family,
+and revoke the caller's JTI. Existing bearer HTTP and WebSocket authority fails
+on its next database resolution. API keys remain outside bearer families.
 
 ---
 

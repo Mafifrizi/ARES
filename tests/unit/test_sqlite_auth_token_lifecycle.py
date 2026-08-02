@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import secrets
+import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -789,9 +789,7 @@ async def test_rollback_cleanup_error_preserves_primary_rotation_failure(
 
     async def fail_successor_insert(
         _tx: aiosqlite.Connection,
-        _token_hash_value: str,
-        _user_id: str,
-        _expires_at: str,
+        **_values: object,
     ) -> None:
         raise PrimaryRotationFailure("primary-rotation-failure")
 
@@ -802,7 +800,7 @@ async def test_rollback_cleanup_error_preserves_primary_rotation_failure(
             "_open_refresh_rotation_connection",
             open_with_failing_rollback,
         )
-        patcher.setattr(db, "_insert_refresh_successor", fail_successor_insert)
+        patcher.setattr(db, "_insert_family_successor", fail_successor_insert)
         with pytest.raises(
             PrimaryRotationFailure,
             match="primary-rotation-failure",
@@ -814,7 +812,7 @@ async def test_rollback_cleanup_error_preserves_primary_rotation_failure(
     assert rows[0]["is_revoked"] == 0
     assert rows[0]["used_at"] is None
     calls = repr(captured_logger.mock_calls)
-    assert "rollback_before_commit" in calls
+    assert "family-rollback" in calls
     assert "RuntimeError" in calls
     assert "private-rollback-detail" not in calls
     assert db._db_path not in calls
@@ -960,7 +958,7 @@ async def test_inactive_owner_api_key_is_denied_without_usage_and_reactivates(
 
 
 @pytest.mark.asyncio
-async def test_inactive_owner_refresh_is_immutable_and_reactivates(
+async def test_inactive_owner_refresh_is_immutable_then_replay_revokes_family(
     db_and_user: tuple[AresDatabase, str],
 ) -> None:
     db, user_id = db_and_user
@@ -1001,8 +999,8 @@ async def test_inactive_owner_refresh_is_immutable_and_reactivates(
         "expected the reactivated predecessor to rotate only once",
     )
     _require_fixed(
-        await _active_refresh_count(db, user_id) == 1,
-        "expected exactly one active refresh successor after reactivation",
+        await _active_refresh_count(db, user_id) == 0,
+        "expected predecessor replay to retire the active successor",
     )
 
 
@@ -1016,9 +1014,26 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
     db, user_id = db_and_user
     subject = "sqlite-lifecycle-user"
     jti = "sqlite-principal-jti"
+    await db.create_refresh_token(user_id)
+    async with db.conn.execute(
+        "SELECT id,auth_epoch FROM refresh_token_families WHERE user_id=?",
+        (user_id,),
+    ) as cursor:
+        family = await cursor.fetchone()
+    assert family is not None
+    family_id = str(family["id"])
+    auth_epoch = int(family["auth_epoch"])
+
+    async def resolve(current_jti: str) -> dict[str, object] | None:
+        return await db.resolve_access_token_principal(
+            subject,
+            current_jti,
+            family_id,
+            auth_epoch,
+        )
 
     changes_before = db.conn.total_changes
-    active = await db.resolve_access_token_principal(subject, jti)
+    active = await resolve(jti)
     changes_after = db.conn.total_changes
     _require_fixed(
         active is not None
@@ -1037,7 +1052,7 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
         (user_id,),
     )
     await db.conn.commit()
-    inactive = await db.resolve_access_token_principal(subject, jti)
+    inactive = await resolve(jti)
     _require_fixed(
         inactive is None,
         "expected inactive SQLite bearer principal to be rejected",
@@ -1048,7 +1063,7 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
         (user_id,),
     )
     await db.conn.commit()
-    demoted = await db.resolve_access_token_principal(subject, jti)
+    demoted = await resolve(jti)
     _require_fixed(
         demoted is not None and demoted.get("role") == "reporter",
         "expected SQLite principal lookup to return the current demoted role",
@@ -1059,7 +1074,7 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
         (user_id,),
     )
     await db.conn.commit()
-    promoted = await db.resolve_access_token_principal(subject, jti)
+    promoted = await resolve(jti)
     _require_fixed(
         promoted is not None and promoted.get("role") == "team_lead",
         "expected SQLite principal lookup to return the current promoted role",
@@ -1072,7 +1087,12 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
     await db.conn.commit()
     signing_key = "sqlite-principal-test-signing-key"
     token = create_access_token(
-        {"sub": subject, "role": "team_lead"},
+        {
+            "sub": subject,
+            "sid": family_id,
+            "ver": auth_epoch,
+            "role": "team_lead",
+        },
         signing_key,
     )
     invalid_role = await resolve_bearer_principal(
@@ -1096,7 +1116,7 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
         (jti, user_id, "2099-01-01 00:00:00"),
     )
     await db.conn.commit()
-    revoked = await db.resolve_access_token_principal(subject, jti)
+    revoked = await resolve(jti)
     _require_fixed(
         revoked is None,
         "expected revoked SQLite bearer principal to be rejected",
@@ -1111,13 +1131,13 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
         (user_id,),
     )
     await db.conn.commit()
-    suspended = await db.resolve_access_token_principal(subject, jti)
+    suspended = await resolve(jti)
     await db.conn.execute(
         "UPDATE users SET is_active=1 WHERE id=?",
         (user_id,),
     )
     await db.conn.commit()
-    reactivated = await db.resolve_access_token_principal(subject, jti)
+    reactivated = await resolve(jti)
     _require_fixed(
         suspended is None and reactivated is not None,
         "expected temporary SQLite suspension to be reversible",
@@ -1125,7 +1145,7 @@ async def test_authoritative_principal_state_role_revocation_and_read_only(
 
     await db.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     await db.conn.commit()
-    deleted = await db.resolve_access_token_principal(subject, jti)
+    deleted = await resolve(jti)
     _require_fixed(
         deleted is None,
         "expected a deleted SQLite bearer principal to be rejected",
@@ -1142,6 +1162,8 @@ async def test_authoritative_principal_closed_database_propagates(
         await db.resolve_access_token_principal(
             "sqlite-lifecycle-user",
             "sqlite-closed-jti",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            1,
         )
     await db.connect()
 
@@ -1233,7 +1255,9 @@ async def test_database_generated_exact_now_is_rejected(
         (key_id,),
     )
     await db.conn.execute(
-        "UPDATE refresh_tokens SET expires_at=datetime('now') WHERE id=?",
+        "UPDATE refresh_tokens SET "
+        "created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day'),"
+        "expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
         (_token_hash(predecessor),),
     )
     await db.conn.commit()
@@ -1253,30 +1277,31 @@ async def test_api_key_rejects_malformed_non_null_expiry(
     assert await db.verify_api_key(raw_key) is None
 
 
-@pytest.mark.parametrize(
-    "expires_at",
-    [
-        pytest.param(
-            lambda: (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
-            id="expired-iso-offset",
-        ),
-        pytest.param(lambda: "not-a-timestamp", id="malformed"),
-    ],
-)
+@pytest.mark.parametrize("expiry_kind", ["expired", "malformed"])
 @pytest.mark.asyncio
 async def test_invalid_refresh_expiry_cannot_rotate_or_create_successor(
     db_and_user: tuple[AresDatabase, str],
-    expires_at,
+    expiry_kind: str,
 ) -> None:
     db, user_id = db_and_user
     old_token = await db.create_refresh_token(user_id)
-    await db.conn.execute(
-        "UPDATE refresh_tokens SET expires_at=? WHERE id=?",
-        (expires_at(), _token_hash(old_token)),
-    )
-    await db.conn.commit()
-
-    assert await db.rotate_refresh_token(old_token) == (None, None)
+    if expiry_kind == "expired":
+        await db.conn.execute(
+            "UPDATE refresh_tokens SET "
+            "created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-2 days'),"
+            "expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day') "
+            "WHERE id=?",
+            (_token_hash(old_token),),
+        )
+        await db.conn.commit()
+        assert await db.rotate_refresh_token(old_token) == (None, None)
+    else:
+        with pytest.raises(sqlite3.IntegrityError):
+            await db.conn.execute(
+                "UPDATE refresh_tokens SET expires_at=? WHERE id=?",
+                ("not-a-timestamp", _token_hash(old_token)),
+            )
+        await db.conn.rollback()
     rows = await _refresh_rows(db)
     assert len(rows) == 1
     assert rows[0]["is_revoked"] == 0
@@ -1314,25 +1339,18 @@ async def test_cancellation_before_commit_rolls_back_and_propagates(
     predecessor = await db.create_refresh_token(user_id)
     inserted = asyncio.Event()
     release = asyncio.Event()
-    original_insert = db._insert_refresh_successor
+    original_insert = db._insert_family_successor
 
     async def insert_then_pause(
         tx: aiosqlite.Connection,
-        token_hash: str,
-        successor_user_id: str,
-        expires_at: str,
+        **values: object,
     ) -> None:
-        await original_insert(
-            tx,
-            token_hash,
-            successor_user_id,
-            expires_at,
-        )
+        await original_insert(tx, **values)
         inserted.set()
         await release.wait()
 
     with monkeypatch.context() as patcher:
-        patcher.setattr(db, "_insert_refresh_successor", insert_then_pause)
+        patcher.setattr(db, "_insert_family_successor", insert_then_pause)
         rotation = asyncio.create_task(db.rotate_refresh_token(predecessor))
         await inserted.wait()
         rotation.cancel()
@@ -1399,7 +1417,7 @@ async def test_cancellation_during_commit_returns_committed_successor(
     assert rotated_user is not None
     assert replacement is not None
     assert await db.rotate_refresh_token(successor) == (None, None)
-    assert await _active_refresh_count(db, user_id) == 1
+    assert await _active_refresh_count(db, user_id) == 0
 
 
 @pytest.mark.asyncio
@@ -1495,40 +1513,69 @@ async def test_commit_normalization_preserves_preexisting_cancellation_debt(
 
 
 @pytest.mark.asyncio
-async def test_purge_preserves_grace_and_malformed_unrevoked_rows(
+async def test_purge_uses_family_retention_and_rejects_malformed_timestamps(
     db_and_user: tuple[AresDatabase, str],
 ) -> None:
     db, user_id = db_and_user
-    now = datetime.now(timezone.utc)
-    rows = [
-        (_token_hash(secrets.token_urlsafe(32)), 1, (now + timedelta(days=1)).isoformat()),
-        (_token_hash(secrets.token_urlsafe(32)), 0, (now - timedelta(days=8)).isoformat()),
-        (
-            _token_hash(secrets.token_urlsafe(32)),
-            0,
-            (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S"),
-        ),
-        (_token_hash(secrets.token_urlsafe(32)), 0, "not-a-timestamp"),
-        (_token_hash(secrets.token_urlsafe(32)), 0, (now + timedelta(days=1)).isoformat()),
-    ]
-    await db.conn.executemany(
-        "INSERT INTO refresh_tokens(id,user_id,is_revoked,expires_at) "
-        "VALUES(?,?,?,?)",
-        [(token_id, user_id, revoked, expires_at) for token_id, revoked, expires_at in rows],
+    raw_tokens = [await db.create_refresh_token(user_id) for _ in range(4)]
+    token_hashes = [_token_hash(value) for value in raw_tokens]
+    async with db.conn.execute(
+        "SELECT id,family_id FROM refresh_tokens WHERE user_id=? ORDER BY id",
+        (user_id,),
+    ) as cursor:
+        family_by_hash = {
+            str(row["id"]): str(row["family_id"])
+            for row in await cursor.fetchall()
+        }
+    retained_revoked = family_by_hash[token_hashes[0]]
+    expired_revoked = family_by_hash[token_hashes[1]]
+    expired_active = family_by_hash[token_hashes[2]]
+    retained_active = family_by_hash[token_hashes[3]]
+
+    for family_id in (retained_revoked, expired_revoked):
+        await db.conn.execute(
+            "UPDATE refresh_token_families SET state='revoked',"
+            "created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-40 days'),"
+            "absolute_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 days'),"
+            "revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 days'),"
+            "revoke_reason='expired',retain_until=strftime("
+            "'%Y-%m-%dT%H:%M:%fZ','now',?) WHERE id=?",
+            ("+1 day" if family_id == retained_revoked else "-1 day", family_id),
+        )
+        await db.conn.execute(
+            "UPDATE refresh_tokens SET state='retired',is_revoked=1,"
+            "revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 days') "
+            "WHERE family_id=?",
+            (family_id,),
+        )
+    await db.conn.execute(
+        "UPDATE refresh_token_families SET "
+        "created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-40 days'),"
+        "absolute_expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 days'),"
+        "retain_until=strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day') "
+        "WHERE id=?",
+        (expired_active,),
     )
     await db.conn.commit()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        await db.conn.execute(
+            "UPDATE refresh_token_families SET retain_until='not-a-timestamp' "
+            "WHERE id=?",
+            (retained_active,),
+        )
+    await db.conn.rollback()
 
     assert await db.purge_expired_tokens() == 2
     remaining = await _refresh_rows(db)
     assert {row["id"] for row in remaining} == {
-        rows[2][0],
-        rows[3][0],
-        rows[4][0],
+        token_hashes[0],
+        token_hashes[3],
     }
 
 
 @pytest.mark.asyncio
-async def test_many_concurrent_rotations_have_one_winner_and_reusable_successor(
+async def test_many_concurrent_rotations_revoke_the_winner_family_on_replay(
     db_and_user: tuple[AresDatabase, str],
 ) -> None:
     db, user_id = db_and_user
@@ -1546,17 +1593,14 @@ async def test_many_concurrent_rotations_have_one_winner_and_reusable_successor(
 
     assert len(winners) == 1
     assert sum(result == (None, None) for result in results) == 15
-    assert await _active_refresh_count(db, user_id) == 1
+    assert await _active_refresh_count(db, user_id) == 0
     assert len(await _refresh_rows(db)) == 2
     assert await db.rotate_refresh_token(old_token) == (None, None)
 
     successor = winners[0][1]
     assert successor is not None
-    rotated_user, replacement = await db.rotate_refresh_token(successor)
-    assert rotated_user is not None
-    assert replacement is not None
     assert await db.rotate_refresh_token(successor) == (None, None)
-    assert await _active_refresh_count(db, user_id) == 1
+    assert await _active_refresh_count(db, user_id) == 0
 
 
 @pytest.mark.asyncio
@@ -1587,7 +1631,7 @@ async def test_two_database_instances_have_exactly_one_rotation_winner(
         )
         old_token = await first.create_refresh_token(user_id)
         old_hash = _token_hash(old_token)
-        original_insert = first._insert_refresh_successor
+        original_insert = first._insert_family_successor
         original_first_open = first._open_refresh_rotation_connection
         original_second_open = second._open_refresh_rotation_connection
         loop = asyncio.get_running_loop()
@@ -1623,18 +1667,11 @@ async def test_two_database_instances_have_exactly_one_rotation_winner(
 
         async def pause_with_writer_lock(
             tx: aiosqlite.Connection,
-            token_hash: str,
-            successor_user_id: str,
-            expires_at: str,
+            **values: object,
         ) -> None:
             first_holds_writer.set()
             await release_first.wait()
-            await original_insert(
-                tx,
-                token_hash,
-                successor_user_id,
-                expires_at,
-            )
+            await original_insert(tx, **values)
 
         async def open_first_with_transaction_trace() -> aiosqlite.Connection:
             tx = await original_first_open()
@@ -1669,7 +1706,7 @@ async def test_two_database_instances_have_exactly_one_rotation_winner(
             )
             patcher.setattr(
                 first,
-                "_insert_refresh_successor",
+                "_insert_family_successor",
                 pause_with_writer_lock,
             )
             patcher.setattr(
@@ -1718,13 +1755,13 @@ async def test_two_database_instances_have_exactly_one_rotation_winner(
         )
         assert completed_first_order.count("BEGIN IMMEDIATE") == 1
         assert completed_second_order.count("BEGIN IMMEDIATE") == 1
-        assert await _active_refresh_count(first, user_id) == 1
+        assert await _active_refresh_count(first, user_id) == 0
         rows = await _refresh_rows(first)
         assert len(rows) == 2
         predecessor = next(row for row in rows if row["id"] == old_hash)
         assert predecessor["is_revoked"] == 1
         assert predecessor["used_at"] is not None
-        assert sum(row["is_revoked"] == 0 for row in rows) == 1
+        assert sum(row["is_revoked"] == 0 for row in rows) == 0
         assert _owned_sqlite_tasks() == []
     finally:
         release_first.set()
@@ -1849,6 +1886,6 @@ async def test_plain_memory_database_supports_atomic_refresh_lifecycle() -> None
         assert user is not None
         assert successor is not None
         assert await db.rotate_refresh_token(old_token) == (None, None)
-        assert await _active_refresh_count(db, user_id) == 1
+        assert await _active_refresh_count(db, user_id) == 0
     finally:
         await db.close()

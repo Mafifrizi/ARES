@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from alembic import command
 
 import ares.db.migrations.adoption as adoption_module
 from ares.db.database import AresDatabase
@@ -28,17 +29,20 @@ from ares.db.migrations.adoption import (
 
 
 async def _create_runtime(path: Path, *, generation: int = 7) -> None:
-    database = AresDatabase(f"file:{path.resolve().as_posix()}?mode=rwc")
-    await database.connect()
-    await database.close()
-    if generation == 6:
-        connection = sqlite3.connect(path)
-        try:
-            connection.execute("PRAGMA foreign_keys=OFF")
-            connection.execute("DROP TABLE websocket_tickets")
-            connection.commit()
-        finally:
-            connection.close()
+    engine = sa.create_engine(f"sqlite:///{path.resolve().as_posix()}")
+    with engine.connect() as connection:
+        with migration_config(connection) as config:
+            command.upgrade(config, "0008")
+        connection.exec_driver_sql("DROP TABLE rate_limit_events")
+        connection.exec_driver_sql("DROP TABLE alembic_version")
+        if generation == 6:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            try:
+                connection.exec_driver_sql("DROP TABLE websocket_tickets")
+            finally:
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.commit()
+    engine.dispose()
 
 
 def _catalog_digest(path: Path) -> bytes:
@@ -147,7 +151,7 @@ async def test_sqlite_adoption_uses_backup_and_normal_history(
     assert backup.is_file()
     assert _catalog_digest(backup) == before
     managed = verify_managed_connection_from_path(path)
-    assert managed.diagnostic == "ARES-M2B-ALREADY-MANAGED:0008"
+    assert managed.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009"
     connection = sqlite3.connect(path)
     try:
         revision = connection.execute(
@@ -155,7 +159,7 @@ async def test_sqlite_adoption_uses_backup_and_normal_history(
         ).fetchone()[0]
     finally:
         connection.close()
-    assert revision == "0008"
+    assert revision == "0009"
 
 
 @pytest.mark.asyncio
@@ -174,7 +178,7 @@ async def test_sqlite_adoption_rerun_is_verified_noop(tmp_path: Path) -> None:
         second_backup.exists(),
     ) == (
         AdoptionExit.OK,
-        "ARES-M2B-ALREADY-MANAGED:0008",
+        "ARES-M2B-ALREADY-MANAGED:0009",
         True,
         False,
     )
@@ -274,7 +278,7 @@ async def test_startup_rejects_unversioned_without_alembic_side_effect(
 
 
 @pytest.mark.asyncio
-async def test_startup_rejects_noncanonical_fake_0008(tmp_path: Path) -> None:
+async def test_startup_rejects_noncanonical_fake_0009(tmp_path: Path) -> None:
     path = tmp_path / "runtime.db"
     await _create_runtime(path)
     connection = sqlite3.connect(path)
@@ -284,7 +288,7 @@ async def test_startup_rejects_noncanonical_fake_0008(tmp_path: Path) -> None:
             "version_num VARCHAR(32) NOT NULL, "
             "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
         )
-        connection.execute("INSERT INTO alembic_version VALUES ('0008')")
+        connection.execute("INSERT INTO alembic_version VALUES ('0009')")
         connection.commit()
     finally:
         connection.close()

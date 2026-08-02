@@ -44,3 +44,10 @@ and run the explicit verification/adoption workflow described in
 adoption is serialized with a transaction-scoped advisory lock; SQLite adoption
 requires exclusive ownership and a new durable backup target. Keep additive
 migrations installed if the application image is rolled back.
+
+Revision `0009` introduces authoritative refresh-token families and forces a
+one-time browser reauthentication. Drain WebSockets and stop every old
+container before the database upgrade, then start the matching backend and
+frontend together. Mixed workers are unsupported because managed ownership is
+revision-exact. A container-image rollback does not downgrade the additive
+schema; return to a compatible forward image instead.

@@ -6,6 +6,8 @@ export interface TokenResponse {
   token_type: string;
   expires_in: number;
   role: Role;
+  refresh_generation: number;
+  session_coordination_key: string;
 }
 
 export interface UserProfile {

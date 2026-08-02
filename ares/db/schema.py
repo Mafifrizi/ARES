@@ -16,7 +16,7 @@ Tables (v5 additions marked ★):
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 CREATE_TABLES = """
 PRAGMA journal_mode = WAL;
@@ -169,7 +169,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_active       INTEGER NOT NULL DEFAULT 1,
     created_by      TEXT NOT NULL DEFAULT 'system',
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    last_login      TEXT
+    last_login      TEXT,
+    auth_epoch      INTEGER NOT NULL DEFAULT 1
+                    CONSTRAINT ck_users_auth_epoch CHECK (auth_epoch >= 1)
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_username  ON users(username);
@@ -196,17 +198,142 @@ CREATE INDEX IF NOT EXISTS idx_apikeys_prefix  ON api_keys(key_prefix);
 
 -- ── Refresh Tokens (★ v5) ────────────────────────────────────────────────────
 -- Opaque tokens stored in DB; rotated on each use (rotation security).
+CREATE TABLE IF NOT EXISTS refresh_token_families (
+    id                  TEXT NOT NULL PRIMARY KEY
+                        CONSTRAINT ck_refresh_family_id CHECK (
+                            length(id)=43
+                            AND id NOT GLOB '*[^A-Za-z0-9_-]*'
+                        ),
+    user_id             TEXT NOT NULL
+                        CONSTRAINT fk_refresh_family_user
+                        REFERENCES users(id) ON DELETE CASCADE,
+    auth_epoch          INTEGER NOT NULL
+                        CONSTRAINT ck_refresh_family_epoch CHECK (auth_epoch >= 1),
+    state               TEXT NOT NULL
+                        CONSTRAINT ck_refresh_family_state CHECK (
+                            state IN ('active','revoked')
+                        ),
+    created_at          TEXT NOT NULL,
+    absolute_expires_at TEXT NOT NULL,
+    revoked_at          TEXT,
+    revoke_reason       TEXT,
+    retain_until        TEXT NOT NULL,
+    CONSTRAINT uq_refresh_family_owner UNIQUE (id,user_id),
+    CONSTRAINT ck_refresh_family_revocation_shape CHECK (
+        (state='active' AND revoked_at IS NULL AND revoke_reason IS NULL)
+        OR
+        (state='revoked' AND revoked_at IS NOT NULL AND revoke_reason IS NOT NULL)
+    ),
+    CONSTRAINT ck_refresh_family_reason CHECK (
+        revoke_reason IS NULL OR revoke_reason IN (
+            'replay','logout_current','logout_all','password_change',
+            'password_reset','role_change','user_status_change','rollout_reset',
+            'expired','operator_revoke'
+        )
+    ),
+    CONSTRAINT ck_refresh_family_created_at_utc CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ',created_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ',created_at)=created_at
+    ),
+    CONSTRAINT ck_refresh_family_absolute_expires_at_utc CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ',absolute_expires_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ',absolute_expires_at)=absolute_expires_at
+    ),
+    CONSTRAINT ck_refresh_family_revoked_at_utc CHECK (
+        revoked_at IS NULL OR (
+            strftime('%Y-%m-%dT%H:%M:%fZ',revoked_at) IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M:%fZ',revoked_at)=revoked_at
+        )
+    ),
+    CONSTRAINT ck_refresh_family_retain_until_utc CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ',retain_until) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ',retain_until)=retain_until
+    ),
+    CONSTRAINT ck_refresh_family_expiry_order CHECK (
+        absolute_expires_at > created_at
+    ),
+    CONSTRAINT ck_refresh_family_retention_order CHECK (
+        retain_until > absolute_expires_at
+        AND (revoked_at IS NULL OR retain_until > revoked_at)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_family_user_state_exp
+    ON refresh_token_families(user_id,state,absolute_expires_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_family_retain
+    ON refresh_token_families(retain_until);
+
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-    id              TEXT PRIMARY KEY,        -- random UUID = the token itself
-    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id              TEXT NOT NULL PRIMARY KEY
+                    CONSTRAINT ck_refresh_token_hash CHECK (
+                        length(id)=64 AND id NOT GLOB '*[^0-9a-f]*'
+                    ),
+    user_id         TEXT NOT NULL
+                    CONSTRAINT fk_refresh_tokens_user
+                    REFERENCES users(id) ON DELETE CASCADE,
     is_revoked      INTEGER NOT NULL DEFAULT 0,
     expires_at      TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    used_at         TEXT                     -- NULL = never used
+    created_at      TEXT NOT NULL,
+    used_at         TEXT,
+    family_id       TEXT NOT NULL,
+    parent_id       TEXT,
+    generation      INTEGER NOT NULL,
+    state           TEXT NOT NULL,
+    revoked_at      TEXT,
+    CONSTRAINT uq_refresh_token_family_hash UNIQUE (family_id,id),
+    CONSTRAINT uq_refresh_token_family_generation UNIQUE (family_id,generation),
+    CONSTRAINT uq_refresh_token_parent UNIQUE (parent_id),
+    CONSTRAINT fk_refresh_token_family_owner
+        FOREIGN KEY (family_id,user_id)
+        REFERENCES refresh_token_families(id,user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_refresh_token_parent
+        FOREIGN KEY (family_id,parent_id)
+        REFERENCES refresh_tokens(family_id,id)
+        ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT ck_refresh_token_generation CHECK (generation >= 0),
+    CONSTRAINT ck_refresh_token_parent_shape CHECK (
+        (generation=0 AND parent_id IS NULL)
+        OR (generation>0 AND parent_id IS NOT NULL)
+    ),
+    CONSTRAINT ck_refresh_token_state CHECK (
+        state IN ('active','consumed','retired')
+    ),
+    CONSTRAINT ck_refresh_token_state_shape CHECK (
+        (state='active' AND is_revoked=0 AND used_at IS NULL AND revoked_at IS NULL)
+        OR
+        (state='consumed' AND is_revoked=1 AND used_at IS NOT NULL AND revoked_at IS NULL)
+        OR
+        (state='retired' AND is_revoked=1 AND revoked_at IS NOT NULL)
+    ),
+    CONSTRAINT ck_refresh_token_created_utc CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ',created_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ',created_at)=created_at
+    ),
+    CONSTRAINT ck_refresh_token_expires_utc CHECK (
+        strftime('%Y-%m-%dT%H:%M:%fZ',expires_at) IS NOT NULL
+        AND strftime('%Y-%m-%dT%H:%M:%fZ',expires_at)=expires_at
+    ),
+    CONSTRAINT ck_refresh_token_used_utc CHECK (
+        used_at IS NULL OR (
+            strftime('%Y-%m-%dT%H:%M:%fZ',used_at) IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M:%fZ',used_at)=used_at
+        )
+    ),
+    CONSTRAINT ck_refresh_token_revoked_utc CHECK (
+        revoked_at IS NULL OR (
+            strftime('%Y-%m-%dT%H:%M:%fZ',revoked_at) IS NOT NULL
+            AND strftime('%Y-%m-%dT%H:%M:%fZ',revoked_at)=revoked_at
+        )
+    ),
+    CONSTRAINT ck_refresh_token_expiry_order CHECK (expires_at > created_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_refresh_user    ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_exp     ON refresh_tokens(expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_refresh_token_one_active
+    ON refresh_tokens(family_id) WHERE state='active';
+CREATE INDEX IF NOT EXISTS idx_refresh_family_generation
+    ON refresh_tokens(family_id,generation);
 
 -- Revoked access token JTIs — allows early revocation before natural expiry (60 min TTL)
 CREATE TABLE IF NOT EXISTS revoked_access_tokens (
@@ -244,6 +371,8 @@ CREATE TABLE IF NOT EXISTS websocket_tickets (
     created_at        TEXT NOT NULL,
     expires_at        TEXT NOT NULL,
     consumed_at       TEXT,
+    bearer_family_id  TEXT,
+    bearer_auth_epoch INTEGER,
     CONSTRAINT ck_ws_ticket_created_at CHECK (
         strftime('%Y-%m-%dT%H:%M:%fZ', created_at) IS NOT NULL
         AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at)=created_at
@@ -281,6 +410,12 @@ CREATE TABLE IF NOT EXISTS websocket_tickets (
             AND strftime(
                 '%Y-%m-%dT%H:%M:%fZ', bearer_expires_at
             )=bearer_expires_at
+            AND bearer_family_id IS NOT NULL
+            AND length(bearer_family_id)=43
+            AND bearer_family_id NOT GLOB '*[^A-Za-z0-9_-]*'
+            AND bearer_auth_epoch IS NOT NULL
+            AND typeof(bearer_auth_epoch)='integer'
+            AND bearer_auth_epoch >= 1
             AND api_key_id IS NULL
             AND required_scope IS NULL
         )
@@ -290,12 +425,17 @@ CREATE TABLE IF NOT EXISTS websocket_tickets (
             AND bearer_subject IS NULL
             AND bearer_jti IS NULL
             AND bearer_expires_at IS NULL
+            AND bearer_family_id IS NULL
+            AND bearer_auth_epoch IS NULL
             AND api_key_id IS NOT NULL
             AND length(trim(api_key_id)) > 0
             AND api_key_id=trim(api_key_id)
             AND required_scope='read'
         )
-    )
+    ),
+    CONSTRAINT fk_ws_ticket_bearer_family
+        FOREIGN KEY (bearer_family_id,user_id)
+        REFERENCES refresh_token_families(id,user_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_expires
     ON websocket_tickets(expires_at);
@@ -305,6 +445,8 @@ CREATE INDEX IF NOT EXISTS idx_ws_tickets_campaign
     ON websocket_tickets(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
     ON websocket_tickets(api_key_id);
+CREATE INDEX IF NOT EXISTS idx_ws_tickets_bearer_family
+    ON websocket_tickets(bearer_family_id);
 """
 
 # ── Migration: v4 → v5 ────────────────────────────────────────────────────────

@@ -445,3 +445,9 @@ SQLite or PostgreSQL database requires adoption, stop all workers and follow
 [`docs/database-migrations.md`](docs/database-migrations.md). Do not run a blind
 `alembic stamp`: only audited unversioned generations 6 and 7 are supported, and
 SQLite adoption requires a retained verified backup.
+
+The current managed head is revision `0009`. Upgrading to it installs
+authoritative refresh-token families and deliberately invalidates existing
+browser bearer sessions. Stop every worker, take the required backup, upgrade,
+deploy the matching backend and frontend together, and have operators sign in
+again. Revision `0009` is forward-only; do not run mixed `0008`/`0009` workers.

@@ -39,6 +39,23 @@ function resetTestSessionStorage(): void {
   }
 }
 
+function installSession(
+  accessToken: string,
+  refreshToken: string,
+  coordinationKey = "coordination-a",
+  generation = 0
+): void {
+  const session = beginIdentityTransition();
+  const installed = installTokenPairIfCurrent(
+    session,
+    accessToken,
+    refreshToken,
+    coordinationKey,
+    generation
+  );
+  requireFixed(installed, "expected authoritative test session");
+}
+
 describe("api client auth", () => {
   beforeEach(() => {
     clearTokens();
@@ -65,7 +82,9 @@ describe("api client auth", () => {
           refresh_token: "refresh",
           token_type: "bearer",
           expires_in: 3600,
-          role: "operator"
+          role: "operator",
+          refresh_generation: 0,
+          session_coordination_key: "coordination-a"
         }),
         { status: 200 }
       );
@@ -80,7 +99,7 @@ describe("api client auth", () => {
   });
 
   it("refreshes the access token from the stored refresh token", async () => {
-    setRefreshToken("refresh-old");
+    installSession("access-old", "refresh-old");
     const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
       expect(init?.method).toBe("POST");
       const body = JSON.parse(String(init?.body)) as { refresh_token?: unknown };
@@ -92,7 +111,9 @@ describe("api client auth", () => {
           refresh_token: "refresh-new",
           token_type: "bearer",
           expires_in: 3600,
-          role: "operator"
+          role: "operator",
+          refresh_generation: 1,
+          session_coordination_key: "coordination-a"
         }),
         { status: 200 }
       );
@@ -107,7 +128,7 @@ describe("api client auth", () => {
   });
 
   it("clears tokens when refresh fails", async () => {
-    setRefreshToken("expired-refresh");
+    installSession("expired-access", "expired-refresh");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
 
     await expect(refreshAccessToken()).resolves.toBe(false);
@@ -121,7 +142,9 @@ describe("api client auth", () => {
         refresh_token: "refresh",
         token_type: "bearer",
         expires_in: 3600,
-        role: "operator"
+        role: "operator",
+        refresh_generation: 0,
+        session_coordination_key: "coordination-a"
       }),
       { status: 200 }
     )));
@@ -226,7 +249,9 @@ describe("api client auth", () => {
     const installed = installTokenPairIfCurrent(
       recoveredSession,
       "access-after-read-failure",
-      "refresh-after-read-failure"
+      "refresh-after-read-failure",
+      "coordination-recovered",
+      0
     );
     requireFixed(installed, "expected valid token-pair recovery");
     const recoveredAccessTokenCurrent = getAccessToken() === "access-after-read-failure";
@@ -240,7 +265,9 @@ describe("api client auth", () => {
     const installed = installTokenPairIfCurrent(
       activeSession,
       "access-before-clear-failure",
-      "refresh-before-clear-failure"
+      "refresh-before-clear-failure",
+      "coordination-clear",
+      0
     );
     requireFixed(installed, "expected active session setup");
     const beforeInvalidation = captureSession();
@@ -299,7 +326,9 @@ describe("api client auth", () => {
     const recovered = installTokenPairIfCurrent(
       recoveredSession,
       "access-after-clear-failure",
-      "refresh-after-clear-failure"
+      "refresh-after-clear-failure",
+      "coordination-recovered",
+      0
     );
     requireFixed(recovered, "expected token-pair recovery after cleanup failure");
     const recoveredAccessTokenCurrent = getAccessToken() === "access-after-clear-failure";

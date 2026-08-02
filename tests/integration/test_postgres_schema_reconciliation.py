@@ -34,6 +34,7 @@ _EXPECTED_TABLES = (
     "loot",
     "module_runs",
     "rate_limit_events",
+    "refresh_token_families",
     "refresh_tokens",
     "revoked_access_tokens",
     "users",
@@ -99,7 +100,31 @@ _EXPECTED_INDEXES = (
         ("expires_at",),
         "timestamptz_ops",
     ),
+    (
+        "refresh_token_families",
+        "idx_refresh_family_retain",
+        ("retain_until",),
+        "timestamptz_ops",
+    ),
+    (
+        "refresh_token_families",
+        "idx_refresh_family_user_state_exp",
+        ("user_id", "state", "absolute_expires_at"),
+        ("text_ops", "text_ops", "timestamptz_ops"),
+    ),
+    (
+        "refresh_tokens",
+        "idx_refresh_family_generation",
+        ("family_id", "generation"),
+        ("text_ops", "int8_ops"),
+    ),
     ("refresh_tokens", "idx_refresh_user", ("user_id",), "text_ops"),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_one_active",
+        ("family_id",),
+        "text_ops",
+    ),
     (
         "revoked_access_tokens",
         "idx_rat_expires",
@@ -119,6 +144,11 @@ _EXPECTED_PRIMARY_KEYS = (
     ("loot", "loot_pkey", ("id",)),
     ("module_runs", "module_runs_pkey", ("id",)),
     ("rate_limit_events", "rate_limit_events_pkey", ("id",)),
+    (
+        "refresh_token_families",
+        "refresh_token_families_pkey",
+        ("id",),
+    ),
     ("refresh_tokens", "refresh_tokens_pkey", ("id",)),
     (
         "revoked_access_tokens",
@@ -211,6 +241,33 @@ _EXPECTED_FOREIGN_KEYS = (
         "c",
     ),
     (
+        "refresh_token_families",
+        "fk_refresh_family_user",
+        ("user_id",),
+        "users",
+        ("id",),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "refresh_tokens",
+        "fk_refresh_token_family_owner",
+        ("family_id", "user_id"),
+        "refresh_token_families",
+        ("id", "user_id"),
+        "CASCADE",
+        "c",
+    ),
+    (
+        "refresh_tokens",
+        "fk_refresh_token_parent",
+        ("family_id", "parent_id"),
+        "refresh_tokens",
+        ("family_id", "id"),
+        "CASCADE",
+        "c",
+    ),
+    (
         "refresh_tokens",
         "fk_refresh_tokens_user",
         ("user_id",),
@@ -223,6 +280,22 @@ _EXPECTED_FOREIGN_KEYS = (
 
 _EXPECTED_UNIQUES = (
     ("hosts", "uq_hosts_campaign_ip", ("campaign_id", "ip_address")),
+    (
+        "refresh_token_families",
+        "uq_refresh_family_owner",
+        ("id", "user_id"),
+    ),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_family_generation",
+        ("family_id", "generation"),
+    ),
+    (
+        "refresh_tokens",
+        "uq_refresh_token_family_hash",
+        ("family_id", "id"),
+    ),
+    ("refresh_tokens", "uq_refresh_token_parent", ("parent_id",)),
     ("users", "uq_users_username", ("username",)),
 )
 
@@ -240,13 +313,169 @@ _EXPECTED_FINITE_CHECKS = (
     ("loot", "captured_at", False),
     ("module_runs", "completed_at", False),
     ("rate_limit_events", "timestamp", False),
+    ("refresh_token_families", "absolute_expires_at", False),
+    ("refresh_token_families", "created_at", False),
+    ("refresh_token_families", "retain_until", False),
+    ("refresh_token_families", "revoked_at", True),
     ("refresh_tokens", "created_at", False),
     ("refresh_tokens", "expires_at", False),
+    ("refresh_tokens", "revoked_at", True),
     ("refresh_tokens", "used_at", True),
     ("revoked_access_tokens", "expires_at", False),
     ("revoked_access_tokens", "revoked_at", False),
     ("users", "created_at", False),
     ("users", "last_login", True),
+)
+
+_EXPECTED_TOKEN_CHECKS = (
+    ("users", "ck_users_auth_epoch", "auth_epoch", "CHECK (auth_epoch >= 1)"),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_id",
+        "id",
+        "CHECK (id ~ '^[A-Za-z0-9_-]{43}$'::text)",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_epoch",
+        "auth_epoch",
+        "CHECK (auth_epoch >= 1)",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_state",
+        "state",
+        "CHECK (state = ANY (ARRAY['active'::text, 'revoked'::text]))",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_revocation_shape",
+        "state",
+        "CHECK (state = 'active'::text AND revoked_at IS NULL "
+        "AND revoke_reason IS NULL OR state = 'revoked'::text "
+        "AND revoked_at IS NOT NULL AND revoke_reason IS NOT NULL)",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_reason",
+        "revoke_reason",
+        "CHECK (revoke_reason IS NULL OR (revoke_reason = ANY "
+        "(ARRAY['expired'::text, 'logout_all'::text, "
+        "'logout_current'::text, 'operator_revoke'::text, "
+        "'password_change'::text, 'password_reset'::text, "
+        "'replay'::text, 'role_change'::text, "
+        "'rollout_reset'::text, 'user_status_change'::text])))",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_expiry_order",
+        "absolute_expires_at",
+        "CHECK (absolute_expires_at > created_at)",
+    ),
+    (
+        "refresh_token_families",
+        "ck_refresh_family_retention_order",
+        "retain_until",
+        "CHECK (retain_until > absolute_expires_at AND "
+        "(revoked_at IS NULL OR retain_until > revoked_at))",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_hash",
+        "id",
+        "CHECK (id ~ '^[0-9a-f]{64}$'::text)",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_generation",
+        "generation",
+        "CHECK (generation >= 0)",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_parent_shape",
+        "generation",
+        "CHECK (generation = 0 AND parent_id IS NULL "
+        "OR generation > 0 AND parent_id IS NOT NULL)",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_state",
+        "state",
+        "CHECK (state = ANY (ARRAY['active'::text, "
+        "'consumed'::text, 'retired'::text]))",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_state_shape",
+        "state",
+        "CHECK (state = 'active'::text AND is_revoked = 0 "
+        "AND used_at IS NULL AND revoked_at IS NULL "
+        "OR state = 'consumed'::text AND is_revoked = 1 "
+        "AND used_at IS NOT NULL AND revoked_at IS NULL "
+        "OR state = 'retired'::text AND is_revoked = 1 "
+        "AND revoked_at IS NOT NULL)",
+    ),
+    (
+        "refresh_tokens",
+        "ck_refresh_token_expiry_order",
+        "expires_at",
+        "CHECK (expires_at > created_at)",
+    ),
+)
+
+_CURRENT_EXPECTED_TABLES = _EXPECTED_TABLES
+_CURRENT_EXPECTED_INDEXES = _EXPECTED_INDEXES
+_CURRENT_EXPECTED_PRIMARY_KEYS = _EXPECTED_PRIMARY_KEYS
+_CURRENT_EXPECTED_FOREIGN_KEYS = _EXPECTED_FOREIGN_KEYS
+_CURRENT_EXPECTED_UNIQUES = _EXPECTED_UNIQUES
+_CURRENT_EXPECTED_FINITE_CHECKS = _EXPECTED_FINITE_CHECKS
+
+_EXPECTED_TABLES = tuple(
+    table for table in _EXPECTED_TABLES if table != "refresh_token_families"
+)
+_EXPECTED_INDEXES = tuple(
+    item
+    for item in _EXPECTED_INDEXES
+    if item[1]
+    not in {
+        "idx_refresh_family_retain",
+        "idx_refresh_family_user_state_exp",
+        "idx_refresh_family_generation",
+        "uq_refresh_token_one_active",
+    }
+)
+_EXPECTED_PRIMARY_KEYS = tuple(
+    item
+    for item in _EXPECTED_PRIMARY_KEYS
+    if item[0] != "refresh_token_families"
+)
+_EXPECTED_FOREIGN_KEYS = tuple(
+    item
+    for item in _EXPECTED_FOREIGN_KEYS
+    if item[1]
+    not in {
+        "fk_refresh_family_user",
+        "fk_refresh_token_family_owner",
+        "fk_refresh_token_parent",
+    }
+)
+_EXPECTED_UNIQUES = tuple(
+    item
+    for item in _EXPECTED_UNIQUES
+    if item[1]
+    not in {
+        "uq_refresh_family_owner",
+        "uq_refresh_token_family_generation",
+        "uq_refresh_token_family_hash",
+        "uq_refresh_token_parent",
+    }
+)
+_EXPECTED_FINITE_CHECKS = tuple(
+    item
+    for item in _EXPECTED_FINITE_CHECKS
+    if item[0] != "refresh_token_families"
+    and not (item[0] == "refresh_tokens" and item[1] == "revoked_at")
 )
 
 
@@ -257,6 +486,15 @@ def _finite_check_name(table: str, column: str) -> str:
         return "ck_audit_log_timestamp_finite"
     if table == "rate_limit_events":
         return "ck_rate_limit_events_timestamp_finite"
+    if table == "refresh_tokens" and column == "revoked_at":
+        return "ck_refresh_token_revoked_finite"
+    if table == "refresh_token_families":
+        return {
+            "created_at": "ck_refresh_family_created_finite",
+            "absolute_expires_at": "ck_refresh_family_expires_finite",
+            "revoked_at": "ck_refresh_family_revoked_finite",
+            "retain_until": "ck_refresh_family_retain_finite",
+        }[column]
     return f"ck_{table}_{column}_finite"
 
 
@@ -336,7 +574,7 @@ def _table_rows() -> list[dict[str, object]]:
             "user_trigger_count": 0,
             "user_rule_count": 0,
         }
-        for position, table in enumerate(_EXPECTED_TABLES)
+        for position, table in enumerate(_CURRENT_EXPECTED_TABLES)
     ]
 
 
@@ -349,7 +587,7 @@ def _index_rows() -> list[dict[str, object]]:
             "index_relpersistence": "p",
             "index_is_partition": False,
             "access_method": "btree",
-            "indisunique": False,
+            "indisunique": name == "uq_refresh_token_one_active",
             "indisprimary": False,
             "indisvalid": True,
             "indisready": True,
@@ -358,13 +596,21 @@ def _index_rows() -> list[dict[str, object]]:
             "indnatts": len(columns),
             "columns": list(columns),
             "column_options": [0] * len(columns),
-            "operator_classes": [opclass] * len(columns),
+            "operator_classes": (
+                list(opclass)
+                if isinstance(opclass, tuple)
+                else [opclass] * len(columns)
+            ),
             "operator_class_namespaces": ["pg_catalog"] * len(columns),
             "column_collations_match": [True] * len(columns),
             "expressions": None,
-            "predicate": None,
+            "predicate": (
+                "(state = 'active'::text)"
+                if name == "uq_refresh_token_one_active"
+                else None
+            ),
         }
-        for table, name, columns, opclass in _EXPECTED_INDEXES
+        for table, name, columns, opclass in _CURRENT_EXPECTED_INDEXES
     ]
 
 
@@ -389,7 +635,7 @@ def _primary_rows() -> list[dict[str, object]]:
             "indislive": True,
         }
         for position, (table, name, columns) in enumerate(
-            _EXPECTED_PRIMARY_KEYS
+            _CURRENT_EXPECTED_PRIMARY_KEYS
         )
     ]
 
@@ -404,7 +650,19 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
         remote,
         on_delete,
         delete_code,
-    ) in enumerate(_EXPECTED_FOREIGN_KEYS, start=1):
+    ) in enumerate(_CURRENT_EXPECTED_FOREIGN_KEYS, start=1):
+        reference_index_name = {
+            "fk_refresh_token_family_owner": "uq_refresh_family_owner",
+            "fk_refresh_token_parent": "uq_refresh_token_family_hash",
+        }.get(name, f"{parent}_pkey")
+        parent_is_deferred = name == "fk_refresh_token_parent"
+        definition = (
+            f"FOREIGN KEY ({', '.join(local)}) "
+            f"REFERENCES {parent}({', '.join(remote)}) "
+            f"ON DELETE {on_delete}"
+        )
+        if parent_is_deferred:
+            definition += " DEFERRABLE INITIALLY DEFERRED"
         rows.append(
             {
                 "source_schema": "public",
@@ -412,14 +670,10 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
                 "conname": name,
                 "contype": "f",
                 "convalidated": True,
-                "condeferrable": False,
-                "condeferred": False,
+                "condeferrable": parent_is_deferred,
+                "condeferred": parent_is_deferred,
                 "constraint_index_oid": 2000 + position,
-                "definition": (
-                    f"FOREIGN KEY ({', '.join(local)}) "
-                    f"REFERENCES {parent}({', '.join(remote)}) "
-                    f"ON DELETE {on_delete}"
-                ),
+                "definition": definition,
                 "referenced_schema": "public",
                 "referenced_table": parent,
                 "confupdtype": "a",
@@ -427,13 +681,13 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
                 "local_columns": list(local),
                 "remote_columns": list(remote),
                 "index_schema": "public",
-                "index_name": f"{parent}_pkey",
+                "index_name": reference_index_name,
                 "index_relkind": "i",
                 "index_relpersistence": "p",
                 "index_is_partition": False,
                 "access_method": "btree",
                 "indisunique": True,
-                "indisprimary": True,
+                "indisprimary": reference_index_name.endswith("_pkey"),
                 "indisvalid": True,
                 "indisready": True,
                 "indislive": True,
@@ -449,7 +703,7 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
             }
         )
     for position, (table, name, columns) in enumerate(
-        _EXPECTED_UNIQUES,
+        _CURRENT_EXPECTED_UNIQUES,
         start=1,
     ):
         rows.append(
@@ -484,14 +738,20 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
                 "indnatts": len(columns),
                 "index_columns": list(columns),
                 "column_options": [0] * len(columns),
-                "operator_classes": ["text_ops"] * len(columns),
+                "operator_classes": [
+                    "int8_ops"
+                    if table == "refresh_tokens"
+                    and column == "generation"
+                    else "text_ops"
+                    for column in columns
+                ],
                 "operator_class_namespaces": ["pg_catalog"] * len(columns),
                 "column_collations_match": [True] * len(columns),
                 "expressions": None,
                 "predicate": None,
             }
         )
-    for table, column, nullable in _EXPECTED_FINITE_CHECKS:
+    for table, column, nullable in _CURRENT_EXPECTED_FINITE_CHECKS:
         name = _finite_check_name(table, column)
         expression = (
             f"{column} IS NULL OR isfinite({column})"
@@ -547,6 +807,17 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
         }
     )
     rows.append(blocked)
+    for table, name, column, definition in _EXPECTED_TOKEN_CHECKS:
+        token_check = deepcopy(blocked)
+        token_check.update(
+            {
+                "table_name": table,
+                "conname": name,
+                "definition": definition,
+                "local_columns": [column],
+            }
+        )
+        rows.append(token_check)
     return rows
 
 
@@ -587,7 +858,7 @@ class _PureManagedConnection:
         self,
         *,
         revision_present: bool = True,
-        revision_values: tuple[object, ...] = ("0008",),
+        revision_values: tuple[object, ...] = ("0009",),
     ) -> None:
         self.revision_present = revision_present
         self.revision_values = revision_values
@@ -873,7 +1144,7 @@ async def _run_init(
     return validated
 
 
-@pytest.mark.parametrize("revision", ["0001", "0004", "0007"])
+@pytest.mark.parametrize("revision", ["0001", "0004", "0007", "0008"])
 def test_revision_classifier_requires_migration_for_known_older_heads(
     revision: str,
 ) -> None:
@@ -894,10 +1165,10 @@ def test_revision_classifier_requires_migration_for_known_older_heads(
         (),
         (None,),
         ("",),
-        ("0008", "0008"),
-        ("0008", "0007"),
+        ("0009", "0009"),
+        ("0009", "0008"),
         ("9999",),
-        (" 0008",),
+        (" 0009",),
     ],
 )
 def test_revision_classifier_rejects_malformed_or_unknown_state(
@@ -915,7 +1186,7 @@ def test_revision_classifier_rejects_malformed_or_unknown_state(
 
 
 def test_revision_classifier_accepts_only_exact_managed_head() -> None:
-    accepted = _classify_postgres_revision(("0008",)) == "0008"
+    accepted = _classify_postgres_revision(("0009",)) == "0009"
     _require_fixed(accepted, "managed PostgreSQL revision was rejected")
 
 
@@ -942,14 +1213,18 @@ def test_postgres_constraint_normalization_preserves_literal_case() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unversioned_database_retains_runtime_fallback(
+async def test_unversioned_database_requires_migration_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection = _PureManagedConnection(revision_present=False)
-    validated = await _run_init(monkeypatch, connection)
+    observed = ""
+    try:
+        await _run_init(monkeypatch, connection)
+    except RuntimeError as exc:
+        observed = str(exc)
     _require_fixed(
-        connection.fallback_count == 1 and validated == 1,
-        "unversioned PostgreSQL fallback behavior changed",
+        observed == _MIGRATION_REQUIRED and connection.fallback_count == 0,
+        "unversioned PostgreSQL startup did not require migration",
     )
 
 
@@ -1327,7 +1602,7 @@ async def test_managed_inventory_rejects_catalog_drift(
 
 @pytest.mark.parametrize(
     "revision_values",
-    [("0003",), (), ("unknown",), ("0008", "0007")],
+    [("0003",), (), ("unknown",), ("0009", "0008")],
 )
 @pytest.mark.asyncio
 async def test_versioned_failure_never_enters_runtime_fallback(
@@ -1507,6 +1782,7 @@ async def test_real_postgres_managed_startup_preserves_unrelated_objects(
             "Managed-startup fixture must reach revision 0007 before 0008",
         )
         await harness._alembic(target, "upgrade", "0008")
+        await harness._alembic(target, "upgrade", "0009")
         connection = await harness._connect(target)
         try:
             await connection.execute(
@@ -1528,7 +1804,7 @@ async def test_real_postgres_managed_startup_preserves_unrelated_objects(
                     """
                     SELECT
                         (
-                            SELECT version_num='0008'
+                            SELECT version_num='0009'
                             FROM alembic_version
                         ) AS managed,
                         (
@@ -1568,7 +1844,7 @@ async def test_real_postgres_older_revision_requires_migration_and_recovers(
     from tests.integration import test_postgres_migration_portability as harness
 
     async with harness._postgres_harness() as target:
-        await harness._alembic(target, "upgrade", "0007")
+        await harness._alembic(target, "upgrade", "0008")
         pools = _audit_runtime_pools(monkeypatch)
         database = _runtime_database(target)
         observed = await _fixed_connect_result(database)
@@ -1580,7 +1856,7 @@ async def test_real_postgres_older_revision_requires_migration_and_recovers(
             and pools[0].close_count == 1
         )
 
-        await harness._alembic(target, "upgrade", "0008")
+        await harness._alembic(target, "upgrade", "0009")
         try:
             recovered_state = (
                 await _fixed_connect_result(database) == "connected"
@@ -1617,24 +1893,24 @@ async def test_real_postgres_invalid_revision_state_closes_and_recovers(
     operations = {
         "empty": (
             "DELETE FROM alembic_version",
-            "INSERT INTO alembic_version(version_num) VALUES('0008')",
+            "INSERT INTO alembic_version(version_num) VALUES('0009')",
         ),
         "multiple": (
             "INSERT INTO alembic_version(version_num) VALUES('0007')",
             "DELETE FROM alembic_version WHERE version_num='0007'",
         ),
         "malformed": (
-            "UPDATE alembic_version SET version_num=' 0008'",
-            "UPDATE alembic_version SET version_num='0008'",
+            "UPDATE alembic_version SET version_num=' 0009'",
+            "UPDATE alembic_version SET version_num='0009'",
         ),
         "unknown": (
             "UPDATE alembic_version SET version_num='9999'",
-            "UPDATE alembic_version SET version_num='0008'",
+            "UPDATE alembic_version SET version_num='0009'",
         ),
     }
     mutation, repair = operations[revision_state]
     async with harness._postgres_harness() as target:
-        await harness._alembic(target, "upgrade", "0008")
+        await harness._alembic(target, "upgrade", "0009")
         connection = await harness._connect(target)
         try:
             await connection.execute(mutation)
@@ -1862,7 +2138,7 @@ async def test_real_postgres_managed_catalog_drift_never_falls_back(
     }
     statement = statements[drift]
     async with harness._postgres_harness() as target:
-        await harness._alembic(target, "upgrade", "0008")
+        await harness._alembic(target, "upgrade", "0009")
         connection = await harness._connect(target)
         try:
             await connection.execute(statement)
@@ -1883,7 +2159,7 @@ async def test_real_postgres_managed_catalog_drift_never_falls_back(
 
 
 @pytest.mark.asyncio
-async def test_real_postgres_unversioned_startup_uses_runtime_fallback(
+async def test_real_postgres_unversioned_startup_requires_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _postgres_test_config()
@@ -1892,44 +2168,46 @@ async def test_real_postgres_unversioned_startup_uses_runtime_fallback(
     async with harness._postgres_harness() as target:
         pools = _audit_runtime_pools(monkeypatch)
         database = _runtime_database(target)
+        observed = await _fixed_connect_result(database)
+        connection = await harness._connect(target)
         try:
-            connected = await _fixed_connect_result(database) == "connected"
-            async with database._pool.acquire() as connection:
-                state = await connection.fetchrow(
-                    """
-                    SELECT
-                        to_regclass('alembic_version') IS NULL AS unversioned,
-                        to_regclass('campaigns') IS NOT NULL AS runtime_created,
-                        to_regclass('websocket_tickets') IS NOT NULL
-                            AS tickets_created
-                    """
-                )
-                created = (
-                    state is not None
-                    and bool(state["unversioned"])
-                    and bool(state["runtime_created"])
-                    and bool(state["tickets_created"])
-                )
+            state = await connection.fetchrow(
+                """
+                SELECT
+                    to_regclass('alembic_version') IS NULL AS unversioned,
+                    to_regclass('campaigns') IS NULL AS no_campaigns,
+                    to_regclass('websocket_tickets') IS NULL AS no_tickets
+                """
+            )
         finally:
-            await database.close()
+            await connection.close()
+        unchanged = (
+            state is not None
+            and bool(state["unversioned"])
+            and bool(state["no_campaigns"])
+            and bool(state["no_tickets"])
+        )
         _require_fixed(
-            connected
-            and created
+            observed == _MIGRATION_REQUIRED
+            and unchanged
+            and database._pool is None
             and len(pools) == 1
-            and pools[0].fallback_count == 1
+            and pools[0].fallback_count == 0
             and pools[0].close_count == 1,
-            "unversioned PostgreSQL runtime fallback changed",
+            "unversioned PostgreSQL startup did not fail closed",
         )
 
 
 async def _stamp_runtime_origin_0007(target: Any) -> None:
-    database = _runtime_database(target)
-    try:
-        await database.connect()
-    finally:
-        await database.close()
+    from ares.db.postgres import (
+        _PG_CREATE_TABLES,
+        _POSTGRES_FALLBACK_STATEMENT_SPANS,
+    )
+
     connection = await target_support_connect(target)
     try:
+        for _code, start, end in _POSTGRES_FALLBACK_STATEMENT_SPANS:
+            await connection.execute(_PG_CREATE_TABLES[start:end])
         await connection.execute(
             """
             CREATE TABLE alembic_version(
@@ -2634,6 +2912,7 @@ async def test_real_postgres_runtime_origin_converges_without_data_loss(
             )
         finally:
             await connection.close()
+        await harness._alembic(target, "upgrade", "0009")
         pools = _audit_runtime_pools(monkeypatch)
         database = _runtime_database(target)
         try:
@@ -2664,6 +2943,9 @@ async def test_real_postgres_supported_legacy_objects_converge(
         try:
             await harness._seed_postgres_contract(connection)
             await connection.execute(
+                "UPDATE refresh_tokens SET id=repeat('a', 64)"
+            )
+            await connection.execute(
                 """
                 DROP TABLE module_runs;
                 CREATE INDEX idx_findings_validated
@@ -2684,17 +2966,14 @@ async def test_real_postgres_supported_legacy_objects_converge(
             await connection.close()
 
         await harness._alembic(target, "upgrade", "0008")
-        pools = _audit_runtime_pools(monkeypatch)
-        database = _runtime_database(target)
-        connected = await _fixed_connect_result(database) == "connected"
+        connection = await harness._connect(target)
         try:
-            async with database._pool.acquire() as connection:
-                after_data = await _application_data_digest(
-                    connection,
-                    excluded_tables=frozenset({"module_runs"}),
-                )
-                state = await connection.fetchrow(
-                    """
+            after_data = await _application_data_digest(
+                connection,
+                excluded_tables=frozenset({"module_runs"}),
+            )
+            state = await connection.fetchrow(
+                """
                     SELECT
                         (
                             SELECT version_num='0008'
@@ -2734,19 +3013,26 @@ async def test_real_postgres_supported_legacy_objects_converge(
                             FROM ares_m0008_unrelated_probe
                             WHERE id=1
                         ) AS unrelated_preserved
-                    """
-                )
-                converged = (
-                    state is not None
-                    and bool(state["revision_current"])
-                    and bool(state["module_table_present"])
-                    and bool(state["module_fk_present"])
-                    and bool(state["module_check_present"])
-                    and bool(state["module_indexes_exact"])
-                    and bool(state["obsolete_index_removed"])
-                    and bool(state["unrelated_preserved"])
-                    and before_data == after_data
-                )
+                """
+            )
+            converged = (
+                state is not None
+                and bool(state["revision_current"])
+                and bool(state["module_table_present"])
+                and bool(state["module_fk_present"])
+                and bool(state["module_check_present"])
+                and bool(state["module_indexes_exact"])
+                and bool(state["obsolete_index_removed"])
+                and bool(state["unrelated_preserved"])
+                and before_data == after_data
+            )
+        finally:
+            await connection.close()
+        await harness._alembic(target, "upgrade", "0009")
+        pools = _audit_runtime_pools(monkeypatch)
+        database = _runtime_database(target)
+        try:
+            connected = await _fixed_connect_result(database) == "connected"
         finally:
             await database.close()
         _require_fixed(

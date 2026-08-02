@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from ares.db.migrations import adoption
 from ares.db.migrations.adoption import AdoptionExit, AdoptionFailure
-from ares.db.postgres import PostgresDatabase
 
 _ENV = (
     "ARES_TEST_POSTGRES_HOST",
@@ -113,16 +112,20 @@ async def _database() -> AsyncIterator[str]:
 
 
 async def _runtime(url: str, generation: int) -> None:
-    database = PostgresDatabase(url)
-    await database.connect()
-    await database.close()
-    if generation == 6:
-        engine = create_async_engine(url, poolclass=sa.pool.NullPool)
-        try:
-            async with engine.begin() as connection:
+    from ares.db.postgres import (
+        _PG_CREATE_TABLES,
+        _POSTGRES_FALLBACK_STATEMENT_SPANS,
+    )
+
+    engine = create_async_engine(url, poolclass=sa.pool.NullPool)
+    try:
+        async with engine.begin() as connection:
+            for _code, start, end in _POSTGRES_FALLBACK_STATEMENT_SPANS:
+                await connection.exec_driver_sql(_PG_CREATE_TABLES[start:end])
+            if generation == 6:
                 await connection.exec_driver_sql("DROP TABLE websocket_tickets")
-        finally:
-            await engine.dispose()
+    finally:
+        await engine.dispose()
 
 
 async def _revision(url: str) -> str | None:
@@ -206,8 +209,8 @@ async def test_real_postgres_generation_adopts_atomically(
         predecessor,
         None,
         AdoptionExit.OK,
-        "0008",
-        "ARES-M2B-ALREADY-MANAGED:0008",
+        "0009",
+        "ARES-M2B-ALREADY-MANAGED:0009",
     )
 
 
@@ -355,6 +358,6 @@ async def test_real_postgres_adoption_rerun_is_verified_noop(
         revision = await _revision(url)
     assert (first.exit_code, second.diagnostic, revision) == (
         AdoptionExit.OK,
-        "ARES-M2B-ALREADY-MANAGED:0008",
-        "0008",
+        "ARES-M2B-ALREADY-MANAGED:0009",
+        "0009",
     )

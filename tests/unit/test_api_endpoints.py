@@ -17,6 +17,8 @@ Note on POST body tests (register, campaigns create, change-password):
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import os
 from types import SimpleNamespace
 from typing import Any
@@ -50,8 +52,11 @@ def _make_token(username: str, role: str) -> str:
 
     _MOCK_PRINCIPAL_ROLES[username] = role
     s = _settings()
+    family_id = base64.urlsafe_b64encode(
+        hashlib.sha256(username.encode("utf-8")).digest()
+    ).rstrip(b"=").decode("ascii")
     return create_access_token(
-        data={"sub": username, "role": role},
+        data={"sub": username, "sid": family_id, "ver": 1},
         secret_key=s.secret_key_value,
         expires_minutes=60,
     )
@@ -59,6 +64,36 @@ def _make_token(username: str, role: str) -> str:
 
 def _auth(username: str, role: str) -> dict:
     return {"Authorization": f"Bearer {_make_token(username, role)}"}
+
+
+def _issued_session(username: str = "admin", role: str = "team_lead"):
+    from ares.core.security import create_access_token
+    from ares.core.token_sessions import (
+        IssuedTokenSession,
+        SessionIssueResult,
+        SessionIssueStatus,
+    )
+
+    family_id = base64.urlsafe_b64encode(
+        hashlib.sha256(username.encode("utf-8")).digest()
+    ).rstrip(b"=").decode("ascii")
+    token = create_access_token(
+        {"sub": username, "sid": family_id, "ver": 1},
+        _settings().secret_key_value,
+    )
+    return SessionIssueResult(
+        SessionIssueStatus.ISSUED,
+        IssuedTokenSession(
+            access_token=token,
+            refresh_token="test-refresh-token",  # noqa: S106 - fixed test value
+            user_id="test-user-id",
+            subject=username,
+            family_id=family_id,
+            auth_epoch=1,
+            refresh_generation=0,
+            role=role,
+        ),
+    )
 
 
 def _api_key_headers(raw_key: str = "ares_test_api_key") -> dict:
@@ -83,6 +118,15 @@ def _api_key_record(
 
 
 def _make_mock_db():
+    from ares.core.token_sessions import (
+        RefreshRotationResult,
+        RefreshRotationStatus,
+        SessionIssueResult,
+        SessionIssueStatus,
+        SessionRevocationResult,
+        SessionRevocationStatus,
+    )
+
     db = MagicMock()
     db.verify_user = AsyncMock(return_value=None)
     db.get_user = AsyncMock(return_value=None)
@@ -93,17 +137,37 @@ def _make_mock_db():
     db.revoke_all_refresh_tokens = AsyncMock()
     db.revoke_access_token = AsyncMock()
     db.is_access_token_revoked = AsyncMock(return_value=False)
+    db.create_login_session = AsyncMock(
+        return_value=SessionIssueResult(SessionIssueStatus.INVALID)
+    )
+    db.rotate_refresh_session = AsyncMock(
+        return_value=RefreshRotationResult(RefreshRotationStatus.INVALID)
+    )
+    db.revoke_current_session = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
+    db.revoke_all_sessions = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
+    db.apply_user_security_event = AsyncMock(return_value=True)
 
     async def resolve_access_token_principal(
         subject: str,
         _jti: str,
+        _family_id: str,
+        auth_epoch: int,
     ) -> dict[str, str] | None:
         if db.is_access_token_revoked.return_value is True:
             return None
         role = _MOCK_PRINCIPAL_ROLES.get(subject)
         if role is None:
             return None
-        return {"id": f"mock-user-{subject}", "username": subject, "role": role}
+        return {
+            "id": f"mock-user-{subject}",
+            "username": subject,
+            "role": role,
+            "auth_epoch": auth_epoch,
+        }
 
     db.resolve_access_token_principal = AsyncMock(
         side_effect=resolve_access_token_principal
@@ -358,11 +422,7 @@ class TestAuthFlow:
         """Login with mocked OAuth2PasswordRequestForm — valid creds → 200 + tokens."""
         c, db, _app = aclient
         _reset_rate_limiter()
-        db.verify_user.return_value = {
-            "id": "u1",
-            "username": "admin",
-            "role": "team_lead",
-        }
+        db.create_login_session.return_value = _issued_session()
 
         class FakeForm:
             username = "admin"
@@ -381,7 +441,7 @@ class TestAuthFlow:
             assert body["token_type"] == "bearer"  # noqa: S105 - OAuth token type
         finally:
             del _app.dependency_overrides[OAuth2PasswordRequestForm]
-            db.verify_user.return_value = None
+            db.create_login_session.return_value = None
 
     @pytest.mark.asyncio
     async def test_unauthenticated_endpoint_returns_401(self, aclient):
@@ -430,8 +490,7 @@ class TestAuthFlow:
         """Response/handler mapping; real SQLite containment is covered below."""
         c, db, _ = aclient
         _reset_rate_limiter()
-        db.rotate_refresh_token.return_value = (None, None)
-        db.rotate_refresh_token.reset_mock()
+        db.rotate_refresh_session.reset_mock()
         db.create_refresh_token.reset_mock()
 
         response = await c.post(
@@ -447,7 +506,7 @@ class TestAuthFlow:
         if not (
             response.status_code == 401
             and generic_failure
-            and db.rotate_refresh_token.await_count == 1
+            and db.rotate_refresh_session.await_count == 1
             and db.create_refresh_token.await_count == 0
         ):
             pytest.fail(
@@ -2741,6 +2800,7 @@ class TestReportEndpoints:
         from ares.api.server import get_db, get_engine
         from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         from ares.core.engine import EngineModuleResult, ModuleStatus
+        from ares.core.security import create_access_token
         from ares.db.database import AresDatabase
 
         real_report_generator = report_gen.ReportGenerator
@@ -2750,6 +2810,18 @@ class TestReportEndpoints:
             "SyntheticReportPrincipal1!",
             "team_lead",
         )
+        issued = await real_db.create_login_session(
+            "admin",
+            "SyntheticReportPrincipal1!",
+            lambda claims: create_access_token(
+                dict(claims),
+                _settings().secret_key_value,
+            ),
+        )
+        assert issued.session is not None
+        real_auth = {
+            "Authorization": f"Bearer {issued.session.access_token}"
+        }
         original_db = getattr(app.state, "db", None)
         campaign = Campaign(
             name="AD Lab Attack Simulation",
@@ -2845,7 +2917,7 @@ class TestReportEndpoints:
             }
             asrep = await c.post(
                 f"/modules/ad.asreproast/run",
-                headers=_auth("admin", "team_lead"),
+                headers=real_auth,
                 json={
                     "campaign_id": campaign.id,
                     "params": common_params,
@@ -2854,7 +2926,7 @@ class TestReportEndpoints:
             )
             kerb = await c.post(
                 f"/modules/ad.kerberoast/run",
-                headers=_auth("admin", "team_lead"),
+                headers=real_auth,
                 json={
                     "campaign_id": campaign.id,
                     "params": {**common_params, "target_user": "svc-sql"},
@@ -2875,7 +2947,7 @@ class TestReportEndpoints:
 
             findings_response = await c.get(
                 f"/campaigns/{campaign.id}/findings",
-                headers=_auth("admin", "team_lead"),
+                headers=real_auth,
             )
             assert findings_response.status_code == 200
             assert len(findings_response.json()) == 2
@@ -2898,7 +2970,7 @@ class TestReportEndpoints:
 
             report_response = await c.post(
                 f"/reports/{campaign.id}?fmt=json",
-                headers=_auth("admin", "team_lead"),
+                headers=real_auth,
             )
         finally:
             app.dependency_overrides.pop(get_db, None)
@@ -3137,6 +3209,7 @@ class TestAuthoritativeHTTPBearerPrincipal:
     @pytest.fixture
     async def auth_runtime(self, tmp_path: Any):
         from ares.api.server import app, get_db
+        from ares.core.security import create_access_token
         from ares.db import database as database_module
         from ares.db.database import AresDatabase
 
@@ -3148,7 +3221,16 @@ class TestAuthoritativeHTTPBearerPrincipal:
                 "SyntheticPrincipalPass1!",
                 "team_lead",
             )
-        token = _make_token(username, "team_lead")
+        issued = await database.create_login_session(
+            username,
+            "SyntheticPrincipalPass1!",
+            lambda claims: create_access_token(
+                dict(claims),
+                _settings().secret_key_value,
+            ),
+        )
+        assert issued.session is not None
+        token = issued.session.access_token
         original_db = getattr(app.state, "db", None)
         original_overrides = dict(app.dependency_overrides)
         app.state.db = database
@@ -3201,11 +3283,11 @@ class TestAuthoritativeHTTPBearerPrincipal:
             "expected an active bearer principal to reach the protected handler",
         )
 
-        await database.conn.execute(
-            "UPDATE users SET is_active=0 WHERE id=?",
-            (user_id,),
+        await database.apply_user_security_event(
+            user_id=user_id,
+            reason="user_status_change",
+            is_active=False,
         )
-        await database.conn.commit()
         inactive_response = await client.get(
             "/auth/me",
             headers=self._bearer_headers(token),
@@ -3235,18 +3317,18 @@ class TestAuthoritativeHTTPBearerPrincipal:
             "expected inactive bearer denial before protected handler work",
         )
 
-        await database.conn.execute(
-            "UPDATE users SET is_active=1 WHERE id=?",
-            (user_id,),
+        await database.apply_user_security_event(
+            user_id=user_id,
+            reason="user_status_change",
+            is_active=True,
         )
-        await database.conn.commit()
         reactivated_response = await client.get(
             "/auth/me",
             headers=self._bearer_headers(token),
         )
         _require_fixed(
-            reactivated_response.status_code == 200,
-            "expected the same bearer token to work after reactivation",
+            reactivated_response.status_code == 401,
+            "expected status-change epoch revocation to remain authoritative",
         )
 
         await database.conn.execute(
@@ -3280,7 +3362,7 @@ class TestAuthoritativeHTTPBearerPrincipal:
         self,
         auth_runtime: Any,
     ) -> None:
-        client, database, user_id, username, token, _ = auth_runtime
+        client, database, user_id, _username, token, _ = auth_runtime
         _reset_rate_limiter()
         list_calls = [0]
         original_list_users = database.list_users
@@ -3304,7 +3386,6 @@ class TestAuthoritativeHTTPBearerPrincipal:
             "expected current demoted role to block team-lead work",
         )
 
-        promoted_token = _make_token(username, "reporter")
         await database.conn.execute(
             "UPDATE users SET role='team_lead' WHERE id=?",
             (user_id,),
@@ -3312,7 +3393,7 @@ class TestAuthoritativeHTTPBearerPrincipal:
         await database.conn.commit()
         promoted_response = await client.get(
             "/security/users",
-            headers=self._bearer_headers(promoted_token),
+            headers=self._bearer_headers(token),
         )
         _require_fixed(
             promoted_response.status_code == 200 and list_calls[0] == 1,
@@ -3326,7 +3407,7 @@ class TestAuthoritativeHTTPBearerPrincipal:
         await database.conn.commit()
         invalid_role_response = await client.get(
             "/auth/me",
-            headers=self._bearer_headers(promoted_token),
+            headers=self._bearer_headers(token),
         )
         _require_fixed(
             invalid_role_response.status_code == 401,
@@ -4150,13 +4231,21 @@ class TestMainWebSocketAuthoritativeLifetime:
                 "SyntheticWebSocketPass1!",
                 "team_lead",
             )
-        settings = _settings()
-        token = create_access_token(
-            {"sub": username, "role": "team_lead"},
-            settings.secret_key_value,
-            algorithm=settings.ares_jwt_algorithm,
-            expires_minutes=60,
+        issued = await database.create_login_session(
+            username,
+            "SyntheticWebSocketPass1!",
+            lambda claims: create_access_token(
+                dict(claims),
+                _settings().secret_key_value,
+                algorithm=_settings().ares_jwt_algorithm,
+                expires_minutes=60,
+            ),
         )
+        _require_fixed(
+            issued.session is not None,
+            "expected authoritative WebSocket login session",
+        )
+        token = issued.session.access_token
         campaign = Campaign(
             name="Synthetic WebSocket Campaign",
             operator="separate-campaign-owner",
@@ -4533,11 +4622,17 @@ class TestMainWebSocketAuthoritativeLifetime:
         import jwt
 
         settings = _settings()
+        authoritative_claims = jwt.decode(
+            token,
+            settings.secret_key_value,
+            algorithms=[settings.ares_jwt_algorithm],
+        )
         revocation_marker = "synthetic-main-websocket-revocation"
         revoked_token = jwt.encode(
             {
                 "sub": username,
-                "role": "team_lead",
+                "sid": authoritative_claims["sid"],
+                "ver": authoritative_claims["ver"],
                 "jti": revocation_marker,
                 "exp": datetime.now(timezone.utc) + timedelta(hours=1),
             },
@@ -5199,13 +5294,21 @@ class TestMainWebSocketAuthoritativeLifetime:
                 "SyntheticWebSocketPeer1!",
                 "team_lead",
             )
-        settings = _settings()
-        peer_token = create_access_token(
-            {"sub": "main-websocket-peer", "role": "team_lead"},
-            settings.secret_key_value,
-            algorithm=settings.ares_jwt_algorithm,
-            expires_minutes=60,
+        peer_session = await database.create_login_session(
+            "main-websocket-peer",
+            "SyntheticWebSocketPeer1!",
+            lambda claims: create_access_token(
+                dict(claims),
+                _settings().secret_key_value,
+                algorithm=_settings().ares_jwt_algorithm,
+                expires_minutes=60,
+            ),
         )
+        _require_fixed(
+            peer_session.session is not None,
+            "expected authoritative peer session",
+        )
+        peer_token = peer_session.session.access_token
         first_socket, first_task = await _launch_main_websocket(
             app,
             campaign.id,
@@ -5256,13 +5359,21 @@ class TestMainWebSocketAuthoritativeLifetime:
                 "SyntheticAuthorizedPeerPass1!",
                 "team_lead",
             )
-        settings = _settings()
-        peer_token = create_access_token(
-            {"sub": "main-websocket-authorized-peer", "role": "team_lead"},
-            settings.secret_key_value,
-            algorithm=settings.ares_jwt_algorithm,
-            expires_minutes=60,
+        peer_session = await database.create_login_session(
+            "main-websocket-authorized-peer",
+            "SyntheticAuthorizedPeerPass1!",
+            lambda claims: create_access_token(
+                dict(claims),
+                _settings().secret_key_value,
+                algorithm=_settings().ares_jwt_algorithm,
+                expires_minutes=60,
+            ),
         )
+        _require_fixed(
+            peer_session.session is not None,
+            "expected authoritative peer session",
+        )
+        peer_token = peer_session.session.access_token
         stale_socket, stale_task = await _launch_main_websocket(
             app,
             campaign.id,

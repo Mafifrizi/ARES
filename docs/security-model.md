@@ -152,7 +152,29 @@ authentication, campaign-ownership, WebSocket, credential-transport, or
 deployment parity. Query-token exposure and its global live-WebSocket design
 remain. Full retirement is the preferred final control.
 
-Tokens are issued by `POST /auth/token` with valid operator credentials (bcrypt-hashed password). Default expiry: 1 hour.
+Tokens are issued by `POST /auth/token` with valid operator credentials
+(bcrypt-hashed password). Each login creates an independent refresh-token
+family with one active token, a 30-day absolute lifetime, and no sliding
+extension. Only lowercase SHA-256 token hashes are stored. Access JWTs contain
+`sub`, `sid`, `ver`, `jti`, `iat`, and `exp`; they contain no role claim.
+Current database user status, role, authentication epoch, family state, and JTI
+are authoritative on every bearer resolution. Default access expiry is one
+hour.
+
+Refresh is a one-winner database transaction. The predecessor is consumed and
+exactly one child is inserted before commit; the raw child is returned only
+after commit. Reuse of a known consumed or revoked predecessor atomically
+revokes the complete family, including the committed winner after a concurrent
+or lost-response retry. Unknown random values reveal nothing and mutate
+nothing. `POST /auth/logout` revokes only the current family;
+`POST /auth/logout-all`, password changes/resets, role changes, and activation
+state changes increment the user epoch and revoke all families. Separate login
+families remain isolated, and API keys never enter refresh families.
+
+Family lineage is retained until 30 days after the later of family expiry or
+revocation. Fixed security audit actions record login-family creation,
+rotation, replay revocation, current/all-device logout, and account security
+events without token, hash, family, user, SQL, or exception values.
 
 ### Main WebSocket tickets
 
@@ -171,6 +193,12 @@ bearer-expiry/JTI, API-key scope/lifetime/ownership, role, and campaign access
 before protected events. This resolution is read-only and remains possible
 after the ticket row expires or is purged. No registry entry retains a raw
 ticket, bearer, API key, ticket hash, or original query string.
+
+Bearer-backed tickets also bind the user authentication epoch and refresh
+family. Family replay, logout, password/security events, expiry, or revocation
+therefore deny ticket consumption and terminate connected bearer sockets on
+the next heartbeat/event revalidation. API-key-backed tickets remain
+independent of refresh families.
 
 Tickets remain visible to the browser and any upstream component that receives
 the handshake URL, so production clients must initiate HTTPS/WSS directly.

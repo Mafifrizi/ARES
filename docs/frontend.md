@@ -40,8 +40,18 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - Refresh calls `POST /auth/refresh` with JSON `{ "refresh_token": "..." }`.
 - Access tokens are held in memory.
 - Refresh tokens are stored in `sessionStorage`; React output escaping and the
-  FastAPI CSP reduce script injection risk.
-- Logout calls `POST /auth/logout` and clears local token state.
+  FastAPI CSP reduce script injection risk. This residual browser-token/XSS
+  exposure is intentionally deferred to the HttpOnly-cookie/CSRF conversion in
+  Phase 5B.2.
+- Logout calls `POST /auth/logout` and revokes only the current device family;
+  **Logout all devices** calls `POST /auth/logout-all`. Both clear local state
+  even when the remote request fails.
+- Refresh is single-flight within a tab and uses a non-secret family-derived
+  coordination key, generation counter, Web Locks, `localStorage`, and
+  `BroadcastChannel` for cross-tab exclusion/invalidation. Raw access or
+  refresh tokens are never posted across tabs or written to `localStorage`.
+  A tab that loses a refresh race discards its session and requires login; it
+  never retries a consumed predecessor.
 - Each main campaign WebSocket connection first requests a 30-second,
   single-use ticket with authenticated `POST
   /campaigns/{campaign_id}/websocket-ticket`. The ticket exists only across the
@@ -78,7 +88,8 @@ Then open `http://127.0.0.1:5173/dashboard/`.
   notifications from the current session.
 - Notification state must not persist bodies, API keys, tokens, stack traces,
   or raw payloads.
-- The topbar keeps the user identity and logout action.
+- The topbar keeps the user identity plus current-device and all-device logout
+  actions.
 
 ## Safety
 
@@ -98,6 +109,14 @@ issuance and discards a late response after logout, account replacement,
 campaign change, cleanup, or unmount. A same-session access-token refresh does
 not invalidate that barrier. Navigating away closes the connection, so users
 request a fresh ticket when they return.
+
+Every token response carries a refresh generation and non-secret coordination
+key. A response is installed only if it belongs to the captured session and is
+the exact next generation. Logout, account replacement, replay/family
+revocation, or peer-tab generation advancement increments the session revision,
+clears credentials, closes bearer-backed WebSockets through normal lifecycle
+handling, and prevents an infinite refresh loop. A same-family token refresh
+does not change identity until another tab wins it.
 
 Production frontend and backend versions must roll out atomically, with
 existing sockets drained. Mixed old/new versions are unsupported, and rollback

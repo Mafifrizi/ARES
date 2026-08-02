@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 
+from ares.core.token_sessions import require_family_id
+
 WEBSOCKET_TICKET_TTL_SECONDS = 30
 WEBSOCKET_TICKET_ENTROPY_BYTES = 32
 WEBSOCKET_TICKET_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -98,6 +100,8 @@ class BearerTicketSource:
     subject: str = field(repr=False)
     jti: str = field(repr=False)
     expires_at: datetime = field(repr=False)
+    family_id: str = field(repr=False)
+    auth_epoch: int = field(repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -110,6 +114,9 @@ class BearerTicketSource:
         object.__setattr__(
             self, "expires_at", normalize_utc_datetime(self.expires_at)
         )
+        object.__setattr__(self, "family_id", require_family_id(self.family_id))
+        if isinstance(self.auth_epoch, bool) or self.auth_epoch < 1:
+            raise ValueError("invalid bearer authentication epoch")
 
     @property
     def credential_kind(self) -> WebSocketTicketCredentialKind:
@@ -148,6 +155,8 @@ class ConsumedWebSocketTicket:
     bearer_subject: str | None = field(default=None, repr=False)
     bearer_jti: str | None = field(default=None, repr=False)
     bearer_expires_at: datetime | None = field(default=None, repr=False)
+    bearer_family_id: str | None = field(default=None, repr=False)
+    bearer_auth_epoch: int | None = field(default=None, repr=False)
     api_key_id: str | None = field(default=None, repr=False)
     required_scope: str | None = field(default=None, repr=False)
 
@@ -165,6 +174,8 @@ class ConsumedWebSocketTicket:
                 self.bearer_subject is None
                 or self.bearer_jti is None
                 or self.bearer_expires_at is None
+                or self.bearer_family_id is None
+                or self.bearer_auth_epoch is None
                 or self.api_key_id is not None
                 or self.required_scope is not None
             ):
@@ -184,6 +195,13 @@ class ConsumedWebSocketTicket:
                 "bearer_expires_at",
                 normalize_utc_datetime(self.bearer_expires_at),
             )
+            object.__setattr__(
+                self,
+                "bearer_family_id",
+                require_family_id(self.bearer_family_id),
+            )
+            if isinstance(self.bearer_auth_epoch, bool) or self.bearer_auth_epoch < 1:
+                raise ValueError("invalid bearer authentication epoch")
         elif self.credential_kind is WebSocketTicketCredentialKind.API_KEY:
             if (
                 self.api_key_id is None
@@ -191,6 +209,8 @@ class ConsumedWebSocketTicket:
                 or self.bearer_subject is not None
                 or self.bearer_jti is not None
                 or self.bearer_expires_at is not None
+                or self.bearer_family_id is not None
+                or self.bearer_auth_epoch is not None
             ):
                 raise ValueError("invalid API-key ticket handle")
             object.__setattr__(

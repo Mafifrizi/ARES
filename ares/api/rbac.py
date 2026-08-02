@@ -29,6 +29,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from ares.core.logger import get_logger
+from ares.core.token_sessions import is_canonical_family_id
 from ares.db.websocket_tickets import BearerTicketSource
 
 logger = get_logger("ares.api.rbac")
@@ -127,6 +128,8 @@ async def resolve_bearer_principal(
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
 
     subject = payload.get("sub")
+    family_id = payload.get("sid")
+    auth_epoch = payload.get("ver")
     jti = payload.get("jti")
     expires_at = payload.get("exp")
     if (
@@ -134,6 +137,11 @@ async def resolve_bearer_principal(
         or not subject.strip()
         or not isinstance(jti, str)
         or not jti.strip()
+        or not isinstance(family_id, str)
+        or not is_canonical_family_id(family_id)
+        or isinstance(auth_epoch, bool)
+        or not isinstance(auth_epoch, int)
+        or auth_epoch < 1
         or isinstance(expires_at, bool)
         or not isinstance(expires_at, (int, float))
     ):
@@ -151,7 +159,12 @@ async def resolve_bearer_principal(
         return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)
 
     try:
-        row = await db.resolve_access_token_principal(subject, jti)
+        row = await db.resolve_access_token_principal(
+            subject,
+            jti,
+            family_id,
+            auth_epoch,
+        )
     except Exception as exc:
         logger.warning(
             "auth_backend_principal_lookup_failed",
@@ -186,6 +199,8 @@ async def resolve_bearer_principal(
                 subject=subject,
                 jti=jti,
                 expires_at=source_expiry,
+                family_id=family_id,
+                auth_epoch=auth_epoch,
             ),
         ),
     )

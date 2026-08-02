@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import multiprocessing
 import os
 import re
@@ -40,7 +42,7 @@ _SAFE_EXCEPTION_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _POSTGRES_OPERATION_TIMEOUT_SECONDS = 15.0
 _MIGRATION_PROCESS_TIMEOUT_SECONDS = 45.0
 _MIGRATION_ACTIONS = frozenset({"upgrade", "downgrade"})
-_MIGRATION_REVISIONS = frozenset({"0006", "0007", "0008"})
+_MIGRATION_REVISIONS = frozenset({"0006", "0007", "0008", "0009"})
 _OWNED_MIGRATION_PROCESSES: set[Any] = set()
 
 
@@ -617,6 +619,7 @@ async def _postgres_harness(
         database = PostgresDatabase(dsn, pool_min=1, pool_max=8)
         if initialize_runtime:
             try:
+                _run_ticket_migration(test_database, "upgrade", "0009")
                 await _bounded_operation(
                     "runtime-initialize",
                     database.connect(),
@@ -705,6 +708,20 @@ async def _seed_identity(
                 (other_campaign_id, "Other campaign", username),
             ),
         )
+        now = datetime.now(timezone.utc)
+        await connection.execute(
+            """
+            INSERT INTO refresh_token_families(
+                id,user_id,auth_epoch,state,created_at,
+                absolute_expires_at,retain_until
+            ) VALUES($1,$2,1,'active',$3,$4,$5)
+            """,
+            _test_family_id(user_id),
+            user_id,
+            now,
+            now + timedelta(days=30),
+            now + timedelta(days=60),
+        )
     api_key_id = (
         await database.create_api_key(
             user_id,
@@ -715,12 +732,19 @@ async def _seed_identity(
     return user_id, username, campaign_id, other_campaign_id, api_key_id
 
 
+def _test_family_id(user_id: str) -> str:
+    digest = hashlib.sha256(b"ARES-PG-WS-TEST-FAMILY\0" + user_id.encode()).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
 def _bearer_source(user_id: str, username: str) -> BearerTicketSource:
     return BearerTicketSource(
         user_id=user_id,
         subject=username,
         jti=f"ticket-jti-{uuid4().hex}",
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        family_id=_test_family_id(user_id),
+        auth_epoch=1,
     )
 
 
@@ -769,6 +793,8 @@ _EXPECTED_TICKET_COLUMNS = (
         True,
         None,
     ),
+    ("bearer_family_id", "text", False, "", "", True, None),
+    ("bearer_auth_epoch", "bigint", False, "", "", True, None),
 )
 
 _EXPECTED_TICKET_CHECKS = (
@@ -807,12 +833,17 @@ _EXPECTED_TICKET_CHECKS = (
         "AND length(btrim(bearer_jti)) > 0 "
         "AND bearer_jti = btrim(bearer_jti) "
         "AND bearer_expires_at IS NOT NULL "
+        "AND bearer_family_id IS NOT NULL "
+        "AND bearer_auth_epoch IS NOT NULL "
+        "AND bearer_auth_epoch >= 1 "
         "AND api_key_id IS NULL "
         "AND required_scope IS NULL "
         "OR credential_kind = 'api_key'::text "
         "AND bearer_subject IS NULL "
         "AND bearer_jti IS NULL "
         "AND bearer_expires_at IS NULL "
+        "AND bearer_family_id IS NULL "
+        "AND bearer_auth_epoch IS NULL "
         "AND api_key_id IS NOT NULL "
         "AND length(btrim(api_key_id)) > 0 "
         "AND api_key_id = btrim(api_key_id) "
@@ -831,6 +862,14 @@ _EXPECTED_TICKET_FOREIGN_KEYS = (
         ("api_key_id",),
         "api_keys",
         ("id",),
+        "a",
+        "c",
+    ),
+    (
+        "fk_ws_ticket_bearer_family",
+        ("bearer_family_id", "user_id"),
+        "refresh_token_families",
+        ("id", "user_id"),
         "a",
         "c",
     ),
@@ -864,6 +903,23 @@ _EXPECTED_TICKET_INDEXES = (
         1,
         1,
         ("api_key_id",),
+        (0,),
+        ("text_ops",),
+        (True,),
+        None,
+        None,
+    ),
+    (
+        "idx_ws_tickets_bearer_family",
+        "btree",
+        False,
+        False,
+        True,
+        True,
+        True,
+        1,
+        1,
+        ("bearer_family_id",),
         (0,),
         ("text_ops",),
         (True,),
@@ -943,6 +999,14 @@ _EXPECTED_TICKET_INDEXES = (
 _EXPECTED_TICKET_INDEX_IDENTITIES = (
     (
         "idx_ws_tickets_api_key",
+        "i",
+        "p",
+        False,
+        ("text_ops",),
+        ("pg_catalog",),
+    ),
+    (
+        "idx_ws_tickets_bearer_family",
         "i",
         "p",
         False,
@@ -1339,11 +1403,65 @@ def _ticket_catalog_matches_fixed_contract(
                 for binding in fingerprint.get("index_bindings", ())
             }
         )
-        == 5
+        == 6
         and all(
             binding[1] == fingerprint.get("relation_oid")
             for binding in fingerprint.get("constraint_bindings", ())
         )
+        and fingerprint.get("constraint_count") == 16
+    )
+
+
+def _ticket_catalog_matches_revision_0007_contract(
+    fingerprint: dict[str, object],
+) -> bool:
+    old_source_shape = (
+        "CHECK (credential_kind = 'bearer'::text "
+        "AND bearer_subject IS NOT NULL "
+        "AND length(btrim(bearer_subject)) > 0 "
+        "AND bearer_subject = btrim(bearer_subject) "
+        "AND bearer_jti IS NOT NULL "
+        "AND length(btrim(bearer_jti)) > 0 "
+        "AND bearer_jti = btrim(bearer_jti) "
+        "AND bearer_expires_at IS NOT NULL "
+        "AND api_key_id IS NULL AND required_scope IS NULL "
+        "OR credential_kind = 'api_key'::text "
+        "AND bearer_subject IS NULL AND bearer_jti IS NULL "
+        "AND bearer_expires_at IS NULL AND api_key_id IS NOT NULL "
+        "AND length(btrim(api_key_id)) > 0 "
+        "AND api_key_id = btrim(api_key_id) "
+        "AND required_scope = 'read'::text)"
+    )
+    old_checks = tuple(
+        (name, old_source_shape if name == "ck_ws_ticket_source_shape" else definition)
+        for name, definition in _EXPECTED_TICKET_CHECKS
+    )
+    old_foreign_keys = tuple(
+        item
+        for item in _EXPECTED_TICKET_FOREIGN_KEYS
+        if item[0] != "fk_ws_ticket_bearer_family"
+    )
+    old_indexes = tuple(
+        item
+        for item in _EXPECTED_TICKET_INDEXES
+        if item[0] != "idx_ws_tickets_bearer_family"
+    )
+    old_identities = tuple(
+        item
+        for item in _EXPECTED_TICKET_INDEX_IDENTITIES
+        if item[0] != "idx_ws_tickets_bearer_family"
+    )
+    return (
+        fingerprint.get("relation")
+        == ("r", "p", False, False, False, 0, 0, 0, 0, 0)
+        and fingerprint.get("columns") == _EXPECTED_TICKET_COLUMNS[:12]
+        and fingerprint.get("checks") == old_checks
+        and fingerprint.get("foreign_keys") == old_foreign_keys
+        and fingerprint.get("primary")
+        == (("websocket_tickets_pkey", ("ticket_hash",), True, False, False),)
+        and fingerprint.get("indexes") == old_indexes
+        and fingerprint.get("index_identities") == old_identities
+        and len(fingerprint.get("index_bindings", ())) == 5
         and fingerprint.get("constraint_count") == 15
     )
 
@@ -2409,6 +2527,8 @@ class _ConnectionProxy:
                 "BEARER_SUBJECT",
                 "BEARER_JTI",
                 "BEARER_EXPIRES_AT",
+                "BEARER_FAMILY_ID",
+                "BEARER_AUTH_EPOCH",
                 "API_KEY_ID",
                 "REQUIRED_SCOPE",
             )
@@ -2603,6 +2723,8 @@ class _PureTicketConnection:
             "bearer_jti": "synthetic-jti",
             "bearer_expires_at": datetime.now(timezone.utc)
             + timedelta(minutes=1),
+            "bearer_family_id": _test_family_id("synthetic-user"),
+            "bearer_auth_epoch": 1,
             "api_key_id": None,
             "required_scope": None,
         }
@@ -3031,7 +3153,6 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
         _run_ticket_migration(harness.database_name, "upgrade", "0007")
         connection = await _connect()
         try:
-            await PostgresDatabase._validate_websocket_ticket_schema(connection)
             migration_catalog = await _ticket_catalog_fingerprint(connection)
             upgraded_state = await connection.fetchrow(
                 """
@@ -3059,7 +3180,9 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
                 for name in ("users", "campaigns", "api_keys")
             )
             and migration_catalog is not None
-            and _ticket_catalog_matches_fixed_contract(migration_catalog)
+            and _ticket_catalog_matches_revision_0007_contract(
+                migration_catalog
+            )
         )
         _require_fixed(
             upgraded,
@@ -3102,7 +3225,6 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
         _run_ticket_migration(harness.database_name, "upgrade", "0007")
         connection = await _connect()
         try:
-            await PostgresDatabase._validate_websocket_ticket_schema(connection)
             reupgraded_catalog = await _ticket_catalog_fingerprint(connection)
             final_state = await connection.fetchrow(
                 """
@@ -3129,7 +3251,9 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
                 int(final_state[name]) == 1
                 for name in ("users", "campaigns", "api_keys")
             )
-            and _ticket_catalog_matches_fixed_contract(reupgraded_catalog)
+            and _ticket_catalog_matches_revision_0007_contract(
+                reupgraded_catalog
+            )
         )
         _require_fixed(
             final_state_is_exact,
@@ -3213,7 +3337,9 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
                 int(head_state[name]) == 1
                 for name in ("users", "campaigns", "api_keys")
             )
-            and _ticket_catalog_matches_fixed_contract(migration_catalog)
+            and _ticket_catalog_matches_revision_0007_contract(
+                migration_catalog
+            )
             and migration_catalog == ticket_catalog_before_0008
             and tuple(ticket_rows_after_0008)
             == tuple(ticket_rows_before_0008)
@@ -3221,6 +3347,55 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
         _require_fixed(
             revision_0008_is_compatible,
             "revision 0008 changed the revision 0007 ticket contract",
+        )
+
+        _run_ticket_migration(harness.database_name, "upgrade", "0009")
+        connection = await _connect()
+        try:
+            await PostgresDatabase._validate_websocket_ticket_schema(connection)
+            migration_catalog = await _ticket_catalog_fingerprint(connection)
+            ticket_rows_after_0009 = await connection.fetch(
+                """
+                SELECT ticket_hash, campaign_id, user_id, credential_kind,
+                       bearer_subject, bearer_jti, bearer_expires_at,
+                       api_key_id, required_scope, created_at, expires_at,
+                       consumed_at
+                FROM websocket_tickets
+                ORDER BY ticket_hash
+                """
+            )
+            current_state = await connection.fetchrow(
+                """
+                SELECT
+                    (SELECT version_num FROM alembic_version) AS revision,
+                    (SELECT COUNT(*) FROM users WHERE id=$1) AS users,
+                    (SELECT COUNT(*) FROM campaigns WHERE id=$2) AS campaigns,
+                    (SELECT COUNT(*) FROM api_keys WHERE id=$3) AS api_keys
+                """,
+                seed_user,
+                seed_campaign,
+                seed_key,
+            )
+        finally:
+            await _attempt_cleanup(
+                "migration-0009-close",
+                connection.close,
+                [],
+            )
+        revision_0009_is_current = (
+            current_state is not None
+            and current_state["revision"] == "0009"
+            and all(
+                int(current_state[name]) == 1
+                for name in ("users", "campaigns", "api_keys")
+            )
+            and _ticket_catalog_matches_fixed_contract(migration_catalog)
+            and tuple(ticket_rows_after_0009)
+            == tuple(ticket_rows_before_0008)
+        )
+        _require_fixed(
+            revision_0009_is_current,
+            "revision 0009 ticket contract changed",
         )
 
     async with _postgres_harness() as runtime_harness:
@@ -3886,7 +4061,10 @@ async def _ticket_rows_for_metadata_mutation(
 async def test_postgres_rejects_security_altering_relation_metadata(
     mutation: str,
 ) -> None:
-    from ares.db.postgres import _PostgresStartupDiagnosticError
+    from ares.db.postgres import (
+        _PostgresManagedSchemaError,
+        _PostgresStartupDiagnosticError,
+    )
 
     async with _postgres_harness() as harness:
         database = harness.database
@@ -3966,7 +4144,7 @@ async def test_postgres_rejects_security_altering_relation_metadata(
                 )
 
             failure_type: type[BaseException] | None = None
-            fixed_message = False
+            failure_is_sanitized = False
             try:
                 await asyncio.wait_for(
                     candidate.connect(),
@@ -3975,8 +4153,13 @@ async def test_postgres_rejects_security_altering_relation_metadata(
                 candidate_connected = True
             except Exception as exc:
                 failure_type = type(exc)
-                fixed_message = (
-                    str(exc) == "Incompatible WebSocket ticket schema"
+                failure_is_sanitized = (
+                    failure_type is _PostgresStartupDiagnosticError
+                    and str(exc) == "Incompatible WebSocket ticket schema"
+                ) or (
+                    failure_type is _PostgresManagedSchemaError
+                    and str(exc)
+                    == "Incompatible managed PostgreSQL schema"
                 )
             pool_was_cleared = candidate._pool is None
 
@@ -4008,8 +4191,7 @@ async def test_postgres_rejects_security_altering_relation_metadata(
             _require_fixed(
                 mutation_exists
                 and trigger_would_enable_replay
-                and failure_type is _PostgresStartupDiagnosticError
-                and fixed_message
+                and failure_is_sanitized
                 and pool_was_cleared
                 and startup_preserved_state
                 and observer_reusable,

@@ -21,19 +21,31 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function tokenResponse(accessToken: string, refreshToken: string): Response {
+function tokenResponse(
+  accessToken: string,
+  refreshToken: string,
+  generation = 1
+): Response {
   return new Response(JSON.stringify({
     access_token: accessToken,
     refresh_token: refreshToken,
     token_type: "bearer",
     expires_in: 3600,
-    role: "operator"
+    role: "operator",
+    refresh_generation: generation,
+    session_coordination_key: "coordination-a"
   }), { status: 200 });
 }
 
 function installSession(accessToken = "access-a", refreshToken = "refresh-a"): void {
   const session = beginIdentityTransition();
-  if (!installTokenPairIfCurrent(session, accessToken, refreshToken)) {
+  if (!installTokenPairIfCurrent(
+    session,
+    accessToken,
+    refreshToken,
+    "coordination-a",
+    0
+  )) {
     throw new Error("test session setup failed");
   }
 }
@@ -331,7 +343,13 @@ describe("HTTP auth boundary", () => {
         try {
           await refreshStarted.promise;
           const accountB = beginIdentityTransition();
-          const installed = installTokenPairIfCurrent(accountB, "access-b", "refresh-b");
+          const installed = installTokenPairIfCurrent(
+            accountB,
+            "access-b",
+            "refresh-b",
+            "coordination-b",
+            0
+          );
           expect(installed).toBe(true);
           releaseRefresh.resolve();
           await expect(refresh).rejects.toMatchObject({ status: 401 });
@@ -371,7 +389,13 @@ describe("HTTP auth boundary", () => {
     try {
       await requestStarted.promise;
       const accountB = beginIdentityTransition();
-      const installed = installTokenPairIfCurrent(accountB, "access-b", "refresh-b");
+      const installed = installTokenPairIfCurrent(
+        accountB,
+        "access-b",
+        "refresh-b",
+        "coordination-b",
+        0
+      );
       expect(installed).toBe(true);
       releaseRequest.resolve();
 

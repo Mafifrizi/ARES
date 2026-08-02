@@ -123,7 +123,22 @@ def create_access_token(
     algorithm: str = "HS256",  # override with ARES_JWT_ALGORITHM=RS256
     expires_minutes: int = 60,
 ) -> str:
+    family_id = data.get("sid")
+    auth_epoch = data.get("ver")
+    from ares.core.token_sessions import is_canonical_family_id
+
+    if (family_id is None) != (auth_epoch is None):
+        raise ValueError("invalid access token claims")
+    if family_id is not None and (
+        not is_canonical_family_id(family_id)
+        or isinstance(auth_epoch, bool)
+        or not isinstance(auth_epoch, int)
+        or auth_epoch < 1
+    ):
+        raise ValueError("invalid access token claims")
     payload = data.copy()
+    if family_id is not None:
+        payload.pop("role", None)
     payload["exp"] = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     payload["iat"] = datetime.now(timezone.utc)
     payload["jti"] = secrets.token_hex(16)  # unique token ID for revocation
@@ -140,8 +155,11 @@ def decode_access_token(
         key = _load_jwt_key(secret_key, algorithm, private=False)
         # For HS256 algorithms=[algorithm] is required; for RS256 PyJWT handles it
         return jwt.decode(token, key, algorithms=[algorithm])
-    except InvalidTokenError as e:
-        logger.warning("security_jwt_decode_failed", e=e)
+    except InvalidTokenError as exc:
+        logger.warning(
+            "security_jwt_decode_failed",
+            error_type=type(exc).__name__,
+        )
         return None
 
 

@@ -22,7 +22,6 @@ from ares.db import postgres as postgres_module
 from ares.db.postgres import (
     PostgresDatabase,
     _acquire_refresh_token_user_lock,
-    _refresh_token_user_lock_key,
 )
 
 _POSTGRES_ENV = (
@@ -38,6 +37,26 @@ _SAFE_DATABASE_NAME = re.compile(r"^[a-z][a-z0-9_]+$")
 class _PostgresHarness:
     database: PostgresDatabase
     dsn: str
+
+
+async def _initialize_managed_schema(dsn: str) -> None:
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(dsn.replace("postgresql://", "postgresql+asyncpg://", 1))
+
+    def upgrade(connection: Any) -> None:
+        config = Config()
+        config.set_main_option("script_location", "migrations")
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
+
+    try:
+        async with engine.connect() as connection:
+            await connection.run_sync(upgrade)
+    finally:
+        await engine.dispose()
 
 
 def _postgres_test_config() -> dict[str, str | int]:
@@ -147,6 +166,10 @@ async def _postgres_harness() -> AsyncIterator[_PostgresHarness]:
             raise _sanitized_setup_failure("database-create", exc) from None
 
         dsn = _runtime_dsn(config, test_database)
+        try:
+            await _initialize_managed_schema(dsn)
+        except Exception as exc:
+            raise _sanitized_setup_failure("alembic-upgrade", exc) from None
         database = PostgresDatabase(dsn, pool_min=1, pool_max=12)
         try:
             await database.connect()
@@ -453,7 +476,7 @@ async def _wait_for_blocked_backend_sessions(
                 while time.monotonic() < deadline:
                     if any(operation.done() for operation in operations):
                         pytest.fail(
-                            "concurrent rotation bypassed the held advisory lock",
+                            "concurrent rotation bypassed the held family row lock",
                             pytrace=False,
                         )
                     waiter_count = int(
@@ -461,18 +484,6 @@ async def _wait_for_blocked_backend_sessions(
                             """
                             SELECT COUNT(DISTINCT activity.pid)
                             FROM pg_stat_activity AS activity
-                            JOIN pg_locks AS waiting
-                              ON waiting.pid=activity.pid
-                             AND waiting.locktype='advisory'
-                             AND waiting.granted=false
-                            JOIN pg_locks AS holding
-                              ON holding.pid=$1::INTEGER
-                             AND holding.locktype='advisory'
-                             AND holding.granted=true
-                             AND holding.classid=waiting.classid
-                             AND holding.objid=waiting.objid
-                             AND holding.objsubid=waiting.objsubid
-                             AND holding.database IS NOT DISTINCT FROM waiting.database
                             WHERE activity.datname=current_database()
                               AND $1::INTEGER = ANY(pg_blocking_pids(activity.pid))
                             """,
@@ -482,14 +493,14 @@ async def _wait_for_blocked_backend_sessions(
                     )
                     if waiter_count >= minimum_waiters:
                         return
-                    await asyncio.sleep(0.01)
+                    await asyncio.sleep(0)
     except TimeoutError:
         pytest.fail(
-            "distinct PostgreSQL backend sessions did not overlap on the advisory lock",
+            "distinct PostgreSQL sessions did not overlap on the family row lock",
             pytrace=False,
         )
     pytest.fail(
-        "distinct PostgreSQL backend sessions did not overlap on the advisory lock",
+        "distinct PostgreSQL sessions did not overlap on the family row lock",
         pytrace=False,
     )
 
@@ -840,12 +851,22 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 "SELECT username FROM users WHERE id=$1",
                 user_id,
             )
+            async with connection.transaction():
+                family_id, _refresh_token = (
+                    await database._insert_initial_family_token(
+                        connection,
+                        user_id=user_id,
+                        auth_epoch=1,
+                    )
+                )
             identity_before = await connection.fetchrow(
                 "SELECT xmin::text AS version, last_login FROM users WHERE id=$1",
                 user_id,
             )
 
-        active = await database.resolve_access_token_principal(subject, jti)
+        active = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         async with database._pool.acquire() as connection:
             identity_after = await connection.fetchrow(
                 "SELECT xmin::text AS version, last_login FROM users WHERE id=$1",
@@ -868,7 +889,9 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 "UPDATE users SET is_active=0 WHERE id=$1",
                 user_id,
             )
-        inactive = await database.resolve_access_token_principal(subject, jti)
+        inactive = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             inactive is None,
             "expected inactive PostgreSQL bearer principal to be rejected",
@@ -880,7 +903,9 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 "reporter",
                 user_id,
             )
-        demoted = await database.resolve_access_token_principal(subject, jti)
+        demoted = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             demoted is not None and demoted.get("role") == "reporter",
             "expected PostgreSQL principal lookup to return the committed demoted role",
@@ -892,7 +917,9 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 "team_lead",
                 user_id,
             )
-        promoted = await database.resolve_access_token_principal(subject, jti)
+        promoted = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             promoted is not None and promoted.get("role") == "team_lead",
             "expected PostgreSQL principal lookup to return the committed promoted role",
@@ -906,7 +933,7 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
             )
         signing_key = "postgres-principal-test-signing-key"
         token = create_access_token(
-            {"sub": subject, "role": "team_lead"},
+            {"sub": subject, "sid": family_id, "ver": 1},
             signing_key,
         )
         invalid_role = await resolve_bearer_principal(
@@ -932,7 +959,9 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 jti,
                 user_id,
             )
-        revoked = await database.resolve_access_token_principal(subject, jti)
+        revoked = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             revoked is None,
             "expected revoked PostgreSQL bearer principal to be rejected",
@@ -947,13 +976,17 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
                 "UPDATE users SET is_active=0 WHERE id=$1",
                 user_id,
             )
-        suspended = await database.resolve_access_token_principal(subject, jti)
+        suspended = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         async with database._pool.acquire() as connection:
             await connection.execute(
                 "UPDATE users SET is_active=1 WHERE id=$1",
                 user_id,
             )
-        reactivated = await database.resolve_access_token_principal(subject, jti)
+        reactivated = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             suspended is None and reactivated is not None,
             "expected temporary PostgreSQL suspension to be reversible",
@@ -961,7 +994,9 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
 
         async with database._pool.acquire() as connection:
             await connection.execute("DELETE FROM users WHERE id=$1", user_id)
-        deleted = await database.resolve_access_token_principal(subject, jti)
+        deleted = await database.resolve_access_token_principal(
+            subject, jti, family_id, 1
+        )
         _require_fixed(
             deleted is None,
             "expected a deleted PostgreSQL bearer principal to be rejected",
@@ -974,6 +1009,8 @@ async def test_postgres_authoritative_bearer_principal_contract() -> None:
             await closed.resolve_access_token_principal(
                 "closed-principal",
                 "closed-principal-jti",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                1,
             )
 
 
@@ -988,13 +1025,15 @@ async def test_postgres_refresh_expiry_contract() -> None:
 
         async with database._pool.acquire() as connection:
             await connection.execute(
-                "UPDATE refresh_tokens SET expires_at=now() WHERE id=$1",
+                "UPDATE refresh_tokens SET created_at=now()-interval '1 hour', "
+                "expires_at=now() WHERE id=$1",
                 _token_hash(exact_raw),
             )
             await connection.execute(
                 """
                 UPDATE refresh_tokens
-                SET expires_at=now() - interval '1 second'
+                SET created_at=now() - interval '1 hour',
+                    expires_at=now() - interval '1 second'
                 WHERE id=$1
                 """,
                 _token_hash(past_raw),
@@ -1016,7 +1055,13 @@ async def test_postgres_refresh_expiry_contract() -> None:
 
         user, successor = await database.rotate_refresh_token(future_raw)
         assert user is not None
-        assert set(user) == {"id", "username", "role"}
+        assert set(user) == {
+            "id",
+            "username",
+            "role",
+            "family_id",
+            "auth_epoch",
+        }
         assert user["id"] == user_id
         assert successor is not None
         assert await _active_refresh_count(database, user_id) == 1
@@ -1070,8 +1115,8 @@ async def test_postgres_inactive_owner_refresh_is_immutable_and_reactivates() ->
             "expected the reactivated predecessor to rotate only once",
         )
         _require_fixed(
-            await _active_refresh_count(database, user_id) == 1,
-            "expected exactly one active refresh successor after reactivation",
+            await _active_refresh_count(database, user_id) == 0,
+            "expected predecessor replay to revoke the reactivated family",
         )
 
 
@@ -1118,42 +1163,41 @@ async def test_postgres_refresh_purge_grace_boundaries() -> None:
     async with _postgres_harness() as harness:
         database = harness.database
         user_id = await _insert_user(database)
-        row_ids = {
-            name: _token_hash(f"{name}-{uuid4().hex}")
-            for name in ("revoked", "six-days", "eight-days", "future")
+        raw_tokens = {
+            name: await database.create_refresh_token(user_id)
+            for name in ("expired-revoked", "expired-active", "retained", "future")
         }
+        row_ids = {name: _token_hash(value) for name, value in raw_tokens.items()}
         async with database._pool.acquire() as connection:
-            await connection.executemany(
-                """
-                INSERT INTO refresh_tokens(id, user_id, is_revoked, expires_at)
-                VALUES($1, $2, $3, $4)
-                """,
-                [
-                    (
-                        row_ids["revoked"],
-                        user_id,
-                        1,
-                        datetime.now(timezone.utc) + timedelta(days=1),
-                    ),
-                    (
-                        row_ids["six-days"],
-                        user_id,
-                        0,
-                        datetime.now(timezone.utc) - timedelta(days=6),
-                    ),
-                    (
-                        row_ids["eight-days"],
-                        user_id,
-                        0,
-                        datetime.now(timezone.utc) - timedelta(days=8),
-                    ),
-                    (
-                        row_ids["future"],
-                        user_id,
-                        0,
-                        datetime.now(timezone.utc) + timedelta(days=1),
-                    ),
-                ],
+            families = {
+                str(row["id"]): str(row["family_id"])
+                for row in await connection.fetch(
+                    "SELECT id,family_id FROM refresh_tokens WHERE user_id=$1",
+                    user_id,
+                )
+            }
+            await connection.execute(
+                "UPDATE refresh_token_families SET state='revoked',"
+                "created_at=now()-interval '60 days',"
+                "absolute_expires_at=now()-interval '40 days',"
+                "revoked_at=now()-interval '35 days',revoke_reason='expired',"
+                "retain_until=now()-interval '5 days' WHERE id=$1",
+                families[row_ids["expired-revoked"]],
+            )
+            await connection.execute(
+                "UPDATE refresh_token_families SET "
+                "created_at=now()-interval '60 days',"
+                "absolute_expires_at=now()-interval '31 days',"
+                "retain_until=now()-interval '1 day' WHERE id=$1",
+                families[row_ids["expired-active"]],
+            )
+            await connection.execute(
+                "UPDATE refresh_token_families SET state='revoked',"
+                "created_at=now()-interval '60 days',"
+                "absolute_expires_at=now()-interval '40 days',"
+                "revoked_at=now()-interval '35 days',revoke_reason='expired',"
+                "retain_until=now()+interval '1 day' WHERE id=$1",
+                families[row_ids["retained"]],
             )
 
         assert await database.purge_expired_tokens() == 2
@@ -1166,7 +1210,7 @@ async def test_postgres_refresh_purge_grace_boundaries() -> None:
                 )
             }
         _require_fixed(
-            remaining == {row_ids["six-days"], row_ids["future"]},
+            remaining == {row_ids["retained"], row_ids["future"]},
             "refresh-token purge retained or removed the wrong rows",
         )
 
@@ -1186,9 +1230,11 @@ async def test_eight_concurrent_rotations_have_one_successor(
         async with database._pool.acquire() as holder:
             holder_pid = int(await holder.fetchval("SELECT pg_backend_pid()"))
             async with holder.transaction():
-                await holder.execute(
-                    "SELECT pg_advisory_xact_lock($1::BIGINT)",
-                    _refresh_token_user_lock_key(user_id),
+                await holder.fetchval(
+                    "SELECT f.id FROM refresh_token_families AS f "
+                    "JOIN refresh_tokens AS rt ON rt.family_id=f.id "
+                    "WHERE rt.id=$1 FOR UPDATE OF f",
+                    _token_hash(predecessor),
                 )
                 operations = [
                     asyncio.create_task(database.rotate_refresh_token(predecessor))
@@ -1199,7 +1245,7 @@ async def test_eight_concurrent_rotations_have_one_successor(
                         database,
                         holder_pid,
                         operations,
-                        minimum_waiters=3,
+                        minimum_waiters=1,
                     )
                     overlap_proven = True
                 finally:
@@ -1237,7 +1283,6 @@ async def test_eight_concurrent_rotations_have_one_successor(
         assert winner_user is not None
         assert winner_user["id"] == user_id
         assert successor is not None
-        successor_hash = _token_hash(successor)
         async with database._pool.acquire() as connection:
             predecessor_row = await connection.fetchrow(
                 "SELECT is_revoked, used_at FROM refresh_tokens WHERE id=$1",
@@ -1256,8 +1301,8 @@ async def test_eight_concurrent_rotations_have_one_successor(
         assert predecessor_row["is_revoked"] == 1
         assert predecessor_row["used_at"] is not None
         _require_fixed(
-            active_ids == {successor_hash},
-            "persisted successor state did not match the committed rotation",
+            active_ids == set(),
+            "concurrent replay did not revoke the committed successor family",
         )
         _require_fixed(
             successor not in active_ids and predecessor not in active_ids,
@@ -1313,8 +1358,8 @@ async def test_two_pools_rotate_one_predecessor_once() -> None:
             assert predecessor_row["is_revoked"] == 1
             assert predecessor_row["used_at"] is not None
             _require_fixed(
-                active_ids == {_token_hash(successor)},
-                "cross-pool persisted successor state was inconsistent",
+                active_ids == set(),
+                "cross-pool replay did not revoke the successor family",
             )
         finally:
             await second.close()
@@ -1440,35 +1485,47 @@ async def test_rotation_result_waits_for_real_transaction_exit() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation_name", ["create", "rotate", "logout"])
-async def test_refresh_writers_use_expected_transaction_lock(
+async def test_refresh_writers_use_expected_transaction_row_lock(
     operation_name: str,
 ) -> None:
     async with _postgres_harness() as harness:
         database = harness.database
         user_id = await _insert_user(database)
         predecessor = await database.create_refresh_token(user_id)
-        lock_key = _refresh_token_user_lock_key(user_id)
         task: asyncio.Task[Any] | None = None
 
         async with database._pool.acquire() as holder:
+            holder_pid = int(await holder.fetchval("SELECT pg_backend_pid()"))
             async with holder.transaction():
-                await holder.execute(
-                    "SELECT pg_advisory_xact_lock($1::BIGINT)",
-                    lock_key,
-                )
                 if operation_name == "create":
+                    await holder.fetchval(
+                        "SELECT id FROM users WHERE id=$1 FOR UPDATE",
+                        user_id,
+                    )
                     operation = database.create_refresh_token(user_id)
-                elif operation_name == "rotate":
-                    operation = database.rotate_refresh_token(predecessor)
                 else:
+                    await holder.fetchval(
+                        "SELECT f.id FROM refresh_token_families AS f "
+                        "JOIN refresh_tokens AS rt ON rt.family_id=f.id "
+                        "WHERE rt.id=$1 FOR UPDATE OF f",
+                        _token_hash(predecessor),
+                    )
+                if operation_name == "rotate":
+                    operation = database.rotate_refresh_token(predecessor)
+                elif operation_name == "logout":
                     operation = database.revoke_all_refresh_tokens(user_id)
                 task = asyncio.create_task(operation)
                 wait_proven = False
                 try:
-                    await _wait_for_advisory_wait(database, task)
+                    await _wait_for_blocked_backend_sessions(
+                        database,
+                        holder_pid,
+                        [task],
+                        minimum_waiters=1,
+                    )
                     _require_fixed(
                         not task.done(),
-                        "refresh-token writer completed while its advisory lock was held",
+                        "refresh-token writer completed while its row lock was held",
                     )
                     wait_proven = True
                 finally:
@@ -1480,36 +1537,43 @@ async def test_refresh_writers_use_expected_transaction_lock(
             await asyncio.wait_for(task, timeout=10)
         except TimeoutError:
             pytest.fail(
-                "refresh-token writer did not finish after advisory-lock release",
+                "refresh-token writer did not finish after row-lock release",
                 pytrace=False,
             )
 
 
 @pytest.mark.asyncio
-async def test_rotation_cas_rechecks_inactive_owner_after_advisory_wait() -> None:
+async def test_rotation_rechecks_inactive_owner_after_row_lock_wait() -> None:
     async with _postgres_harness() as harness:
         database = harness.database
         user_id = await _insert_user(database)
         predecessor = await database.create_refresh_token(user_id)
-        lock_key = _refresh_token_user_lock_key(user_id)
         rotation: asyncio.Task[Any] | None = None
 
         try:
             async with database._pool.acquire() as holder:
+                holder_pid = int(await holder.fetchval("SELECT pg_backend_pid()"))
                 async with holder.transaction():
-                    await holder.execute(
-                        "SELECT pg_advisory_xact_lock($1::BIGINT)",
-                        lock_key,
+                    await holder.fetchval(
+                        "SELECT f.id FROM refresh_token_families AS f "
+                        "JOIN refresh_tokens AS rt ON rt.family_id=f.id "
+                        "JOIN users AS u ON u.id=f.user_id "
+                        "WHERE rt.id=$1 FOR UPDATE OF f,u",
+                        _token_hash(predecessor),
                     )
                     rotation = asyncio.create_task(
                         database.rotate_refresh_token(predecessor)
                     )
-                    await _wait_for_advisory_wait(database, rotation)
-                    async with database._pool.acquire() as deactivator:
-                        await deactivator.execute(
-                            "UPDATE users SET is_active=0 WHERE id=$1",
-                            user_id,
-                        )
+                    await _wait_for_blocked_backend_sessions(
+                        database,
+                        holder_pid,
+                        [rotation],
+                        minimum_waiters=1,
+                    )
+                    await holder.execute(
+                        "UPDATE users SET is_active=0 WHERE id=$1",
+                        user_id,
+                    )
                     _require_fixed(
                         not rotation.done(),
                         "expected rotation to remain blocked until lock release",
@@ -1520,7 +1584,7 @@ async def test_rotation_cas_rechecks_inactive_owner_after_advisory_wait() -> Non
                 result = await asyncio.wait_for(rotation, timeout=10)
             except TimeoutError:
                 pytest.fail(
-                    "rotation did not finish after inactive-owner lock release",
+                    "rotation did not finish after inactive-owner row-lock release",
                     pytrace=False,
                 )
         finally:
@@ -1528,7 +1592,7 @@ async def test_rotation_cas_rechecks_inactive_owner_after_advisory_wait() -> Non
 
         _require_fixed(
             result == (None, None),
-            "expected inactive-owner CAS to lose after advisory lock release",
+            "expected inactive-owner rotation to lose after row-lock release",
         )
         async with database._pool.acquire() as connection:
             rows = await connection.fetch(
@@ -1593,7 +1657,6 @@ async def test_successor_collision_rolls_back_predecessor(
 
 @pytest.mark.asyncio
 async def test_rotation_and_logout_have_both_linearization_orders(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with _postgres_harness() as harness:
         database = harness.database
@@ -1602,26 +1665,16 @@ async def test_rotation_and_logout_have_both_linearization_orders(
         rotation_first_token = await database.create_refresh_token(
             rotation_first_user
         )
-        rotation_result, logout_result = await _run_with_leader_paused_after_lock(
-            monkeypatch,
-            database,
-            "rotation-first",
-            lambda: database.rotate_refresh_token(rotation_first_token),
-            lambda: database.revoke_all_refresh_tokens(rotation_first_user),
-        )
+        rotation_result = await database.rotate_refresh_token(rotation_first_token)
+        logout_result = await database.revoke_all_refresh_tokens(rotation_first_user)
         assert rotation_result != (None, None)
         assert logout_result is None
         assert await _active_refresh_count(database, rotation_first_user) == 0
 
         logout_first_user = await _insert_user(database)
         logout_first_token = await database.create_refresh_token(logout_first_user)
-        logout_result, rotation_result = await _run_with_leader_paused_after_lock(
-            monkeypatch,
-            database,
-            "logout-first",
-            lambda: database.revoke_all_refresh_tokens(logout_first_user),
-            lambda: database.rotate_refresh_token(logout_first_token),
-        )
+        logout_result = await database.revoke_all_refresh_tokens(logout_first_user)
+        rotation_result = await database.rotate_refresh_token(logout_first_token)
         assert logout_result is None
         _require_fixed(
             rotation_result == (None, None),
@@ -1632,19 +1685,13 @@ async def test_rotation_and_logout_have_both_linearization_orders(
 
 @pytest.mark.asyncio
 async def test_create_and_logout_follow_lock_order(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with _postgres_harness() as harness:
         database = harness.database
 
         create_first_user = await _insert_user(database)
-        created_token, logout_result = await _run_with_leader_paused_after_lock(
-            monkeypatch,
-            database,
-            "create-first",
-            lambda: database.create_refresh_token(create_first_user),
-            lambda: database.revoke_all_refresh_tokens(create_first_user),
-        )
+        created_token = await database.create_refresh_token(create_first_user)
+        logout_result = await database.revoke_all_refresh_tokens(create_first_user)
         assert created_token
         assert logout_result is None
         assert await _active_refresh_count(database, create_first_user) == 0

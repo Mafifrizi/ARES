@@ -62,6 +62,11 @@ from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
 from ares.core.logger import get_logger
 from ares.core.security import create_access_token
+from ares.core.token_sessions import (
+    RefreshRotationStatus,
+    SessionIssueStatus,
+    SessionRevocationStatus,
+)
 from ares.modules.base import normalize_module_metadata
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
@@ -702,7 +707,6 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         "unhandled_exception",
         path=request.url.path,
         method=request.method,
-        exc=str(exc)[:200],
         exc_type=type(exc).__name__,
     )
     return JSONResponse(
@@ -724,6 +728,8 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"  # noqa: S105 - OAuth token type, not a secret
     expires_in: int = 3600
     role: str = ""
+    refresh_generation: int
+    session_coordination_key: str
 
 
 class RefreshRequest(BaseModel):
@@ -755,27 +761,32 @@ async def login(
     if len(form.password) > 128:
         raise HTTPException(status_code=400, detail="Password too long")
 
-    user = await db.verify_user(form.username, form.password)
-    if not user:
-        await db.audit(
-            "system",
-            "login_failed",
-            f"username={form.username}",
+    def _token_factory(claims: Mapping[str, Any]) -> str:
+        return create_access_token(
+            data=dict(claims),
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=settings.ares_jwt_expire_minutes,
         )
-        raise HTTPException(401, "Invalid credentials")
 
-    access_token = create_access_token(
-        data={"sub": user["username"], "role": user["role"]},
-        secret_key=settings.secret_key_value,
-        algorithm=settings.ares_jwt_algorithm,
-        expires_minutes=settings.ares_jwt_expire_minutes,
-    )
-    refresh_token = await db.create_refresh_token(user["id"])
-    await db.audit(user["username"], "login_success")
+    try:
+        result = await db.create_login_session(
+            form.username,
+            form.password,
+            _token_factory,
+        )
+    except Exception as exc:
+        logger.warning("login_transaction_failed", error_type=type(exc).__name__)
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if result.status is not SessionIssueStatus.ISSUED or result.session is None:
+        raise HTTPException(401, "Invalid credentials")
+    session = result.session
     return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        role=user["role"],
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        role=session.role,
+        refresh_generation=session.refresh_generation,
+        session_coordination_key=session.coordination_key,
         expires_in=settings.ares_jwt_expire_minutes * 60,
     )
 
@@ -796,20 +807,28 @@ async def refresh_access_token(
             "Too many refresh attempts. Try again in 60s.",
             headers={"Retry-After": "60"},
         )
-    user, new_refresh = await db.rotate_refresh_token(body.refresh_token)
-    if not user:
-        raise HTTPException(401, "Refresh token invalid or expired")
+    def _token_factory(claims: Mapping[str, Any]) -> str:
+        return create_access_token(
+            data=dict(claims),
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=settings.ares_jwt_expire_minutes,
+        )
 
-    access_token = create_access_token(
-        data={"sub": user["username"], "role": user["role"]},
-        secret_key=settings.secret_key_value,
-        algorithm=settings.ares_jwt_algorithm,
-        expires_minutes=settings.ares_jwt_expire_minutes,
-    )
+    try:
+        result = await db.rotate_refresh_session(body.refresh_token, _token_factory)
+    except Exception as exc:
+        logger.warning("refresh_transaction_failed", error_type=type(exc).__name__)
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if result.status is not RefreshRotationStatus.ROTATED or result.session is None:
+        raise HTTPException(401, "Refresh token invalid or expired")
+    session = result.session
     return TokenResponse(
-        access_token=access_token,
-        refresh_token=new_refresh,
-        role=user["role"],
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        role=session.role,
+        refresh_generation=session.refresh_generation,
+        session_coordination_key=session.coordination_key,
         expires_in=settings.ares_jwt_expire_minutes * 60,
     )
 
@@ -821,35 +840,46 @@ async def logout(
     settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
-    """Revoke all refresh tokens + blacklist the current access token jti."""
-    user = await db.get_user(actor.username)
-    if user:
-        await db.revoke_all_refresh_tokens(user["id"])
-        # Also revoke the current access token by jti so it cannot be reused
-        # within its remaining 60-minute window
-        token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-        if token:
+    """Revoke only the current bearer family; API keys are unaffected."""
+    del request, settings
+    source = actor.websocket_ticket_source
+    if actor.is_api_key or source is None:
+        return {"status": "ok"}
+    try:
+        result = await db.revoke_current_session(
+            user_id=source.user_id,
+            family_id=source.family_id,
+            jti=source.jti,
+            expires_at=source.expires_at,
+        )
+    except Exception as exc:
+        logger.warning("logout_current_failed", error_type=type(exc).__name__)
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if result.status is SessionRevocationStatus.INVALID:
+        raise HTTPException(401, "Not authenticated")
+    return {"status": "ok"}
 
-            from ares.core.security import decode_access_token
 
-            payload = decode_access_token(
-                token,
-                settings.secret_key_value,
-                settings.ares_jwt_algorithm,
-            )
-            if payload and payload.get("jti"):
-                import datetime as _dt
-
-                exp_ts = payload.get("exp", 0)
-                exp_iso = (
-                    _dt.datetime.fromtimestamp(exp_ts, tz=_dt.timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
-                    if exp_ts
-                    else ""
-                )
-                await db.revoke_access_token(payload["jti"], user["id"], exp_iso)
-        await db.audit(actor.username, "logout")
+@app.post("/auth/logout-all", tags=["auth"])
+async def logout_all(
+    actor: AuthenticatedUser = Depends(require_any_auth()),  # noqa: B008
+    db: AresDatabase = Depends(get_db),  # noqa: B008
+) -> dict[str, str]:
+    """Revoke every bearer family by incrementing the user's auth epoch."""
+    source = actor.websocket_ticket_source
+    if actor.is_api_key or source is None:
+        return {"status": "ok"}
+    try:
+        result = await db.revoke_all_sessions(
+            user_id=source.user_id,
+            jti=source.jti,
+            expires_at=source.expires_at,
+        )
+    except Exception as exc:
+        logger.warning("logout_all_failed", error_type=type(exc).__name__)
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if result.status is SessionRevocationStatus.INVALID:
+        raise HTTPException(401, "Not authenticated")
     return {"status": "ok"}
 
 
@@ -935,30 +965,16 @@ async def change_password(
         raise HTTPException(401, "Current password incorrect")
     from ares.core.security import hash_password
 
-    await db.update_password(user["id"], hash_password(body.new_password))
-    await db.revoke_all_refresh_tokens(user["id"])
+    del request, settings
+    changed = await db.apply_user_security_event(
+        user_id=user["id"],
+        reason="password_change",
+        new_password_hash=hash_password(body.new_password),
+    )
+    if not changed:
+        raise HTTPException(401, "Not authenticated")
     # Revoke the current access token by jti — same as logout() —
     # so the old token cannot be reused within its remaining expiry window.
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if token:
-        import datetime as _dt
-
-        from ares.core.security import decode_access_token
-
-        payload = decode_access_token(
-            token, settings.secret_key_value, settings.ares_jwt_algorithm
-        )
-        if payload and payload.get("jti"):
-            exp_ts = payload.get("exp", 0)
-            exp_iso = (
-                _dt.datetime.fromtimestamp(exp_ts, tz=_dt.timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-                if exp_ts
-                else ""
-            )
-            await db.revoke_access_token(payload["jti"], user["id"], exp_iso)
-    await db.audit(actor.username, "password_changed")
     return {"status": "ok", "note": "All existing sessions revoked"}
 
 

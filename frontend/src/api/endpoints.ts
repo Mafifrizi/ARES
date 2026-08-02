@@ -31,7 +31,13 @@ export async function login(username: string, password: string): Promise<TokenRe
     },
     false
   );
-  if (!installTokenPairIfCurrent(loginSession, token.access_token, token.refresh_token)) {
+  if (!installTokenPairIfCurrent(
+    loginSession,
+    token.access_token,
+    token.refresh_token,
+    token.session_coordination_key,
+    token.refresh_generation
+  )) {
     throw new ApiError(401, "Session changed");
   }
   return token;
@@ -39,6 +45,10 @@ export async function login(username: string, password: string): Promise<TokenRe
 
 export async function logout(): Promise<void> {
   await apiRequest<{ status: string }>("/auth/logout", { method: "POST" }, false);
+}
+
+export async function logoutAll(): Promise<void> {
+  await apiRequest<{ status: string }>("/auth/logout-all", { method: "POST" }, false);
 }
 
 export function campaignEventsPath(campaignId: string, ticket: string): string {
