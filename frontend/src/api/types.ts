@@ -13,6 +13,11 @@ export interface UserProfile {
   role: Role;
 }
 
+export interface WebSocketTicketResponse {
+  ticket: string;
+  expires_in: 30;
+}
+
 export interface Campaign {
   id: string;
   name: string;

@@ -31,6 +31,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -55,7 +56,6 @@ from ares.api.rbac import (
     require_any_auth,
     require_operator,
     require_team_lead,
-    resolve_bearer_principal,
 )
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
@@ -65,6 +65,12 @@ from ares.core.security import create_access_token
 from ares.modules.base import normalize_module_metadata
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
+from ares.db.websocket_tickets import (
+    ApiKeyTicketSource,
+    ConsumedWebSocketTicket,
+    WebSocketTicketPrincipal,
+    is_canonical_websocket_ticket,
+)
 
 logger = get_logger("ares.api.server")
 
@@ -249,12 +255,11 @@ _db: AresDatabase | None = None
 # WebSocket registry: campaign_id → opaque authenticated connection contexts.
 @dataclass(eq=False)
 class _CampaignWebSocketConnection:
-    """Opaque main-WebSocket state; credentials must never appear in repr/logs."""
+    """Opaque main-WebSocket state; ticket material must never be retained."""
 
     websocket: WebSocket = field(repr=False)
     campaign_id: str = field(repr=False)
-    credential_kind: str
-    credential: str = field(repr=False)
+    ticket_handle: ConsumedWebSocketTicket = field(repr=False)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     closed: bool = False
 
@@ -670,6 +675,12 @@ _api_key_read_dep = Depends(require_api_key_scope("read", "write", "admin"))
 _api_key_write_dep = Depends(require_api_key_scope("write", "admin"))
 _current_user_or_apikey_dep = _api_key_read_dep
 _db_dep = Depends(get_db)
+_auth_rate_dep = Depends(rate_limit("auth"))
+
+
+class WebSocketTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
 
 
 # ── Error schema ──────────────────────────────────────────────────────────────
@@ -1183,6 +1194,80 @@ async def get_campaign(
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(c, actor)
     return c
+
+
+@app.post(
+    "/campaigns/{campaign_id}/websocket-ticket",
+    tags=["campaigns"],
+    response_model=WebSocketTicketResponse,
+    status_code=201,
+)
+async def issue_campaign_websocket_ticket(
+    campaign_id: str,
+    response: Response,
+    actor: AuthenticatedUser = _api_key_read_dep,
+    _rate: None = _auth_rate_dep,
+    db: AresDatabase = _db_dep,
+) -> WebSocketTicketResponse:
+    """Issue one committed, campaign-bound WebSocket handshake ticket."""
+    try:
+        campaign = await db.get_campaign(campaign_id)
+    except Exception as exc:
+        logger.warning(
+            "websocket_ticket_campaign_lookup_failed",
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if not isinstance(campaign, Mapping):
+        raise HTTPException(404, "Campaign not found")
+    await _require_campaign_access(campaign, actor)
+
+    source = actor.websocket_ticket_source
+    if actor.is_api_key:
+        key_id = actor.api_key_id
+        if not isinstance(key_id, str) or not key_id.strip():
+            raise HTTPException(401, "Not authenticated")
+        try:
+            owner = await db.get_user(actor.username)
+        except Exception as exc:
+            logger.warning(
+                "websocket_ticket_owner_lookup_failed",
+                error_type=type(exc).__name__,
+            )
+            raise HTTPException(503, "Authentication service unavailable") from None
+        if not isinstance(owner, Mapping):
+            raise HTTPException(401, "Not authenticated")
+        owner_id = owner.get("id")
+        owner_name = owner.get("username")
+        owner_role = owner.get("role")
+        if (
+            not isinstance(owner_id, str)
+            or not owner_id.strip()
+            or owner_name != actor.username
+            or owner_role != actor.role
+        ):
+            raise HTTPException(401, "Not authenticated")
+        source = ApiKeyTicketSource(
+            user_id=owner_id,
+            api_key_id=key_id,
+        )
+    elif source is None:
+        raise HTTPException(401, "Not authenticated")
+
+    try:
+        issued = await db.issue_websocket_ticket(campaign_id, source)
+    except Exception as exc:
+        logger.warning(
+            "websocket_ticket_issue_failed",
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(503, "Authentication service unavailable") from None
+    if issued is None:
+        raise HTTPException(401, "Not authenticated")
+    raw_ticket, expires_in = issued
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return WebSocketTicketResponse(ticket=raw_ticket, expires_in=expires_in)
 
 
 @app.delete("/campaigns/{campaign_id}", tags=["campaigns"])
@@ -1828,68 +1913,52 @@ def _websocket_database(connection: _CampaignWebSocketConnection) -> Any | None:
 async def _authorize_campaign_websocket(
     connection: _CampaignWebSocketConnection,
 ) -> PrincipalDecisionStatus:
-    """Revalidate identity, current role, scopes, and campaign access."""
+    """Revalidate the consumed ticket's source authority and campaign access."""
     db = _websocket_database(connection)
     if db is None:
         logger.warning("campaign_websocket_auth_backend_unavailable")
         return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
 
-    if connection.credential_kind == "bearer":
-        settings = get_settings()
-        decision = await resolve_bearer_principal(
-            connection.credential,
-            db=db,
-            secret_key=settings.secret_key_value,
-            algorithm=settings.ares_jwt_algorithm,
-        )
-        if decision.status is not PrincipalDecisionStatus.AUTHORIZED:
-            return decision.status
-        if decision.principal is None:
-            return PrincipalDecisionStatus.INVALID
-        actor = AuthenticatedUser(
-            username=decision.principal.username,
-            role=decision.principal.role,
-        )
-    elif connection.credential_kind == "api_key":
-        try:
-            data = await db.verify_api_key(connection.credential)
-        except Exception as exc:
-            logger.warning(
-                "campaign_websocket_api_key_lookup_failed",
-                error_type=type(exc).__name__,
-            )
-            return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
-        if not isinstance(data, Mapping):
-            return PrincipalDecisionStatus.INVALID
-        username = data.get("username")
-        role = data.get("role")
-        if not isinstance(username, str) or not isinstance(role, str):
-            return PrincipalDecisionStatus.INVALID
-        actor = AuthenticatedUser(
-            username=username,
-            role=role,
-            auth_type="api_key",
-            api_key_id=data.get("key_id") or data.get("id"),
-            api_key_scopes=_normalize_api_key_scopes(data.get("scopes")),
-        )
-        if not actor.has_api_scope("read", "write", "admin"):
-            return PrincipalDecisionStatus.INVALID
-    else:
-        return PrincipalDecisionStatus.INVALID
-
     try:
-        campaign = await db.get_campaign(connection.campaign_id)
+        principal = await db.resolve_websocket_ticket_principal(
+            connection.ticket_handle
+        )
     except Exception as exc:
         logger.warning(
-            "campaign_websocket_campaign_lookup_failed",
+            "campaign_websocket_principal_lookup_failed",
             error_type=type(exc).__name__,
         )
         return PrincipalDecisionStatus.BACKEND_UNAVAILABLE
-    if not isinstance(campaign, Mapping):
+    if not isinstance(principal, WebSocketTicketPrincipal):
         return PrincipalDecisionStatus.INVALID
-    if actor.role != "team_lead" and campaign.get("operator") != actor.username:
+    if principal.user_id != connection.ticket_handle.user_id:
         return PrincipalDecisionStatus.INVALID
     return PrincipalDecisionStatus.AUTHORIZED
+
+
+def _take_campaign_websocket_ticket(websocket: WebSocket) -> str | None:
+    """Scrub and parse the exact ticket-only query shape without awaiting."""
+    private_query = memoryview(
+        websocket.scope.get("query_string", b"")
+    ).tobytes()
+    websocket.scope["query_string"] = b""
+    raw_ticket: str | None = None
+    try:
+        prefix = b"ticket="
+        if len(private_query) != len(prefix) + 43 or not private_query.startswith(
+            prefix
+        ):
+            return None
+        try:
+            candidate = private_query[len(prefix) :].decode("ascii")
+        except UnicodeDecodeError:
+            return None
+        if not is_canonical_websocket_ticket(candidate):
+            return None
+        raw_ticket = candidate
+    finally:
+        private_query = b""
+    return raw_ticket
 
 
 def _websocket_close_details(
@@ -1980,30 +2049,43 @@ async def _disconnect_websocket(
 async def campaign_events(
     websocket: WebSocket,
     campaign_id: str,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
 ) -> None:
-    """
-    Real-time campaign events stream.
-    Auth: ?token=<access_token> or ?api_key=<key>
-    Events: module_start, module_complete, finding_discovered, campaign_status_change
+    """Real-time campaign events authenticated by one single-use ticket."""
+    raw_ticket = _take_campaign_websocket_ticket(websocket)
+    if raw_ticket is None:
+        await _close_websocket_handshake(
+            websocket,
+            PrincipalDecisionStatus.INVALID,
+        )
+        return
 
-    Security note: WebSocket protocol does not support Authorization headers,
-    so tokens are passed as query params — a known limitation. The token will
-    appear in nginx access logs. Mitigations applied:
-      1. nginx log_format redacts ?token= and ?api_key= values (see nginx.conf)
-      2. Token is short-lived (ARES_JWT_EXPIRE_MINUTES, default 60 min)
-      3. nginx access logs should be stored with restricted permissions
-    """
-    # Explicit bearer credentials remain first and terminal; API keys are only
-    # considered when no bearer credential was supplied.
-    if token is not None:
-        credential_kind = "bearer"
-        credential = token
-    elif api_key is not None:
-        credential_kind = "api_key"
-        credential = api_key
-    else:
+    app_instance = websocket.scope.get("app")
+    state = getattr(app_instance, "state", None)
+    db = getattr(state, "db", None)
+    if db is None:
+        await _close_websocket_handshake(
+            websocket,
+            PrincipalDecisionStatus.BACKEND_UNAVAILABLE,
+        )
+        return
+    try:
+        ticket_handle = await db.consume_websocket_ticket(
+            raw_ticket,
+            campaign_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "campaign_websocket_ticket_consume_failed",
+            error_type=type(exc).__name__,
+        )
+        await _close_websocket_handshake(
+            websocket,
+            PrincipalDecisionStatus.BACKEND_UNAVAILABLE,
+        )
+        return
+    finally:
+        raw_ticket = ""
+    if not isinstance(ticket_handle, ConsumedWebSocketTicket):
         await _close_websocket_handshake(
             websocket,
             PrincipalDecisionStatus.INVALID,
@@ -2013,8 +2095,7 @@ async def campaign_events(
     connection = _CampaignWebSocketConnection(
         websocket=websocket,
         campaign_id=campaign_id,
-        credential_kind=credential_kind,
-        credential=credential,
+        ticket_handle=ticket_handle,
     )
     status = await _authorize_campaign_websocket(connection)
     if status is not PrincipalDecisionStatus.AUTHORIZED:

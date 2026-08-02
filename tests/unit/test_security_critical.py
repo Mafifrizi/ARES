@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 # ── env bootstrap (before any ares import) ────────────────────────────────────
 os.environ.setdefault("ARES_SECRET_KEY",             "test-sec-critical-min32-chars!!!!")
@@ -96,6 +97,106 @@ def _reset_limiter() -> None:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+class _ReducedUvicornLogProbe:
+    def __init__(self, marker: str) -> None:
+        self._marker = marker
+        self.calls = 0
+        self.marker_absent = True
+
+    def info(self, template: str, *args: object) -> None:
+        self.calls += 1
+        rendered = template % args
+        self.marker_absent = self.marker_absent and self._marker not in rendered
+
+
+def _uvicorn_protocol_probe(scope: dict, marker: str):
+    from uvicorn.protocols.websockets.websockets_impl import WebSocketProtocol
+
+    protocol = object.__new__(WebSocketProtocol)
+    protocol.scope = scope
+    protocol.logger = _ReducedUvicornLogProbe(marker)
+    protocol.handshake_started_event = asyncio.Event()
+    protocol.handshake_completed_event = asyncio.Event()
+    protocol.closed_event = asyncio.Event()
+    protocol.initial_response = None
+    protocol.accepted_subprotocol = None
+    protocol.extra_headers = []
+    return protocol
+
+
+def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
+    import ast
+    import inspect
+    import textwrap
+    import warnings
+
+    from ares.api.server import campaign_events, _take_campaign_websocket_ticket
+    from uvicorn.config import UvicornDeprecationWarning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.simplefilter("ignore", UvicornDeprecationWarning)
+        from uvicorn.protocols.websockets.websockets_impl import WebSocketProtocol
+
+    marker = "A" * 43
+    scope = {
+        "type": "websocket",
+        "path": "/ws/campaigns/synthetic/events",
+        "query_string": f"ticket={marker}".encode("ascii"),
+        "client": ("127.0.0.1", 1),
+    }
+    websocket = MagicMock()
+    websocket.scope = scope
+    parsed = _take_campaign_websocket_ticket(websocket)
+    parsed_canonical = isinstance(parsed, str) and len(parsed) == 43
+    query_scrubbed = scope["query_string"] == b""
+
+    async def exercise() -> tuple[int, bool]:
+        accepted = _uvicorn_protocol_probe(scope, marker)
+        await WebSocketProtocol.asgi_send(
+            accepted,
+            {"type": "websocket.accept"},
+        )
+        denied = _uvicorn_protocol_probe(scope, marker)
+        await WebSocketProtocol.asgi_send(
+            denied,
+            {"type": "websocket.close", "code": 4001},
+        )
+        return (
+            accepted.logger.calls + denied.logger.calls,
+            accepted.logger.marker_absent and denied.logger.marker_absent,
+        )
+
+    call_count, marker_absent = _run(exercise())
+    route_body = ast.parse(textwrap.dedent(inspect.getsource(campaign_events))).body[0].body
+    helper_body = ast.parse(
+        textwrap.dedent(inspect.getsource(_take_campaign_websocket_ticket))
+    ).body[0].body
+    route_first_operation_is_scrub = (
+        isinstance(route_body[1], ast.Assign)
+        and isinstance(route_body[1].value, ast.Call)
+        and isinstance(route_body[1].value.func, ast.Name)
+        and route_body[1].value.func.id == "_take_campaign_websocket_ticket"
+    )
+    helper_scrubs_before_validation = (
+        isinstance(helper_body[1], ast.Assign)
+        and isinstance(helper_body[2], ast.Assign)
+        and isinstance(helper_body[3], ast.AnnAssign)
+        and isinstance(helper_body[4], ast.Try)
+    )
+    if not (
+        parsed_canonical
+        and query_scrubbed
+        and call_count == 2
+        and marker_absent
+        and route_first_operation_is_scrub
+        and helper_scrubs_before_validation
+    ):
+        pytest.fail(
+            "WebSocket query must be scrubbed before Uvicorn handshake logging.",
+            pytrace=False,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════

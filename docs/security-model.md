@@ -154,6 +154,37 @@ remain. Full retirement is the preferred final control.
 
 Tokens are issued by `POST /auth/token` with valid operator credentials (bcrypt-hashed password). Default expiry: 1 hour.
 
+### Main WebSocket tickets
+
+The supported main campaign WebSocket never accepts a bearer token or API key
+in its query string. A client authenticates `POST
+/campaigns/{campaign_id}/websocket-ticket` with the normal bearer or API-key
+header, then presents the returned ticket as the sole WebSocket query
+parameter. Tickets have a 30-second issuance lifetime, are bound to one
+campaign, and are globally single-use. A wrong-campaign presentation is denied
+without consuming the ticket; replay and every legacy `token` or `api_key`
+query form are denied.
+
+Consumption is only the handshake authority. A connected socket retains an
+opaque consumed handle and ARES revalidates the original current user,
+bearer-expiry/JTI, API-key scope/lifetime/ownership, role, and campaign access
+before protected events. This resolution is read-only and remains possible
+after the ticket row expires or is purged. No registry entry retains a raw
+ticket, bearer, API key, ticket hash, or original query string.
+
+Tickets remain visible to the browser and any upstream component that receives
+the handshake URL, so production clients must initiate HTTPS/WSS directly.
+The production nginx TLS log uses `$uri`, which omits query strings. Its
+port-80 redirect uses `$request_uri`; ticket-bearing plaintext requests at that
+boundary are unsupported. The control does not claim to hide tickets from
+browser developer tools or arbitrary third-party proxies.
+
+Backend and frontend rollout is atomic: drain existing main WebSockets, deploy
+both components together, and obtain a fresh ticket for every reconnect. Mixed
+old/new component versions are unsupported. A rollback replaces both together
+while leaving additive migrations installed. These controls do not change the
+default-disabled legacy dashboard WebSocket or repair its known limitations.
+
 ### Authorization
 
 ARES uses four account roles. Role values are lowercase in API requests:

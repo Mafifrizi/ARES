@@ -585,10 +585,30 @@ System health check. Does not require authentication.
 
 ## WebSocket
 
-### `WS /ws/campaigns/{campaign_id}/events?token=<token>`
+### `POST /campaigns/{campaign_id}/websocket-ticket`
 
-Real-time event stream for a campaign.  
-Auth: `?token=<access_token>` query param (WebSocket cannot send headers before connect).
+Issue a short-lived ticket for the main campaign WebSocket. Authenticate this
+HTTP request with the normal bearer header or `X-API-Key`; API keys require a
+`read`, `write`, or `admin` scope. The response is never cacheable:
+
+```json
+{ "ticket": "<one-time-ticket>", "expires_in": 30 }
+```
+
+The ticket is campaign-bound, expires after 30 seconds if unused, and can be
+consumed successfully only once. Presenting it to a different campaign does
+not consume it. A successful consume remains spent even if WebSocket accept
+subsequently fails, so every connection or reconnect must request a new one.
+
+### `WS /ws/campaigns/{campaign_id}/events?ticket=<one-time-ticket>`
+
+Real-time event stream for a campaign. The main route accepts only the exact
+single `ticket` query parameter. Bearer-token and API-key WebSocket query
+credentials are removed and have no compatibility fallback. After connection,
+ARES revalidates the ticket's original bearer or API-key authority before
+connected, pong, keepalive, module, and strategy event delivery. Ticket expiry
+or row cleanup does not end a connected session while that source authority
+remains valid.
 
 **Events:**
 ```json
@@ -617,9 +637,20 @@ Windows, and open the Vite-served dashboard at
 `http://127.0.0.1:8080` by default.
 
 The dashboard uses `POST /auth/token`, `POST /auth/refresh`, the main REST API,
-and `WS /ws/campaigns/{campaign_id}/events?token=<token>`. Legacy
+`POST /campaigns/{campaign_id}/websocket-ticket`, and the ticket-only main
+campaign WebSocket. Legacy
 `/dashboard/api/*` and `/dashboard/ws/live` routes are not the primary data
 source.
+
+Deploy the backend and frontend atomically and drain existing main WebSocket
+connections during rollout. Old-frontend/new-backend and
+new-frontend/old-backend combinations are unsupported. Rollback likewise
+replaces both components together; the additive ticket migrations remain
+installed. Production clients must use HTTPS/WSS directly. The one-time ticket
+can still be visible in browser developer tools or to upstream components that
+receive the handshake query. The nginx TLS access-log format uses `$uri` to
+omit queries, but the port-80 `$request_uri` redirect boundary is unsupported
+for ticket-bearing requests.
 
 The supported dashboard is `/dashboard` on the main ARES application. The
 older `ares.api.dashboard.app:dashboard_app` FastAPI application is not mounted

@@ -42,6 +42,11 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - Refresh tokens are stored in `sessionStorage`; React output escaping and the
   FastAPI CSP reduce script injection risk.
 - Logout calls `POST /auth/logout` and clears local token state.
+- Each main campaign WebSocket connection first requests a 30-second,
+  single-use ticket with authenticated `POST
+  /campaigns/{campaign_id}/websocket-ticket`. The ticket exists only across the
+  asynchronous connection barrier and is never stored in React state,
+  `localStorage`, or `sessionStorage`.
 
 ## Routes
 
@@ -54,7 +59,10 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - `/strategy`: `Objective`, `Active`, and `Result` tabs for active engagements and role-gated engagement start
 - `/security`: `Account`, `API Keys`, and `Audit` tabs for profile, password change, API keys, audit, and users
 - `/edr`: `Knowledge Base` and `Report Outcome` tabs for bypass telemetry and outcome reporting
-- `/live`: `Stream` and `Buffer` tabs backed by `WS /ws/campaigns/{campaign_id}/events?token=<token>`
+- `/live`: `Stream` and `Buffer` tabs backed by the ticket-only `WS
+  /ws/campaigns/{campaign_id}/events?ticket=<one-time-ticket>` route. Every
+  reconnect requests a fresh ticket; bearer/API-key query credentials are no
+  longer supported.
 
 ## Shell Controls
 
@@ -84,4 +92,18 @@ Dashboard result panels are context-aware. Modules, reports, graph ingest, templ
 
 Long-running actions should show a loading state on the button or result area. Operators should be able to tell that ARES is processing a request without watching the terminal.
 
-The Live page owns a browser WebSocket connection. Navigating away closes that connection, so users reconnect when they return to the page.
+The Live page owns a browser WebSocket connection. It checks the captured
+session revision, campaign, effect, and connection generation after ticket
+issuance and discards a late response after logout, account replacement,
+campaign change, cleanup, or unmount. A same-session access-token refresh does
+not invalidate that barrier. Navigating away closes the connection, so users
+request a fresh ticket when they return.
+
+Production frontend and backend versions must roll out atomically, with
+existing sockets drained. Mixed old/new versions are unsupported, and rollback
+replaces both together while leaving additive migrations installed. Use
+HTTPS/WSS directly: one-time tickets can remain visible in browser developer
+tools and upstream handshake processing. The nginx TLS access log omits query
+strings through `$uri`; its plaintext port-80 `$request_uri` redirect is an
+unsupported ticket boundary. The default-disabled legacy dashboard WebSocket
+retains its separate limitations.

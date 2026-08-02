@@ -134,6 +134,9 @@ def _make_mock_db():
     )
     db.delete_campaign = AsyncMock(return_value=False)
     db.verify_api_key = AsyncMock(return_value=None)
+    db.issue_websocket_ticket = AsyncMock(return_value=None)
+    db.consume_websocket_ticket = AsyncMock(return_value=None)
+    db.resolve_websocket_ticket_principal = AsyncMock(return_value=None)
     return db
 
 
@@ -3700,6 +3703,200 @@ class TestAuthoritativeHTTPBearerPrincipal:
             "expected an explicitly invalid bearer not to fall through to API-key auth",
         )
 
+    @pytest.mark.asyncio
+    async def test_websocket_ticket_bearer_issuance_is_committed_and_uncached(
+        self,
+        auth_runtime: Any,
+    ) -> None:
+        from ares.core.campaign import Campaign
+
+        client, database, _, _, token, _ = auth_runtime
+        _reset_rate_limiter()
+        campaign = Campaign(
+            name="Ticket Issuance Campaign",
+            operator="separate-owner",
+        )
+        await database.save_campaign(campaign)
+        response = await client.post(
+            f"/campaigns/{campaign.id}/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+        body = response.json()
+        ticket = body.get("ticket") if isinstance(body, dict) else None
+        async with database.conn.execute(
+            "SELECT COUNT(*) FROM websocket_tickets"
+        ) as cursor:
+            row_count = int((await cursor.fetchone())[0])
+        contract_is_exact = (
+            response.status_code == 201
+            and set(body) == {"ticket", "expires_in"}
+            and isinstance(ticket, str)
+            and len(ticket) == 43
+            and body.get("expires_in") == 30
+            and response.headers.get("cache-control") == "no-store"
+            and response.headers.get("pragma") == "no-cache"
+            and row_count == 1
+        )
+        _require_fixed(
+            contract_is_exact,
+            "expected one committed uncached bearer WebSocket ticket",
+        )
+
+    @pytest.mark.parametrize("scope", ["read", "write", "admin"])
+    @pytest.mark.asyncio
+    async def test_websocket_ticket_api_key_scopes_update_last_used_once(
+        self,
+        auth_runtime: Any,
+        scope: str,
+    ) -> None:
+        from ares.core.campaign import Campaign
+
+        client, database, user_id, username, _, _ = auth_runtime
+        _reset_rate_limiter()
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        campaign = Campaign(
+            name="API Key Ticket Campaign",
+            operator=username,
+        )
+        await database.save_campaign(campaign)
+        with patch("ares.db.database.logger.info"):
+            key_id, raw_key = await database.create_api_key(
+                user_id,
+                "ticket-key",
+                scopes=scope,
+            )
+        verify_calls = [0]
+        original_verify = database.verify_api_key
+
+        async def tracked_verify(candidate: str) -> Any:
+            verify_calls[0] += 1
+            return await original_verify(candidate)
+
+        database.verify_api_key = tracked_verify  # type: ignore[method-assign]
+        response = await client.post(
+            f"/campaigns/{campaign.id}/websocket-ticket",
+            headers={"X-API-Key": raw_key},
+        )
+        async with database.conn.execute(
+            "SELECT last_used FROM api_keys WHERE id=?",
+            (key_id,),
+        ) as cursor:
+            last_used_present = (await cursor.fetchone())[0] is not None
+        async with database.conn.execute(
+            "SELECT COUNT(*) FROM websocket_tickets"
+        ) as cursor:
+            row_count = int((await cursor.fetchone())[0])
+        _require_fixed(
+            response.status_code == 201
+            and verify_calls[0] == 1
+            and last_used_present
+            and row_count == 1,
+            "expected one API-key verification and one committed ticket",
+        )
+
+    @pytest.mark.asyncio
+    async def test_websocket_ticket_denials_do_not_insert_rows(
+        self,
+        auth_runtime: Any,
+        monkeypatch: Any,
+    ) -> None:
+        from ares.api import server
+        from ares.core.campaign import Campaign
+
+        client, database, user_id, username, token, _ = auth_runtime
+        _reset_rate_limiter()
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        inaccessible = Campaign(
+            name="Inaccessible Ticket Campaign",
+            operator="different-owner",
+        )
+        accessible = Campaign(
+            name="Accessible Ticket Campaign",
+            operator=username,
+        )
+        await database.save_campaign(inaccessible)
+        await database.save_campaign(accessible)
+        with patch("ares.db.database.logger.info"):
+            _, insufficient_key = await database.create_api_key(
+                user_id,
+                "insufficient-ticket-key",
+                scopes="none",
+            )
+
+        invalid = await client.post(
+            f"/campaigns/{accessible.id}/websocket-ticket",
+            headers={"Authorization": "Bearer synthetic.invalid.jwt"},
+        )
+        insufficient = await client.post(
+            f"/campaigns/{accessible.id}/websocket-ticket",
+            headers={"X-API-Key": insufficient_key},
+        )
+        missing = await client.post(
+            "/campaigns/missing-ticket-campaign/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+        inaccessible_response = await client.post(
+            f"/campaigns/{inaccessible.id}/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+
+        original_issue = database.issue_websocket_ticket
+
+        async def lose_authority(_campaign_id: str, _source: Any) -> None:
+            return None
+
+        database.issue_websocket_ticket = lose_authority  # type: ignore[method-assign]
+        revalidation_loss = await client.post(
+            f"/campaigns/{accessible.id}/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+
+        async def fail_issue(_campaign_id: str, _source: Any) -> Any:
+            raise RuntimeError
+
+        database.issue_websocket_ticket = fail_issue  # type: ignore[method-assign]
+        unavailable = await client.post(
+            f"/campaigns/{accessible.id}/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+        database.issue_websocket_ticket = original_issue  # type: ignore[method-assign]
+
+        original_limit = server._limiter.is_allowed_async
+
+        async def deny_auth_bucket(key: str, _limit: int) -> tuple[bool, int]:
+            return (False, 0) if key.startswith("auth:") else (True, 1)
+
+        monkeypatch.setattr(server._limiter, "is_allowed_async", deny_auth_bucket)
+        limited = await client.post(
+            f"/campaigns/{accessible.id}/websocket-ticket",
+            headers=self._bearer_headers(token),
+        )
+        monkeypatch.setattr(server._limiter, "is_allowed_async", original_limit)
+
+        async with database.conn.execute(
+            "SELECT COUNT(*) FROM websocket_tickets"
+        ) as cursor:
+            row_count = int((await cursor.fetchone())[0])
+        statuses = (
+            invalid.status_code,
+            insufficient.status_code,
+            missing.status_code,
+            inaccessible_response.status_code,
+            revalidation_loss.status_code,
+            limited.status_code,
+            unavailable.status_code,
+        )
+        _require_fixed(
+            statuses == (401, 403, 404, 404, 401, 429, 503) and row_count == 0,
+            "expected fixed ticket denial statuses without row insertion",
+        )
+
 
 _WS_TEST_DISCONNECT = object()
 _WS_TEST_HEARTBEAT = object()
@@ -3750,8 +3947,8 @@ class _FirstBroadcastSendCoordinator:
 class _MainWebSocketHarness:
     """Minimal ASGI peer for the real registered WebSocket route."""
 
-    def __init__(self, app: Any) -> None:
-        self.scope = {"app": app}
+    def __init__(self, app: Any, query_string: bytes = b"") -> None:
+        self.scope = {"app": app, "query_string": query_string}
         self.accepted = asyncio.Event()
         self.closed = asyncio.Event()
         self.disconnect_observed = asyncio.Event()
@@ -3762,6 +3959,7 @@ class _MainWebSocketHarness:
         self.sent = asyncio.Queue[str]()
         self.inbound = asyncio.Queue[Any]()
         self.fail_next_send = False
+        self.fail_accept = False
         self.block_next_send = False
         self.send_started = asyncio.Event()
         self.send_release = asyncio.Event()
@@ -3770,6 +3968,8 @@ class _MainWebSocketHarness:
         ) = None
 
     async def accept(self) -> None:
+        if self.fail_accept:
+            raise RuntimeError
         self.accepted.set()
 
     async def close(self, *, code: int, reason: str) -> None:
@@ -3844,15 +4044,73 @@ async def _launch_main_websocket(
     app: Any,
     campaign_id: str,
     *,
+    ticket: str | None = None,
     token: str | None = None,
     api_key: str | None = None,
+    query_string: bytes | None = None,
+    fail_accept: bool = False,
 ) -> tuple[_MainWebSocketHarness, asyncio.Task[None]]:
-    socket = _MainWebSocketHarness(app)
+    if query_string is None:
+        if ticket is None and (token is not None or api_key is not None):
+            ticket = await _issue_main_websocket_ticket(
+                app,
+                campaign_id,
+                token=token,
+                api_key=api_key,
+            )
+        query_string = b"" if ticket is None else b"ticket=" + ticket.encode("ascii")
+    socket = _MainWebSocketHarness(app, query_string)
+    socket.fail_accept = fail_accept
     endpoint = _main_campaign_websocket_endpoint(app)
-    task = asyncio.create_task(
-        endpoint(socket, campaign_id, token=token, api_key=api_key)
-    )
+    task = asyncio.create_task(endpoint(socket, campaign_id))
     return socket, task
+
+
+async def _request_main_websocket_ticket(
+    app: Any,
+    campaign_id: str,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+) -> httpx.Response:
+    headers: dict[str, str] = {}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    if api_key is not None:
+        headers["X-API-Key"] = api_key
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://localhost",
+    ) as client:
+        return await client.post(
+            f"/campaigns/{campaign_id}/websocket-ticket",
+            headers=headers,
+        )
+
+
+async def _issue_main_websocket_ticket(
+    app: Any,
+    campaign_id: str,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+) -> str:
+    response = await _request_main_websocket_ticket(
+        app,
+        campaign_id,
+        token=token,
+        api_key=api_key,
+    )
+    body = response.json()
+    ticket = body.get("ticket") if isinstance(body, dict) else None
+    canonical = (
+        response.status_code == 201
+        and isinstance(ticket, str)
+        and len(ticket) == 43
+        and body.get("expires_in") == 30
+    )
+    _require_fixed(canonical, "expected committed WebSocket ticket issuance")
+    return ticket
 
 
 async def _settle_main_websocket(
@@ -3907,6 +4165,7 @@ class TestMainWebSocketAuthoritativeLifetime:
         original_db = getattr(server.app.state, "db", None)
         server.app.state.db = database
         server._ws_connections.clear()
+        _reset_rate_limiter()
         try:
             yield server, database, user_id, username, token, campaign, server.app
         finally:
@@ -4005,12 +4264,217 @@ class TestMainWebSocketAuthoritativeLifetime:
             await _settle_main_websocket(key_socket, key_task)
 
     @pytest.mark.asyncio
+    async def test_ticket_is_single_use_and_concurrent_handshake_has_one_winner(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, _, _, _, token, campaign, app = ws_runtime
+        ticket = await _issue_main_websocket_ticket(app, campaign.id, token=token)
+        first_socket, first_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket
+        )
+        second_socket, second_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket
+        )
+        try:
+            async def wait_for_outcome(socket: _MainWebSocketHarness) -> None:
+                accepted = asyncio.create_task(socket.accepted.wait())
+                closed = asyncio.create_task(socket.closed.wait())
+                done, pending = await asyncio.wait(
+                    {accepted, closed},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for waiter in pending:
+                    waiter.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                _require_fixed(bool(done), "expected a handshake outcome")
+
+            await _ws_wait(
+                asyncio.gather(
+                    wait_for_outcome(first_socket),
+                    wait_for_outcome(second_socket),
+                ),
+                "expected exactly one concurrent ticket winner",
+            )
+            accepted_count = sum(
+                socket.accepted.is_set() for socket in (first_socket, second_socket)
+            )
+            denied_count = sum(
+                socket.close_code == 4001 for socket in (first_socket, second_socket)
+            )
+            _require_fixed(
+                accepted_count == 1 and denied_count == 1,
+                "expected one accepted and one replay-denied handshake",
+            )
+        finally:
+            await _settle_main_websocket(first_socket, first_task)
+            await _settle_main_websocket(second_socket, second_task)
+
+        replay_socket, replay_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket
+        )
+        await self._await_denied(replay_socket, replay_task, code=4001)
+
+    @pytest.mark.parametrize(
+        "query_string",
+        [
+            b"",
+            b"ticket=",
+            b"ticket=short",
+            b"ticket%3Dsynthetic",
+            b"%74icket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            b"ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA%41",
+            b"ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&extra=1",
+            b"extra=1&ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            b"ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            b"token=synthetic-legacy-value",
+            b"api_key=synthetic-legacy-value",
+            b"ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&token=legacy",
+            b"ticket=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&api_key=legacy",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_ticket_query_parser_rejects_every_noncanonical_shape_before_db(
+        self,
+        ws_runtime: Any,
+        query_string: bytes,
+    ) -> None:
+        _, database, _, _, _, campaign, app = ws_runtime
+        consume_calls = [0]
+        original_consume = database.consume_websocket_ticket
+
+        async def tracked_consume(raw_ticket: str, campaign_id: str) -> Any:
+            consume_calls[0] += 1
+            return await original_consume(raw_ticket, campaign_id)
+
+        database.consume_websocket_ticket = tracked_consume  # type: ignore[method-assign]
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            query_string=query_string,
+        )
+        try:
+            await self._await_denied(socket, task, code=4001)
+            _require_fixed(
+                consume_calls[0] == 0 and socket.scope["query_string"] == b"",
+                "expected malformed query rejection after synchronous scrubbing",
+            )
+        finally:
+            database.consume_websocket_ticket = original_consume  # type: ignore[method-assign]
+
+    @pytest.mark.asyncio
+    async def test_wrong_campaign_does_not_consume_ticket(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        from ares.core.campaign import Campaign
+
+        _, database, _, _, token, campaign, app = ws_runtime
+        other_campaign = Campaign(
+            name="Wrong Ticket Campaign",
+            operator="separate-owner",
+        )
+        await database.save_campaign(other_campaign)
+        ticket = await _issue_main_websocket_ticket(app, campaign.id, token=token)
+        wrong_socket, wrong_task = await _launch_main_websocket(
+            app, other_campaign.id, ticket=ticket
+        )
+        await self._await_denied(wrong_socket, wrong_task, code=4001)
+        correct_socket, correct_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket
+        )
+        try:
+            await self._await_connected(correct_socket)
+        finally:
+            await _settle_main_websocket(correct_socket, correct_task)
+
+    @pytest.mark.asyncio
+    async def test_expired_ticket_and_consume_outage_use_fixed_close_codes(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, database, _, _, token, campaign, app = ws_runtime
+        expired_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
+        await database.conn.execute(
+            "UPDATE websocket_tickets SET created_at=?, expires_at=? "
+            "WHERE consumed_at IS NULL",
+            (
+                "1999-12-31T23:59:30.000Z",
+                "2000-01-01T00:00:00.000Z",
+            ),
+        )
+        await database.conn.commit()
+        expired_socket, expired_task = await _launch_main_websocket(
+            app, campaign.id, ticket=expired_ticket
+        )
+        await self._await_denied(expired_socket, expired_task, code=4001)
+
+        unavailable_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
+        original_consume = database.consume_websocket_ticket
+
+        async def fail_consume(_ticket: str, _campaign_id: str) -> Any:
+            raise ConnectionError
+
+        database.consume_websocket_ticket = fail_consume  # type: ignore[method-assign]
+        try:
+            unavailable_socket, unavailable_task = await _launch_main_websocket(
+                app, campaign.id, ticket=unavailable_ticket
+            )
+            await self._await_denied(
+                unavailable_socket,
+                unavailable_task,
+                code=1013,
+            )
+        finally:
+            database.consume_websocket_ticket = original_consume  # type: ignore[method-assign]
+
+    @pytest.mark.asyncio
+    async def test_failed_accept_keeps_ticket_consumed_and_fresh_ticket_recovers(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        _, _, _, _, token, campaign, app = ws_runtime
+        ticket = await _issue_main_websocket_ticket(app, campaign.id, token=token)
+        failed_socket, failed_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket, fail_accept=True
+        )
+        failed_accept_observed = False
+        try:
+            await failed_task
+        except RuntimeError:
+            failed_accept_observed = True
+        _require_fixed(
+            failed_accept_observed,
+            "expected the synthetic accept failure to propagate",
+        )
+
+        replay_socket, replay_task = await _launch_main_websocket(
+            app, campaign.id, ticket=ticket
+        )
+        await self._await_denied(replay_socket, replay_task, code=4001)
+
+        recovered_socket, recovered_task = await _launch_main_websocket(
+            app, campaign.id, token=token
+        )
+        try:
+            await self._await_connected(recovered_socket)
+        finally:
+            await _settle_main_websocket(recovered_socket, recovered_task)
+
+    @pytest.mark.asyncio
     async def test_bearer_handshake_denies_inactive_renamed_revoked_and_deleted(
         self,
         ws_runtime: Any,
     ) -> None:
         _, database, user_id, username, token, campaign, app = ws_runtime
 
+        inactive_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
         await database.conn.execute(
             "UPDATE users SET is_active=0 WHERE id=?",
             (user_id,),
@@ -4019,19 +4483,27 @@ class TestMainWebSocketAuthoritativeLifetime:
         inactive_socket, inactive_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=inactive_ticket,
         )
         await self._await_denied(inactive_socket, inactive_task, code=4001)
 
         await database.conn.execute(
-            "UPDATE users SET is_active=1, username=? WHERE id=?",
+            "UPDATE users SET is_active=1 WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.commit()
+        renamed_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
+        await database.conn.execute(
+            "UPDATE users SET username=? WHERE id=?",
             ("renamed-main-websocket-principal", user_id),
         )
         await database.conn.commit()
         renamed_socket, renamed_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=renamed_ticket,
         )
         await self._await_denied(renamed_socket, renamed_task, code=4001)
 
@@ -4040,27 +4512,27 @@ class TestMainWebSocketAuthoritativeLifetime:
             (username, user_id),
         )
         await database.conn.commit()
-        import jwt
         from datetime import datetime, timedelta, timezone
 
-        settings = _settings()
-        expired_token = jwt.encode(
-            {
-                "sub": username,
-                "role": "team_lead",
-                "jti": "synthetic-expired-websocket-marker",
-                "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
-            },
-            settings.secret_key_value,
-            algorithm=settings.ares_jwt_algorithm,
+        expired_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
         )
+        await database.conn.execute(
+            "UPDATE websocket_tickets SET bearer_expires_at=? "
+            "WHERE consumed_at IS NULL",
+            ("2000-01-01T00:00:00.000Z",),
+        )
+        await database.conn.commit()
         expired_socket, expired_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=expired_token,
+            ticket=expired_ticket,
         )
         await self._await_denied(expired_socket, expired_task, code=4001)
 
+        import jwt
+
+        settings = _settings()
         revocation_marker = "synthetic-main-websocket-revocation"
         revoked_token = jwt.encode(
             {
@@ -4072,6 +4544,9 @@ class TestMainWebSocketAuthoritativeLifetime:
             settings.secret_key_value,
             algorithm=settings.ares_jwt_algorithm,
         )
+        revoked_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=revoked_token
+        )
         await database.revoke_access_token(
             revocation_marker,
             user_id,
@@ -4080,16 +4555,19 @@ class TestMainWebSocketAuthoritativeLifetime:
         revoked_socket, revoked_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=revoked_token,
+            ticket=revoked_ticket,
         )
         await self._await_denied(revoked_socket, revoked_task, code=4001)
 
+        deleted_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
         await database.conn.execute("DELETE FROM users WHERE id=?", (user_id,))
         await database.conn.commit()
         deleted_socket, deleted_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=deleted_ticket,
         )
         await self._await_denied(deleted_socket, deleted_task, code=4001)
 
@@ -4099,6 +4577,7 @@ class TestMainWebSocketAuthoritativeLifetime:
         ws_runtime: Any,
     ) -> None:
         _, database, user_id, _, token, campaign, app = ws_runtime
+        ticket = await _issue_main_websocket_ticket(app, campaign.id, token=token)
         await database.conn.execute(
             "UPDATE users SET role='operator' WHERE id=?",
             (user_id,),
@@ -4107,7 +4586,7 @@ class TestMainWebSocketAuthoritativeLifetime:
         socket, task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=ticket,
         )
         await self._await_denied(socket, task, code=4001)
 
@@ -4128,13 +4607,32 @@ class TestMainWebSocketAuthoritativeLifetime:
                 user_id,
                 "main-websocket-precedence-key",
             )
-        socket, task = await _launch_main_websocket(
+        verify_calls = [0]
+        original_verify = database.verify_api_key
+
+        async def tracked_verify(candidate: str) -> Any:
+            verify_calls[0] += 1
+            return await original_verify(candidate)
+
+        database.verify_api_key = tracked_verify  # type: ignore[method-assign]
+        response = await _request_main_websocket_ticket(
             app,
             campaign.id,
             token="synthetic.invalid.jwt",
             api_key=raw_key,
         )
-        await self._await_denied(socket, task, code=4001)
+        database.verify_api_key = original_verify  # type: ignore[method-assign]
+        _require_fixed(
+            response.status_code == 401 and verify_calls[0] == 0,
+            "expected bearer issuance failure to remain terminal",
+        )
+
+        legacy_socket, legacy_task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            query_string=b"api_key=synthetic-legacy-value",
+        )
+        await self._await_denied(legacy_socket, legacy_task, code=4001)
 
     @pytest.mark.asyncio
     async def test_api_key_revocation_and_inactive_owner_deny_handshake(
@@ -4147,6 +4645,9 @@ class TestMainWebSocketAuthoritativeLifetime:
                 user_id,
                 "main-websocket-lifecycle-key",
             )
+        revoked_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, api_key=raw_key
+        )
         await database.conn.execute(
             "UPDATE api_keys SET is_active=0 WHERE id=?",
             (key_id,),
@@ -4155,13 +4656,17 @@ class TestMainWebSocketAuthoritativeLifetime:
         revoked_socket, revoked_task = await _launch_main_websocket(
             app,
             campaign.id,
-            api_key=raw_key,
+            ticket=revoked_ticket,
         )
         await self._await_denied(revoked_socket, revoked_task, code=4001)
 
         await database.conn.execute(
             "UPDATE api_keys SET is_active=1 WHERE id=?",
             (key_id,),
+        )
+        await database.conn.commit()
+        inactive_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, api_key=raw_key
         )
         await database.conn.execute(
             "UPDATE users SET is_active=0 WHERE id=?",
@@ -4171,7 +4676,7 @@ class TestMainWebSocketAuthoritativeLifetime:
         inactive_socket, inactive_task = await _launch_main_websocket(
             app,
             campaign.id,
-            api_key=raw_key,
+            ticket=inactive_ticket,
         )
         await self._await_denied(inactive_socket, inactive_task, code=4001)
 
@@ -4181,39 +4686,48 @@ class TestMainWebSocketAuthoritativeLifetime:
         ws_runtime: Any,
     ) -> None:
         _, database, _, _, token, campaign, app = ws_runtime
+        absent_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
         app.state.db = None
         absent_socket, absent_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=absent_ticket,
         )
         await self._await_denied(absent_socket, absent_task, code=1013)
 
         app.state.db = database
+        closed_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
         await database.close()
         closed_socket, closed_task = await _launch_main_websocket(
             app,
             campaign.id,
-            token=token,
+            ticket=closed_ticket,
         )
         await self._await_denied(closed_socket, closed_task, code=1013)
         await database.connect()
 
-        original_resolve = database.resolve_access_token_principal
+        failed_ticket = await _issue_main_websocket_ticket(
+            app, campaign.id, token=token
+        )
+        original_resolve = database.resolve_websocket_ticket_principal
 
-        async def fail_lookup(_subject: str, _jti: str) -> Any:
+        async def fail_lookup(_handle: Any) -> Any:
             raise TimeoutError
 
-        database.resolve_access_token_principal = fail_lookup  # type: ignore[method-assign]
+        database.resolve_websocket_ticket_principal = fail_lookup  # type: ignore[method-assign]
         try:
             failed_socket, failed_task = await _launch_main_websocket(
                 app,
                 campaign.id,
-                token=token,
+                ticket=failed_ticket,
             )
             await self._await_denied(failed_socket, failed_task, code=1013)
         finally:
-            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+            database.resolve_websocket_ticket_principal = original_resolve  # type: ignore[method-assign]
 
         recovered_socket, recovered_task = await _launch_main_websocket(
             app,
@@ -4234,7 +4748,6 @@ class TestMainWebSocketAuthoritativeLifetime:
         self,
         ws_runtime: Any,
         state_change: str,
-        monkeypatch: Any,
     ) -> None:
         server, database, user_id, username, token, campaign, app = ws_runtime
         socket, task = await _launch_main_websocket(
@@ -4284,18 +4797,18 @@ class TestMainWebSocketAuthoritativeLifetime:
                     (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
                 )
             elif state_change == "expired":
-                import jwt.api_jwt
-                from datetime import datetime, timedelta, timezone
+                from dataclasses import replace
+                from datetime import datetime, timezone
 
-                real_datetime = datetime
-
-                class FutureDateTime(datetime):
-                    @classmethod
-                    def now(cls, tz: Any = None) -> datetime:
-                        current = real_datetime.now(timezone.utc) + timedelta(days=2)
-                        return current if tz is not None else current.replace(tzinfo=None)
-
-                monkeypatch.setattr(jwt.api_jwt, "datetime", FutureDateTime)
+                contexts = list(server._ws_connections.get(campaign.id, set()))
+                _require_fixed(
+                    len(contexts) == 1,
+                    "expected one registered ticket handle",
+                )
+                contexts[0].ticket_handle = replace(
+                    contexts[0].ticket_handle,
+                    bearer_expires_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+                )
             else:
                 await database.conn.execute(
                     "UPDATE users SET role='operator' WHERE id=?",
@@ -4324,7 +4837,10 @@ class TestMainWebSocketAuthoritativeLifetime:
         finally:
             await _settle_main_websocket(socket, task)
 
-    @pytest.mark.parametrize("state_change", ["revoked", "inactive", "ownership"])
+    @pytest.mark.parametrize(
+        "state_change",
+        ["revoked", "inactive", "ownership", "scope", "expired", "key_owner"],
+    )
     @pytest.mark.asyncio
     async def test_api_key_and_ownership_lifetime_revalidation(
         self,
@@ -4363,10 +4879,31 @@ class TestMainWebSocketAuthoritativeLifetime:
                     "UPDATE users SET is_active=0 WHERE id=?",
                     (user_id,),
                 )
-            else:
+            elif state_change == "ownership":
                 await database.conn.execute(
                     "UPDATE campaigns SET operator=? WHERE id=?",
                     ("different-campaign-owner", campaign.id),
+                )
+            elif state_change == "scope":
+                await database.conn.execute(
+                    "UPDATE api_keys SET scopes='none' WHERE id=?",
+                    (key_id,),
+                )
+            elif state_change == "expired":
+                await database.conn.execute(
+                    "UPDATE api_keys SET expires_at=? WHERE id=?",
+                    ("2000-01-01T00:00:00+00:00", key_id),
+                )
+            else:
+                with patch("ares.db.database.logger.info"):
+                    replacement_user_id = await database.create_user(
+                        "main-websocket-key-owner",
+                        "SyntheticKeyOwnerPass1!",
+                        "team_lead",
+                    )
+                await database.conn.execute(
+                    "UPDATE api_keys SET user_id=? WHERE id=?",
+                    (replacement_user_id, key_id),
                 )
             await database.conn.commit()
 
@@ -4426,6 +4963,116 @@ class TestMainWebSocketAuthoritativeLifetime:
             await _settle_main_websocket(socket, task)
 
     @pytest.mark.asyncio
+    async def test_pong_revalidates_without_broadcast(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, _, token, campaign, app = ws_runtime
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            token=token,
+        )
+        try:
+            await self._await_connected(socket)
+            await database.conn.execute(
+                "UPDATE users SET is_active=0 WHERE id=?",
+                (user_id,),
+            )
+            await database.conn.commit()
+            await socket.inbound.put("ping")
+            await _ws_wait(
+                socket.closed.wait(),
+                "expected pong authorization loss to close the connection",
+            )
+            _require_fixed(
+                socket.close_code == 4001
+                and socket.sent_types == ["connected"]
+                and not server._ws_connections.get(campaign.id),
+                "expected principal revalidation before pong delivery",
+            )
+        finally:
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.asyncio
+    async def test_consumed_handle_survives_ticket_expiry_and_purge_read_only(
+        self,
+        ws_runtime: Any,
+    ) -> None:
+        server, database, user_id, username, _, campaign, app = ws_runtime
+        await database.conn.execute(
+            "UPDATE users SET role='operator' WHERE id=?",
+            (user_id,),
+        )
+        await database.conn.execute(
+            "UPDATE campaigns SET operator=? WHERE id=?",
+            (username, campaign.id),
+        )
+        await database.conn.commit()
+        with patch("ares.db.database.logger.info"):
+            key_id, raw_key = await database.create_api_key(
+                user_id,
+                "read-only-lifetime-key",
+                scopes="read",
+            )
+        socket, task = await _launch_main_websocket(
+            app,
+            campaign.id,
+            api_key=raw_key,
+        )
+        try:
+            await self._await_connected(socket)
+            async with database.conn.execute(
+                "SELECT last_used FROM api_keys WHERE id=?",
+                (key_id,),
+            ) as cursor:
+                last_used_before = (await cursor.fetchone())[0]
+            await database.conn.execute(
+                "UPDATE websocket_tickets "
+                "SET created_at=?, consumed_at=?, expires_at=?",
+                (
+                    "1999-12-31T23:59:00.000Z",
+                    "1999-12-31T23:59:15.000Z",
+                    "1999-12-31T23:59:30.000Z",
+                ),
+            )
+            await database.conn.commit()
+            await database.purge_expired_websocket_tickets()
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "module_complete"},
+            )
+            await server._broadcast_event(
+                campaign.id,
+                {"type": "strategy_update"},
+            )
+            first = await _ws_wait(
+                socket.sent.get(),
+                "expected module event after ticket purge",
+            )
+            second = await _ws_wait(
+                socket.sent.get(),
+                "expected strategy event after ticket purge",
+            )
+            async with database.conn.execute(
+                "SELECT last_used FROM api_keys WHERE id=?",
+                (key_id,),
+            ) as cursor:
+                last_used_after = (await cursor.fetchone())[0]
+            async with database.conn.execute(
+                "SELECT COUNT(*) FROM websocket_tickets"
+            ) as cursor:
+                ticket_rows = int((await cursor.fetchone())[0])
+            _require_fixed(
+                (first, second) == ("module_complete", "strategy_update")
+                and ticket_rows == 0
+                and last_used_before == last_used_after,
+                "expected purged handle authority with read-only API-key resolution",
+            )
+        finally:
+            await _settle_main_websocket(socket, task)
+
+    @pytest.mark.asyncio
     async def test_delayed_authoritative_lookup_observes_committed_invalidation(
         self,
         ws_runtime: Any,
@@ -4438,19 +5085,19 @@ class TestMainWebSocketAuthoritativeLifetime:
         )
         lookup_started = asyncio.Event()
         lookup_release = asyncio.Event()
-        original_resolve = database.resolve_access_token_principal
+        original_resolve = database.resolve_websocket_ticket_principal
 
-        async def delayed_resolve(subject: str, jti: str) -> Any:
+        async def delayed_resolve(handle: Any) -> Any:
             lookup_started.set()
             await _ws_wait(
                 lookup_release.wait(),
                 "expected authoritative lookup barrier release",
             )
-            return await original_resolve(subject, jti)
+            return await original_resolve(handle)
 
         try:
             await self._await_connected(socket)
-            database.resolve_access_token_principal = delayed_resolve  # type: ignore[method-assign]
+            database.resolve_websocket_ticket_principal = delayed_resolve  # type: ignore[method-assign]
             broadcast_task = asyncio.create_task(
                 server._broadcast_event(
                     campaign.id,
@@ -4483,7 +5130,7 @@ class TestMainWebSocketAuthoritativeLifetime:
             )
         finally:
             lookup_release.set()
-            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+            database.resolve_websocket_ticket_principal = original_resolve  # type: ignore[method-assign]
             await _settle_main_websocket(socket, task)
 
     @pytest.mark.asyncio
@@ -4497,14 +5144,14 @@ class TestMainWebSocketAuthoritativeLifetime:
             campaign.id,
             token=token,
         )
-        original_resolve = database.resolve_access_token_principal
+        original_resolve = database.resolve_websocket_ticket_principal
 
-        async def fail_lookup(_subject: str, _jti: str) -> Any:
+        async def fail_lookup(_handle: Any) -> Any:
             raise ConnectionError
 
         try:
             await self._await_connected(socket)
-            database.resolve_access_token_principal = fail_lookup  # type: ignore[method-assign]
+            database.resolve_websocket_ticket_principal = fail_lookup  # type: ignore[method-assign]
             await server._broadcast_event(
                 campaign.id,
                 {"type": "synthetic_protected_event"},
@@ -4524,7 +5171,7 @@ class TestMainWebSocketAuthoritativeLifetime:
                 "expected backend outage to prevent protected delivery with 1013",
             )
         finally:
-            database.resolve_access_token_principal = original_resolve  # type: ignore[method-assign]
+            database.resolve_websocket_ticket_principal = original_resolve  # type: ignore[method-assign]
             await _settle_main_websocket(socket, task)
 
         recovered_socket, recovered_task = await _launch_main_websocket(

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  api,
   beginIdentityTransition,
   buildModuleRunPayload,
   campaignEventsPath,
@@ -319,9 +320,33 @@ describe("module execution helpers", () => {
 });
 
 describe("live event helpers", () => {
-  it("uses the backend campaign websocket route", () => {
-    const path = campaignEventsPath("camp/one", "token value");
-    const matchesExpectedRoute = path === "/ws/campaigns/camp%2Fone/events?token=token%20value";
+  it("requests a fresh ticket with POST and parses the fixed response", async () => {
+    let requestIsCanonical = false;
+    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+      requestIsCanonical =
+        path === "/campaigns/camp%2Fone/websocket-ticket"
+        && init?.method === "POST"
+        && init.body === undefined;
+      return new Response(JSON.stringify({
+        ticket: "A".repeat(43),
+        expires_in: 30
+      }), { status: 201 });
+    }));
+
+    const response = await api.websocketTicket("camp/one");
+    const responseIsCanonical =
+      response.ticket.length === 43 && response.expires_in === 30;
+    requireFixed(requestIsCanonical, "expected ticket issuance request contract");
+    requireFixed(responseIsCanonical, "expected ticket issuance response contract");
+  });
+
+  it("uses only the one-time ticket on the campaign websocket route", () => {
+    const path = campaignEventsPath("camp/one", "A".repeat(43));
+    const matchesExpectedRoute =
+      path === `/ws/campaigns/camp%2Fone/events?ticket=${"A".repeat(43)}`;
+    const excludesLegacyCredentials =
+      !path.includes("token=") && !path.includes("api_key=");
     requireFixed(matchesExpectedRoute, "expected encoded campaign WebSocket route");
+    requireFixed(excludesLegacyCredentials, "expected ticket-only WebSocket query");
   });
 });

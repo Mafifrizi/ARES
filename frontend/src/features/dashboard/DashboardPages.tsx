@@ -40,7 +40,14 @@ import {
 } from "react";
 import { NavLink, Navigate, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api, buildModuleRunPayload, campaignEventsPath, getAccessToken } from "../../api/client";
+import {
+  ApiError,
+  api,
+  buildModuleRunPayload,
+  campaignEventsPath,
+  captureSession,
+  isSessionCurrent
+} from "../../api/client";
 import type { ApiKeyMeta, Campaign, ExecutionChain, Finding, ModuleMeta, MonthlyFindingStats, ParamField, ReportItem } from "../../api/types";
 import { useAuth } from "../auth/authContext";
 import { DashboardUiProvider } from "./dashboardUi";
@@ -205,6 +212,110 @@ const pageMeta: Record<string, { icon: LucideIcon; eyebrow: string; description:
 
 const brandMarkPath = "/dashboard/brand/ares-mark.png";
 
+interface CampaignEventSocketOptions {
+  campaignId: string;
+  enabled: boolean;
+  onDisconnected: () => void;
+  onEvent: (event: unknown) => void;
+}
+
+function useCampaignEventSocket({
+  campaignId,
+  enabled,
+  onDisconnected,
+  onEvent
+}: CampaignEventSocketOptions): void {
+  const socketRef = useRef<WebSocket | null>(null);
+  const generationRef = useRef(0);
+  const onDisconnectedRef = useRef(onDisconnected);
+  const onEventRef = useRef(onEvent);
+  onDisconnectedRef.current = onDisconnected;
+  onEventRef.current = onEvent;
+
+  useEffect(() => {
+    generationRef.current += 1;
+    const connectionGeneration = generationRef.current;
+    let disposed = false;
+    let ownedSocket: WebSocket | null = null;
+
+    if (!enabled || !campaignId) {
+      return;
+    }
+
+    const session = captureSession();
+    if (!session.accessToken) {
+      onDisconnectedRef.current();
+      return;
+    }
+
+    void (async () => {
+      try {
+        const response = await api.websocketTicket(campaignId);
+        const responseIsCanonical =
+          response.expires_in === 30
+          && /^[A-Za-z0-9_-]{43}$/.test(response.ticket);
+        if (!responseIsCanonical) {
+          throw new Error("Invalid WebSocket ticket response");
+        }
+        if (
+          disposed
+          || generationRef.current !== connectionGeneration
+          || !isSessionCurrent(session)
+        ) {
+          return;
+        }
+
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const socket = new WebSocket(
+          `${protocol}//${window.location.host}${campaignEventsPath(campaignId, response.ticket)}`
+        );
+        ownedSocket = socket;
+        socketRef.current = socket;
+        socket.onmessage = (event) => {
+          try {
+            onEventRef.current(JSON.parse(event.data));
+          } catch {
+            onEventRef.current(event.data);
+          }
+        };
+        socket.onclose = () => {
+          if (socketRef.current === socket) {
+            socketRef.current = null;
+            onDisconnectedRef.current();
+          }
+        };
+      } catch {
+        if (
+          !disposed
+          && generationRef.current === connectionGeneration
+          && isSessionCurrent(session)
+        ) {
+          onDisconnectedRef.current();
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      generationRef.current += 1;
+      if (ownedSocket) {
+        ownedSocket.onclose = null;
+        ownedSocket.close();
+        if (socketRef.current === ownedSocket) {
+          socketRef.current = null;
+        }
+      }
+    };
+  }, [campaignId, enabled]);
+}
+
+export function CampaignEventSocketController(
+  options: CampaignEventSocketOptions
+): null {
+  useCampaignEventSocket(options);
+  return null;
+}
+
 function formatRole(role?: string): string {
   const labels: Record<string, string> = {
     team_lead: "Team Lead",
@@ -232,7 +343,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>([]);
-  const liveSocketRef = useRef<WebSocket | null>(null);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
@@ -244,41 +354,12 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     enabled: Boolean(selectedCampaignId)
   });
 
-  useEffect(() => {
-    const accessToken = getAccessToken();
-    if (!liveConnected || !liveCampaignId || !accessToken) {
-      if (liveSocketRef.current) {
-        liveSocketRef.current.close();
-        liveSocketRef.current = null;
-      }
-      return;
-    }
-
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}${campaignEventsPath(liveCampaignId, accessToken)}`);
-    liveSocketRef.current = socket;
-    socket.onmessage = (event) => {
-      try {
-        setLiveEvents((items) => [JSON.parse(event.data), ...items].slice(0, 100));
-      } catch {
-        setLiveEvents((items) => [event.data, ...items].slice(0, 100));
-      }
-    };
-    socket.onclose = () => {
-      if (liveSocketRef.current === socket) {
-        liveSocketRef.current = null;
-        setLiveConnected(false);
-      }
-    };
-
-    return () => {
-      socket.onclose = null;
-      socket.close();
-      if (liveSocketRef.current === socket) {
-        liveSocketRef.current = null;
-      }
-    };
-  }, [liveCampaignId, liveConnected, setLiveEvents]);
+  useCampaignEventSocket({
+    campaignId: liveCampaignId,
+    enabled: liveConnected,
+    onDisconnected: () => setLiveConnected(false),
+    onEvent: (event) => setLiveEvents((items) => [event, ...items].slice(0, 100))
+  });
 
   const dashboardUi = useMemo<DashboardUiState>(
     () => ({

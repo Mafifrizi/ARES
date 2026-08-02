@@ -11,7 +11,8 @@ import type {
   ReportItem,
   TemplateMeta,
   TokenResponse,
-  UserProfile
+  UserProfile,
+  WebSocketTicketResponse
 } from "./types";
 import { apiBlobRequest, apiRequest, ApiError } from "./http";
 import { beginIdentityTransition, installTokenPairIfCurrent } from "./session";
@@ -40,8 +41,8 @@ export async function logout(): Promise<void> {
   await apiRequest<{ status: string }>("/auth/logout", { method: "POST" }, false);
 }
 
-export function campaignEventsPath(campaignId: string, token: string): string {
-  return `/ws/campaigns/${encodeURIComponent(campaignId)}/events?token=${encodeURIComponent(token)}`;
+export function campaignEventsPath(campaignId: string, ticket: string): string {
+  return `/ws/campaigns/${encodeURIComponent(campaignId)}/events?ticket=${encodeURIComponent(ticket)}`;
 }
 
 export function buildModuleRunPayload(
@@ -65,6 +66,11 @@ export const api = {
       body: JSON.stringify(body)
     }),
   campaign: (id: string) => apiRequest<Campaign>(`/campaigns/${encodeURIComponent(id)}`),
+  websocketTicket: (id: string) =>
+    apiRequest<WebSocketTicketResponse>(
+      `/campaigns/${encodeURIComponent(id)}/websocket-ticket`,
+      { method: "POST" }
+    ),
   deleteCampaign: (id: string) =>
     apiRequest<Record<string, string>>(`/campaigns/${encodeURIComponent(id)}`, { method: "DELETE" }),
   findings: (id: string) => apiRequest<Finding[]>(`/campaigns/${encodeURIComponent(id)}/findings`),

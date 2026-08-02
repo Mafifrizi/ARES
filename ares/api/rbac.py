@@ -21,13 +21,15 @@ import math
 import time
 from collections import defaultdict, deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from ares.core.logger import get_logger
+from ares.db.websocket_tickets import BearerTicketSource
 
 logger = get_logger("ares.api.rbac")
 
@@ -53,6 +55,11 @@ class AuthenticatedUser:
     auth_type: str = "bearer"
     api_key_id: str | None = None
     api_key_scopes: tuple[str, ...] = ()
+    websocket_ticket_source: BearerTicketSource | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def is_api_key(self) -> bool:
@@ -87,6 +94,10 @@ class AuthoritativePrincipal:
     user_id: str
     username: str
     role: str
+    websocket_ticket_source: BearerTicketSource = field(
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -129,6 +140,7 @@ async def resolve_bearer_principal(
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
     try:
         expires_at_is_finite = math.isfinite(float(expires_at))
+        source_expiry = datetime.fromtimestamp(float(expires_at), timezone.utc)
     except (TypeError, ValueError, OverflowError):
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
     if not expires_at_is_finite:
@@ -169,6 +181,12 @@ async def resolve_bearer_principal(
             user_id=user_id,
             username=username,
             role=role,
+            websocket_ticket_source=BearerTicketSource(
+                user_id=user_id,
+                subject=subject,
+                jti=jti,
+                expires_at=source_expiry,
+            ),
         ),
     )
 
@@ -454,7 +472,11 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return AuthenticatedUser(username=principal.username, role=principal.role)
+    return AuthenticatedUser(
+        username=principal.username,
+        role=principal.role,
+        websocket_ticket_source=principal.websocket_ticket_source,
+    )
 
 
 def require_role(*allowed_roles: str) -> Any:
