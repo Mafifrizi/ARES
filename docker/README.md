@@ -35,3 +35,12 @@ The Vite server proxies API and WebSocket traffic to `ares-api`.
 
 ## Environment
 Copy `.env.example` to `.env` and fill in secrets before starting either stack.
+## Existing database adoption
+
+Containers do not adopt unversioned databases during startup. Before replacing
+an existing deployment, stop every application worker, take the required backup,
+and run the explicit verification/adoption workflow described in
+[`docs/database-migrations.md`](../docs/database-migrations.md). PostgreSQL
+adoption is serialized with a transaction-scoped advisory lock; SQLite adoption
+requires exclusive ownership and a new durable backup target. Keep additive
+migrations installed if the application image is rolled back.

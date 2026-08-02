@@ -134,7 +134,10 @@ ares-setup = "ares.cli.typer_main:setup_entrypoint"
 
 [tool.setuptools.packages.find]
 where   = ["."]
-include = ["ares*"]
+include = ["ares*", "migrations"]
+
+[tool.setuptools.package-data]
+migrations = ["script.py.mako", "versions/*.py"]
 
 [tool.ruff]
 line-length    = 100

@@ -573,7 +573,10 @@ def _require_no_sqlite_temp_shadows(bind: Any) -> None:
             raise RuntimeError(_CATALOG_ERROR)
 
 
-def _require_sqlite_alembic_version_relation(bind: Any) -> None:
+def _require_sqlite_alembic_version_relation(
+    bind: Any,
+    expected_revision: str = "0007",
+) -> None:
     rows = bind.execute(
         sa.text(
             "SELECT type, name, tbl_name, sql FROM sqlite_schema "
@@ -633,7 +636,7 @@ def _require_sqlite_alembic_version_relation(bind: Any) -> None:
             "SELECT version_num FROM main.alembic_version"
         ).fetchall()
     )
-    if values != ("0007",):
+    if values != (expected_revision,):
         raise RuntimeError(_CATALOG_ERROR)
 
 
@@ -1264,10 +1267,17 @@ def _require_ticket_contract(bind: Any) -> None:
         raise RuntimeError(_CATALOG_ERROR)
 
 
-def _sqlite_preflight(bind: Any) -> bool:
+def _sqlite_preflight(
+    bind: Any,
+    *,
+    expected_revision: str = "0007",
+    require_version: bool = True,
+    include_ticket: bool = True,
+) -> bool:
     _require_no_sqlite_temp_shadows(bind)
     _require_sqlite_managed_name_ownership(bind)
-    _require_sqlite_alembic_version_relation(bind)
+    if require_version:
+        _require_sqlite_alembic_version_relation(bind, expected_revision)
     tables = set(sa.inspect(bind).get_table_names())
     required = {
         "campaigns",
@@ -1280,8 +1290,9 @@ def _sqlite_preflight(bind: Any) -> bool:
         "api_keys",
         "refresh_tokens",
         "revoked_access_tokens",
-        "websocket_tickets",
     }
+    if include_ticket:
+        required.add("websocket_tickets")
     if not required.issubset(tables):
         raise RuntimeError(_CATALOG_ERROR)
     if any(table.startswith(_TEMP_PREFIX) for table in tables):
@@ -1309,7 +1320,8 @@ def _sqlite_preflight(bind: Any) -> bool:
         _require_sqlite_primary_key_index(bind, table)
         _require_not_null_data(bind, table)
 
-    _require_ticket_contract(bind)
+    if include_ticket:
+        _require_ticket_contract(bind)
     _require_no_orphans(bind)
     _require_boolean_integer_data(bind, tables)
     _require_valid_sqlite_timestamps(bind, tables)
@@ -2064,7 +2076,8 @@ def _sqlite_upgrade(bind: Any) -> None:
     # transaction, but SQLite does not emit BEGIN for DDL.  An explicit
     # write transaction makes the reconciliation and Alembic's subsequent
     # version-row update one atomic unit.  Alembic owns commit/rollback.
-    bind.exec_driver_sql("BEGIN IMMEDIATE")
+    if not bind.info.get("ares_m2b_adoption_transaction", False):
+        bind.exec_driver_sql("BEGIN IMMEDIATE")
     exact = _sqlite_preflight(bind)
     if exact:
         return
@@ -2413,7 +2426,10 @@ def _pg_check_name(table: str, column: str) -> str:
     return f"ck_{table}_{column}_finite"
 
 
-def _pg_validate_alembic_version_relation(bind: Any) -> None:
+def _pg_validate_alembic_version_relation(
+    bind: Any,
+    expected_revision: str = "0007",
+) -> None:
     relation_rows = list(
         bind.execute(
             sa.text(
@@ -2821,7 +2837,7 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
             f'SELECT version_num FROM {quoted_schema}."alembic_version"'  # noqa: S608
         ).fetchall()
     )
-    if values != ("0007",):
+    if values != (expected_revision,):
         raise RuntimeError(_CATALOG_ERROR)
 
 
@@ -2889,7 +2905,10 @@ def _pg_relation_rows(bind: Any) -> list[dict[str, object]]:
     )
 
 
-def _pg_validate_relation_shapes(bind: Any) -> set[str]:
+def _pg_validate_relation_shapes(
+    bind: Any,
+    required_tables: frozenset[str] | None = None,
+) -> set[str]:
     rows = _pg_relation_rows(bind)
     relations = {
         str(row["table_name"]): row
@@ -2898,9 +2917,10 @@ def _pg_validate_relation_shapes(bind: Any) -> set[str]:
     if len(relations) != len(rows):
         raise RuntimeError(_CATALOG_ERROR)
     tables = set(relations)
-    if not _PG_REQUIRED_TABLES.issubset(tables):
+    required = required_tables or _PG_REQUIRED_TABLES
+    if not required.issubset(tables):
         raise RuntimeError(_CATALOG_ERROR)
-    if not tables.issubset(_PG_REQUIRED_TABLES | _PG_OPTIONAL_TABLES):
+    if not tables.issubset(required | _PG_OPTIONAL_TABLES):
         raise RuntimeError(_CATALOG_ERROR)
     expected = ("r", "p", False, False, False, 0, 0, 0, 0, 0)
     for row in relations.values():
@@ -3711,6 +3731,8 @@ def _expected_pg_primary(columns: tuple[str, ...]) -> str:
 def _pg_constraint_plan(
     bind: Any,
     tables: set[str],
+    *,
+    include_ticket: bool = True,
 ) -> tuple[
     list[tuple[str, str, str]],
     list[tuple[str, str, str, str, str]],
@@ -3869,10 +3891,11 @@ def _pg_constraint_plan(
         ] = _normalize_pg_definition(
             "CHECK (blocked = ANY (ARRAY[0, 1]))"
         )
-    for name, definition in _PG_TICKET_CHECKS.items():
-        expected_checks[("websocket_tickets", name)] = (
-            _normalize_pg_definition(definition)
-        )
+    if include_ticket:
+        for name, definition in _PG_TICKET_CHECKS.items():
+            expected_checks[("websocket_tickets", name)] = (
+                _normalize_pg_definition(definition)
+            )
 
     for (table, name), expected in expected_checks.items():
         row = next(
@@ -3941,9 +3964,21 @@ def _pg_constraint_plan(
     return drop, add_fks, add_checks, add_uniques, rename_uniques
 
 
-def _postgresql_upgrade(bind: Any) -> None:
-    _pg_validate_alembic_version_relation(bind)
-    tables = _pg_validate_relation_shapes(bind)
+def _postgresql_reconciliation_plan(
+    bind: Any,
+    *,
+    expected_revision: str = "0007",
+    require_version: bool = True,
+    include_ticket: bool = True,
+) -> dict[str, Any]:
+    if require_version:
+        _pg_validate_alembic_version_relation(bind, expected_revision)
+    required_tables = _PG_REQUIRED_TABLES
+    if not include_ticket:
+        required_tables = frozenset(
+            table for table in required_tables if table != "websocket_tickets"
+        )
+    tables = _pg_validate_relation_shapes(bind, required_tables)
     create_module_runs = "module_runs" not in tables
     create_rate_limit = "rate_limit_events" not in tables
 
@@ -3962,7 +3997,11 @@ def _postgresql_upgrade(bind: Any) -> None:
         add_checks,
         add_uniques,
         rename_uniques,
-    ) = _pg_constraint_plan(bind, tables)
+    ) = _pg_constraint_plan(
+        bind,
+        tables,
+        include_ticket=include_ticket,
+    )
 
     canonical_indexes = {
         table: indexes
@@ -4026,6 +4065,36 @@ def _postgresql_upgrade(bind: Any) -> None:
         ):
             raise RuntimeError(_CATALOG_ERROR)
         drop_indexes.append(("idx_findings_validated", "findings"))
+
+    return {
+        "tables": tables,
+        "findings_alterations": findings_alterations,
+        "rename_credentials": rename_credentials,
+        "create_module_runs": create_module_runs,
+        "create_rate_limit": create_rate_limit,
+        "drop_constraints": drop_constraints,
+        "add_fks": add_fks,
+        "add_checks": add_checks,
+        "add_uniques": add_uniques,
+        "rename_uniques": rename_uniques,
+        "create_indexes": create_indexes,
+        "drop_indexes": drop_indexes,
+    }
+
+
+def _postgresql_upgrade(bind: Any) -> None:
+    plan = _postgresql_reconciliation_plan(bind)
+    findings_alterations = plan["findings_alterations"]
+    rename_credentials = plan["rename_credentials"]
+    create_module_runs = plan["create_module_runs"]
+    create_rate_limit = plan["create_rate_limit"]
+    drop_constraints = plan["drop_constraints"]
+    add_fks = plan["add_fks"]
+    add_checks = plan["add_checks"]
+    add_uniques = plan["add_uniques"]
+    rename_uniques = plan["rename_uniques"]
+    create_indexes = plan["create_indexes"]
+    drop_indexes = plan["drop_indexes"]
 
     if rename_credentials:
         op.alter_column(
@@ -4143,6 +4212,136 @@ def _postgresql_upgrade(bind: Any) -> None:
         op.create_index(name, table, list(columns))
     for name, table in drop_indexes:
         op.drop_index(name, table_name=table)
+
+
+def _require_postgresql_relation_set(
+    bind: Any,
+    expected_tables: set[str],
+) -> None:
+    rows = bind.execute(
+        sa.text(
+            """
+            SELECT relation.relname, relation.relkind::text AS relkind
+            FROM pg_class AS relation
+            JOIN pg_namespace AS namespace
+              ON namespace.oid=relation.relnamespace
+            WHERE namespace.nspname=current_schema()
+              AND relation.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+            """
+        )
+    ).fetchall()
+    expected = {(table, "r") for table in expected_tables}
+    expected.add(("audit_log_id_seq", "S"))
+    if "rate_limit_events" in expected_tables:
+        expected.add(("rate_limit_events_id_seq", "S"))
+    actual = {(str(row[0]), str(row[1])) for row in rows}
+    if actual != expected:
+        raise RuntimeError(_CATALOG_ERROR)
+
+
+def classify_unversioned_catalog(bind: Any) -> str:
+    """Return the sole proven predecessor for a complete unversioned catalog."""
+    dialect = bind.dialect.name
+    if dialect == "sqlite":
+        version_objects = bind.exec_driver_sql(
+            "SELECT 1 FROM sqlite_schema "
+            "WHERE name='alembic_version' OR tbl_name='alembic_version' LIMIT 1"
+        ).first()
+        if version_objects:
+            raise RuntimeError(_CATALOG_ERROR)
+        databases = bind.exec_driver_sql("PRAGMA database_list").fetchall()
+        if len(databases) != 1 or str(databases[0][1]) != "main":
+            raise RuntimeError(_CATALOG_ERROR)
+        if int(bind.exec_driver_sql("PRAGMA foreign_keys").scalar_one()) != 1:
+            raise RuntimeError(_CATALOG_ERROR)
+        tables = {
+            str(row[0])
+            for row in bind.exec_driver_sql(
+                "SELECT name FROM sqlite_schema WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        }
+        generation = "0007" if "websocket_tickets" in tables else "0006"
+        expected = set(_SQLITE_COLUMNS) - {"rate_limit_events"}
+        if generation == "0006":
+            expected.remove("websocket_tickets")
+        if tables != expected:
+            raise RuntimeError(_CATALOG_ERROR)
+        _sqlite_preflight(
+            bind,
+            require_version=False,
+            include_ticket=generation == "0007",
+        )
+        return generation
+    if dialect == "postgresql":
+        version_object = bind.execute(
+            sa.text(
+                """
+                SELECT 1
+                FROM pg_class AS relation
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid=relation.relnamespace
+                WHERE namespace.nspname=current_schema()
+                  AND relation.relname='alembic_version'
+                LIMIT 1
+                """
+            )
+        ).first()
+        if version_object:
+            raise RuntimeError(_CATALOG_ERROR)
+        relation_names = {
+            str(row["table_name"])
+            for row in _pg_relation_rows(bind)
+        }
+        generation = (
+            "0007" if "websocket_tickets" in relation_names else "0006"
+        )
+        expected = set(_PG_REQUIRED_TABLES | _PG_OPTIONAL_TABLES) - {
+            "rate_limit_events"
+        }
+        if generation == "0006":
+            expected.remove("websocket_tickets")
+        if relation_names != expected:
+            raise RuntimeError(_CATALOG_ERROR)
+        _require_postgresql_relation_set(bind, expected)
+        _postgresql_reconciliation_plan(
+            bind,
+            require_version=False,
+            include_ticket=generation == "0007",
+        )
+        return generation
+    raise RuntimeError(_DIALECT_ERROR)
+
+
+def verify_managed_catalog(bind: Any) -> None:
+    """Verify that one selected catalog is exactly managed revision 0008."""
+    dialect = bind.dialect.name
+    if dialect == "sqlite":
+        tables = set(sa.inspect(bind).get_table_names())
+        if tables != set(_SQLITE_COLUMNS) | {"alembic_version"}:
+            raise RuntimeError(_CATALOG_ERROR)
+        if not _sqlite_preflight(bind, expected_revision="0008"):
+            raise RuntimeError(_CATALOG_ERROR)
+        return
+    if dialect == "postgresql":
+        _pg_validate_alembic_version_relation(bind, "0008")
+        expected = set(_PG_REQUIRED_TABLES | _PG_OPTIONAL_TABLES)
+        _require_postgresql_relation_set(
+            bind,
+            expected | {"alembic_version"},
+        )
+        plan = _postgresql_reconciliation_plan(
+            bind,
+            expected_revision="0008",
+        )
+        if set(plan["tables"]) != expected or any(
+            bool(value)
+            for key, value in plan.items()
+            if key != "tables"
+        ):
+            raise RuntimeError(_CATALOG_ERROR)
+        return
+    raise RuntimeError(_DIALECT_ERROR)
 
 
 def upgrade() -> None:

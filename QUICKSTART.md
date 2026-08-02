@@ -438,3 +438,10 @@ reports, and API key lifecycle.
 
 ARES is intended for authorized security testing, lab use, and defensive
 validation only.
+## Database ownership
+
+Fresh databases initialize through Alembic. If ARES reports that an existing
+SQLite or PostgreSQL database requires adoption, stop all workers and follow
+[`docs/database-migrations.md`](docs/database-migrations.md). Do not run a blind
+`alembic stamp`: only audited unversioned generations 6 and 7 are supported, and
+SQLite adoption requires a retained verified backup.

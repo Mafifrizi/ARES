@@ -620,7 +620,12 @@ cd frontend && npm run build
 ```
 
 Do not commit `.env`, `.venv`, local databases, reports with real client data,
-API keys, tokens, or screenshots that expose secrets.
+API keys, tokens, screenshots that expose secrets, or database-adoption backups.
+Persistent databases are Alembic-managed. Existing
+unversioned generation-6/7 databases require the explicit verified adoption
+workflow; startup never stamps them automatically. See
+[`docs/database-migrations.md`](docs/database-migrations.md) before upgrading a
+deployment.
 
 ---
 

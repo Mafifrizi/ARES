@@ -11,7 +11,7 @@ from typing import Any
 
 from alembic import context
 from sqlalchemy import event, pool
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import URL, Connection, make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -178,7 +178,15 @@ async def run_async_migrations() -> None:
 def run_migrations_online() -> None:
     """Run the online migration and sanitize operational diagnostics."""
     try:
-        asyncio.run(run_async_migrations())
+        supplied_connection = config.attributes.get("connection")
+        if supplied_connection is not None:
+            if not isinstance(supplied_connection, Connection):
+                raise _AlembicSanitizedError(
+                    "Invalid caller-owned Alembic connection"
+                )
+            do_run_migrations(supplied_connection)
+        else:
+            asyncio.run(run_async_migrations())
     except (
         asyncio.CancelledError,
         KeyboardInterrupt,

@@ -1,19 +1,20 @@
+"""Explicit operator tooling for canonical Alembic database ownership.
+
+Application startup never invokes the adoption commands in this package.
+Use ``python -m ares.db.migrations --help`` for the fixed noninteractive
+operator surface.
 """
-ARES Database Migrations — Alembic is canonical.
 
-This package previously contained a custom migration runner (runner.py).
-That has been removed. Alembic in migrations/ at repo root is the single
-source of truth for all schema changes.
+from ares.db.migrations.adoption import (
+    SUPPORTED_GENERATIONS,
+    AdoptionExit,
+    AdoptionResult,
+    RuntimeGeneration,
+)
 
-To run migrations:
-    alembic upgrade head           # apply all pending
-    alembic downgrade -1           # roll back one step
-    alembic revision -m "add_x"   # create a new migration
-
-AresDatabase.connect() runs `alembic upgrade head` automatically at startup.
-See: migrations/versions/ for the migration chain.
-"""
-# Nothing to import — Alembic is invoked programmatically via database.py
-
-# No public exports — Alembic is invoked programmatically.
-__all__: list = []
+__all__ = [
+    "AdoptionExit",
+    "AdoptionResult",
+    "RuntimeGeneration",
+    "SUPPORTED_GENERATIONS",
+]

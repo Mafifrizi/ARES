@@ -693,6 +693,53 @@ class AresDatabase:
         return await db.connect()
 
     async def _init_schema(self) -> None:
+        if not self._is_sqlite_uri:
+            from ares.db.migrations.adoption import (
+                AdoptionExit,
+                AdoptionFailure,
+                inspect_sqlite_database,
+            )
+
+            try:
+                ownership = await asyncio.to_thread(
+                    inspect_sqlite_database,
+                    self._db_path,
+                )
+            except AdoptionFailure as exc:
+                if exc.exit_code == AdoptionExit.MANAGED_METADATA:
+                    raise RuntimeError(
+                        "Invalid managed SQLite database metadata"
+                    ) from None
+                raise RuntimeError("Incompatible SQLite database catalog") from None
+
+            if ownership.diagnostic.startswith("ARES-M2B-ADOPTION-READY:"):
+                raise RuntimeError("SQLite database adoption is required")
+            if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0008":
+                return
+            if ownership.exit_code == AdoptionExit.MIGRATION_REQUIRED:
+                if ownership.predecessor not in {
+                    f"{revision:04d}" for revision in range(1, 8)
+                }:
+                    raise RuntimeError(
+                        "Invalid managed SQLite database metadata"
+                    )
+            elif ownership.diagnostic != "ARES-M2B-EMPTY-DATABASE":
+                raise RuntimeError("Incompatible SQLite database catalog")
+
+            if await self._run_alembic_migrations():
+                try:
+                    managed = await asyncio.to_thread(
+                        inspect_sqlite_database,
+                        self._db_path,
+                    )
+                except AdoptionFailure:
+                    raise RuntimeError(
+                        "SQLite managed initialization failed"
+                    ) from None
+                if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0008":
+                    raise RuntimeError("SQLite managed initialization failed")
+                return
+
         async with self._conn.execute(
             "SELECT 1 FROM sqlite_master "
             "WHERE type='table' AND name='websocket_tickets'"
@@ -1067,25 +1114,28 @@ class AresDatabase:
             return False
 
         try:
-            from pathlib import Path
-            from alembic.config import Config as AlembicConfig
+            from types import SimpleNamespace
+
             from alembic import command as alembic_command
+            from alembic.config import Config as AlembicConfig
 
-            repo_root   = Path(__file__).parent.parent.parent
-            alembic_ini = repo_root / "alembic.ini"
-            if not alembic_ini.exists():
-                logger.debug("alembic_ini_not_found", file="alembic.ini")
-                return False
+            from ares.db.migrations.adoption import migration_config
 
-            alembic_cfg = AlembicConfig(str(alembic_ini))
             db_url = f"sqlite:///{self._db_path}"
-            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
 
-            import asyncio
             loop = asyncio.get_running_loop()
+
+            def _upgrade() -> None:
+                with migration_config() as configured:
+                    alembic_cfg: AlembicConfig = configured
+                    alembic_cfg.cmd_opts = SimpleNamespace(
+                        x=[f"db_url={db_url}"]
+                    )
+                    alembic_command.upgrade(alembic_cfg, "head")
+
             await loop.run_in_executor(
                 None,
-                lambda: alembic_command.upgrade(alembic_cfg, "head")
+                _upgrade,
             )
             logger.info(
                 "alembic_migrations_applied",
@@ -1094,15 +1144,12 @@ class AresDatabase:
             return True
 
         except ImportError:
-            logger.debug("alembic_not_installed", hint="pip install alembic")
-            return False
+            raise RuntimeError("SQLite managed initialization failed") from None
         except Exception as exc:
-            logger.warning(
-                "alembic_migration_failed",
-                error_type=type(exc).__name__,
-                fallback="raw_sql_create_if_not_exists",
-            )
-            return False
+            raise RuntimeError(
+                "SQLite managed initialization failed "
+                f"[{type(exc).__name__}]"
+            ) from None
 
     # ── Backup / export ───────────────────────────────────────────────────────
 
