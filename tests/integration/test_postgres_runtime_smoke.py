@@ -784,9 +784,13 @@ def test_postgres_ticket_census_all_zero_and_closed_rendering() -> None:
 
 
 def test_postgres_q78_operation_and_failure_contract_is_closed() -> None:
+    import inspect
+
     from ares.db.postgres import (
         _POSTGRES_Q78_OPERATION_BITS,
+        _POSTGRES_Q78_SPLIT_INDEX_QUERY,
         _POSTGRES_Q78_SUBPHASES,
+        PostgresDatabase,
         _is_postgres_q78_failure,
         _postgres_q78_failure,
     )
@@ -800,6 +804,86 @@ def test_postgres_q78_operation_and_failure_contract_is_closed() -> None:
     _require_fixed(
         operation_map_is_exact,
         "q78 must map exactly to its four source operations",
+    )
+    production_source = inspect.getsource(
+        PostgresDatabase._validate_websocket_ticket_schema
+    )
+    managed_revision_source = inspect.getsource(
+        PostgresDatabase._managed_schema_revision
+    )
+    managed_schema_source = inspect.getsource(
+        PostgresDatabase._validate_managed_schema
+    )
+    managed_constraints_source = inspect.getsource(
+        PostgresDatabase._validate_managed_constraints
+    )
+    managed_serials_source = inspect.getsource(
+        PostgresDatabase._validate_managed_serials
+    )
+    managed_source = "\n".join(
+        (
+            managed_revision_source,
+            managed_schema_source,
+            managed_constraints_source,
+            managed_serials_source,
+        )
+    )
+    syntax_is_portable = (
+        "item(collation, ordinality)" not in _POSTGRES_Q78_SPLIT_INDEX_QUERY
+        and "item(collation, ordinality)" not in production_source
+        and "item(collation_oid, ordinality)"
+        in _POSTGRES_Q78_SPLIT_INDEX_QUERY
+        and "item(collation_oid, ordinality)" in production_source
+    )
+    _require_fixed(
+        syntax_is_portable,
+        "q78 index queries must not use a reserved alias",
+    )
+    managed_syntax_is_portable = (
+        "item(collation, position)" not in managed_source
+        and managed_source.count("item(collation_oid, position)") == 3
+    )
+    _require_fixed(
+        managed_syntax_is_portable,
+        "Managed index queries must not use a reserved alias",
+    )
+    catalog_codecs_are_explicit = (
+        "idx.relkind::text AS index_relkind"
+        in _POSTGRES_Q78_SPLIT_INDEX_QUERY
+        and "idx.relpersistence::text AS index_relpersistence"
+        in _POSTGRES_Q78_SPLIT_INDEX_QUERY
+        and "idx.relkind::text AS index_relkind" in production_source
+        and "idx.relpersistence::text AS index_relpersistence"
+        in production_source
+        and "att.attidentity::text AS attidentity" in production_source
+        and "att.attgenerated::text AS attgenerated" in production_source
+        and "con.contype::text AS contype" in production_source
+        and "con.confupdtype::text AS confupdtype" in production_source
+        and "con.confdeltype::text AS confdeltype" in production_source
+    )
+    _require_fixed(
+        catalog_codecs_are_explicit,
+        "PostgreSQL internal catalog codes require explicit text projections",
+    )
+    managed_catalog_codecs_are_explicit = all(
+        projection in managed_source
+        for projection in (
+            "rel.relkind::text AS relkind",
+            "rel.relpersistence::text AS relpersistence",
+            "index_rel.relkind::text AS index_relkind",
+            "index_rel.relpersistence::text AS index_relpersistence",
+            "con.contype::text AS contype",
+            "con.confupdtype::text AS confupdtype",
+            "con.confdeltype::text AS confdeltype",
+            "sequence_rel.relkind::text AS relkind",
+            "sequence_rel.relpersistence::text AS relpersistence",
+            "owner_att.attidentity::text AS attidentity",
+            "owner_att.attgenerated::text AS attgenerated",
+        )
+    )
+    _require_fixed(
+        managed_catalog_codecs_are_explicit,
+        "Managed catalog codes require explicit text projections",
     )
     subphases_are_distinct = True
     for subphase in _POSTGRES_Q78_SUBPHASES:
@@ -938,6 +1022,29 @@ async def test_postgres_q78_cancellation_propagates() -> None:
     _require_fixed(
         propagated,
         "q78 cancellation must propagate without classification",
+    )
+
+
+def test_postgres_managed_constraint_identifier_normalization() -> None:
+    from ares.db.postgres import _postgres_constraint_definition
+
+    unquoted = _postgres_constraint_definition(
+        "CHECK (isfinite(timestamp))"
+    )
+    quoted_lowercase = _postgres_constraint_definition(
+        'CHECK (isfinite("timestamp"))'
+    )
+    quoted_case_sensitive = _postgres_constraint_definition(
+        'CHECK (isfinite("Timestamp"))'
+    )
+
+    _require_fixed(
+        quoted_lowercase == unquoted,
+        "managed constraint lowercase identifier normalization changed",
+    )
+    _require_fixed(
+        quoted_case_sensitive != unquoted,
+        "managed constraint case-sensitive identifier was weakened",
     )
 
 

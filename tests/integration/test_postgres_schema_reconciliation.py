@@ -1492,6 +1492,20 @@ async def test_real_postgres_managed_startup_preserves_unrelated_objects(
             )
         finally:
             await connection.close()
+        await harness._alembic(target, "upgrade", "0007")
+        connection = await harness._connect(target)
+        try:
+            at_0007 = bool(
+                await connection.fetchval(
+                    "SELECT version_num='0007' FROM alembic_version"
+                )
+            )
+        finally:
+            await connection.close()
+        _require_fixed(
+            at_0007,
+            "Managed-startup fixture must reach revision 0007 before 0008",
+        )
         await harness._alembic(target, "upgrade", "0008")
         connection = await harness._connect(target)
         try:
@@ -1833,7 +1847,10 @@ async def test_real_postgres_managed_catalog_drift_never_falls_back(
         "wrong-sequence-owner-schema": (
             "CREATE SCHEMA ares_runtime_shadow; "
             "CREATE TABLE ares_runtime_shadow.audit_log(id INTEGER NOT NULL); "
+            "ALTER SEQUENCE audit_log_id_seq OWNED BY NONE; "
             "ALTER SEQUENCE audit_log_id_seq "
+            "SET SCHEMA ares_runtime_shadow; "
+            "ALTER SEQUENCE ares_runtime_shadow.audit_log_id_seq "
             "OWNED BY ares_runtime_shadow.audit_log.id"
         ),
         "wrong-sequence-options": (
@@ -2930,7 +2947,10 @@ async def _apply_column_or_relation_mutation(
             CREATE TABLE ares_m0008_shadow.audit_log(
                 id INTEGER NOT NULL
             );
+            ALTER SEQUENCE audit_log_id_seq OWNED BY NONE;
             ALTER SEQUENCE audit_log_id_seq
+            SET SCHEMA ares_m0008_shadow;
+            ALTER SEQUENCE ares_m0008_shadow.audit_log_id_seq
             OWNED BY ares_m0008_shadow.audit_log.id
             """
         )
@@ -3608,6 +3628,11 @@ async def test_real_postgres_invalid_integer_boolean_is_atomic(
         connection = await harness._connect(target)
         try:
             await harness._seed_postgres_contract(connection)
+            if boolean_mutation == "rate-blocked":
+                await connection.execute(
+                    "ALTER TABLE rate_limit_events "
+                    "DROP CONSTRAINT ck_rate_limit_events_blocked_bool"
+                )
             await connection.execute(
                 f'UPDATE "{table}" SET "{column}"=2'  # noqa: S608
             )
@@ -3742,11 +3767,15 @@ async def test_real_postgres_all_managed_timestamps_enforce_finite_values(
                     if catalog is not None
                     else ""
                 )
-                expected_term = f"isfinite({column})"
+                catalog_column = (
+                    f'"{column}"' if column == "timestamp" else column
+                )
+                expected_term = f"isfinite({catalog_column})"
                 catalog_valid = expected_term in definition
                 if nullable:
                     catalog_valid = (
-                        catalog_valid and f"{column}isnull" in definition
+                        catalog_valid
+                        and f"{catalog_column}isnull" in definition
                     )
 
                 finite_update = await connection.execute(

@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -1133,8 +1134,8 @@ SELECT ind.indrelid::bigint AS table_oid,
        idx.relnamespace::bigint AS index_schema_oid,
        idx_nsp.nspname AS index_schema,
        idx.relname AS index_name,
-       idx.relkind AS index_relkind,
-       idx.relpersistence AS index_relpersistence,
+       idx.relkind::text AS index_relkind,
+       idx.relpersistence::text AS index_relpersistence,
        idx.relispartition AS index_is_partition,
        am.amname AS access_method,
        ind.indisunique,
@@ -1181,9 +1182,9 @@ SELECT ind.indrelid::bigint AS table_oid,
            ORDER BY item.ordinality
        ) AS operator_class_namespaces,
        ARRAY(
-           SELECT item.collation=att.attcollation
+           SELECT item.collation_oid=att.attcollation
            FROM unnest(ind.indcollation::oid[]) WITH ORDINALITY
-                AS item(collation, ordinality)
+                AS item(collation_oid, ordinality)
            JOIN unnest(ind.indkey::smallint[]) WITH ORDINALITY
                 AS key(attnum, ordinality)
              ON key.ordinality=item.ordinality
@@ -1960,7 +1961,8 @@ def _postgres_finite_check_name(table: str, column: str) -> str:
 
 
 def _postgres_constraint_definition(value: object) -> str:
-    return " ".join(str(value).split())
+    normalized = " ".join(str(value).split())
+    return re.sub(r'"([a-z_][a-z0-9_]*)"', r"\1", normalized)
 
 
 def _postgres_index_opclass(table: str, column: str) -> str:
@@ -2122,10 +2124,10 @@ class PostgresDatabase:
                    relation_type.oid::bigint AS type_oid,
                    type_nsp.nspname AS type_schema,
                    relation_type.typname AS type_name,
-                   relation_type.typtype,
+                   relation_type.typtype::text AS typtype,
                    relation_type.typrelid::bigint AS type_relation_oid,
-                   rel.relkind,
-                   rel.relpersistence,
+                   rel.relkind::text AS relkind,
+                   rel.relpersistence::text AS relpersistence,
                    rel.relispartition,
                    rel.relrowsecurity,
                    rel.relforcerowsecurity,
@@ -2235,8 +2237,8 @@ class PostgresDatabase:
                        att.atttypmod
                    ) AS data_type,
                    att.attnotnull,
-                   att.attidentity,
-                   att.attgenerated,
+                   att.attidentity::text AS attidentity,
+                   att.attgenerated::text AS attgenerated,
                    att.attisdropped,
                    att.attinhcount,
                    att.attislocal,
@@ -2308,7 +2310,7 @@ class PostgresDatabase:
         primary_rows = await connection.fetch(
             """
             SELECT con.conname,
-                   con.contype,
+                   con.contype::text AS contype,
                    con.convalidated,
                    con.condeferrable,
                    con.condeferred,
@@ -2364,8 +2366,8 @@ class PostgresDatabase:
         version_index_rows = await connection.fetch(
             """
             SELECT index_rel.relname AS index_name,
-                   index_rel.relkind AS index_relkind,
-                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relkind::text AS index_relkind,
+                   index_rel.relpersistence::text AS index_relpersistence,
                    index_rel.relispartition AS index_is_partition,
                    access_method.amname AS access_method,
                    ind.indisunique,
@@ -2408,9 +2410,9 @@ class PostgresDatabase:
                        ORDER BY item.position
                    ) AS operator_class_namespaces,
                    ARRAY(
-                       SELECT item.collation=att.attcollation
+                       SELECT item.collation_oid=att.attcollation
                        FROM unnest(ind.indcollation)
-                            WITH ORDINALITY AS item(collation, position)
+                            WITH ORDINALITY AS item(collation_oid, position)
                        JOIN unnest(ind.indkey)
                             WITH ORDINALITY AS key(attnum, position)
                          ON key.position=item.position
@@ -2535,10 +2537,10 @@ class PostgresDatabase:
                    relation_type.oid::bigint AS type_oid,
                    type_nsp.nspname AS type_schema,
                    relation_type.typname AS type_name,
-                   relation_type.typtype,
+                   relation_type.typtype::text AS typtype,
                    relation_type.typrelid::bigint AS type_relation_oid,
-                   rel.relkind,
-                   rel.relpersistence,
+                   rel.relkind::text AS relkind,
+                   rel.relpersistence::text AS relpersistence,
                    rel.relispartition,
                    rel.relrowsecurity,
                    rel.relforcerowsecurity,
@@ -2673,8 +2675,8 @@ class PostgresDatabase:
             """
             SELECT table_rel.relname AS table_name,
                    index_rel.relname AS index_name,
-                   index_rel.relkind AS index_relkind,
-                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relkind::text AS index_relkind,
+                   index_rel.relpersistence::text AS index_relpersistence,
                    index_rel.relispartition AS index_is_partition,
                    access_method.amname AS access_method,
                    ind.indisunique,
@@ -2728,9 +2730,9 @@ class PostgresDatabase:
                        ORDER BY item.position
                    ) AS operator_class_namespaces,
                    ARRAY(
-                       SELECT item.collation=att.attcollation
+                       SELECT item.collation_oid=att.attcollation
                        FROM unnest(ind.indcollation)
-                            WITH ORDINALITY AS item(collation, position)
+                            WITH ORDINALITY AS item(collation_oid, position)
                        JOIN unnest(ind.indkey)
                             WITH ORDINALITY AS key(attnum, position)
                          ON key.position=item.position
@@ -2830,7 +2832,7 @@ class PostgresDatabase:
             """
             SELECT source.relname AS table_name,
                    con.conname,
-                   con.contype,
+                   con.contype::text AS contype,
                    con.convalidated,
                    con.condeferrable,
                    con.condeferred,
@@ -2844,8 +2846,8 @@ class PostgresDatabase:
                         AND att.attnum=key.attnum
                        ORDER BY key.position
                    ) AS local_columns,
-                   index_rel.relkind AS index_relkind,
-                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relkind::text AS index_relkind,
+                   index_rel.relpersistence::text AS index_relpersistence,
                    index_rel.relispartition AS index_is_partition,
                    ind.indisunique,
                    ind.indisprimary,
@@ -2929,7 +2931,7 @@ class PostgresDatabase:
             SELECT source_nsp.nspname AS source_schema,
                    source.relname AS table_name,
                    con.conname,
-                   con.contype,
+                   con.contype::text AS contype,
                    con.convalidated,
                    con.condeferrable,
                    con.condeferred,
@@ -2937,8 +2939,8 @@ class PostgresDatabase:
                    pg_get_constraintdef(con.oid, true) AS definition,
                    reference_nsp.nspname AS referenced_schema,
                    reference.relname AS referenced_table,
-                   con.confupdtype,
-                   con.confdeltype,
+                   con.confupdtype::text AS confupdtype,
+                   con.confdeltype::text AS confdeltype,
                    ARRAY(
                        SELECT attribute.attname
                        FROM unnest(con.conkey)
@@ -2959,8 +2961,8 @@ class PostgresDatabase:
                    ) AS remote_columns,
                    index_nsp.nspname AS index_schema,
                    index_rel.relname AS index_name,
-                   index_rel.relkind AS index_relkind,
-                   index_rel.relpersistence AS index_relpersistence,
+                   index_rel.relkind::text AS index_relkind,
+                   index_rel.relpersistence::text AS index_relpersistence,
                    index_rel.relispartition AS index_is_partition,
                    access_method.amname AS access_method,
                    ind.indisunique,
@@ -3002,9 +3004,9 @@ class PostgresDatabase:
                        ORDER BY item.position
                    ) AS operator_class_namespaces,
                    ARRAY(
-                       SELECT item.collation=attribute.attcollation
+                       SELECT item.collation_oid=attribute.attcollation
                        FROM unnest(ind.indcollation)
-                            WITH ORDINALITY AS item(collation, position)
+                            WITH ORDINALITY AS item(collation_oid, position)
                        JOIN unnest(ind.indkey)
                             WITH ORDINALITY AS key(attnum, position)
                          ON key.position=item.position
@@ -3318,8 +3320,8 @@ class PostgresDatabase:
             """
             SELECT sequence_nsp.nspname AS sequence_schema,
                    sequence_rel.relname AS sequence_name,
-                   sequence_rel.relkind,
-                   sequence_rel.relpersistence,
+                   sequence_rel.relkind::text AS relkind,
+                   sequence_rel.relpersistence::text AS relpersistence,
                    format_type(sequence_def.seqtypid, NULL) AS data_type,
                    sequence_def.seqstart,
                    sequence_def.seqincrement,
@@ -3330,14 +3332,14 @@ class PostgresDatabase:
                    owner_nsp.nspname AS owner_schema,
                    owner_rel.relname AS owner_table,
                    owner_att.attname AS owner_column,
-                   dependency.deptype,
+                   dependency.deptype::text AS deptype,
                    format_type(
                        owner_att.atttypid,
                        owner_att.atttypmod
                    ) AS owner_data_type,
                    owner_att.attnotnull,
-                   owner_att.attidentity,
-                   owner_att.attgenerated,
+                   owner_att.attidentity::text AS attidentity,
+                   owner_att.attgenerated::text AS attgenerated,
                    owner_att.attcollation=owner_type.typcollation
                        AS collation_is_default,
                    pg_get_expr(
@@ -3649,8 +3651,8 @@ class PostgresDatabase:
             SELECT att.attname AS column_name,
                    pg_catalog.format_type(att.atttypid, att.atttypmod) AS data_type,
                    att.attnotnull,
-                   att.attidentity,
-                   att.attgenerated,
+                   att.attidentity::text AS attidentity,
+                   att.attgenerated::text AS attgenerated,
                    att.attcollation=typ.typcollation AS collation_is_default,
                    pg_get_expr(def.adbin, def.adrelid) AS column_default
             FROM pg_attribute AS att
@@ -3740,7 +3742,7 @@ class PostgresDatabase:
         try:
             constraint_rows = await connection.fetch(
                 """
-            SELECT con.conname, con.contype,
+            SELECT con.conname, con.contype::text AS contype,
                    con.conrelid::bigint AS table_oid,
                    con.confrelid::bigint AS referenced_oid,
                    con.conindid::bigint AS constraint_index_oid,
@@ -3766,7 +3768,8 @@ class PostgresDatabase:
                         AND remote_att.attnum=key.attnum
                        ORDER BY key.ordinality
                    ) AS remote_columns,
-                   con.confupdtype, con.confdeltype
+                   con.confupdtype::text AS confupdtype,
+                   con.confdeltype::text AS confdeltype
             FROM pg_constraint AS con
             LEFT JOIN pg_class AS ref_rel ON ref_rel.oid=con.confrelid
             LEFT JOIN pg_namespace AS ref_nsp ON ref_nsp.oid=ref_rel.relnamespace
@@ -3853,8 +3856,8 @@ class PostgresDatabase:
                    idx.relnamespace::bigint AS index_schema_oid,
                    idx_nsp.nspname AS index_schema,
                    idx.relname AS index_name,
-                   idx.relkind AS index_relkind,
-                   idx.relpersistence AS index_relpersistence,
+                   idx.relkind::text AS index_relkind,
+                   idx.relpersistence::text AS index_relpersistence,
                    idx.relispartition AS index_is_partition,
                    am.amname AS access_method,
                    ind.indisunique,
@@ -3901,9 +3904,9 @@ class PostgresDatabase:
                        ORDER BY item.ordinality
                    ) AS operator_class_namespaces,
                    ARRAY(
-                       SELECT item.collation=att.attcollation
+                       SELECT item.collation_oid=att.attcollation
                        FROM unnest(ind.indcollation) WITH ORDINALITY
-                            AS item(collation, ordinality)
+                            AS item(collation_oid, ordinality)
                        JOIN unnest(ind.indkey) WITH ORDINALITY
                             AS key(attnum, ordinality)
                          ON key.ordinality=item.ordinality

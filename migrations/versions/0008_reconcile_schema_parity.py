@@ -12,6 +12,7 @@ Alembic contract.  Unknown or unsafe catalogs fail without mutation.
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import sqlalchemy as sa
@@ -21,6 +22,7 @@ revision: str = "0008"
 down_revision: str | None = "0007"
 branch_labels: str | None = None
 depends_on: str | None = None
+
 
 _CATALOG_ERROR = "Incompatible catalog for migration 0008"
 _DATA_ERROR = "Unsafe data for migration 0008"
@@ -412,6 +414,27 @@ def _normalize_default(value: object) -> str | None:
     ):
         normalized = normalized[1:-1].replace("''", "'")
     return " ".join(normalized.split())
+
+
+def _pg_defaults_match(
+    actual: str | None,
+    expected: str | None,
+    data_type: str,
+) -> bool:
+    if actual == expected:
+        return True
+    if data_type != "double precision" or actual is None or expected is None:
+        return False
+    try:
+        actual_number = Decimal(actual)
+        expected_number = Decimal(expected)
+    except InvalidOperation:
+        return False
+    return (
+        actual_number.is_finite()
+        and expected_number.is_finite()
+        and actual_number == expected_number
+    )
 
 
 def _sqlite_columns(bind: Any, table: str) -> tuple[_Column, ...]:
@@ -2401,10 +2424,10 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                     relation_type.oid::bigint AS type_oid,
                     type_namespace.nspname AS type_schema,
                     relation_type.typname AS type_name,
-                    relation_type.typtype,
+                    relation_type.typtype::text AS typtype,
                     relation_type.typrelid::bigint AS type_relation_oid,
-                    relation.relkind,
-                    relation.relpersistence,
+                    relation.relkind::text AS relkind,
+                    relation.relpersistence::text AS relpersistence,
                     relation.relispartition,
                     relation.relrowsecurity,
                     relation.relforcerowsecurity,
@@ -2497,8 +2520,8 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                         attribute.atttypmod
                     ) AS data_type,
                     attribute.attnotnull,
-                    attribute.attidentity,
-                    attribute.attgenerated,
+                    attribute.attidentity::text AS attidentity,
+                    attribute.attgenerated::text AS attgenerated,
                     attribute.attisdropped,
                     attribute.attinhcount,
                     attribute.attislocal,
@@ -2571,7 +2594,7 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                 SELECT
                     constraint_record.oid::bigint AS constraint_oid,
                     constraint_record.conname AS constraint_name,
-                    constraint_record.contype,
+                    constraint_record.contype::text AS contype,
                     constraint_record.convalidated,
                     constraint_record.condeferrable,
                     constraint_record.condeferred,
@@ -2636,8 +2659,8 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                     index_record.oid::bigint AS index_oid,
                     index_record.relname AS index_name,
                     index_namespace.nspname AS index_schema,
-                    index_record.relkind AS index_relkind,
-                    index_record.relpersistence AS index_relpersistence,
+                    index_record.relkind::text AS index_relkind,
+                    index_record.relpersistence::text AS index_relpersistence,
                     index_record.relispartition AS index_is_partition,
                     access_method.amname AS access_method,
                     index_definition.indrelid::bigint AS table_oid,
@@ -2650,7 +2673,7 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                     index_definition.indnatts,
                     constraint_record.oid::bigint AS constraint_oid,
                     constraint_record.conname AS constraint_name,
-                    constraint_record.contype,
+                    constraint_record.contype::text AS contype,
                     ARRAY(
                         SELECT attribute.attname
                         FROM unnest(index_definition.indkey)
@@ -2686,9 +2709,9 @@ def _pg_validate_alembic_version_relation(bind: Any) -> None:
                         ORDER BY item.position
                     ) AS operator_class_namespaces,
                     ARRAY(
-                        SELECT item.collation=attribute.attcollation
+                        SELECT item.collation_oid=attribute.attcollation
                         FROM unnest(index_definition.indcollation)
-                             WITH ORDINALITY AS item(collation, position)
+                             WITH ORDINALITY AS item(collation_oid, position)
                         JOIN unnest(index_definition.indkey)
                              WITH ORDINALITY AS key(attnum, position)
                           ON key.position=item.position
@@ -2810,8 +2833,8 @@ def _pg_relation_rows(bind: Any) -> list[dict[str, object]]:
                 SELECT
                     relation.oid::bigint AS relation_oid,
                     relation.relname AS table_name,
-                    relation.relkind,
-                    relation.relpersistence,
+                    relation.relkind::text AS relkind,
+                    relation.relpersistence::text AS relpersistence,
                     relation.relispartition,
                     relation.relrowsecurity,
                     relation.relforcerowsecurity,
@@ -2902,7 +2925,7 @@ def _pg_validate_relation_shapes(bind: Any) -> set[str]:
                 """
                 SELECT
                     type_record.typname AS type_name,
-                    type_record.typtype,
+                    type_record.typtype::text AS typtype,
                     type_record.typrelid::bigint AS type_relation_oid,
                     namespace.nspname AS type_schema
                 FROM pg_type AS type_record
@@ -2962,8 +2985,8 @@ def _pg_column_rows(bind: Any) -> list[dict[str, object]]:
                         attribute.atttypmod
                     ) AS data_type,
                     attribute.attnotnull,
-                    attribute.attidentity,
-                    attribute.attgenerated,
+                    attribute.attidentity::text AS attidentity,
+                    attribute.attgenerated::text AS attgenerated,
                     attribute.attisdropped,
                     attribute.attinhcount,
                     attribute.attislocal,
@@ -3112,7 +3135,11 @@ def _pg_validate_column_metadata(
             or str(row["data_type"]).lower()
             != _pg_column_type(table, column)
             or not nullable_matches
-            or actual_default != expected_default
+            or not _pg_defaults_match(
+                actual_default,
+                expected_default,
+                str(row["data_type"]).lower(),
+            )
             or str(row["attidentity"])
             or str(row["attgenerated"])
             or bool(row["attisdropped"])
@@ -3192,8 +3219,8 @@ def _pg_validate_serial_sequences(
                 SELECT
                     namespace.nspname AS sequence_schema,
                     sequence_record.relname AS sequence_name,
-                    sequence_record.relkind,
-                    sequence_record.relpersistence,
+                    sequence_record.relkind::text AS relkind,
+                    sequence_record.relpersistence::text AS relpersistence,
                     format_type(
                         sequence_definition.seqtypid,
                         NULL
@@ -3207,7 +3234,7 @@ def _pg_validate_serial_sequences(
                     owner_namespace.nspname AS owner_schema,
                     owner_table.relname AS owner_table,
                     owner_column.attname AS owner_column,
-                    dependency.deptype
+                    dependency.deptype::text AS deptype
                 FROM pg_class AS sequence_record
                 JOIN pg_namespace AS namespace
                   ON namespace.oid=sequence_record.relnamespace
@@ -3296,7 +3323,7 @@ def _pg_constraint_rows(bind: Any) -> list[dict[str, object]]:
                 SELECT
                     relation.relname AS table_name,
                     constraint_record.conname AS constraint_name,
-                    constraint_record.contype AS constraint_type,
+                    constraint_record.contype::text AS constraint_type,
                     constraint_record.convalidated AS is_validated,
                     constraint_record.condeferrable AS is_deferrable,
                     constraint_record.condeferred AS is_deferred,
@@ -3324,8 +3351,8 @@ def _pg_index_rows(bind: Any) -> list[dict[str, object]]:
                 SELECT
                     table_record.relname AS table_name,
                     index_record.relname AS index_name,
-                    index_record.relkind AS index_relkind,
-                    index_record.relpersistence AS index_relpersistence,
+                    index_record.relkind::text AS index_relkind,
+                    index_record.relpersistence::text AS index_relpersistence,
                     index_record.relispartition AS index_is_partition,
                     access_method.amname AS access_method,
                     index_definition.indisunique AS is_unique,
@@ -3370,9 +3397,9 @@ def _pg_index_rows(bind: Any) -> list[dict[str, object]]:
                         ORDER BY item.position
                     ) AS operator_class_namespaces,
                     ARRAY(
-                        SELECT item.collation=attribute.attcollation
+                        SELECT item.collation_oid=attribute.attcollation
                         FROM unnest(index_definition.indcollation)
-                             WITH ORDINALITY AS item(collation, position)
+                             WITH ORDINALITY AS item(collation_oid, position)
                         JOIN unnest(index_definition.indkey)
                              WITH ORDINALITY AS key(attnum, position)
                           ON key.position=item.position
@@ -3419,7 +3446,7 @@ def _pg_reject_reserved_index_collisions(
                 SELECT
                     named_record.relname AS reserved_name,
                     namespace.nspname AS reserved_schema,
-                    named_record.relkind,
+                    named_record.relkind::text AS relkind,
                     index_definition.indexrelid IS NOT NULL AS is_index,
                     table_namespace.nspname AS table_schema,
                     table_record.relname AS table_name,
@@ -3530,6 +3557,7 @@ def _pg_index_opclass(table: str, column: str) -> str:
         return "float8_ops"
     if (table, column) in {
         ("findings", "false_positive"),
+        ("findings", "validated"),
         ("rate_limit_events", "blocked"),
     }:
         return "int4_ops"

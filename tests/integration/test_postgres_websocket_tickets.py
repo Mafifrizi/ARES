@@ -990,8 +990,8 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
         SELECT rel.oid::bigint AS table_oid,
                nsp.oid::bigint AS schema_oid,
                nsp.nspname AS schema_name,
-               rel.relkind,
-               rel.relpersistence,
+               rel.relkind::text AS relkind,
+               rel.relpersistence::text AS relpersistence,
                rel.relispartition,
                rel.relrowsecurity,
                rel.relforcerowsecurity,
@@ -1031,8 +1031,8 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
         SELECT att.attname AS name,
                pg_catalog.format_type(att.atttypid, att.atttypmod) AS type,
                att.attnotnull,
-               att.attidentity,
-               att.attgenerated,
+               att.attidentity::text AS attidentity,
+               att.attgenerated::text AS attgenerated,
                att.attcollation=typ.typcollation AS collation_is_default,
                pg_get_expr(def.adbin, def.adrelid) AS default_value
         FROM pg_attribute AS att
@@ -1048,7 +1048,7 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
     )
     constraint_rows = await connection.fetch(
         """
-        SELECT con.conname, con.contype,
+        SELECT con.conname, con.contype::text AS contype,
                con.conrelid::bigint AS table_oid,
                con.confrelid::bigint AS referenced_oid,
                con.conindid::bigint AS constraint_index_oid,
@@ -1074,7 +1074,8 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
                     AND remote_att.attnum=key.attnum
                    ORDER BY key.ordinality
                ) AS remote_columns,
-               con.confupdtype, con.confdeltype
+               con.confupdtype::text AS confupdtype,
+               con.confdeltype::text AS confdeltype
         FROM pg_constraint AS con
         LEFT JOIN pg_class AS ref_rel ON ref_rel.oid=con.confrelid
         LEFT JOIN pg_namespace AS ref_nsp ON ref_nsp.oid=ref_rel.relnamespace
@@ -1090,8 +1091,8 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
                idx.relnamespace::bigint AS index_schema_oid,
                idx_nsp.nspname=current_schema() AS index_schema_is_local,
                idx.relname AS name,
-               idx.relkind,
-               idx.relpersistence,
+               idx.relkind::text AS relkind,
+               idx.relpersistence::text AS relpersistence,
                idx.relispartition,
                am.amname,
                ind.indisunique, ind.indisprimary,
@@ -1130,9 +1131,9 @@ async def _ticket_catalog_fingerprint(connection: Any) -> dict[str, object]:
                    ORDER BY item.ordinality
                ) AS opclass_namespaces,
                ARRAY(
-                   SELECT item.collation=att.attcollation
+                   SELECT item.collation_oid=att.attcollation
                    FROM unnest(ind.indcollation) WITH ORDINALITY
-                        AS item(collation, ordinality)
+                        AS item(collation_oid, ordinality)
                    JOIN unnest(ind.indkey) WITH ORDINALITY
                         AS key(attnum, ordinality)
                      ON key.ordinality=item.ordinality
@@ -1618,22 +1619,22 @@ async def test_postgres_ticket_timestamps_reject_both_infinities() -> None:
             for statement in (
                 """
                 UPDATE websocket_tickets
-                SET bearer_expires_at=$2::timestamptz
+                SET bearer_expires_at=$2::text::timestamptz
                 WHERE ticket_hash=$1
                 """,
                 """
                 UPDATE websocket_tickets
-                SET created_at=$2::timestamptz
+                SET created_at=$2::text::timestamptz
                 WHERE ticket_hash=$1
                 """,
                 """
                 UPDATE websocket_tickets
-                SET expires_at=$2::timestamptz
+                SET expires_at=$2::text::timestamptz
                 WHERE ticket_hash=$1
                 """,
                 """
                 UPDATE websocket_tickets
-                SET consumed_at=$2::timestamptz
+                SET consumed_at=$2::text::timestamptz
                 WHERE ticket_hash=$1
                 """,
             ):
@@ -3238,6 +3239,8 @@ async def test_postgres_revision_0007_ownership_and_0008_compatibility(
 
 @pytest.mark.asyncio
 async def test_postgres_partial_ticket_schema_fails_clearly() -> None:
+    from ares.db.postgres import _PostgresStartupDiagnosticError
+
     async with _postgres_harness() as harness:
         database = harness.database
         async with database._pool.acquire() as connection:
@@ -3263,11 +3266,20 @@ async def test_postgres_partial_ticket_schema_fails_clearly() -> None:
             after_failure = await _ticket_catalog_fingerprint(connection)
             reusable = await connection.fetchval("SELECT 1")
         _require_fixed(
-            failure_type is RuntimeError
-            and failure_message_is_fixed
-            and incompatible == after_failure
-            and reusable == 1,
-            "partial PostgreSQL ticket schema did not fail clearly",
+            failure_type is _PostgresStartupDiagnosticError,
+            "partial PostgreSQL ticket schema failure type changed",
+        )
+        _require_fixed(
+            failure_message_is_fixed,
+            "partial PostgreSQL ticket schema failure message changed",
+        )
+        _require_fixed(
+            incompatible == after_failure,
+            "partial PostgreSQL ticket schema mutated after rejection",
+        )
+        _require_fixed(
+            reusable == 1,
+            "partial PostgreSQL ticket schema connection was not reusable",
         )
 
 
@@ -3426,6 +3438,8 @@ async def test_postgres_partial_ticket_schema_fails_clearly() -> None:
 async def test_postgres_validator_rejects_near_compatible_catalogs(
     mutation: str,
 ) -> None:
+    from ares.db.postgres import _PostgresStartupDiagnosticError
+
     async with _postgres_harness() as harness:
         database = harness.database
         async with database._pool.acquire() as connection:
@@ -3444,7 +3458,7 @@ async def test_postgres_validator_rejects_near_compatible_catalogs(
             after_failure = await _ticket_catalog_fingerprint(connection)
             reusable = await connection.fetchval("SELECT 1")
         _require_fixed(
-            failure_type is RuntimeError
+            failure_type is _PostgresStartupDiagnosticError
             and fixed_message
             and incompatible == after_failure
             and reusable == 1,
@@ -3872,6 +3886,8 @@ async def _ticket_rows_for_metadata_mutation(
 async def test_postgres_rejects_security_altering_relation_metadata(
     mutation: str,
 ) -> None:
+    from ares.db.postgres import _PostgresStartupDiagnosticError
+
     async with _postgres_harness() as harness:
         database = harness.database
         user_id, username, campaign_id, _other_id, _key_id = (
@@ -3992,7 +4008,7 @@ async def test_postgres_rejects_security_altering_relation_metadata(
             _require_fixed(
                 mutation_exists
                 and trigger_would_enable_replay
-                and failure_type is RuntimeError
+                and failure_type is _PostgresStartupDiagnosticError
                 and fixed_message
                 and pool_was_cleared
                 and startup_preserved_state

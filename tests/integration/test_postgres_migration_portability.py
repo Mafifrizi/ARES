@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -1931,8 +1932,8 @@ async def _postgres_isolation_fingerprint(
                 SELECT
                     namespace.nspname AS schema_name,
                     relation.relname AS relation_name,
-                    relation.relkind AS relation_kind,
-                    relation.relpersistence AS persistence
+                    relation.relkind::text AS relation_kind,
+                    relation.relpersistence::text AS persistence
                 FROM pg_class AS relation
                 JOIN pg_namespace AS namespace
                   ON namespace.oid=relation.relnamespace
@@ -1963,8 +1964,8 @@ async def _postgres_isolation_fingerprint(
                         default_value.adbin,
                         default_value.adrelid
                     ) AS default_expression,
-                    attribute.attidentity AS identity_kind,
-                    attribute.attgenerated AS generated_kind
+                    attribute.attidentity::text AS identity_kind,
+                    attribute.attgenerated::text AS generated_kind
                 FROM pg_attribute AS attribute
                 JOIN pg_class AS relation
                   ON relation.oid=attribute.attrelid
@@ -1992,7 +1993,7 @@ async def _postgres_isolation_fingerprint(
                     namespace.nspname AS schema_name,
                     relation.relname AS relation_name,
                     constraint_value.conname AS constraint_name,
-                    constraint_value.contype AS constraint_type,
+                    constraint_value.contype::text AS constraint_type,
                     pg_get_constraintdef(
                         constraint_value.oid,
                         true
@@ -2199,7 +2200,11 @@ def _normalize_postgres_expression(value: str) -> str:
     return normalized.replace("(", "").replace(")", "")
 
 
-def _postgres_default_kind(value: object) -> str | None:
+def _postgres_default_kind(
+    value: object,
+    *,
+    data_type: str,
+) -> str | None:
     if value is None:
         return None
     normalized = str(value).strip()
@@ -2216,6 +2221,16 @@ def _postgres_default_kind(value: object) -> str | None:
     normalized = normalized.strip()
     if len(normalized) >= 2 and normalized[0] == normalized[-1] == "'":
         normalized = normalized[1:-1].replace("''", "'")
+    if data_type == "double precision":
+        try:
+            numeric = Decimal(normalized)
+        except InvalidOperation:
+            pass
+        else:
+            if numeric.is_finite():
+                normalized = format(numeric, "f")
+                if "." not in normalized:
+                    normalized += ".0"
     return f"literal:{normalized}"
 
 
@@ -2241,7 +2256,10 @@ async def _postgres_catalog_contract(
             str(row["column_name"]),
             str(row["data_type"]),
             str(row["is_nullable"]) == "YES",
-            _postgres_default_kind(row["column_default"]),
+            _postgres_default_kind(
+                row["column_default"],
+                data_type=str(row["data_type"]),
+            ),
         )
         for row in await connection.fetch(
             """
@@ -2270,18 +2288,18 @@ async def _postgres_catalog_contract(
                 relation.relname AS table_name,
                 ARRAY(
                     SELECT attribute.attname
-                    FROM unnest(constraint.conkey)
+                    FROM unnest(constraint_record.conkey)
                         WITH ORDINALITY AS key(attnum, position)
                     JOIN pg_attribute AS attribute
-                      ON attribute.attrelid=constraint.conrelid
+                      ON attribute.attrelid=constraint_record.conrelid
                      AND attribute.attnum=key.attnum
                     ORDER BY key.position
                 ) AS columns
-            FROM pg_constraint AS constraint
+            FROM pg_constraint AS constraint_record
             JOIN pg_class AS relation
-              ON relation.oid=constraint.conrelid
+              ON relation.oid=constraint_record.conrelid
             WHERE relation.relnamespace=current_schema()::regnamespace
-              AND constraint.contype='p'
+              AND constraint_record.contype='p'
               AND relation.relname <> 'alembic_version'
             ORDER BY relation.relname
             """
@@ -2297,22 +2315,22 @@ async def _postgres_catalog_contract(
             """
             SELECT
                 relation.relname AS table_name,
-                constraint.conname AS constraint_name,
+                constraint_record.conname AS constraint_name,
                 ARRAY(
                     SELECT attribute.attname
-                    FROM unnest(constraint.conkey)
+                    FROM unnest(constraint_record.conkey)
                         WITH ORDINALITY AS key(attnum, position)
                     JOIN pg_attribute AS attribute
-                      ON attribute.attrelid=constraint.conrelid
+                      ON attribute.attrelid=constraint_record.conrelid
                      AND attribute.attnum=key.attnum
                     ORDER BY key.position
                 ) AS columns
-            FROM pg_constraint AS constraint
+            FROM pg_constraint AS constraint_record
             JOIN pg_class AS relation
-              ON relation.oid=constraint.conrelid
+              ON relation.oid=constraint_record.conrelid
             WHERE relation.relnamespace=current_schema()::regnamespace
-              AND constraint.contype='u'
-            ORDER BY relation.relname, constraint.conname
+              AND constraint_record.contype='u'
+            ORDER BY relation.relname, constraint_record.conname
             """
         )
     )
@@ -2326,14 +2344,14 @@ async def _postgres_catalog_contract(
             """
             SELECT
                 relation.relname AS table_name,
-                constraint.conname AS constraint_name,
-                pg_get_constraintdef(constraint.oid) AS definition
-            FROM pg_constraint AS constraint
+                constraint_record.conname AS constraint_name,
+                pg_get_constraintdef(constraint_record.oid) AS definition
+            FROM pg_constraint AS constraint_record
             JOIN pg_class AS relation
-              ON relation.oid=constraint.conrelid
+              ON relation.oid=constraint_record.conrelid
             WHERE relation.relnamespace=current_schema()::regnamespace
-              AND constraint.contype='c'
-            ORDER BY relation.relname, constraint.conname
+              AND constraint_record.contype='c'
+            ORDER BY relation.relname, constraint_record.conname
             """
         )
     )
@@ -2351,48 +2369,48 @@ async def _postgres_catalog_contract(
             """
             SELECT
                 source.relname AS table_name,
-                constraint.conname AS constraint_name,
+                constraint_record.conname AS constraint_name,
                 ARRAY(
                     SELECT attribute.attname
-                    FROM unnest(constraint.conkey)
+                    FROM unnest(constraint_record.conkey)
                         WITH ORDINALITY AS key(attnum, position)
                     JOIN pg_attribute AS attribute
-                      ON attribute.attrelid=constraint.conrelid
+                      ON attribute.attrelid=constraint_record.conrelid
                      AND attribute.attnum=key.attnum
                     ORDER BY key.position
                 ) AS local_columns,
                 target.relname AS remote_table,
                 ARRAY(
                     SELECT attribute.attname
-                    FROM unnest(constraint.confkey)
+                    FROM unnest(constraint_record.confkey)
                         WITH ORDINALITY AS key(attnum, position)
                     JOIN pg_attribute AS attribute
-                      ON attribute.attrelid=constraint.confrelid
+                      ON attribute.attrelid=constraint_record.confrelid
                      AND attribute.attnum=key.attnum
                     ORDER BY key.position
                 ) AS remote_columns,
-                CASE constraint.confupdtype
+                CASE constraint_record.confupdtype
                     WHEN 'a' THEN 'NO ACTION'
                     WHEN 'r' THEN 'RESTRICT'
                     WHEN 'c' THEN 'CASCADE'
                     WHEN 'n' THEN 'SET NULL'
                     WHEN 'd' THEN 'SET DEFAULT'
                 END AS update_action,
-                CASE constraint.confdeltype
+                CASE constraint_record.confdeltype
                     WHEN 'a' THEN 'NO ACTION'
                     WHEN 'r' THEN 'RESTRICT'
                     WHEN 'c' THEN 'CASCADE'
                     WHEN 'n' THEN 'SET NULL'
                     WHEN 'd' THEN 'SET DEFAULT'
                 END AS delete_action
-            FROM pg_constraint AS constraint
+            FROM pg_constraint AS constraint_record
             JOIN pg_class AS source
-              ON source.oid=constraint.conrelid
+              ON source.oid=constraint_record.conrelid
             JOIN pg_class AS target
-              ON target.oid=constraint.confrelid
+              ON target.oid=constraint_record.confrelid
             WHERE source.relnamespace=current_schema()::regnamespace
-              AND constraint.contype='f'
-            ORDER BY source.relname, constraint.conname
+              AND constraint_record.contype='f'
+            ORDER BY source.relname, constraint_record.conname
             """
         )
     )
@@ -2435,8 +2453,8 @@ async def _postgres_catalog_contract(
               ON index_relation.oid=index_catalog.indexrelid
             WHERE table_relation.relnamespace=current_schema()::regnamespace
               AND NOT EXISTS (
-                  SELECT 1 FROM pg_constraint AS constraint
-                  WHERE constraint.conindid=index_catalog.indexrelid
+                  SELECT 1 FROM pg_constraint AS constraint_record
+                  WHERE constraint_record.conindid=index_catalog.indexrelid
               )
             ORDER BY table_relation.relname, index_relation.relname
             """
@@ -4681,20 +4699,20 @@ async def test_postgres_0006_catalog_types_defaults_fks_and_indexes() -> None:
                     source.relname AS source_table,
                     source_column.attname AS source_column,
                     target.relname AS target_table,
-                    CASE constraint.confdeltype
+                    CASE constraint_record.confdeltype
                         WHEN 'c' THEN 'CASCADE'
                         WHEN 'n' THEN 'SET NULL'
                         ELSE 'OTHER'
                     END AS delete_action
-                FROM pg_constraint AS constraint
+                FROM pg_constraint AS constraint_record
                 JOIN pg_class AS source
-                  ON source.oid=constraint.conrelid
+                  ON source.oid=constraint_record.conrelid
                 JOIN pg_class AS target
-                  ON target.oid=constraint.confrelid
+                  ON target.oid=constraint_record.confrelid
                 JOIN pg_attribute AS source_column
                   ON source_column.attrelid=source.oid
-                 AND source_column.attnum=constraint.conkey[1]
-                WHERE constraint.contype='f'
+                 AND source_column.attnum=constraint_record.conkey[1]
+                WHERE constraint_record.contype='f'
                   AND source.relnamespace=current_schema()::regnamespace
                 """
             )
@@ -4739,12 +4757,13 @@ async def test_postgres_0006_catalog_types_defaults_fks_and_indexes() -> None:
                 for row in await connection.fetch(
                     """
                     SELECT table_class.relname AS table_name
-                    FROM pg_constraint AS constraint
+                    FROM pg_constraint AS constraint_record
                     JOIN pg_class AS table_class
-                      ON table_class.oid=constraint.conrelid
-                    WHERE constraint.contype='p'
+                      ON table_class.oid=constraint_record.conrelid
+                    WHERE constraint_record.contype='p'
                       AND table_class.relnamespace=
                           current_schema()::regnamespace
+                      AND table_class.relname <> 'alembic_version'
                     """
                 )
             }
@@ -4839,13 +4858,13 @@ async def test_postgres_all_timestamp_columns_reject_infinity() -> None:
                 """
                 SELECT
                     relation.relname AS table_name,
-                    constraint.conname AS constraint_name,
-                    pg_get_constraintdef(constraint.oid) AS definition
-                FROM pg_constraint AS constraint
+                    constraint_record.conname AS constraint_name,
+                    pg_get_constraintdef(constraint_record.oid) AS definition
+                FROM pg_constraint AS constraint_record
                 JOIN pg_class AS relation
-                  ON relation.oid=constraint.conrelid
+                  ON relation.oid=constraint_record.conrelid
                 WHERE relation.relnamespace=current_schema()::regnamespace
-                  AND constraint.contype='c'
+                  AND constraint_record.contype='c'
                 """
             )
             observed_constraints = {
@@ -5365,12 +5384,12 @@ async def test_postgres_0003_blocked_integer_contract_is_enforced() -> None:
             )
             check_definition = await connection.fetchval(
                 """
-                SELECT pg_get_constraintdef(constraint.oid)
-                FROM pg_constraint AS constraint
+                SELECT pg_get_constraintdef(constraint_record.oid)
+                FROM pg_constraint AS constraint_record
                 JOIN pg_class AS relation
-                  ON relation.oid=constraint.conrelid
+                  ON relation.oid=constraint_record.conrelid
                 WHERE relation.relname='rate_limit_events'
-                  AND constraint.conname='ck_rate_limit_events_blocked_bool'
+                  AND constraint_record.conname='ck_rate_limit_events_blocked_bool'
                 """
             )
             check_is_semantic = (
@@ -6199,15 +6218,15 @@ async def _postgres_credential_catalog_fingerprint(
         for row in await connection.fetch(
             """
             SELECT
-                constraint.conname,
-                constraint.contype,
-                pg_get_constraintdef(constraint.oid)
-            FROM pg_constraint AS constraint
+                constraint_record.conname,
+                constraint_record.contype::text AS contype,
+                pg_get_constraintdef(constraint_record.oid)
+            FROM pg_constraint AS constraint_record
             JOIN pg_class AS relation
-              ON relation.oid=constraint.conrelid
+              ON relation.oid=constraint_record.conrelid
             WHERE relation.relnamespace=current_schema()::regnamespace
               AND relation.relname='credentials'
-            ORDER BY constraint.conname
+            ORDER BY constraint_record.conname
             """
         )
     )
@@ -6250,6 +6269,15 @@ async def _prepare_postgres_0006_variant(
             f'ALTER TABLE credentials DROP COLUMN "{source}"'
         )
         return
+    if variant == "target-default-null-equivalent":
+        await connection.execute(
+            f'ALTER TABLE credentials DROP COLUMN "{source}"'
+        )
+        await connection.execute(
+            f'ALTER TABLE credentials ADD COLUMN "{target}" '
+            "TEXT DEFAULT NULL"
+        )
+        return
     if variant.startswith("wrong-target-"):
         await connection.execute(
             f'ALTER TABLE credentials DROP COLUMN "{source}"'
@@ -6259,14 +6287,18 @@ async def _prepare_postgres_0006_variant(
             definition = "VARCHAR(64)"
         elif variant.endswith("-nullability"):
             definition = "TEXT NOT NULL"
-        elif variant.endswith("-default-null"):
-            definition = "TEXT DEFAULT NULL"
         elif variant.endswith("-default"):
             definition = "TEXT DEFAULT ''::text"
         else:
             raise AssertionError("unknown PostgreSQL target variant")
         await connection.execute(
             f'ALTER TABLE credentials ADD COLUMN "{inspected}" {definition}'
+        )
+        return
+    if variant == "source-default-null-equivalent":
+        await connection.execute(
+            f'ALTER TABLE credentials ALTER COLUMN "{source}" '
+            "SET DEFAULT NULL"
         )
         return
     if variant.startswith("wrong-source-"):
@@ -6278,11 +6310,6 @@ async def _prepare_postgres_0006_variant(
         elif variant.endswith("-nullability"):
             await connection.execute(
                 f'ALTER TABLE credentials ALTER COLUMN "{source}" SET NOT NULL'
-            )
-        elif variant.endswith("-default-null"):
-            await connection.execute(
-                f'ALTER TABLE credentials ALTER COLUMN "{source}" '
-                "SET DEFAULT NULL"
             )
         elif variant.endswith("-default"):
             await connection.execute(
@@ -6307,11 +6334,11 @@ async def _prepare_postgres_0006_variant(
         "wrong-source-type",
         "wrong-source-nullability",
         "wrong-source-default",
-        "wrong-source-default-null",
+        "source-default-null-equivalent",
         "wrong-target-type",
         "wrong-target-nullability",
         "wrong-target-default",
-        "wrong-target-default-null",
+        "target-default-null-equivalent",
     ],
 )
 async def test_postgres_0006_exact_column_state_machine(
@@ -6423,6 +6450,17 @@ async def test_postgres_0006_exact_column_state_machine(
                 """,
                 target,
             )
+            current_credential_columns = {
+                str(row["column_name"])
+                for row in await connection.fetch(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema=current_schema()
+                      AND table_name='credentials'
+                    """
+                )
+            }
             target_is_exact = (
                 target_definition is not None
                 and target_definition["data_type"] == "text"
@@ -6430,7 +6468,7 @@ async def test_postgres_0006_exact_column_state_machine(
                 and target_definition["is_nullable"] == "YES"
                 and target_definition["column_default"] is None
             )
-            if target == "cracked_value_enc":
+            if "cracked_value_enc" in current_credential_columns:
                 preserved = (
                     await connection.fetchval(
                         """
@@ -6440,7 +6478,7 @@ async def test_postgres_0006_exact_column_state_machine(
                     )
                     == 1
                 )
-            else:
+            elif "cracked_value" in current_credential_columns:
                 preserved = (
                     await connection.fetchval(
                         """
@@ -6450,12 +6488,19 @@ async def test_postgres_0006_exact_column_state_machine(
                     )
                     == 1
                 )
+            else:
+                preserved = True
             current_revision = await _version(connection)
             reusable = await connection.fetchval("SELECT 1") == 1
         finally:
             await connection.close()
 
-        allowed = variant in {"source-only", "target-only"}
+        allowed = variant in {
+            "source-only",
+            "target-only",
+            "source-default-null-equivalent",
+            "target-default-null-equivalent",
+        }
         if allowed:
             _require_fixed(
                 not failed
@@ -6467,10 +6512,22 @@ async def test_postgres_0006_exact_column_state_machine(
             )
         else:
             _require_fixed(
-                failed
-                and current_revision == parent_revision
-                and before_catalog == after_catalog
-                and before_rows == after_rows
-                and reusable,
-                "PostgreSQL revision 0006 changed an incompatible catalog",
+                failed,
+                "PostgreSQL revision 0006 accepted an incompatible catalog",
+            )
+            _require_fixed(
+                current_revision == parent_revision,
+                "PostgreSQL revision 0006 changed an incompatible revision",
+            )
+            _require_fixed(
+                before_catalog == after_catalog,
+                "PostgreSQL revision 0006 changed an incompatible schema",
+            )
+            _require_fixed(
+                before_rows == after_rows,
+                "PostgreSQL revision 0006 changed incompatible rows",
+            )
+            _require_fixed(
+                reusable,
+                "PostgreSQL revision 0006 left connection unusable",
             )
