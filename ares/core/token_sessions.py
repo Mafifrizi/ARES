@@ -138,6 +138,7 @@ class IssuedTokenSession:
     subject: str = field(repr=False)
     family_id: str = field(repr=False)
     auth_epoch: int = field(repr=False)
+    absolute_expires_at: datetime = field(repr=False)
     refresh_generation: int
     role: str
 
@@ -154,6 +155,12 @@ class IssuedTokenSession:
             raise ValueError("invalid authentication epoch")
         if isinstance(self.refresh_generation, bool) or self.refresh_generation < 0:
             raise ValueError("invalid refresh generation")
+        if (
+            not isinstance(self.absolute_expires_at, datetime)
+            or self.absolute_expires_at.tzinfo is None
+            or self.absolute_expires_at.utcoffset() is None
+        ):
+            raise ValueError("invalid family expiry")
 
     @property
     def coordination_key(self) -> str:

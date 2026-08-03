@@ -273,6 +273,9 @@ See [docs/modules.md](docs/modules.md).
 
 - Database-authoritative JWT access with one refresh-token family per login,
   one-time rotation, strict replay-family revocation, and no JWT role authority.
+- Same-origin browser sessions with memory-only access tokens, host-only
+  HttpOnly refresh cookies, strict Origin checks, and constant-time CSRF
+  validation. Refresh credentials are never returned in JSON or browser storage.
 - Current-device and all-device logout plus immediate epoch revocation after
   password, role, or activation security events.
 - API key lifecycle with revoked-key removal from dashboard lists.
@@ -283,6 +286,12 @@ See [docs/modules.md](docs/modules.md).
 - Security headers and audit visibility.
 
 See [docs/security-model.md](docs/security-model.md).
+
+Production requires one exact HTTPS `ARES_BROWSER_ORIGIN`. Browser auth is
+same-origin and CORS remains noncredentialed; use API keys for automation.
+Backend and frontend cookie-transport changes must be deployed atomically,
+existing sockets drained, and existing users asked to sign in again. No schema
+revision beyond `0009` is required for this transport change.
 
 ### User Roles And Accounts
 
@@ -317,28 +326,10 @@ Roles are assigned when a `team_lead` creates a user:
 | `recon` | Low-risk review/recon identity. | Read-heavy access. The internal module permission matrix marks enumeration, fingerprint, and network modules as recon-safe, but the main dashboard execution endpoints are still operator-gated. |
 | `reporter` | Report reviewer or stakeholder account. | Read-only access to campaign/report/graph-style data. No module execution and no user administration. |
 
-Create additional users through the API while logged in as `team_lead`:
-
-```powershell
-$token = (Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/token `
-  -ContentType "application/x-www-form-urlencoded" `
-  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
-
-$headers = @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/register `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body (@{
-    username = "alice"
-    password = "StrongPass1!"
-    role = "operator"
-  } | ConvertTo-Json)
-```
+Create additional users through `POST /auth/register` while logged in as
+`team_lead`. Browser login is cookie/CSRF protected; follow the browser-session
+example in [docs/api-reference.md](docs/api-reference.md) instead of posting a
+password directly to the backend origin.
 
 Valid role values are exactly `team_lead`, `operator`, `recon`, and `reporter`.
 Passwords must be at least 12 characters and include uppercase, lowercase,

@@ -2586,13 +2586,13 @@ class AresDatabase:
                 )
             return result
 
-    async def _insert_initial_family_token(
+    async def _insert_initial_family_token_with_expiry(
         self,
         tx: aiosqlite.Connection,
         *,
         user_id: str,
         auth_epoch: int,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, datetime]:
         family_id = generate_family_id()
         raw_token = generate_refresh_token()
         token_hash = hash_refresh_token(raw_token)
@@ -2608,6 +2608,20 @@ class AresDatabase:
             "id,user_id,is_revoked,expires_at,created_at,family_id,parent_id,"
             "generation,state,revoked_at) VALUES(?,?,0,?,?,?,NULL,0,'active',NULL)",
             (token_hash, user_id, expires, created, family_id),
+        )
+        return family_id, raw_token, parse_sqlite_utc(expires)
+
+    async def _insert_initial_family_token(
+        self,
+        tx: aiosqlite.Connection,
+        *,
+        user_id: str,
+        auth_epoch: int,
+    ) -> tuple[str, str]:
+        family_id, raw_token, _ = await self._insert_initial_family_token_with_expiry(
+            tx,
+            user_id=user_id,
+            auth_epoch=auth_epoch,
         )
         return family_id, raw_token
 
@@ -2649,10 +2663,12 @@ class AresDatabase:
                 password, row["hashed_password"]
             ):
                 return SessionIssueResult(SessionIssueStatus.INVALID)
-            family_id, raw_token = await self._insert_initial_family_token(
-                tx,
-                user_id=row["id"],
-                auth_epoch=int(row["auth_epoch"]),
+            family_id, raw_token, absolute_expiry = (
+                await self._insert_initial_family_token_with_expiry(
+                    tx,
+                    user_id=row["id"],
+                    auth_epoch=int(row["auth_epoch"]),
+                )
             )
             access_token = token_factory(
                 {
@@ -2678,6 +2694,7 @@ class AresDatabase:
                     subject=row["username"],
                     family_id=family_id,
                     auth_epoch=int(row["auth_epoch"]),
+                    absolute_expires_at=absolute_expiry,
                     refresh_generation=0,
                     role=row["role"],
                 ),
@@ -2877,6 +2894,7 @@ class AresDatabase:
                     subject=row["username"],
                     family_id=row["family_id"],
                     auth_epoch=int(row["auth_epoch"]),
+                    absolute_expires_at=parse_sqlite_utc(row["absolute_expires_at"]),
                     refresh_generation=generation,
                     role=row["role"],
                 ),
@@ -3155,6 +3173,48 @@ class AresDatabase:
                 await tx.execute(
                     "INSERT INTO audit_log(actor,action,detail) VALUES("
                     "'auth-system','logout_current','')"
+                )
+                return SessionRevocationResult(SessionRevocationStatus.REVOKED)
+            return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)
+
+        return await self._run_refresh_family_transaction(_revoke)
+
+    async def revoke_refresh_cookie_session(
+        self,
+        raw_token: str,
+    ) -> SessionRevocationResult:
+        """Revoke the family identified only by a browser refresh cookie."""
+        token_hash = hash_refresh_token(raw_token)
+
+        async def _revoke(tx: aiosqlite.Connection) -> SessionRevocationResult:
+            async with tx.execute(
+                "SELECT rt.user_id,rt.family_id,rt.state,f.state AS family_state "
+                "FROM refresh_tokens AS rt JOIN refresh_token_families AS f "
+                "ON f.id=rt.family_id AND f.user_id=rt.user_id WHERE rt.id=?",
+                (token_hash,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None:
+                return SessionRevocationResult(SessionRevocationStatus.INVALID)
+            if row["family_state"] != "active":
+                return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)
+            reason = "logout_current" if row["state"] == "active" else "replay"
+            changed = await self._revoke_family_rows(
+                tx,
+                user_id=row["user_id"],
+                family_id=row["family_id"],
+                reason=reason,
+            )
+            if changed:
+                action = (
+                    "logout_cookie_family_revoked"
+                    if reason == "logout_current"
+                    else "logout_cookie_replay_family_revoked"
+                )
+                await tx.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system',?,'')",
+                    (action,),
                 )
                 return SessionRevocationResult(SessionRevocationStatus.REVOKED)
             return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)

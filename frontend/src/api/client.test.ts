@@ -1,381 +1,172 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ApiError,
-  api,
-  beginIdentityTransition,
-  buildModuleRunPayload,
-  campaignEventsPath,
-  captureSession,
-  clearTokens,
-  getAccessToken,
-  getRefreshToken,
-  invalidateSession,
-  login,
-  refreshAccessToken,
-  setAccessToken,
-  subscribeToSessionInvalidation,
-  setRefreshToken
-} from "./client";
-import { installTokenPairIfCurrent } from "./session";
 
-function requireFixed(condition: boolean, message: string): void {
-  if (!condition) {
-    throw new Error(message);
-  }
+const CSRF = "A".repeat(43);
+const KEY = "B".repeat(43);
+
+function installBrowserPrimitives(): void {
+  localStorage.clear();
+  sessionStorage.clear();
+  document.cookie = `ares-dev-csrf=${CSRF}; Path=/`;
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: vi.fn(async (_name: string, operation: () => unknown) => operation()) }
+  });
 }
 
-function requireTokensUnavailable(): void {
-  const accessTokenUnavailable = getAccessToken() === null;
-  const refreshTokenUnavailable = getRefreshToken() === null;
-  requireFixed(accessTokenUnavailable, "Access token should remain unavailable.");
-  requireFixed(refreshTokenUnavailable, "Refresh token should remain unavailable.");
+function loginResponse(): Response {
+  return new Response(JSON.stringify({
+    access_token: "memory-access",
+    token_type: "bearer",
+    expires_in: 3600,
+    role: "operator",
+    refresh_generation: 0,
+    session_coordination_key: KEY
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function resetTestSessionStorage(): void {
-  const keys = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index))
-    .filter((key): key is string => key !== null);
-  for (const key of keys) {
-    sessionStorage.removeItem(key);
-  }
-}
-
-function installSession(
-  accessToken: string,
-  refreshToken: string,
-  coordinationKey = "coordination-a",
-  generation = 0
-): void {
-  const session = beginIdentityTransition();
-  const installed = installTokenPairIfCurrent(
-    session,
-    accessToken,
-    refreshToken,
-    coordinationKey,
-    generation
-  );
-  requireFixed(installed, "expected authoritative test session");
-}
-
-describe("api client auth", () => {
+describe("browser auth API facade", () => {
   beforeEach(() => {
-    clearTokens();
-    resetTestSessionStorage();
-    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.resetModules();
+    installBrowserPrimitives();
   });
 
-  it("posts login as form-urlencoded and stores returned tokens", async () => {
-    let loginCalls = 0;
-    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
-      loginCalls += 1;
-      const headers = new Headers(init?.headers);
-      requireFixed(
-        headers.get("Content-Type") === "application/x-www-form-urlencoded",
-        "expected form content type"
-      );
-      requireFixed(init?.body instanceof URLSearchParams, "expected form request body");
-      const body = new URLSearchParams(String(init?.body));
-      requireFixed(body.get("username") === "alice", "expected canonical login username");
-      return new Response(
-        JSON.stringify({
-          access_token: "access",
-          refresh_token: "refresh",
-          token_type: "bearer",
-          expires_in: 3600,
-          role: "operator",
-          refresh_generation: 0,
-          session_coordination_key: "coordination-a"
-        }),
-        { status: 200 }
-      );
+  it("login performs CSRF, locked logout, CSRF, then credential form", async () => {
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      void init;
+      if (path === "/auth/csrf") return new Response(null, { status: 204 });
+      if (path === "/auth/logout") return new Response(null, { status: 204 });
+      return loginResponse();
     });
     vi.stubGlobal("fetch", fetchMock);
-    await login("alice", "Secret123!");
-    expect(loginCalls).toBe(1);
-    const accessTokenInstalled = getAccessToken() === "access";
-    const refreshTokenInstalled = getRefreshToken() === "refresh";
-    requireFixed(accessTokenInstalled, "expected access token installation");
-    requireFixed(refreshTokenInstalled, "expected refresh token installation");
+    const client = await import("./client");
+    const response = await client.login("alice", "Secret123!");
+    expect(response.access_token).toBe("memory-access");
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/auth/csrf", "/auth/logout", "/auth/csrf", "/auth/token"
+    ]);
   });
 
-  it("refreshes the access token from the stored refresh token", async () => {
-    installSession("access-old", "refresh-old");
-    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
-      expect(init?.method).toBe("POST");
-      const body = JSON.parse(String(init?.body)) as { refresh_token?: unknown };
-      const refreshRequestTokenMatches = body.refresh_token === "refresh-old";
-      requireFixed(refreshRequestTokenMatches, "expected refresh request token");
-      return new Response(
-        JSON.stringify({
-          access_token: "access-new",
-          refresh_token: "refresh-new",
-          token_type: "bearer",
-          expires_in: 3600,
-          role: "operator",
-          refresh_generation: 1,
-          session_coordination_key: "coordination-a"
-        }),
-        { status: 200 }
-      );
+  it("login response and browser storage contain no refresh token", async () => {
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      void init;
+      return path === "/auth/token" ? loginResponse() : new Response(null, { status: 204 });
     });
     vi.stubGlobal("fetch", fetchMock);
-
-    await expect(refreshAccessToken()).resolves.toBe(true);
-    const rotatedAccessTokenCurrent = getAccessToken() === "access-new";
-    const rotatedRefreshTokenCurrent = getRefreshToken() === "refresh-new";
-    requireFixed(rotatedAccessTokenCurrent, "expected rotated access token");
-    requireFixed(rotatedRefreshTokenCurrent, "expected rotated refresh token");
+    const client = await import("./client");
+    const response = await client.login("alice", "Secret123!");
+    expect("refresh_token" in response).toBe(false);
+    expect(sessionStorage.getItem("ares.refreshToken")).toBeNull();
+    expect(JSON.stringify(localStorage)).not.toContain("memory-access");
   });
 
-  it("clears tokens when refresh fails", async () => {
-    installSession("expired-access", "expired-refresh");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
-
-    await expect(refreshAccessToken()).resolves.toBe(false);
-    requireTokensUnavailable();
+  it("login form carries credentials only in the form body", async () => {
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      void init;
+      return path === "/auth/token" ? loginResponse() : new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    await client.login("alice", "Secret123!");
+    const tokenCall = fetchMock.mock.calls.find((call) => call[0] === "/auth/token");
+    const init = tokenCall?.[1] as RequestInit;
+    expect(init.body).toBeInstanceOf(URLSearchParams);
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
+    expect(init.credentials).toBe("same-origin");
   });
 
-  it("fails closed when a login token pair cannot be persisted", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({
-        access_token: "access",
-        refresh_token: "refresh",
-        token_type: "bearer",
-        expires_in: 3600,
-        role: "operator",
-        refresh_generation: 0,
-        session_coordination_key: "coordination-a"
-      }),
-      { status: 200 }
-    )));
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new DOMException("unavailable", "SecurityError");
-    });
-    try {
-      let rejectionStatus: number | undefined;
-      try {
-        await login("alice", "Secret123!");
-      } catch (error) {
-        rejectionStatus = error instanceof ApiError ? error.status : undefined;
-      }
-      requireFixed(rejectionStatus === 401, "expected failed token-pair installation");
-      requireTokensUnavailable();
-    } finally {
-      setItem.mockRestore();
-    }
+  it("login fails closed without Web Locks", async () => {
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    await expect(client.login("alice", "Secret123!")).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("clears the logical token pair when refresh-token removal fails", () => {
-    setAccessToken("access");
-    setRefreshToken("refresh");
-    const originalRemoveItem = Storage.prototype.removeItem;
-    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (
-      this: Storage,
-      key: string
-    ) {
-      if (key === "ares.refreshToken") {
-        throw new DOMException("unavailable", "SecurityError");
-      }
-      return originalRemoveItem.call(this, key);
+  it("logout is cookie-authoritative and has an empty body", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 204 });
     });
-    try {
-      expect(() => clearTokens()).not.toThrow();
-      requireTokensUnavailable();
-      const refreshStorageNeutralized = sessionStorage.getItem("ares.refreshToken") === "";
-      requireFixed(refreshStorageNeutralized, "Refresh-token storage should be neutralized.");
-    } finally {
-      removeItem.mockRestore();
-      setRefreshToken(null);
-    }
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    await client.logout();
+    const call = fetchMock.mock.calls[0];
+    const init = call?.[1] as RequestInit;
+    expect(call?.[0]).toBe("/auth/logout");
+    expect(init.body).toBeUndefined();
+    expect(new Headers(init.headers).has("Authorization")).toBe(false);
   });
 
-  it("continues invalidation after a subscriber throws", () => {
-    setAccessToken("access");
-    setRefreshToken("refresh");
-    let laterSubscriberCalls = 0;
-    const unsubscribeThrowing = subscribeToSessionInvalidation(() => {
-      throw new Error("subscriber failed");
+  it("logout-all sends in-memory bearer plus CSRF", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 204 });
     });
-    const unsubscribeLater = subscribeToSessionInvalidation(() => {
-      laterSubscriberCalls += 1;
-    });
-    try {
-      const invalidated = invalidateSession(captureSession());
-      expect(invalidated).toBe(true);
-      expect(laterSubscriberCalls).toBe(1);
-      requireTokensUnavailable();
-    } finally {
-      unsubscribeThrowing();
-      unsubscribeLater();
-    }
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    client.setAccessToken("memory-access");
+    await client.logoutAll();
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer memory-access");
+    expect(headers.get("X-ARES-CSRF")).toBe(CSRF);
   });
 
-  it("fails closed when refresh-token storage reads fail and recovers after a valid install", () => {
-    setRefreshToken("refresh-before-read-failure");
-    const originalGetItem = Storage.prototype.getItem;
-    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
-      this: Storage,
-      key: string
-    ) {
-      if (key === "ares.refreshToken") {
-        throw new DOMException("unavailable", "SecurityError");
-      }
-      return originalGetItem.call(this, key);
-    });
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const warningLog = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      let readThrew = false;
-      let observedRefreshToken: string | null = null;
-      try {
-        observedRefreshToken = getRefreshToken();
-      } catch {
-        readThrew = true;
-      }
-      requireFixed(!readThrew, "expected storage read failure to remain internal");
-      const observedRefreshTokenUnavailable = observedRefreshToken === null;
-      const accessTokenUnavailable = getAccessToken() === null;
-      requireFixed(observedRefreshTokenUnavailable, "Refresh token should remain unavailable.");
-      requireFixed(accessTokenUnavailable, "Access token should remain unavailable.");
-      expect(errorLog).not.toHaveBeenCalled();
-      expect(warningLog).not.toHaveBeenCalled();
-    } finally {
-      getItem.mockRestore();
-      errorLog.mockRestore();
-      warningLog.mockRestore();
-    }
-
-    const recoveredSession = beginIdentityTransition();
-    const installed = installTokenPairIfCurrent(
-      recoveredSession,
-      "access-after-read-failure",
-      "refresh-after-read-failure",
-      "coordination-recovered",
-      0
-    );
-    requireFixed(installed, "expected valid token-pair recovery");
-    const recoveredAccessTokenCurrent = getAccessToken() === "access-after-read-failure";
-    const recoveredRefreshTokenCurrent = getRefreshToken() === "refresh-after-read-failure";
-    requireFixed(recoveredAccessTokenCurrent, "expected recovered access session");
-    requireFixed(recoveredRefreshTokenCurrent, "expected recovered refresh session");
-  });
-
-  it("keeps invalidation fail-closed when refresh-token removal and sentinel writes fail", () => {
-    const activeSession = beginIdentityTransition();
-    const installed = installTokenPairIfCurrent(
-      activeSession,
-      "access-before-clear-failure",
-      "refresh-before-clear-failure",
-      "coordination-clear",
-      0
-    );
-    requireFixed(installed, "expected active session setup");
-    const beforeInvalidation = captureSession();
-    let subscriberCalls = 0;
-    const unsubscribe = subscribeToSessionInvalidation(() => {
-      subscriberCalls += 1;
-    });
-    const originalRemoveItem = Storage.prototype.removeItem;
-    const originalSetItem = Storage.prototype.setItem;
-    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (
-      this: Storage,
-      key: string
-    ) {
-      if (key === "ares.refreshToken") {
-        throw new DOMException("unavailable", "SecurityError");
-      }
-      return originalRemoveItem.call(this, key);
-    });
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
-      this: Storage,
-      key: string,
-      value: string
-    ) {
-      if (key === "ares.refreshToken" && value === "") {
-        throw new DOMException("unavailable", "SecurityError");
-      }
-      return originalSetItem.call(this, key, value);
-    });
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const warningLog = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      let invalidationThrew = false;
-      let invalidated = false;
-      try {
-        invalidated = invalidateSession(beforeInvalidation);
-      } catch {
-        invalidationThrew = true;
-      }
-      const afterInvalidation = captureSession();
-      requireFixed(!invalidationThrew, "expected storage cleanup failures to remain internal");
-      expect(invalidated).toBe(true);
-      requireTokensUnavailable();
-      expect(afterInvalidation.revision).toBeGreaterThan(beforeInvalidation.revision);
-      expect(subscriberCalls).toBe(1);
-      expect(errorLog).not.toHaveBeenCalled();
-      expect(warningLog).not.toHaveBeenCalled();
-    } finally {
-      removeItem.mockRestore();
-      setItem.mockRestore();
-      errorLog.mockRestore();
-      warningLog.mockRestore();
-      unsubscribe();
-    }
-
-    const recoveredSession = beginIdentityTransition();
-    const recovered = installTokenPairIfCurrent(
-      recoveredSession,
-      "access-after-clear-failure",
-      "refresh-after-clear-failure",
-      "coordination-recovered",
-      0
-    );
-    requireFixed(recovered, "expected token-pair recovery after cleanup failure");
-    const recoveredAccessTokenCurrent = getAccessToken() === "access-after-clear-failure";
-    const recoveredRefreshTokenCurrent = getRefreshToken() === "refresh-after-clear-failure";
-    requireFixed(recoveredAccessTokenCurrent, "expected recovered access session");
-    requireFixed(recoveredRefreshTokenCurrent, "expected recovered refresh session");
-  });
-});
-
-describe("module execution helpers", () => {
-  it("defaults UI module runs to dry_run true", () => {
-    expect(buildModuleRunPayload("campaign-1", { target: "dc01" })).toEqual({
-      campaign_id: "campaign-1",
-      params: { target: "dc01" },
-      dry_run: true
-    });
-  });
-});
-
-describe("live event helpers", () => {
-  it("requests a fresh ticket with POST and parses the fixed response", async () => {
-    let requestIsCanonical = false;
-    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
-      requestIsCanonical =
-        path === "/campaigns/camp%2Fone/websocket-ticket"
-        && init?.method === "POST"
-        && init.body === undefined;
+  it("campaign WebSocket tickets remain bearer API requests", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
       return new Response(JSON.stringify({
-        ticket: "A".repeat(43),
-        expires_in: 30
-      }), { status: 201 });
-    }));
-
-    const response = await api.websocketTicket("camp/one");
-    const responseIsCanonical =
-      response.ticket.length === 43 && response.expires_in === 30;
-    requireFixed(requestIsCanonical, "expected ticket issuance request contract");
-    requireFixed(responseIsCanonical, "expected ticket issuance response contract");
+        ticket: "ticket-value", expires_in: 30
+      }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    client.setAccessToken("memory-access");
+    await client.api.websocketTicket("campaign-a");
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer memory-access");
   });
 
-  it("uses only the one-time ticket on the campaign websocket route", () => {
-    const path = campaignEventsPath("camp/one", "A".repeat(43));
-    const matchesExpectedRoute =
-      path === `/ws/campaigns/camp%2Fone/events?ticket=${"A".repeat(43)}`;
-    const excludesLegacyCredentials =
-      !path.includes("token=") && !path.includes("api_key=");
-    requireFixed(matchesExpectedRoute, "expected encoded campaign WebSocket route");
-    requireFixed(excludesLegacyCredentials, "expected ticket-only WebSocket query");
+  it("WebSocket URL contains only the one-time ticket query", async () => {
+    const client = await import("./client");
+    const path = client.campaignEventsPath("campaign-a", "ticket-value");
+    expect(path).toBe("/ws/campaigns/campaign-a/events?ticket=ticket-value");
+    expect(path).not.toContain("access_token");
+    expect(path).not.toContain("api_key");
+  });
+
+  it("account replacement publishes an old-family tombstone", async () => {
+    const fetchMock = vi.fn(async (path: string, init?: RequestInit) => {
+      void init;
+      return path === "/auth/token" ? loginResponse() : new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    await client.login("alice", "Secret123!");
+    await client.login("bob", "Secret123!");
+    expect(fetchMock.mock.calls.filter((call) => call[0] === "/auth/logout")).toHaveLength(2);
+  });
+
+  it("API errors keep fixed status metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Denied" }), { status: 403 })));
+    const client = await import("./client");
+    await expect(client.api.health()).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("all generic requests use same-origin credentials", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    await client.api.health();
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("same-origin");
   });
 });

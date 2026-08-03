@@ -187,3 +187,75 @@ async def test_sqlite_logout_all_increments_epoch_and_is_read_only_afterward(
         )
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_issued_session_exposes_authoritative_absolute_expiry(tmp_path) -> None:
+    database = AresDatabase(str(tmp_path / "cookie-expiry.db"))
+    await database.connect()
+    try:
+        await database.create_user("cookie-user", "CookiePassword1!", "operator")
+        issued = await database.create_login_session(
+            "cookie-user", "CookiePassword1!", _access_factory
+        )
+        now = datetime.now(timezone.utc)
+        _require(
+            issued.session is not None
+            and issued.session.absolute_expires_at.tzinfo is not None
+            and issued.session.absolute_expires_at > now,
+            "issued session did not expose authoritative family expiry",
+        )
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_cookie_logout_revokes_active_family_and_is_idempotent(tmp_path) -> None:
+    database = AresDatabase(str(tmp_path / "cookie-logout.db"))
+    await database.connect()
+    try:
+        await database.create_user("logout-user", "LogoutPassword1!", "operator")
+        issued = await database.create_login_session(
+            "logout-user", "LogoutPassword1!", _access_factory
+        )
+        _require(issued.session is not None, "login session missing")
+        raw = issued.session.refresh_token
+        revoked = await database.revoke_refresh_cookie_session(raw)
+        repeated = await database.revoke_refresh_cookie_session(raw)
+        rotation = await database.rotate_refresh_session(raw, _access_factory)
+        _require(
+            revoked.status is SessionRevocationStatus.REVOKED
+            and repeated.status is SessionRevocationStatus.ALREADY_REVOKED
+            and rotation.status is not RefreshRotationStatus.ROTATED,
+            "cookie logout did not revoke exactly one family",
+        )
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_consumed_cookie_logout_triggers_replay_revocation(tmp_path) -> None:
+    database = AresDatabase(str(tmp_path / "cookie-replay.db"))
+    await database.connect()
+    try:
+        await database.create_user("replay-user", "ReplayPassword1!", "operator")
+        issued = await database.create_login_session(
+            "replay-user", "ReplayPassword1!", _access_factory
+        )
+        _require(issued.session is not None, "login session missing")
+        predecessor = issued.session.refresh_token
+        rotated = await database.rotate_refresh_session(predecessor, _access_factory)
+        _require(rotated.session is not None, "rotation successor missing")
+        replay_logout = await database.revoke_refresh_cookie_session(predecessor)
+        successor = await database.rotate_refresh_session(
+            rotated.session.refresh_token, _access_factory
+        )
+        unknown = await database.revoke_refresh_cookie_session("u" * 64)
+        _require(
+            replay_logout.status is SessionRevocationStatus.REVOKED
+            and successor.status is not RefreshRotationStatus.ROTATED
+            and unknown.status is SessionRevocationStatus.INVALID,
+            "consumed-cookie logout did not preserve replay authority",
+        )
+    finally:
+        await database.close()

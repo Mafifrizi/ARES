@@ -36,22 +36,28 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 
 ## Auth
 
-- Login calls `POST /auth/token` with `application/x-www-form-urlencoded`.
-- Refresh calls `POST /auth/refresh` with JSON `{ "refresh_token": "..." }`.
-- Access tokens are held in memory.
-- Refresh tokens are stored in `sessionStorage`; React output escaping and the
-  FastAPI CSP reduce script injection risk. This residual browser-token/XSS
-  exposure is intentionally deferred to the HttpOnly-cookie/CSRF conversion in
-  Phase 5B.2.
+- Browser authentication is same-origin only. Login first obtains a pre-login
+  CSRF cookie from `GET /auth/csrf`, then calls `POST /auth/token` with the
+  existing form body and `X-ARES-CSRF`.
+- Access tokens are held in module memory only. Refresh tokens exist only in a
+  host-only HttpOnly cookie and never enter JSON, browser-readable storage,
+  React state, messages, logs, or request bodies/headers/queries.
+- Refresh acquires the origin-global `ares-refresh-cookie-v2` Web Lock, reads
+  the current CSRF cookie immediately before the request, and sends an empty
+  credentialed `POST /auth/refresh`.
+- Startup synchronously deletes the legacy `sessionStorage` refresh-token key
+  before any request, then performs at most one locked refresh rotation.
 - Logout calls `POST /auth/logout` and revokes only the current device family;
   **Logout all devices** calls `POST /auth/logout-all`. Both clear local state
   even when the remote request fails.
-- Refresh is single-flight within a tab and uses a non-secret family-derived
-  coordination key, generation counter, Web Locks, `localStorage`, and
-  `BroadcastChannel` for cross-tab exclusion/invalidation. Raw access or
-  refresh tokens are never posted across tabs or written to `localStorage`.
-  A tab that loses a refresh race discards its session and requires login; it
-  never retries a consumed predecessor.
+- Web Locks and writable `localStorage` coordination are mandatory.
+  `localStorage`, storage events, and `BroadcastChannel` carry only a bounded
+  protocol version, non-secret coordination key, refresh generation, and
+  logout tombstone. A tab needing its own in-memory access token performs a
+  sequential locked rotation using the latest shared cookie.
+- An indeterminate refresh is never retried. The frontend clears in-memory
+  authority and makes at most one locked logout-current attempt; if that is
+  also unavailable, explicit sign-in is required.
 - Each main campaign WebSocket connection first requests a 30-second,
   single-use ticket with authenticated `POST
   /campaigns/{campaign_id}/websocket-ticket`. The ticket exists only across the
@@ -123,6 +129,6 @@ existing sockets drained. Mixed old/new versions are unsupported, and rollback
 replaces both together while leaving additive migrations installed. Use
 HTTPS/WSS directly: one-time tickets can remain visible in browser developer
 tools and upstream handshake processing. The nginx TLS access log omits query
-strings through `$uri`; its plaintext port-80 `$request_uri` redirect is an
-unsupported ticket boundary. The default-disabled legacy dashboard WebSocket
+strings through `$uri`; the port-80 redirect also uses `$uri` and drops
+queries. The default-disabled legacy dashboard WebSocket
 retains its separate limitations.

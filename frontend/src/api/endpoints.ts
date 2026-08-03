@@ -14,27 +14,33 @@ import type {
   UserProfile,
   WebSocketTicketResponse
 } from "./types";
-import { apiBlobRequest, apiRequest, ApiError } from "./http";
-import { beginIdentityTransition, installTokenPairIfCurrent } from "./session";
+import {
+  apiBlobRequest,
+  apiRequest,
+  ApiError,
+  bootstrapBrowserCsrf,
+  browserMutationRequest,
+  withRefreshCookieLock
+} from "./http";
+import { beginIdentityTransition, installSessionIfCurrent } from "./session";
 
 export async function login(username: string, password: string): Promise<TokenResponse> {
   const loginSession = beginIdentityTransition();
-  const body = new URLSearchParams();
-  body.set("username", username);
-  body.set("password", password);
-  const token = await apiRequest<TokenResponse>(
-    "/auth/token",
-    {
-      method: "POST",
+  const token = await withRefreshCookieLock(async () => {
+    await bootstrapBrowserCsrf();
+    await browserMutationRequest<null>("/auth/logout");
+    await bootstrapBrowserCsrf();
+    const body = new URLSearchParams();
+    body.set("username", username);
+    body.set("password", password);
+    return browserMutationRequest<TokenResponse>("/auth/token", {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body
-    },
-    false
-  );
-  if (!installTokenPairIfCurrent(
+    });
+  });
+  if (!installSessionIfCurrent(
     loginSession,
     token.access_token,
-    token.refresh_token,
     token.session_coordination_key,
     token.refresh_generation
   )) {
@@ -44,11 +50,15 @@ export async function login(username: string, password: string): Promise<TokenRe
 }
 
 export async function logout(): Promise<void> {
-  await apiRequest<{ status: string }>("/auth/logout", { method: "POST" }, false);
+  await withRefreshCookieLock(async () => {
+    await browserMutationRequest<null>("/auth/logout");
+  });
 }
 
 export async function logoutAll(): Promise<void> {
-  await apiRequest<{ status: string }>("/auth/logout-all", { method: "POST" }, false);
+  await withRefreshCookieLock(async () => {
+    await browserMutationRequest<null>("/auth/logout-all", {}, { authenticated: true });
+  });
 }
 
 export function campaignEventsPath(campaignId: string, ticket: string): string {

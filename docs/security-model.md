@@ -124,8 +124,9 @@ Use `X-API-Key` for automation endpoints such as `GET /auth/me`; account
 credential management, user registration, and API-key lifecycle operations are
 performed from an authenticated browser/JWT session.
 
-**Unauthenticated endpoints** (by design):
-- `POST /auth/token` — login (takes credentials, returns token)
+**Endpoints without an existing bearer** (by design):
+- `GET /auth/csrf` — same-origin pre-login CSRF bootstrap
+- `POST /auth/token` — same-origin, CSRF-protected browser login
 - `GET /health` — health check (no sensitive data)
 
 The supported dashboard is the React application served by the main ARES
@@ -161,6 +162,16 @@ Current database user status, role, authentication epoch, family state, and JTI
 are authoritative on every bearer resolution. Default access expiry is one
 hour.
 
+Browser refresh authority is transported only by a host-only HttpOnly cookie.
+Production uses `__Host-ares-refresh` and `__Host-ares-csrf` with `Secure`,
+`SameSite=Strict`, `Path=/`, and no `Domain`; access tokens remain memory-only.
+Every browser-auth mutation requires one exact configured HTTPS Origin and a
+constant-time match between the readable CSRF cookie and `X-ARES-CSRF`.
+Refresh-token JSON, header, query, and bearer fallbacks are rejected. Debug
+cookies use distinct names and are available only for the fixed loopback Vite
+origins under explicit debug mode. CORS remains noncredentialed and is not a
+browser-auth mechanism.
+
 Refresh is a one-winner database transaction. The predecessor is consumed and
 exactly one child is inserted before commit; the raw child is returned only
 after commit. Reuse of a known consumed or revoked predecessor atomically
@@ -170,6 +181,13 @@ nothing. `POST /auth/logout` revokes only the current family;
 `POST /auth/logout-all`, password changes/resets, role changes, and activation
 state changes increment the user epoch and revoke all families. Separate login
 families remain isolated, and API keys never enter refresh families.
+
+Cookie publication follows the confirmed family commit. An indeterminate
+network result is not refreshed again: the browser clears memory authority and
+attempts one locked family logout before requiring sign-in. Active XSS can
+still act as the user and read the CSRF cookie; HttpOnly limits refresh-token
+exfiltration but does not claim to defeat active script, browser extensions,
+developer tools, or upstream traffic inspection.
 
 Family lineage is retained until 30 days after the later of family expiry or
 revocation. Fixed security audit actions record login-family creation,
@@ -202,9 +220,9 @@ independent of refresh families.
 
 Tickets remain visible to the browser and any upstream component that receives
 the handshake URL, so production clients must initiate HTTPS/WSS directly.
-The production nginx TLS log uses `$uri`, which omits query strings. Its
-port-80 redirect uses `$request_uri`; ticket-bearing plaintext requests at that
-boundary are unsupported. The control does not claim to hide tickets from
+The production nginx TLS log and port-80 redirect use `$uri`, which omits query
+strings; the redirect deliberately drops them. Production clients must still
+connect through HTTPS/WSS. The control does not claim to hide tickets from
 browser developer tools or arbitrary third-party proxies.
 
 Backend and frontend rollout is atomic: drain existing main WebSockets, deploy

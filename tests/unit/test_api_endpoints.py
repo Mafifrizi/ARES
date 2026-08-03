@@ -20,6 +20,7 @@ import asyncio
 import base64
 import hashlib
 import os
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -33,6 +34,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 os.environ.setdefault("ARES_SECRET_KEY", "test-api-secret-key-min32-chars!!")
 os.environ.setdefault("ARES_ENCRYPTION_KEY", "test-enc-key-min32-chars-xxxxxxx")
 os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestApiPass1!")
+os.environ.setdefault("ARES_DEBUG", "true")
+os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -85,11 +88,12 @@ def _issued_session(username: str = "admin", role: str = "team_lead"):
         SessionIssueStatus.ISSUED,
         IssuedTokenSession(
             access_token=token,
-            refresh_token="test-refresh-token",  # noqa: S106 - fixed test value
+            refresh_token="r" * 64,  # noqa: S106 - fixed test value
             user_id="test-user-id",
             subject=username,
             family_id=family_id,
             auth_epoch=1,
+            absolute_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
             refresh_generation=0,
             role=role,
         ),
@@ -144,6 +148,9 @@ def _make_mock_db():
         return_value=RefreshRotationResult(RefreshRotationStatus.INVALID)
     )
     db.revoke_current_session = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
+    db.revoke_refresh_cookie_session = AsyncMock(
         return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
     )
     db.revoke_all_sessions = AsyncMock(
@@ -280,10 +287,40 @@ def _app_mock_db():
 
 @pytest.fixture(scope="module")
 def aclient(_app_mock_db):
-    """Async httpx client with ASGITransport. base_url=localhost passes TrustedHostMiddleware."""
+    """Async same-origin browser client with a rotating CSRF header."""
     _app, mock_db = _app_mock_db
     transport = httpx.ASGITransport(app=_app)
-    client = httpx.AsyncClient(transport=transport, base_url="http://localhost")
+    client: httpx.AsyncClient
+
+    async def _browser_headers(request: httpx.Request) -> None:
+        if request.url.path in {
+            "/auth/token",
+            "/auth/refresh",
+            "/auth/logout",
+            "/auth/logout-all",
+        }:
+            request.headers["Origin"] = "http://localhost:5173"
+            request.headers["Sec-Fetch-Site"] = "same-origin"
+            try:
+                csrf = client.cookies.get("ares-dev-csrf")
+            except httpx.CookieConflict:
+                csrf = None
+            csrf = csrf or ("A" * 43)
+            request.headers["X-ARES-CSRF"] = csrf
+            cookie = request.headers.get("Cookie", "")
+            if "ares-dev-csrf=" not in cookie:
+                request.headers["Cookie"] = (
+                    f"{cookie}; ares-dev-csrf={csrf}" if cookie else f"ares-dev-csrf={csrf}"
+                )
+
+    client = httpx.AsyncClient(
+        transport=transport,
+        base_url="http://localhost:5173",
+        event_hooks={"request": [_browser_headers]},
+    )
+    client.cookies.set(
+        "ares-dev-csrf", "A" * 43, domain="localhost.local", path="/"
+    )
     yield client, mock_db, _app
     asyncio.run(client.aclose())
 
@@ -367,6 +404,32 @@ class TestSecurityHeaders:
         hdrs = {k.lower() for k in (await c.get("/health")).headers}
         assert "server" not in hdrs
 
+    @pytest.mark.asyncio
+    async def test_cors_is_exact_and_never_credentialed(self, aclient):
+        c, _, __ = aclient
+        allowed = await c.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        denied = await c.options(
+            "/health",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        reduced = (
+            allowed.headers.get("access-control-allow-origin")
+            == "http://localhost:3000",
+            "access-control-allow-credentials" not in allowed.headers,
+            denied.headers.get("access-control-allow-origin") is None,
+            "access-control-allow-credentials" not in denied.headers,
+        )
+        _require_fixed(all(reduced), "CORS credential boundary differed")
+
 
 # ── Auth flow ─────────────────────────────────────────────────────────────────
 
@@ -395,6 +458,24 @@ class TestAuthFlow:
         assert r.status_code == 200
         assert r.json().get("username") == "admin"
         assert r.json().get("role") == "team_lead"
+
+    @pytest.mark.asyncio
+    async def test_csrf_bootstrap_is_empty_uncacheable_and_cookie_only(self, aclient):
+        c, _, __ = aclient
+        response = await c.get("/auth/csrf")
+        cookie_headers = response.headers.get_list("set-cookie")
+        reduced = (
+            response.status_code == 204,
+            response.content == b"",
+            response.headers.get("cache-control") == "no-store",
+            response.headers.get("pragma") == "no-cache",
+            len(cookie_headers) == 1,
+            cookie_headers[0].startswith("ares-dev-csrf=") if cookie_headers else False,
+            "httponly" not in cookie_headers[0].lower() if cookie_headers else False,
+            "max-age=600" in cookie_headers[0].lower() if cookie_headers else False,
+        )
+        del cookie_headers
+        _require_fixed(all(reduced), "CSRF bootstrap contract differed")
 
     @pytest.mark.asyncio
     async def test_login_invalid_credentials_returns_401(self, aclient):
@@ -437,8 +518,20 @@ class TestAuthFlow:
             assert r.status_code == 200
             body = r.json()
             assert "access_token" in body
-            assert "refresh_token" in body
+            assert "refresh_token" not in body
             assert body["token_type"] == "bearer"  # noqa: S105 - OAuth token type
+            cookie_headers = r.headers.get_list("set-cookie")
+            reduced = (
+                len(cookie_headers) == 2,
+                any(value.startswith("ares-dev-refresh=") for value in cookie_headers),
+                any(value.startswith("ares-dev-csrf=") for value in cookie_headers),
+                sum("httponly" in value.lower() for value in cookie_headers) == 1,
+                all("samesite=strict" in value.lower() for value in cookie_headers),
+                all("path=/" in value.lower() for value in cookie_headers),
+                all("domain=" not in value.lower() for value in cookie_headers),
+            )
+            del cookie_headers
+            _require_fixed(all(reduced), "Committed login cookie contract differed")
         finally:
             del _app.dependency_overrides[OAuth2PasswordRequestForm]
             db.create_login_session.return_value = None
@@ -492,32 +585,88 @@ class TestAuthFlow:
         _reset_rate_limiter()
         db.rotate_refresh_session.reset_mock()
         db.create_refresh_token.reset_mock()
-
-        response = await c.post(
-            "/auth/refresh",
-            json={"refresh_token": "inactive-refresh-fixture"},
+        c.cookies.set(
+            "ares-dev-refresh", "r" * 64, domain="localhost.local", path="/"
         )
+
+        response = await c.post("/auth/refresh")
         response_body = response.json()
         generic_failure = (
             response_body.get("code") == 401
-            and response_body.get("detail") == "Refresh token invalid or expired"
+            and response_body.get("detail") == "Session is not valid"
             and response_body.get("type") == "api_error"
         )
-        if not (
-            response.status_code == 401
-            and generic_failure
-            and db.rotate_refresh_session.await_count == 1
-            and db.create_refresh_token.await_count == 0
-        ):
-            pytest.fail(
-                "expected inactive refresh to fail generically without a successor",
-                pytrace=False,
-            )
+        _require_fixed(response.status_code == 401, "inactive refresh status differed")
+        _require_fixed(generic_failure, "inactive refresh detail differed")
+        _require_fixed(
+            db.rotate_refresh_session.await_count == 1,
+            "inactive refresh lookup count differed",
+        )
+        _require_fixed(
+            db.create_refresh_token.await_count == 0,
+            "inactive refresh created successor",
+        )
         if "inactive" in response.text.lower():
             pytest.fail(
                 "expected refresh authentication failure not to disclose account status",
                 pytrace=False,
             )
+
+    @pytest.mark.asyncio
+    async def test_refresh_json_transport_is_rejected_before_database(self, aclient):
+        c, db, _ = aclient
+        _reset_rate_limiter()
+        db.rotate_refresh_session.reset_mock()
+        c.cookies.set(
+            "ares-dev-csrf", "A" * 43, domain="localhost.local", path="/"
+        )
+        response = await c.post(
+            "/auth/refresh",
+            json={"refresh_token": "legacy-transport"},
+        )
+        _require_fixed(response.status_code == 400, "legacy refresh body was accepted")
+        _require_fixed(db.rotate_refresh_session.await_count == 0, "legacy body reached database")
+
+    @pytest.mark.asyncio
+    async def test_refresh_backend_uncertainty_publishes_no_cookie(self, aclient):
+        c, db, _ = aclient
+        _reset_rate_limiter()
+        c.cookies.set(
+            "ares-dev-refresh", "r" * 64, domain="localhost.local", path="/"
+        )
+        db.rotate_refresh_session.side_effect = RuntimeError("fixed-test-canary")
+        try:
+            response = await c.post("/auth/refresh")
+            reduced = (
+                response.status_code == 503,
+                not response.headers.get_list("set-cookie"),
+            )
+            _require_fixed(all(reduced), "Indeterminate refresh published browser state")
+        finally:
+            db.rotate_refresh_session.side_effect = None
+
+    @pytest.mark.asyncio
+    async def test_cookie_logout_commits_then_clears_exact_cookies(self, aclient):
+        c, db, _ = aclient
+        _reset_rate_limiter()
+        c.cookies.set(
+            "ares-dev-refresh", "r" * 64, domain="localhost.local", path="/"
+        )
+        db.revoke_refresh_cookie_session.reset_mock()
+        response = await c.post("/auth/logout")
+        cookie_headers = response.headers.get_list("set-cookie")
+        reduced = (
+            response.status_code == 204,
+            response.content == b"",
+            db.revoke_refresh_cookie_session.await_count == 1,
+            len(cookie_headers) == 2,
+            all("max-age=0" in value.lower() for value in cookie_headers),
+            all("path=/" in value.lower() for value in cookie_headers),
+            all("samesite=strict" in value.lower() for value in cookie_headers),
+            all("domain=" not in value.lower() for value in cookie_headers),
+        )
+        del cookie_headers
+        _require_fixed(all(reduced), "Cookie logout contract differed")
 
     @pytest.mark.asyncio
     async def test_real_sqlite_inactive_credentials_fail_at_api_boundary(
@@ -595,10 +744,15 @@ class TestAuthFlow:
                     "/campaigns",
                     headers={"X-API-Key": raw_key},
                 )
-                refresh_response = await c.post(
-                    "/auth/refresh",
-                    json={"refresh_token": refresh_token},
+                c.cookies.set(
+                    "ares-dev-csrf", "A" * 43,
+                    domain="localhost.local", path="/",
                 )
+                c.cookies.set(
+                    "ares-dev-refresh", refresh_token,
+                    domain="localhost.local", path="/",
+                )
+                refresh_response = await c.post("/auth/refresh")
 
                 api_body = api_response.json()
                 refresh_body = refresh_response.json()
@@ -611,8 +765,7 @@ class TestAuthFlow:
                 )
                 refresh_contract = (
                     refresh_response.status_code == 401
-                    and refresh_body.get("detail")
-                    == "Refresh token invalid or expired"
+                    and refresh_body.get("detail") == "Session is not valid"
                     and "inactive" not in refresh_response.text.lower()
                     and "refresh_token" not in refresh_body
                 )
@@ -818,7 +971,6 @@ class TestAPIKeyScopeEnforcement:
             ),
             ("get", "/auth/api-keys", {}),
             ("delete", "/auth/api-keys/api-key-1", {}),
-            ("post", "/auth/logout", {}),
         ],
     )
     @pytest.mark.asyncio
@@ -831,6 +983,20 @@ class TestAPIKeyScopeEnforcement:
         r = await getattr(c, method)(path, headers=_api_key_headers(), **kwargs)
 
         assert r.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_cookie_logout_does_not_use_or_revoke_api_key(self, aclient):
+        c, db, _ = aclient
+        db.verify_api_key.reset_mock()
+        db.revoke_refresh_cookie_session.reset_mock()
+        c.cookies.delete("ares-dev-refresh")
+        response = await c.post("/auth/logout", headers=_api_key_headers())
+        _require_fixed(response.status_code == 204, "cookie logout was not idempotent")
+        _require_fixed(db.verify_api_key.await_count == 0, "cookie logout verified API key")
+        _require_fixed(
+            db.revoke_refresh_cookie_session.await_count == 0,
+            "cookie logout revoked family",
+        )
 
     @pytest.mark.asyncio
     async def test_jwt_auth_can_create_list_and_delete_api_keys(self, aclient):

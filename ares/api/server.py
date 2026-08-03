@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from collections.abc import AsyncGenerator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -57,6 +56,16 @@ from ares.api.rbac import (
     require_operator,
     require_team_lead,
 )
+from ares.core.browser_sessions import (
+    BrowserRequestContext,
+    BrowserSessionBoundaryMiddleware,
+    BrowserSessionPolicy,
+    build_browser_session_policy,
+    canonical_noncredentialed_origins,
+    clear_session_cookies,
+    publish_prelogin_csrf,
+    publish_session_cookies,
+)
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
@@ -67,7 +76,6 @@ from ares.core.token_sessions import (
     SessionIssueStatus,
     SessionRevocationStatus,
 )
-from ares.modules.base import normalize_module_metadata
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
 from ares.db.websocket_tickets import (
@@ -76,6 +84,7 @@ from ares.db.websocket_tickets import (
     WebSocketTicketPrincipal,
     is_canonical_websocket_ticket,
 )
+from ares.modules.base import normalize_module_metadata
 
 logger = get_logger("ares.api.server")
 
@@ -322,6 +331,8 @@ async def _get_engagement_lock() -> asyncio.Lock:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _engine, _db
     settings = get_settings()
+    app.state.browser_policy = build_browser_session_policy(settings)
+    canonical_noncredentialed_origins(settings.cors_origins_list)
     _db = await AresDatabase.create(
         db_path=settings.db_path,
         encryption_key=settings.encryption_key_value,
@@ -503,7 +514,7 @@ try:
     from ares.core.config import get_settings as _get_settings
 
     _s = _get_settings()
-    _cors_origins = _s.cors_origins_list
+    _cors_origins = canonical_noncredentialed_origins(_s.cors_origins_list)
     _trusted_hosts = _s.trusted_hosts_list
 except Exception:
     _cors_origins = ["http://localhost:3000", "http://localhost:8080"]
@@ -512,9 +523,9 @@ except Exception:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-ARES-CSRF"],
 )
 app.add_middleware(
     TrustedHostMiddleware,
@@ -584,6 +595,14 @@ async def global_rate_limit_middleware(request: Request, call_next: Any) -> Any:
     response = await call_next(request)
     response.headers["X-RateLimit-Remaining"] = str(max(0, remaining))
     return response
+
+
+# Registered last so browser-auth validation and scrubbing is the first ASGI
+# operation for its five routes, before body parsing, logging, or database work.
+app.add_middleware(
+    BrowserSessionBoundaryMiddleware,
+    settings_provider=get_settings,
+)
 
 
 # ── Shared dependencies ───────────────────────────────────────────────────────
@@ -724,7 +743,6 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 class TokenResponse(BaseModel):
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"  # noqa: S105 - OAuth token type, not a secret
     expires_in: int = 3600
     role: str = ""
@@ -732,18 +750,58 @@ class TokenResponse(BaseModel):
     session_coordination_key: str
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
+def _browser_context(request: Request) -> BrowserRequestContext:
+    context = getattr(request.state, "browser_session", None)
+    if not isinstance(context, BrowserRequestContext):
+        raise HTTPException(403, "Browser request rejected")
+    return context
 
 
-@app.post("/auth/token", response_model=TokenResponse, tags=["auth"])
+def _browser_policy(request: Request) -> BrowserSessionPolicy:
+    policy = getattr(request.state, "browser_policy", None)
+    if not isinstance(policy, BrowserSessionPolicy):
+        raise HTTPException(503, "Browser authentication unavailable")
+    return policy
+
+
+def _token_response_content(session: Any, settings: AresSettings) -> dict[str, Any]:
+    return {
+        "access_token": session.access_token,
+        "token_type": "bearer",
+        "expires_in": settings.ares_jwt_expire_minutes * 60,
+        "role": session.role,
+        "refresh_generation": session.refresh_generation,
+        "session_coordination_key": session.coordination_key,
+    }
+
+
+def _auth_json_response(content: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
+@app.get("/auth/csrf", status_code=204, tags=["auth"])
+async def bootstrap_browser_csrf(request: Request) -> Response:
+    response = Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+    publish_prelogin_csrf(response, _browser_policy(request))
+    return response
+
+
+@app.post("/auth/token", tags=["auth"])
 async def login(
     request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
-) -> TokenResponse:
-    """Authenticate. Returns access_token (60m) + refresh_token (30d)."""
+) -> JSONResponse:
+    """Authenticate and publish the committed refresh session as cookies."""
+    _browser_context(request)
     ip = request.client.host if request.client else "unknown"
     # Double-check: per-IP AND per-username to block both distributed and targeted attacks
     allowed_ip, _ = await _limiter.is_allowed_async(f"auth:{ip}", RATE_LIMITS["auth"])
@@ -781,24 +839,33 @@ async def login(
     if result.status is not SessionIssueStatus.ISSUED or result.session is None:
         raise HTTPException(401, "Invalid credentials")
     session = result.session
-    return TokenResponse(
-        access_token=session.access_token,
+    response = _auth_json_response(_token_response_content(session, settings))
+    if not publish_session_cookies(
+        response,
+        _browser_policy(request),
         refresh_token=session.refresh_token,
-        role=session.role,
-        refresh_generation=session.refresh_generation,
-        session_coordination_key=session.coordination_key,
-        expires_in=settings.ares_jwt_expire_minutes * 60,
-    )
+        absolute_expiry=session.absolute_expires_at,
+    ):
+        raise HTTPException(401, "Session is not valid")
+    return response
 
 
-@app.post("/auth/refresh", response_model=TokenResponse, tags=["auth"])
+@app.post("/auth/refresh", tags=["auth"])
 async def refresh_access_token(
     request: Request,
-    body: RefreshRequest,
     settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
-) -> TokenResponse:
-    """Rotate refresh token. Old token revoked; new access + refresh token issued."""
+) -> JSONResponse:
+    """Rotate the single canonical refresh cookie."""
+    context = _browser_context(request)
+    policy = _browser_policy(request)
+    if context.refresh_token is None:
+        response = _auth_json_response(
+            {"code": 401, "detail": "Session is not valid", "type": "api_error"},
+            status_code=401,
+        )
+        clear_session_cookies(response, policy)
+        return response
     ip = request.client.host if request.client else "unknown"
     allowed, _ = await _limiter.is_allowed_async(f"refresh:{ip}", RATE_LIMITS["auth"])
     if not allowed:
@@ -816,59 +883,63 @@ async def refresh_access_token(
         )
 
     try:
-        result = await db.rotate_refresh_session(body.refresh_token, _token_factory)
+        result = await db.rotate_refresh_session(context.refresh_token, _token_factory)
     except Exception as exc:
         logger.warning("refresh_transaction_failed", error_type=type(exc).__name__)
         raise HTTPException(503, "Authentication service unavailable") from None
     if result.status is not RefreshRotationStatus.ROTATED or result.session is None:
-        raise HTTPException(401, "Refresh token invalid or expired")
+        response = _auth_json_response(
+            {"code": 401, "detail": "Session is not valid", "type": "api_error"},
+            status_code=401,
+        )
+        clear_session_cookies(response, policy)
+        return response
     session = result.session
-    return TokenResponse(
-        access_token=session.access_token,
+    response = _auth_json_response(_token_response_content(session, settings))
+    if not publish_session_cookies(
+        response,
+        policy,
         refresh_token=session.refresh_token,
-        role=session.role,
-        refresh_generation=session.refresh_generation,
-        session_coordination_key=session.coordination_key,
-        expires_in=settings.ares_jwt_expire_minutes * 60,
-    )
+        absolute_expiry=session.absolute_expires_at,
+    ):
+        raise HTTPException(401, "Session is not valid")
+    return response
 
 
 @app.post("/auth/logout", tags=["auth"])
 async def logout(
     request: Request,
-    actor: AuthenticatedUser = Depends(require_any_auth()),
-    settings: AresSettings = Depends(get_settings),
     db: AresDatabase = Depends(get_db),
-) -> dict[str, str]:
-    """Revoke only the current bearer family; API keys are unaffected."""
-    del request, settings
-    source = actor.websocket_ticket_source
-    if actor.is_api_key or source is None:
-        return {"status": "ok"}
-    try:
-        result = await db.revoke_current_session(
-            user_id=source.user_id,
-            family_id=source.family_id,
-            jti=source.jti,
-            expires_at=source.expires_at,
-        )
-    except Exception as exc:
-        logger.warning("logout_current_failed", error_type=type(exc).__name__)
-        raise HTTPException(503, "Authentication service unavailable") from None
-    if result.status is SessionRevocationStatus.INVALID:
-        raise HTTPException(401, "Not authenticated")
-    return {"status": "ok"}
+) -> Response:
+    """Idempotently revoke the family named by the refresh cookie."""
+    context = _browser_context(request)
+    policy = _browser_policy(request)
+    if context.refresh_token is not None:
+        try:
+            await db.revoke_refresh_cookie_session(context.refresh_token)
+        except Exception as exc:
+            logger.warning("logout_current_failed", error_type=type(exc).__name__)
+            raise HTTPException(503, "Authentication service unavailable") from None
+    response = Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+    clear_session_cookies(response, policy)
+    return response
 
 
 @app.post("/auth/logout-all", tags=["auth"])
 async def logout_all(
+    request: Request,
     actor: AuthenticatedUser = Depends(require_any_auth()),  # noqa: B008
     db: AresDatabase = Depends(get_db),  # noqa: B008
-) -> dict[str, str]:
+) -> Response:
     """Revoke every bearer family by incrementing the user's auth epoch."""
+    _browser_context(request)
+    policy = _browser_policy(request)
     source = actor.websocket_ticket_source
     if actor.is_api_key or source is None:
-        return {"status": "ok"}
+        raise HTTPException(401, "Not authenticated")
     try:
         result = await db.revoke_all_sessions(
             user_id=source.user_id,
@@ -880,7 +951,12 @@ async def logout_all(
         raise HTTPException(503, "Authentication service unavailable") from None
     if result.status is SessionRevocationStatus.INVALID:
         raise HTTPException(401, "Not authenticated")
-    return {"status": "ok"}
+    response = Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+    clear_session_cookies(response, policy)
+    return response
 
 
 def _validate_password_complexity(v: str) -> str:

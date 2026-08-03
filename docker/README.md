@@ -32,6 +32,10 @@ Development compose starts:
 - `ares-frontend` at `http://localhost:5173/dashboard`
 
 The Vite server proxies API and WebSocket traffic to `ares-api`.
+Development browser cookies use the distinct `ares-dev-*` names only while
+`ARES_DEBUG=true`, the configured origin is exactly `http://localhost:5173`,
+and the request host is loopback. Production requires one exact HTTPS
+`ARES_BROWSER_ORIGIN`; browser auth is same-origin and does not use CORS.
 
 ## Environment
 Copy `.env.example` to `.env` and fill in secrets before starting either stack.
@@ -51,3 +55,15 @@ container before the database upgrade, then start the matching backend and
 frontend together. Mixed workers are unsupported because managed ownership is
 revision-exact. A container-image rollback does not downgrade the additive
 schema; return to a compatible forward image instead.
+
+## Browser-session rollout
+
+Refresh sessions use host-only HttpOnly cookies and CSRF/Origin validation.
+Access tokens remain in browser memory, and API keys remain the automation
+credential. Deploy backend and frontend atomically, drain existing sockets,
+and require existing users to sign in again; the old browser refresh value is
+deleted from `sessionStorage` and is not bridged into the cookie transport.
+Mixed versions are unsupported. No revision `0010` is introduced: Alembic
+remains at `0009`, so rollback replaces backend and frontend together without a
+database downgrade. The nginx TLS log and HTTP redirect use `$uri`, and the
+redirect drops query strings instead of reflecting them.

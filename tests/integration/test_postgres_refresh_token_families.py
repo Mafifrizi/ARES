@@ -164,3 +164,42 @@ async def test_real_postgres_logout_all_advances_epoch_across_pools() -> None:
             )
         finally:
             await observer.close()
+
+
+@pytest.mark.asyncio
+async def test_real_postgres_cookie_logout_expiry_and_replay_contract() -> None:
+    async with _postgres_harness() as harness:
+        database = harness.database
+        await database.create_user(
+            "cookie-family-pg-user",
+            "CookieFamilyPass1!",
+            "operator",
+        )
+        issued = await database.create_login_session(
+            "cookie-family-pg-user",
+            "CookieFamilyPass1!",
+            _access_factory,
+        )
+        _require(issued.session is not None, "PostgreSQL cookie session missing")
+        predecessor = issued.session.refresh_token
+        expiry_is_authoritative = (
+            issued.session.absolute_expires_at.tzinfo is not None
+            and issued.session.absolute_expires_at > datetime.now(timezone.utc)
+        )
+        rotated = await database.rotate_refresh_session(predecessor, _access_factory)
+        _require(rotated.session is not None, "PostgreSQL cookie successor missing")
+        revoked = await database.revoke_refresh_cookie_session(predecessor)
+        successor = await database.rotate_refresh_session(
+            rotated.session.refresh_token,
+            _access_factory,
+        )
+        repeated = await database.revoke_refresh_cookie_session(predecessor)
+        unknown = await database.revoke_refresh_cookie_session("u" * 64)
+        _require(
+            expiry_is_authoritative
+            and revoked.status is SessionRevocationStatus.REVOKED
+            and successor.status is not RefreshRotationStatus.ROTATED
+            and repeated.status is SessionRevocationStatus.ALREADY_REVOKED
+            and unknown.status is SessionRevocationStatus.INVALID,
+            "PostgreSQL cookie logout/replay contract changed",
+        )

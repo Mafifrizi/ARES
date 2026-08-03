@@ -108,19 +108,20 @@ authorization and a scoped campaign.
 ### API Flow
 
 ```powershell
-$token = (Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/token `
-  -ContentType "application/x-www-form-urlencoded" `
-  -Body "username=admin&password=YOUR_PASSWORD").access_token
-
-$headers = @{ Authorization = "Bearer $token" }
+$headers = @{ "X-API-Key" = $env:ARES_API_KEY }
 
 Invoke-RestMethod `
   -Method Get `
   -Uri http://127.0.0.1:8080/modules `
   -Headers $headers
 ```
+
+API keys are the supported automation credential. Browser authentication is
+same-origin only: it begins with `GET /auth/csrf`, keeps the refresh authority
+in an HttpOnly cookie, and keeps access tokens in memory. `POST /auth/refresh`
+has an empty body and query and accepts no refresh-token header or JSON
+fallback. WebSocket tickets continue to be issued from an access bearer or API
+key and ignore ambient refresh cookies.
 
 Run a module in dry-run mode:
 

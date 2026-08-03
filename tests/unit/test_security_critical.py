@@ -26,6 +26,8 @@ import pytest
 os.environ.setdefault("ARES_SECRET_KEY",             "test-sec-critical-min32-chars!!!!")
 os.environ.setdefault("ARES_ENCRYPTION_KEY",         "test-enc-critical-min32-chars!!!!")
 os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestCriticalPass1!")
+os.environ.setdefault("ARES_DEBUG", "true")
+os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -81,6 +83,9 @@ def _make_mock_db():
     db.revoke_current_session = AsyncMock(
         return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
     )
+    db.revoke_refresh_cookie_session = AsyncMock(
+        return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
+    )
     db.revoke_all_sessions = AsyncMock(
         return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
     )
@@ -120,6 +125,46 @@ def _make_mock_db():
 def _reset_limiter() -> None:
     from ares.api.rbac import _limiter
     _limiter._windows.clear()
+
+
+def _browser_client(app):
+    import httpx
+
+    client: httpx.AsyncClient
+
+    async def _headers(request: httpx.Request) -> None:
+        if request.url.path in {
+            "/auth/token",
+            "/auth/refresh",
+            "/auth/logout",
+            "/auth/logout-all",
+        }:
+            request.headers["Origin"] = "http://localhost:5173"
+            request.headers["Sec-Fetch-Site"] = "same-origin"
+            try:
+                csrf = client.cookies.get("ares-dev-csrf")
+            except httpx.CookieConflict:
+                csrf = None
+            csrf = csrf or ("A" * 43)
+            request.headers["X-ARES-CSRF"] = csrf
+            cookie = request.headers.get("Cookie", "")
+            if "ares-dev-csrf=" not in cookie:
+                request.headers["Cookie"] = (
+                    f"{cookie}; ares-dev-csrf={csrf}" if cookie else f"ares-dev-csrf={csrf}"
+                )
+
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://localhost:5173",
+        event_hooks={"request": [_headers]},
+    )
+    client.cookies.set(
+        "ares-dev-csrf", "A" * 43, domain="localhost.local", path="/"
+    )
+    client.cookies.set(
+        "ares-dev-refresh", "r" * 64, domain="localhost.local", path="/"
+    )
+    return client
 
 
 def _run(coro):
@@ -240,15 +285,11 @@ class TestTokenRevocation:
         _reset_limiter()
 
     def _client(self, mock_db):
-        import httpx
         from ares.api.server import app, get_db, get_settings
         app.state.db = mock_db
         app.dependency_overrides[get_db]       = lambda: mock_db
         app.dependency_overrides[get_settings] = lambda: _settings()
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://localhost",
-        )
+        return _browser_client(app)
 
     def test_revoked_token_rejected(self):
         """Token whose JTI is in the blacklist must return 401."""
@@ -294,8 +335,8 @@ class TestTokenRevocation:
             )
         _run(_run_test())
 
-    def test_logout_triggers_revocation(self):
-        """POST /auth/logout must call DB revocation methods."""
+    def test_logout_triggers_cookie_family_revocation(self):
+        """POST /auth/logout must use refresh-cookie family authority."""
         db = _make_mock_db()
         db.is_access_token_revoked = AsyncMock(return_value=False)
         db.get_user = AsyncMock(return_value={
@@ -305,8 +346,9 @@ class TestTokenRevocation:
         async def _run_test():
             async with self._client(db) as c:
                 r = await c.post("/auth/logout", headers=_auth("alice", "operator"))
-            assert r.status_code == 200
-            db.revoke_current_session.assert_awaited_once()
+            assert r.status_code == 204
+            db.revoke_refresh_cookie_session.assert_awaited_once()
+            db.revoke_current_session.assert_not_awaited()
         _run(_run_test())
 
 
@@ -445,16 +487,12 @@ class TestRBACEnforcement:
         _reset_limiter()
 
     def _client(self, mock_db=None):
-        import httpx
         from ares.api.server import app, get_db, get_settings
         db = mock_db or _make_mock_db()
         app.state.db = db
         app.dependency_overrides[get_db]       = lambda: db
         app.dependency_overrides[get_settings] = lambda: _settings()
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://localhost",
-        )
+        return _browser_client(app)
 
     def test_no_token_returns_401(self):
         """Unauthenticated request must return 401, not 403."""
@@ -576,16 +614,12 @@ class TestRefreshTokenRateLimit:
         _reset_limiter()
 
     def _client(self, mock_db=None):
-        import httpx
         from ares.api.server import app, get_db, get_settings
         db = mock_db or _make_mock_db()
         app.state.db = db
         app.dependency_overrides[get_db]       = lambda: db
         app.dependency_overrides[get_settings] = lambda: _settings()
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://localhost",
-        )
+        return _browser_client(app)
 
     def test_rate_limited_after_many_attempts(self):
         """After N refresh calls from same IP, 429 must be returned."""
@@ -595,9 +629,8 @@ class TestRefreshTokenRateLimit:
         async def _run_test():
             async with self._client() as c:
                 statuses = []
-                for i in range(limit + 2):
-                    r = await c.post("/auth/refresh",
-                                     json={"refresh_token": f"fake-{i}"})
+                for _ in range(limit + 2):
+                    r = await c.post("/auth/refresh")
                     statuses.append(r.status_code)
             assert 429 in statuses, (
                 f"Expected 429 after {limit} attempts, got statuses: {statuses}"
@@ -611,9 +644,8 @@ class TestRefreshTokenRateLimit:
 
         async def _run_test():
             async with self._client() as c:
-                for i in range(limit + 1):
-                    r = await c.post("/auth/refresh",
-                                     json={"refresh_token": f"fake-{i}"})
+                for _ in range(limit + 1):
+                    r = await c.post("/auth/refresh")
                     if r.status_code == 429:
                         headers_lower = {k.lower(): v for k, v in r.headers.items()}
                         assert "retry-after" in headers_lower, (

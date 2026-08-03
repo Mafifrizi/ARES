@@ -1,5 +1,8 @@
 param(
-    [string]$BaseUrl = "http://localhost:8080",
+    [ValidateNotNullOrEmpty()]
+    [string]$BaseUrl = "http://127.0.0.1:5173",
+    [ValidateNotNullOrEmpty()]
+    [string]$BrowserOrigin = "http://127.0.0.1:5173",
     [string]$Username = "admin"
 )
 
@@ -11,4 +14,8 @@ if (-not (Test-Path $Python)) {
     $Python = "python"
 }
 
-& $Python (Join-Path $PSScriptRoot "validation_lab.py") --base-url $BaseUrl --username $Username
+& $Python (Join-Path $PSScriptRoot "validation_lab.py") `
+    --base-url $BaseUrl `
+    --browser-origin $BrowserOrigin `
+    --username $Username
+exit $LASTEXITCODE

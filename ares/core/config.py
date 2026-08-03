@@ -121,6 +121,12 @@ class AresSettings(BaseSettings):
         default="http://localhost:3000,http://localhost:8080",
         description="Comma-separated allowed CORS origins. Example: https://ares.corp.local",
     )
+    ares_browser_origin: str = Field(
+        default="",
+        description=(
+            "Exact same-origin browser boundary. Required outside explicit debug mode."
+        ),
+    )
     ares_trusted_hosts: str = Field(
         default="localhost,127.0.0.1",
         description="Comma-separated trusted hostnames. Example: ares.corp.local,10.0.0.5",

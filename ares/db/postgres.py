@@ -5560,12 +5560,12 @@ class PostgresDatabase:
     # ── Refresh tokens ───────────────────────────────────────────────────────
 
     @staticmethod
-    async def _insert_initial_family_token(
+    async def _insert_initial_family_token_with_expiry(
         conn: Any,
         *,
         user_id: str,
         auth_epoch: int,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, datetime]:
         family_id = generate_family_id()
         raw_token = generate_refresh_token()
         token_hash = hash_refresh_token(raw_token)
@@ -5592,6 +5592,22 @@ class PostgresDatabase:
             absolute_expiry,
             now,
             family_id,
+        )
+        return family_id, raw_token, absolute_expiry
+
+    @staticmethod
+    async def _insert_initial_family_token(
+        conn: Any,
+        *,
+        user_id: str,
+        auth_epoch: int,
+    ) -> tuple[str, str]:
+        family_id, raw_token, _ = (
+            await PostgresDatabase._insert_initial_family_token_with_expiry(
+                conn,
+                user_id=user_id,
+                auth_epoch=auth_epoch,
+            )
         )
         return family_id, raw_token
 
@@ -5636,10 +5652,12 @@ class PostgresDatabase:
                     row["hashed_password"],
                 ):
                     return SessionIssueResult(SessionIssueStatus.INVALID)
-                family_id, raw_token = await self._insert_initial_family_token(
-                    conn,
-                    user_id=row["id"],
-                    auth_epoch=int(row["auth_epoch"]),
+                family_id, raw_token, absolute_expiry = (
+                    await self._insert_initial_family_token_with_expiry(
+                        conn,
+                        user_id=row["id"],
+                        auth_epoch=int(row["auth_epoch"]),
+                    )
                 )
                 access_token = token_factory(
                     {
@@ -5665,6 +5683,7 @@ class PostgresDatabase:
                 subject=row["username"],
                 family_id=family_id,
                 auth_epoch=int(row["auth_epoch"]),
+                absolute_expires_at=absolute_expiry,
                 refresh_generation=0,
                 role=row["role"],
             ),
@@ -5799,6 +5818,7 @@ class PostgresDatabase:
                 subject=row["username"],
                 family_id=row["family_id"],
                 auth_epoch=int(row["auth_epoch"]),
+                absolute_expires_at=row["absolute_expires_at"],
                 refresh_generation=generation,
                 role=row["role"],
             ),
@@ -5902,6 +5922,49 @@ class PostgresDatabase:
             if changed
             else SessionRevocationStatus.ALREADY_REVOKED
         )
+
+    async def revoke_refresh_cookie_session(
+        self,
+        raw_token: str,
+    ) -> SessionRevocationResult:
+        """Revoke the family identified only by a browser refresh cookie."""
+        token_hash = hash_refresh_token(raw_token)
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT rt.user_id,rt.family_id,rt.state,f.state AS family_state "
+                    "FROM refresh_tokens AS rt JOIN refresh_token_families AS f "
+                    "ON f.id=rt.family_id AND f.user_id=rt.user_id "
+                    "WHERE rt.id=$1 FOR UPDATE OF rt,f",
+                    token_hash,
+                )
+                if row is None:
+                    return SessionRevocationResult(SessionRevocationStatus.INVALID)
+                if row["family_state"] != "active":
+                    return SessionRevocationResult(
+                        SessionRevocationStatus.ALREADY_REVOKED
+                    )
+                reason = "logout_current" if row["state"] == "active" else "replay"
+                changed = await self._revoke_family_rows(
+                    conn,
+                    family_id=row["family_id"],
+                    reason=reason,
+                )
+                if changed:
+                    action = (
+                        "logout_cookie_family_revoked"
+                        if reason == "logout_current"
+                        else "logout_cookie_replay_family_revoked"
+                    )
+                    await conn.execute(
+                        "INSERT INTO audit_log(actor,action,detail) VALUES("
+                        "'auth-system',$1,'')",
+                        action,
+                    )
+                    return SessionRevocationResult(SessionRevocationStatus.REVOKED)
+                return SessionRevocationResult(
+                    SessionRevocationStatus.ALREADY_REVOKED
+                )
 
     async def revoke_all_sessions(
         self,

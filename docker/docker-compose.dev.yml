@@ -24,6 +24,12 @@ services:
       ARES_DATABASE_URL:           "${ARES_DATABASE_URL:-sqlite+aiosqlite:////home/ares/.ares/ares.db}"
       ARES_API_HOST:               "0.0.0.0"
       ARES_API_PORT:               "8080"
+      # Locked browser-cookie development boundary: Vite is the browser origin
+      # and proxies /auth, API, and WebSocket traffic to this service.
+      ARES_DEBUG:                  "true"
+      ARES_BROWSER_ORIGIN:         "http://localhost:5173"
+      ARES_TRUSTED_HOSTS:          "localhost,127.0.0.1"
+      ARES_CORS_ORIGINS:           "http://localhost:5173"
     env_file:
       - path: ../.env
         required: false   # Don't fail if .env doesn't exist — env block above provides defaults

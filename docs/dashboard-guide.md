@@ -144,28 +144,15 @@ The dashboard currently shows users in the `Security` page, but it does not
 include a role editor. In the current release, the role is assigned when the
 account is created.
 
-PowerShell example:
+Create users through the same-origin dashboard. Browser authentication first
+bootstraps CSRF with `GET /auth/csrf`; login then reuses that cookie jar and
+sends the exact browser `Origin` plus `X-ARES-CSRF`. The login response returns
+an access token and nonsecret coordination metadata only. Refresh authority is
+held exclusively in the HttpOnly cookie and is never returned to JavaScript.
 
-```powershell
-$token = (Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/token `
-  -ContentType "application/x-www-form-urlencoded" `
-  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
-
-$headers = @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/register `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body (@{
-    username = "bob"
-    password = "StrongPass1!"
-    role = "operator"
-  } | ConvertTo-Json)
-```
+For automated API access, create and use a scoped API key. Do not automate the
+browser login endpoint or transport refresh credentials in JSON, headers,
+queries, `sessionStorage`, or `localStorage`.
 
 Password rules:
 

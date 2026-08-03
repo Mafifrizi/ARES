@@ -2,9 +2,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  browserCoordinationAvailable,
   captureSession,
   clearTokens,
-  getRefreshToken,
   invalidateSession,
   isSessionCurrent,
   login as loginRequest,
@@ -30,7 +30,7 @@ function LoadingSession() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(Boolean(getRefreshToken()));
+  const [loading, setLoading] = useState(browserCoordinationAvailable());
   const [accountBoundary, setAccountBoundary] = useState(0);
   const providerLifecycle = useRef({ generation: 0, mounted: false });
   const queryClient = useQueryClient();
@@ -70,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    if (!getRefreshToken()) {
+    if (!browserCoordinationAvailable()) {
       resetLocalSession();
       setLoading(false);
       return;

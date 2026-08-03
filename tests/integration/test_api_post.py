@@ -43,6 +43,8 @@ def isolated_api_post_environment():
         "ARES_ENCRYPTION_KEY": _ENCKEY,
         "ARES_DEFAULT_ADMIN_PASSWORD": _ADMIN,
         "ARES_DATABASE_URL": _DBURL,
+        "ARES_DEBUG": "true",
+        "ARES_BROWSER_ORIGIN": "http://localhost:5173",
     }
     original = {key: os.environ.get(key) for key in updates}
     os.environ.update(updates)
@@ -66,12 +68,40 @@ def _fresh_client() -> TestClient:
     from ares.core.config import get_settings
     get_settings.cache_clear()   # clear lru_cache — force re-read from env
     from ares.api.server import app
-    return TestClient(app, base_url="http://localhost", raise_server_exceptions=False)
+    return TestClient(app, base_url="http://localhost:5173", raise_server_exceptions=False)
+
+
+def _csrf(client: TestClient) -> str:
+    value = client.cookies.get("ares-dev-csrf")
+    if not value:
+        response = client.get(
+            "/auth/csrf",
+            headers={"Origin": "http://localhost:5173"},
+        )
+        assert response.status_code == 204
+        value = client.cookies.get("ares-dev-csrf")
+    assert value
+    return value
+
+
+def _browser_post(client: TestClient, path: str, **kwargs):
+    headers = dict(kwargs.pop("headers", {}))
+    headers.update(
+        {
+            "Origin": "http://localhost:5173",
+            "Sec-Fetch-Site": "same-origin",
+            "X-ARES-CSRF": _csrf(client),
+        }
+    )
+    return client.post(path, headers=headers, **kwargs)
 
 
 def _login(client: TestClient, password: str = _ADMIN) -> str:
-    r = client.post("/auth/token",
-                    data={"username": "admin", "password": password})
+    r = _browser_post(
+        client,
+        "/auth/token",
+        data={"username": "admin", "password": password},
+    )
     assert r.status_code == 200, f"Login failed ({r.status_code}): {r.text}"
     return r.json()["access_token"]
 
@@ -94,38 +124,42 @@ class TestAuthPostEndpoints:
         return _login(c)
 
     def test_login_valid_returns_tokens(self, c):
-        r = c.post("/auth/token", data={"username": "admin", "password": _ADMIN})
+        r = _browser_post(c, "/auth/token", data={"username": "admin", "password": _ADMIN})
         assert r.status_code == 200
         body = r.json()
         assert "access_token"  in body
-        assert "refresh_token" in body
+        assert "refresh_token" not in body
         assert body["token_type"] == "bearer"
         assert body["role"]       == "team_lead"
 
     def test_login_wrong_password_returns_401(self, c):
-        r = c.post("/auth/token", data={"username": "admin", "password": "WrongPass!"})
+        r = _browser_post(c, "/auth/token", data={"username": "admin", "password": "WrongPass!"})
         assert r.status_code == 401
 
     def test_login_unknown_user_returns_401(self, c):
-        r = c.post("/auth/token", data={"username": "nobody", "password": "anything"})
+        r = _browser_post(c, "/auth/token", data={"username": "nobody", "password": "anything"})
         assert r.status_code == 401
 
     def test_refresh_invalid_token_returns_401(self, c):
-        r = c.post("/auth/refresh", json={"refresh_token": "not-a-real-token"})
-        assert r.status_code == 401
+        r = _browser_post(c, "/auth/refresh", json={"refresh_token": "not-a-real-token"})
+        assert r.status_code == 400
 
     def test_refresh_valid_rotates_token(self, c):
-        r = c.post("/auth/token", data={"username": "admin", "password": _ADMIN})
+        r = _browser_post(c, "/auth/token", data={"username": "admin", "password": _ADMIN})
         assert r.status_code == 200
-        old_refresh = r.json()["refresh_token"]
+        old_refresh = c.cookies.get("ares-dev-refresh")
+        assert old_refresh
 
-        r2 = c.post("/auth/refresh", json={"refresh_token": old_refresh})
+        r2 = _browser_post(c, "/auth/refresh")
         assert r2.status_code == 200
         assert "access_token"  in r2.json()
-        assert "refresh_token" in r2.json()
+        assert "refresh_token" not in r2.json()
 
         # Old refresh token must now be revoked
-        r3 = c.post("/auth/refresh", json={"refresh_token": old_refresh})
+        c.cookies.set(
+            "ares-dev-refresh", old_refresh, domain="localhost.local", path="/"
+        )
+        r3 = _browser_post(c, "/auth/refresh")
         assert r3.status_code == 401
 
     def test_register_new_operator(self, c, token):
@@ -150,8 +184,11 @@ class TestAuthPostEndpoints:
 
     def test_register_forbidden_for_non_team_lead(self, c, token):
         # Log in as the new operator
-        login = c.post("/auth/token",
-                       data={"username": "op_post_test", "password": "OpPass1!Test99"})
+        login = _browser_post(
+            c,
+            "/auth/token",
+            data={"username": "op_post_test", "password": "OpPass1!Test99"},
+        )
         assert login.status_code == 200
         op_token = login.json()["access_token"]
 
@@ -171,8 +208,11 @@ class TestAuthPostEndpoints:
         )
         assert r.status_code == 200
         # Change it back
-        login2 = c.post("/auth/token",
-                        data={"username": "admin", "password": _ADMIN + "New"})
+        login2 = _browser_post(
+            c,
+            "/auth/token",
+            data={"username": "admin", "password": _ADMIN + "New"},
+        )
         new_tok = login2.json()["access_token"]
         c.post(
             "/auth/change-password",

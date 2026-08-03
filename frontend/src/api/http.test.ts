@@ -1,422 +1,197 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { apiBlobRequest, apiRequest } from "./http";
-import {
-  beginIdentityTransition,
-  captureSession,
-  clearTokens,
-  getAccessToken,
-  getRefreshToken,
-  installTokenPairIfCurrent,
-  invalidateSession,
-  subscribeToSessionInvalidation
-} from "./session";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
+const CSRF = "A".repeat(43);
+const KEY = "B".repeat(43);
+
+function installBrowserPrimitives(): void {
+  localStorage.clear();
+  sessionStorage.clear();
+  document.cookie = `ares-dev-csrf=${CSRF}; Path=/`;
+  Object.defineProperty(navigator, "locks", {
+    configurable: true,
+    value: { request: vi.fn(async (_name: string, operation: () => unknown) => operation()) }
   });
-  return { promise, reject, resolve };
 }
 
-function tokenResponse(
-  accessToken: string,
-  refreshToken: string,
-  generation = 1
-): Response {
+function tokenResponse(generation = 1): Response {
   return new Response(JSON.stringify({
-    access_token: accessToken,
-    refresh_token: refreshToken,
+    access_token: "memory-access",
     token_type: "bearer",
     expires_in: 3600,
     role: "operator",
     refresh_generation: generation,
-    session_coordination_key: "coordination-a"
-  }), { status: 200 });
+    session_coordination_key: KEY
+  }), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function installSession(accessToken = "access-a", refreshToken = "refresh-a"): void {
-  const session = beginIdentityTransition();
-  if (!installTokenPairIfCurrent(
-    session,
-    accessToken,
-    refreshToken,
-    "coordination-a",
-    0
-  )) {
-    throw new Error("test session setup failed");
-  }
-}
-
-function requireFixed(condition: boolean, message: string): void {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-function resetTestSessionStorage(): void {
-  const keys = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index))
-    .filter((key): key is string => key !== null);
-  for (const key of keys) {
-    sessionStorage.removeItem(key);
-  }
-}
-
-describe("HTTP auth boundary", () => {
+describe("cookie-backed HTTP transport", () => {
   beforeEach(() => {
-    clearTokens();
-    resetTestSessionStorage();
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.resetModules();
+    installBrowserPrimitives();
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  it("reads only one canonical CSRF cookie", async () => {
+    const http = await import("./http");
+    expect(http.readBrowserCsrfToken()).toBe(CSRF);
   });
 
-  it("shares one refresh across simultaneous JSON requests and retries both once", async () => {
-    installSession();
-    const releaseRefresh = deferred<void>();
-    const refreshStarted = deferred<void>();
-    let refreshCalls = 0;
-    let initialCalls = 0;
-    let retryCalls = 0;
-    let incorrectRetryAuthorization = false;
-
-    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
-      const authorization = new Headers(init?.headers).get("Authorization");
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-        refreshStarted.resolve();
-        await releaseRefresh.promise;
-        return tokenResponse("access-b", "refresh-b");
-      }
-      if (authorization === "Bearer access-a") {
-        initialCalls += 1;
-        return new Response(null, { status: 401 });
-      }
-      if (authorization !== "Bearer access-b") {
-        incorrectRetryAuthorization = true;
-        return new Response(null, { status: 403 });
-      }
-      retryCalls += 1;
-      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
-    }));
-
-    const first = apiRequest<{ status: string }>("/protected/one");
-    const second = apiRequest<{ status: string }>("/protected/two");
-    try {
-      await refreshStarted.promise;
-      releaseRefresh.resolve();
-
-      const results = await Promise.all([first, second]);
-      expect(results.map((result) => result.status)).toEqual(["ok", "ok"]);
-      expect({ incorrectRetryAuthorization, initialCalls, refreshCalls, retryCalls }).toEqual({
-        incorrectRetryAuthorization: false,
-        initialCalls: 2,
-        refreshCalls: 1,
-        retryCalls: 2
-      });
-      const rotatedAccessTokenCurrent = getAccessToken() === "access-b";
-      requireFixed(rotatedAccessTokenCurrent, "expected rotated access authorization");
-    } finally {
-      releaseRefresh.resolve();
-      await Promise.allSettled([first, second]);
-    }
+  it("rejects duplicate canonical CSRF cookie names", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue(
+      `ares-dev-csrf=${CSRF}; ares-dev-csrf=${CSRF}`
+    );
+    const http = await import("./http");
+    expect(http.readBrowserCsrfToken()).toBeNull();
   });
 
-  it("shares the same refresh flight between JSON and blob requests", async () => {
-    installSession();
-    const releaseRefresh = deferred<void>();
-    const refreshStarted = deferred<void>();
-    let refreshCalls = 0;
-    let incorrectRetryAuthorization = false;
-
-    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
-      const authorization = new Headers(init?.headers).get("Authorization");
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-        refreshStarted.resolve();
-        await releaseRefresh.promise;
-        return tokenResponse("access-b", "refresh-b");
-      }
-      if (authorization === "Bearer access-a") {
-        return new Response(null, { status: 401 });
-      }
-      if (authorization !== "Bearer access-b") {
-        incorrectRetryAuthorization = true;
-        return new Response(null, { status: 403 });
-      }
-      return path === "/blob"
-        ? new Response("artifact", { status: 200 })
-        : new Response(JSON.stringify({ status: "ok" }), { status: 200 });
-    }));
-
-    const jsonRequest = apiRequest<{ status: string }>("/json");
-    const blobRequest = apiBlobRequest("/blob");
-    try {
-      await refreshStarted.promise;
-      releaseRefresh.resolve();
-
-      const [json, blob] = await Promise.all([jsonRequest, blobRequest]);
-      expect(json.status).toBe("ok");
-      expect(blob.size).toBeGreaterThan(0);
-      expect({ incorrectRetryAuthorization, refreshCalls }).toEqual({
-        incorrectRetryAuthorization: false,
-        refreshCalls: 1
-      });
-    } finally {
-      releaseRefresh.resolve();
-      await Promise.allSettled([jsonRequest, blobRequest]);
-    }
-  });
-
-  it("invalidates once when a shared refresh fails and does not retry protected requests", async () => {
-    installSession();
-    let refreshCalls = 0;
-    let protectedCalls = 0;
-    let invalidations = 0;
-    const unsubscribe = subscribeToSessionInvalidation(() => {
-      invalidations += 1;
+  it("CSRF bootstrap uses a same-origin credentialed GET", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 204 });
     });
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-        return new Response(null, { status: 401 });
-      }
-      protectedCalls += 1;
-      return new Response(null, { status: 401 });
-    }));
-
-    try {
-      const results = await Promise.allSettled([
-        apiRequest("/protected/one"),
-        apiRequest("/protected/two")
-      ]);
-      expect(results.every((result) => result.status === "rejected")).toBe(true);
-      expect({ invalidations, protectedCalls, refreshCalls }).toEqual({
-        invalidations: 1,
-        protectedCalls: 2,
-        refreshCalls: 1
-      });
-      const refreshTokenUnavailable = getRefreshToken() === null;
-      requireFixed(refreshTokenUnavailable, "Refresh token should remain unavailable.");
-    } finally {
-      unsubscribe();
-    }
+    vi.stubGlobal("fetch", fetchMock);
+    const http = await import("./http");
+    await http.bootstrapBrowserCsrf();
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/auth/csrf");
+    expect(init.credentials).toBe("same-origin");
+    expect(init.method).toBe("GET");
   });
 
-  it("invalidates after one retry receives a second 401 without recursion", async () => {
-    installSession();
-    let protectedCalls = 0;
-    let refreshCalls = 0;
-    let invalidations = 0;
-    const unsubscribe = subscribeToSessionInvalidation(() => {
-      invalidations += 1;
+  it("refresh sends an empty cookie-authoritative request", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return tokenResponse();
     });
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-        return tokenResponse("access-b", "refresh-b");
-      }
-      protectedCalls += 1;
-      return new Response(null, { status: 401 });
-    }));
-
-    try {
-      await expect(apiRequest("/protected")).rejects.toMatchObject({ status: 401 });
-      expect({ invalidations, protectedCalls, refreshCalls }).toEqual({
-        invalidations: 1,
-        protectedCalls: 2,
-        refreshCalls: 1
-      });
-    } finally {
-      unsubscribe();
-    }
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    const snapshot = session.beginIdentityTransition();
+    session.installSessionIfCurrent(snapshot, "old-access", KEY, 0);
+    const http = await import("./http");
+    await expect(http.refreshAccessToken(session.captureSession())).resolves.toBe(true);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/auth/refresh");
+    expect(init.body).toBeUndefined();
+    expect(init.credentials).toBe("same-origin");
+    expect(headers.get("X-ARES-CSRF")).toBe(CSRF);
+    expect(headers.has("Authorization")).toBe(false);
   });
 
-  it("retries a delayed old-token 401 with the current token without a second refresh", async () => {
-    installSession();
-    const releaseDelayed = deferred<void>();
-    const delayedStarted = deferred<void>();
-    let refreshCalls = 0;
-    let delayedCalls = 0;
-    let incorrectRetryAuthorization = false;
-
-    vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
-      const authorization = new Headers(init?.headers).get("Authorization");
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-        return tokenResponse("access-b", "refresh-b");
-      }
-      if (path === "/delayed" && authorization === "Bearer access-a") {
-        delayedStarted.resolve();
-        await releaseDelayed.promise;
-        return new Response(null, { status: 401 });
-      }
-      if (authorization === "Bearer access-a") {
-        return new Response(null, { status: 401 });
-      }
-      if (authorization !== "Bearer access-b") {
-        incorrectRetryAuthorization = true;
-        return new Response(null, { status: 403 });
-      }
-      if (path === "/delayed") {
-        delayedCalls += 1;
-      }
-      return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
-    }));
-
-    const delayed = apiRequest<{ status: string }>("/delayed");
-    try {
-      await delayedStarted.promise;
-      await expect(apiRequest<{ status: string }>("/leading")).resolves.toEqual({ status: "ok" });
-      releaseDelayed.resolve();
-      await expect(delayed).resolves.toEqual({ status: "ok" });
-
-      expect({ delayedCalls, incorrectRetryAuthorization, refreshCalls }).toEqual({
-        delayedCalls: 1,
-        incorrectRetryAuthorization: false,
-        refreshCalls: 1
-      });
-    } finally {
-      releaseDelayed.resolve();
-      await Promise.allSettled([delayed]);
-    }
+  it("refresh rejects a response containing a raw refresh token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      access_token: "access",
+      refresh_token: "forbidden",
+      refresh_generation: 1,
+      session_coordination_key: KEY
+    }), { status: 200 })));
+    const session = await import("./session");
+    const snapshot = session.beginIdentityTransition();
+    session.installSessionIfCurrent(snapshot, "old", KEY, 0);
+    const http = await import("./http");
+    await expect(http.refreshAccessToken(session.captureSession())).resolves.toBe(false);
+    expect(session.getAccessToken()).toBeNull();
   });
 
-  it("does not restore a session when a refresh succeeds after logout", async () => {
-    installSession();
-    const releaseRefresh = deferred<void>();
-    const refreshStarted = deferred<void>();
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
-      if (path !== "/auth/refresh") {
-        return new Response(null, { status: 401 });
-      }
-      refreshStarted.resolve();
-      await releaseRefresh.promise;
-      return tokenResponse("access-late", "refresh-late");
-    }));
-
-    const original = captureSession();
-    const refresh = apiRequest("/protected");
-    try {
-      await refreshStarted.promise;
-      invalidateSession(original);
-      releaseRefresh.resolve();
-
-      await expect(refresh).rejects.toMatchObject({ status: 401 });
-      const accessTokenUnavailable = getAccessToken() === null;
-      const refreshTokenUnavailable = getRefreshToken() === null;
-      requireFixed(accessTokenUnavailable, "Access token should remain unavailable.");
-      requireFixed(refreshTokenUnavailable, "Refresh token should remain unavailable.");
-    } finally {
-      releaseRefresh.resolve();
-      await Promise.allSettled([refresh]);
-    }
-  });
-
-  it.each(["success", "failure"] as const)(
-    "does not let stale account-A refresh %s alter account B",
-    async (outcome) => {
-      installSession();
-      const releaseRefresh = deferred<void>();
-      const refreshStarted = deferred<void>();
-      let invalidations = 0;
-      const unsubscribe = subscribeToSessionInvalidation(() => {
-        invalidations += 1;
-      });
-      vi.stubGlobal("fetch", vi.fn(async (path: string) => {
-        if (path === "/auth/refresh") {
-          refreshStarted.resolve();
-          await releaseRefresh.promise;
-          return outcome === "success"
-            ? tokenResponse("access-a-late", "refresh-a-late")
-            : new Response(null, { status: 401 });
-        }
-        return new Response(null, { status: 401 });
-      }));
-
-      try {
-        const refresh = apiRequest("/protected");
-        try {
-          await refreshStarted.promise;
-          const accountB = beginIdentityTransition();
-          const installed = installTokenPairIfCurrent(
-            accountB,
-            "access-b",
-            "refresh-b",
-            "coordination-b",
-            0
-          );
-          expect(installed).toBe(true);
-          releaseRefresh.resolve();
-          await expect(refresh).rejects.toMatchObject({ status: 401 });
-          const accountBAccessTokenCurrent = getAccessToken() === "access-b";
-          const accountBRefreshTokenCurrent = getRefreshToken() === "refresh-b";
-          requireFixed(accountBAccessTokenCurrent, "expected account B access token");
-          requireFixed(accountBRefreshTokenCurrent, "expected account B refresh token");
-          expect(invalidations).toBe(0);
-        } finally {
-          releaseRefresh.resolve();
-          await Promise.allSettled([refresh]);
-        }
-      } finally {
-        unsubscribe();
-      }
-    }
-  );
-
-  it("never retries an old-account request with the new account authorization", async () => {
-    installSession();
-    const releaseRequest = deferred<void>();
-    const requestStarted = deferred<void>();
-    let protectedCalls = 0;
-    let refreshCalls = 0;
-    vi.stubGlobal("fetch", vi.fn(async (path: string) => {
-      if (path === "/auth/refresh") {
-        refreshCalls += 1;
-      } else {
-        protectedCalls += 1;
-        requestStarted.resolve();
-        await releaseRequest.promise;
-      }
-      return new Response(null, { status: 401 });
-    }));
-
-    const request = apiRequest("/protected");
-    try {
-      await requestStarted.promise;
-      const accountB = beginIdentityTransition();
-      const installed = installTokenPairIfCurrent(
-        accountB,
-        "access-b",
-        "refresh-b",
-        "coordination-b",
-        0
-      );
-      expect(installed).toBe(true);
-      releaseRequest.resolve();
-
-      await expect(request).rejects.toMatchObject({ status: 401 });
-      expect({ protectedCalls, refreshCalls }).toEqual({ protectedCalls: 1, refreshCalls: 0 });
-      const accountBAccessTokenCurrent = getAccessToken() === "access-b";
-      requireFixed(accountBAccessTokenCurrent, "expected account B access token");
-    } finally {
-      releaseRequest.resolve();
-      await Promise.allSettled([request]);
-    }
-  });
-
-  it("removes an invalidation subscriber cleanly", () => {
-    installSession();
-    let calls = 0;
-    const unsubscribe = subscribeToSessionInvalidation(() => {
-      calls += 1;
+  it("same-tab concurrent refreshes share one flight", async () => {
+    let release: (() => void) | undefined;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      await barrier;
+      return tokenResponse();
     });
-    unsubscribe();
-    invalidateSession(captureSession());
-    expect(calls).toBe(0);
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    const start = session.beginIdentityTransition();
+    session.installSessionIfCurrent(start, "old", KEY, 0);
+    const http = await import("./http");
+    const snapshot = session.captureSession();
+    const first = http.refreshAccessToken(snapshot);
+    const second = http.refreshAccessToken(snapshot);
+    release?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a peer generation allows the next sequential rotation", async () => {
+    localStorage.setItem("ares.sessionCoordination.v2", JSON.stringify({
+      version: 2, key: KEY, generation: 2, tombstone: false
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => tokenResponse(3)));
+    const http = await import("./http");
+    await expect(http.refreshAccessToken()).resolves.toBe(true);
+  });
+
+  it("a tombstone prevents refresh", async () => {
+    localStorage.setItem("ares.sessionCoordination.v2", JSON.stringify({
+      version: 2, key: KEY, generation: 0, tombstone: true
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    const start = session.beginIdentityTransition();
+    session.installSessionIfCurrent(start, "old", KEY, 0);
+    localStorage.setItem("ares.sessionCoordination.v2", JSON.stringify({
+      version: 2, key: KEY, generation: 0, tombstone: true
+    }));
+    const http = await import("./http");
+    await expect(http.refreshAccessToken(session.captureSession())).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a 503 produces fixed unavailable state without retry", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const http = await import("./http");
+    const session = await import("./session");
+    await expect(http.refreshAccessToken()).resolves.toBe(false);
+    expect(session.isSessionUnavailable()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an indeterminate refresh performs one logout and never retries refresh", async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network"))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const http = await import("./http");
+    await expect(http.refreshAccessToken()).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/auth/refresh", "/auth/logout"
+    ]);
+  });
+
+  it("missing Web Locks fails closed before network", async () => {
+    Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const http = await import("./http");
+    await expect(http.refreshAccessToken()).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ordinary API requests include same-origin credentials and memory bearer", async () => {
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    session.setAccessToken("memory-bearer");
+    const http = await import("./http");
+    await http.apiRequest("/health", {}, false);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.credentials).toBe("same-origin");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer memory-bearer");
   });
 });

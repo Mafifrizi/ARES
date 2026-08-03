@@ -125,6 +125,7 @@ ARES requires these values before the first dashboard login:
 | `ARES_SECRET_KEY` | Signs API sessions and tokens. Generate a random high-entropy value. |
 | `ARES_ENCRYPTION_KEY` | Encrypts sensitive stored data such as vault/checkpoint material. Keep it stable and backed up. |
 | `ARES_DEFAULT_ADMIN_PASSWORD` | Bootstrap password for the first `admin` account only when the user table is empty. |
+| `ARES_BROWSER_ORIGIN` | One exact HTTPS production browser origin. Debug mode accepts only the fixed loopback Vite origins. |
 
 Windows PowerShell:
 
@@ -144,6 +145,11 @@ export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
 
 For repeated local use, copy `.env.example` to `.env` and fill these values
 there instead of setting session variables each time.
+
+Browser authentication is same-origin. Production must set
+`ARES_BROWSER_ORIGIN` to the public HTTPS origin that serves both dashboard and
+API through nginx. The local dashboard launcher uses the fixed loopback Vite
+proxy boundary; it does not enable general cross-origin cookie authentication.
 
 Important:
 
@@ -272,28 +278,10 @@ Valid roles:
 | `recon` | Read-heavy recon identity. Main dashboard execution endpoints remain operator-gated. |
 | `reporter` | Read-only reporting and review. No module execution or user administration. |
 
-PowerShell example:
-
-```powershell
-$token = (Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/token `
-  -ContentType "application/x-www-form-urlencoded" `
-  -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
-
-$headers = @{ Authorization = "Bearer $token" }
-
-Invoke-RestMethod `
-  -Method Post `
-  -Uri http://127.0.0.1:8080/auth/register `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body (@{
-    username = "alice"
-    password = "StrongPass1!"
-    role = "operator"
-  } | ConvertTo-Json)
-```
+Create accounts with `POST /auth/register` from a current `team_lead` browser
+session. Login is same-origin and CSRF protected; use the complete
+browser-session example in `docs/api-reference.md`, not a direct password POST
+to the backend origin.
 
 Passwords must be at least 12 characters and include uppercase, lowercase,
 number, and special-character content.
@@ -451,3 +439,11 @@ authoritative refresh-token families and deliberately invalidates existing
 browser bearer sessions. Stop every worker, take the required backup, upgrade,
 deploy the matching backend and frontend together, and have operators sign in
 again. Revision `0009` is forward-only; do not run mixed `0008`/`0009` workers.
+
+The browser transport uses a host-only HttpOnly refresh cookie and a readable
+CSRF cookie/header pair. Access tokens remain in memory, API keys remain the
+automation credential, and refresh tokens are no longer returned in JSON or
+stored in `sessionStorage`. Deploy the matching backend and frontend together,
+drain existing WebSockets, and require existing users to sign in again. A
+rollback replaces both components together and does not downgrade the database;
+there is no revision `0010` for this transport-only change.

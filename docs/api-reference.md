@@ -3,8 +3,9 @@
 > **Base URL:** `http://127.0.0.1:8080`
 > API endpoints require authentication unless noted otherwise. Automation
 > endpoints may accept `X-API-Key`; account/security management endpoints use
-> JWT/browser sessions only. `POST /auth/token` and `GET /health` are
-> unauthenticated.
+> JWT/browser sessions only. Browser auth is same-origin and CSRF protected;
+> `GET /health` is unauthenticated. API keys are the supported automation
+> credential.
 >
 > **Note:** The web dashboard (`/dashboard/*`) has its own authentication
 > using the same tokens — see [Dashboard](#dashboard) section.
@@ -15,7 +16,9 @@
 
 ### `POST /auth/token`
 
-Get a JWT access token + refresh token.
+Create a browser session. First call `GET /auth/csrf` from the configured
+same origin, then submit the form with the readable CSRF cookie copied into
+`X-ARES-CSRF`. The refresh token is returned only as an HttpOnly cookie.
 
 **Request:** `application/x-www-form-urlencoded` (OAuth2 password flow)
 ```
@@ -26,7 +29,6 @@ username=alice&password=changeme
 ```json
 {
   "access_token":  "eyJhbGci...",
-  "refresh_token": "rt-...",
   "token_type":    "bearer",
   "role":          "operator",
   "refresh_generation": 0,
@@ -34,6 +36,10 @@ username=alice&password=changeme
   "expires_in":    3600
 }
 ```
+
+The response sets host-only `__Host-ares-refresh` (HttpOnly) and
+`__Host-ares-csrf` cookies in production. Both use `Secure`, `SameSite=Strict`,
+and `Path=/`; no `Domain` is set. Responses are never cacheable.
 
 Each successful login creates an independent device/session family with a
 fixed 30-day absolute lifetime. Access JWTs carry the family identifier and
@@ -50,27 +56,29 @@ the same family. Rate limited per IP (same limit as `/auth/token`). A known
 consumed-token replay, including a concurrent loser or retry after a lost
 response, revokes the complete family and returns the same fixed `401` as any
 invalid, expired, unknown, or revoked refresh token. No replacement token can
-be recovered; the user must sign in again.
-
-```json
-{ "refresh_token": "rt-..." }
-```
+be recovered; the user must sign in again. The request body and query must be
+empty, no bearer or refresh-token header is accepted, and the refresh token is
+read only from the canonical HttpOnly cookie. Exact Origin and CSRF checks are
+required. Success rotates both cookies and returns access/coordination metadata
+without a refresh token.
 
 ---
 
 ### `POST /auth/logout`
 
-Revoke the current bearer family and access-token JTI. Other device families
-remain active. API-key authentication is unchanged and this call is
-idempotently successful for API-key callers.
+Revoke the family represented by the current refresh cookie. The empty request
+requires exact Origin and CSRF checks. A conclusive result returns `204`,
+clears both browser cookies, and is idempotent for a missing or already-revoked
+cookie. Other device families remain active.
 
 ---
 
 ### `POST /auth/logout-all`
 
-Increment the current user's authentication epoch, revoke every bearer family,
-and revoke the caller's JTI. Existing bearer HTTP and WebSocket authority fails
-on its next database resolution. API keys remain outside bearer families.
+Require the current access bearer plus Origin and CSRF, increment the current
+user's authentication epoch, and revoke every bearer family. Success returns
+`204` and clears both cookies. Existing bearer HTTP and WebSocket authority
+fails on its next database resolution. API keys remain outside bearer families.
 
 ---
 
@@ -114,9 +122,16 @@ and special-character content.
 PowerShell example:
 
 ```powershell
+$origin = "http://127.0.0.1:5173"
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+Invoke-WebRequest -Uri "$origin/auth/csrf" -WebSession $session | Out-Null
+$csrf = ($session.Cookies.GetCookies($origin) |
+  Where-Object Name -eq "ares-dev-csrf").Value
 $token = (Invoke-RestMethod `
   -Method Post `
-  -Uri http://127.0.0.1:8080/auth/token `
+  -Uri "$origin/auth/token" `
+  -WebSession $session `
+  -Headers @{ Origin = $origin; "X-ARES-CSRF" = $csrf; "Sec-Fetch-Site" = "same-origin" } `
   -ContentType "application/x-www-form-urlencoded" `
   -Body "username=admin&password=YOUR_CURRENT_ADMIN_PASSWORD").access_token
 
@@ -124,7 +139,7 @@ $headers = @{ Authorization = "Bearer $token" }
 
 Invoke-RestMethod `
   -Method Post `
-  -Uri http://127.0.0.1:8080/auth/register `
+  -Uri "$origin/auth/register" `
   -Headers $headers `
   -ContentType "application/json" `
   -Body (@{
@@ -658,7 +673,8 @@ Windows, and open the Vite-served dashboard at
 `http://127.0.0.1:5173/dashboard/`. The backend API remains on
 `http://127.0.0.1:8080` by default.
 
-The dashboard uses `POST /auth/token`, `POST /auth/refresh`, the main REST API,
+The dashboard bootstraps CSRF with `GET /auth/csrf`, uses cookie-only
+`POST /auth/token` and `POST /auth/refresh`, the main REST API,
 `POST /campaigns/{campaign_id}/websocket-ticket`, and the ticket-only main
 campaign WebSocket. Legacy
 `/dashboard/api/*` and `/dashboard/ws/live` routes are not the primary data
@@ -671,8 +687,9 @@ replaces both components together; the additive ticket migrations remain
 installed. Production clients must use HTTPS/WSS directly. The one-time ticket
 can still be visible in browser developer tools or to upstream components that
 receive the handshake query. The nginx TLS access-log format uses `$uri` to
-omit queries, but the port-80 `$request_uri` redirect boundary is unsupported
-for ticket-bearing requests.
+omit queries. Its port-80 redirect also uses `$uri`, deliberately dropping
+every query string; production clients must still connect with HTTPS/WSS
+directly.
 
 The supported dashboard is `/dashboard` on the main ARES application. The
 older `ares.api.dashboard.app:dashboard_app` FastAPI application is not mounted
