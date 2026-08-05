@@ -4,6 +4,44 @@ Writing your first ARES module in 10 minutes.
 
 ---
 
+## Phase 5C.1 Boundary
+
+Phase 5C.1 introduces `ares.modules.descriptors`, an immutable audit-only
+sidecar containing explicit contracts for the 62 first-party module IDs. It
+does not change module execution, parsing, plugin loading, or any execution
+ingress. In particular, it is not the canonical pre-side-effect gateway; that
+enforcement work is deferred to Phase 5C.2.
+
+Descriptor completeness and future-gateway eligibility are separate states.
+A first-party module may have every descriptor field recorded and still be
+ineligible because its current cancellation, output, destination, credential,
+or adapter contract is unsafe or unproven. Existing Phase 5C.0 P0/P1 execution
+defects remain unfixed in this metadata phase.
+
+The descriptor records sensitive defaults only as fixed semantic states; no
+sensitive value or value-derived hash is retained. Current lifecycle metadata
+is intentionally conservative: prior-attempt settlement, compensation, and
+timeout settlement remain unproven across the inventory, while the external
+LLM planner is explicitly billable, nondeterministic, and not automatically
+retryable. Dry-run support is source-bound rather than inferred from the base
+flag: 56 modules have native guard provenance and six lateral modules bind to
+the shared lateral adapter guard. These classifications are audit evidence,
+not live enforcement.
+
+The sidecar is trusted first-party repository data, not metadata inferred from
+class names, categories, defaults, or plugins. External plugin metadata remains
+untrusted catalog data and receives neither a fallback first-party descriptor
+nor future-gateway eligibility. Adding normal SDK class attributes is therefore
+not sufficient to make a plugin eligible for the future gateway. No database
+schema changes or Alembic revision `0010` are part of Phase 5C.1; the migration
+head remains `0009`.
+
+The examples below describe the existing SDK surface. They are not proof that
+all current ingresses apply the same policy, that dry-run is universally
+side-effect-free, or that current outcomes and retries are authoritative.
+
+---
+
 ## Quick Start
 
 ```python
@@ -42,14 +80,14 @@ class MssqlEnumModule(BaseModule):
         port   = ctx.params.get("port", 1433)
         result = ModuleResult(module_id=self.MODULE_ID, execution_id=ctx.execution_id)
 
-        # Always call before_request to enforce scope + rate limiting
-        await self.before_request(target, action="mssql_enum")
-
         if ctx.dry_run:
             # Simulation mode — return dummy data
             result.status = "success"
             result.raw    = {"simulated": True}
             return result
+
+        # Existing SDK hook; Phase 5C.2 defines the canonical gateway order.
+        await self.before_request(target, action="mssql_enum")
 
         try:
             # Real implementation: connect to MSSQL and enumerate
@@ -153,13 +191,13 @@ async def validate(self, ctx: ExecutionContext) -> None:
 async def execute(self, ctx: ExecutionContext) -> ModuleResult:
     result = ModuleResult(module_id=self.MODULE_ID, execution_id=ctx.execution_id)
 
-    # Always enforce scope + rate limiting
-    await self.before_request(ctx.target)
-
     # Don't make real calls in dry_run / simulation mode
     if ctx.dry_run:
         result.status = "success"
         return result
+
+    # Existing SDK hook; Phase 5C.2 defines the canonical gateway order.
+    await self.before_request(ctx.target)
 
     try:
         # Your attack/enumeration logic here
@@ -245,7 +283,7 @@ from ares.core.errors import (
     SandboxError,             # module crashed
 )
 
-# Engine behavior:
+# Intended legacy engine behavior (not made canonical by Phase 5C.1):
 #   ModuleValidationError → abort module, don't retry
 #   ConnectionRefused     → try fallback protocol/port
 #   AuthenticationFailed  → try next credential

@@ -12,6 +12,40 @@ authorized scope, review findings, and generate a report. AD/Kerberos, cloud,
 network, credential, Windows, Linux, and other modules differ only in optional
 extras/tools and parameter values.
 
+## Phase 5C.1 Descriptor Readiness (Audit Only)
+
+Phase 5C.1 adds an immutable first-party descriptor sidecar at
+`ares.modules.descriptors`. It records one explicit contract for each of the
+62 first-party module IDs and cross-checks those records against the existing
+registry and parameter models. The sidecar is audit metadata only. It is not
+called by the API, engine, plans, CLI, SDK, workers, Strategy, Goal, chains, or
+plugin loader during live execution.
+
+Descriptor completeness is not execution safety. A descriptor can cover every
+required metadata dimension while remaining future-gateway-ineligible. The
+current inventory deliberately records blockers where cancellation ownership,
+result authority, dynamic destinations, ambient credentials, or adapters are
+not trustworthy enough for fail-closed execution. The P0/P1 execution defects
+identified by the Phase 5C.0 audit remain unfixed until later Phase 5C work.
+
+Default metadata is value-free for nonpublic fields. The sidecar records only
+fixed absent, `None`, empty, nonempty-blocked, or unevaluated-factory states;
+it never stores or hashes a sensitive default. Nine nonpublic fields currently
+have a nonempty blocked state across eight modules. Lifecycle review records
+61 idempotency contracts as unproven and the billable, nondeterministic AI
+planner as proven non-idempotent. Automatic retry is disabled for 30 mutating
+or conditionally mutating modules and blocked for lack of settled-attempt proof
+for the other 32. Compensation and timeout settlement remain unproven for all
+62 modules; 12 timeout values are module-defined bounds and 50 are observations
+of the legacy engine default.
+
+The canonical pre-side-effect gateway is deferred to Phase 5C.2. Until that
+gateway exists, the sidecar does not add role, approval, capability,
+destination, credential, retry, or outcome enforcement. External plugin
+metadata remains untrusted catalog data under the future contract and receives
+no fallback descriptor or gateway eligibility. Phase 5C.1 adds no database
+table, migration, or revision `0010`; the Alembic head remains `0009`.
+
 ## Safety Model
 
 Only run ARES in systems you own or have written permission to test.
@@ -24,9 +58,12 @@ Every serious workflow should start with:
 4. Treat high-noise modules as approval-only actions.
 5. Generate a report and keep evidence inside the campaign.
 
-The dashboard and API enforce authentication, RBAC, scope validation, parameter
-validation, rate limits, and token revocation. The frontend is a convenience
-layer; the backend remains the enforcement boundary.
+The dashboard and API currently provide authentication, RBAC, scope,
+parameter-validation, rate-limit, and token-revocation checks. They are not yet
+one canonical execution gateway, and their existing ingress-parity defects are
+not corrected by the descriptor sidecar. The frontend remains a convenience
+layer; future execution enforcement must still be authoritative in the
+backend.
 
 ## Execution Chains inside Modules
 
@@ -51,12 +88,17 @@ each step explicitly.
 
 ## Dry-Run and Outcomes
 
-The module catalog is the source of truth for required and optional parameters,
-defaults, capability labels, supported modes, dependency notes, and whether a
-safe dry-run is supported. A module dry-run validates the request and campaign
-context only; it does not contact a target or perform module actions. The API
-returns `dry_run_ok`, `dry_run_blocked`, or `dry_run_unsupported` with a
-redacted parameter summary, missing inputs, warnings, and next steps.
+The live module catalog currently exposes required and optional parameters,
+defaults, capability labels, supported modes, dependency notes, and its
+declared dry-run flag. Phase 5C.1 independently records the audited contract;
+it does not make those legacy declarations authoritative. The audit binds 56
+module-native dry-run guards and six lateral modules to the shared
+`BaseLateralModule.execute` guard using stable normalized provenance. Guard
+removal, inversion, fall-through, pre-guard effects, flag poisoning, and
+provenance drift are readiness failures. Existing dry-run
+routes return `dry_run_ok`, `dry_run_blocked`, or `dry_run_unsupported` with a
+redacted parameter summary, missing inputs, warnings, and next steps, but the
+sidecar does not invoke a module or enforce dry-run at a live ingress.
 
 Live results use these outcome labels:
 
