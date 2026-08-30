@@ -56,6 +56,12 @@ frontend together. Mixed workers are unsupported because managed ownership is
 revision-exact. A container-image rollback does not downgrade the additive
 schema; return to a compatible forward image instead.
 
+Revision `0010` adds execution-lifecycle persistence without activating a live
+gateway. Drain all processes externally, back up, migrate, and then start only
+the matching 0010-aware API compatibility image. No supported operator budget
+command exists in this phase, so do not configure execution capacity with
+direct SQL. Legacy execution is not automatically disabled by the migration.
+
 ## Browser-session rollout
 
 Refresh sessions use host-only HttpOnly cookies and CSRF/Origin validation.
@@ -63,7 +69,8 @@ Access tokens remain in browser memory, and API keys remain the automation
 credential. Deploy backend and frontend atomically, drain existing sockets,
 and require existing users to sign in again; the old browser refresh value is
 deleted from `sessionStorage` and is not bridged into the cookie transport.
-Mixed versions are unsupported. No revision `0010` is introduced: Alembic
-remains at `0009`, so rollback replaces backend and frontend together without a
-database downgrade. The nginx TLS log and HTTP redirect use `$uri`, and the
+Mixed versions are unsupported. That browser-session change remains revision
+`0009`; the current Alembic head is the separate additive revision `0010`.
+Rollback replaces compatible application images without a database downgrade.
+The nginx TLS log and HTTP redirect use `$uri`, and the
 redirect drops query strings instead of reflecting them.

@@ -6,6 +6,8 @@ import type {
   CampaignGraph,
   ExecutionChain,
   Finding,
+  LiveExecutionResponse,
+  LiveSubmissionOptions,
   ModuleMeta,
   MonthlyFindingStats,
   ReportItem,
@@ -24,7 +26,91 @@ import {
 } from "./http";
 import { beginIdentityTransition, installSessionIfCurrent } from "./session";
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const pendingLiveSubmissions = new Map<string, string>();
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function liveSubmissionFingerprint(path: string, body: Record<string, unknown>): string {
+  return `${path}\u0000${canonicalJson(body)}`;
+}
+
+function canonicalIdempotencyKey(value: string): string {
+  if (!UUID_V4.test(value)) {
+    throw new ApiError(422, "Idempotency-Key must be a canonical lowercase UUIDv4");
+  }
+  return value;
+}
+
+function createIdempotencyKey(): string {
+  const value = globalThis.crypto?.randomUUID?.();
+  if (typeof value !== "string") {
+    throw new ApiError(503, "Secure UUID generation unavailable");
+  }
+  return canonicalIdempotencyKey(value);
+}
+
+function attachIdempotencyKey(error: unknown, key: string): never {
+  if ((typeof error === "object" && error !== null) || typeof error === "function") {
+    Object.defineProperty(error, "idempotencyKey", {
+      configurable: false,
+      enumerable: true,
+      value: key,
+      writable: false
+    });
+  }
+  throw error;
+}
+
+async function liveExecutionRequest(
+  path: string,
+  body: Record<string, unknown>,
+  options: LiveSubmissionOptions = {}
+): Promise<LiveExecutionResponse> {
+  const fingerprint = liveSubmissionFingerprint(path, body);
+  if (options.startNewSubmission) {
+    pendingLiveSubmissions.delete(fingerprint);
+  }
+  const supplied = options.idempotencyKey === undefined
+    ? undefined
+    : canonicalIdempotencyKey(options.idempotencyKey);
+  const key = supplied ?? pendingLiveSubmissions.get(fingerprint) ?? createIdempotencyKey();
+  pendingLiveSubmissions.set(fingerprint, key);
+  try {
+    const result = await apiRequest<Record<string, unknown>>(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": key
+      },
+      body: JSON.stringify(body)
+    });
+    if (pendingLiveSubmissions.get(fingerprint) === key) {
+      pendingLiveSubmissions.delete(fingerprint);
+    }
+    return { ...result, idempotency_key: key };
+  } catch (error) {
+    attachIdempotencyKey(error, key);
+  }
+}
+
+function clearPendingLiveSubmissions(): void {
+  pendingLiveSubmissions.clear();
+}
+
 export async function login(username: string, password: string): Promise<TokenResponse> {
+  clearPendingLiveSubmissions();
   const loginSession = beginIdentityTransition();
   const token = await withRefreshCookieLock(async () => {
     await bootstrapBrowserCsrf();
@@ -50,12 +136,14 @@ export async function login(username: string, password: string): Promise<TokenRe
 }
 
 export async function logout(): Promise<void> {
+  clearPendingLiveSubmissions();
   await withRefreshCookieLock(async () => {
     await browserMutationRequest<null>("/auth/logout");
   });
 }
 
 export async function logoutAll(): Promise<void> {
+  clearPendingLiveSubmissions();
   await withRefreshCookieLock(async () => {
     await browserMutationRequest<null>("/auth/logout-all", {}, { authenticated: true });
   });
@@ -97,24 +185,40 @@ export const api = {
   cvss: (id: string) => apiRequest<Record<string, unknown>>(`/campaigns/${encodeURIComponent(id)}/cvss`),
   restoreVault: (id: string) =>
     apiRequest<Record<string, unknown>>(`/campaigns/${encodeURIComponent(id)}/restore-vault`, { method: "POST" }),
-  runCampaign: (id: string, body: Record<string, unknown>) =>
-    apiRequest<Record<string, unknown>>(`/campaigns/${encodeURIComponent(id)}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }),
+  runCampaign: (
+    id: string,
+    body: Record<string, unknown>,
+    options: LiveSubmissionOptions = {}
+  ) => {
+    const path = `/campaigns/${encodeURIComponent(id)}/run`;
+    return body.dry_run === true
+      ? apiRequest<Record<string, unknown>>(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+      : liveExecutionRequest(path, body, options);
+  },
   diffCampaign: (id: string, otherId: string) =>
     apiRequest<Record<string, unknown>>(
       `/campaigns/${encodeURIComponent(id)}/diff/${encodeURIComponent(otherId)}`
     ),
   modules: () => apiRequest<ModuleMeta[]>("/modules"),
   executionChains: () => apiRequest<ExecutionChain[]>("/modules/execution-chains"),
-  runModule: (moduleId: string, payload: ReturnType<typeof buildModuleRunPayload>) =>
-    apiRequest<Record<string, unknown>>(`/modules/${encodeURIComponent(moduleId)}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    }),
+  runModule: (
+    moduleId: string,
+    payload: ReturnType<typeof buildModuleRunPayload>,
+    options: LiveSubmissionOptions = {}
+  ) => {
+    const path = `/modules/${encodeURIComponent(moduleId)}/run`;
+    return payload.dry_run
+      ? apiRequest<Record<string, unknown>>(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        })
+      : liveExecutionRequest(path, payload, options);
+  },
   generateReport: (campaignId: string, format: string) =>
     apiRequest<Record<string, string>>(
       `/reports/${encodeURIComponent(campaignId)}?fmt=${encodeURIComponent(format)}`,
@@ -153,12 +257,10 @@ export const api = {
       body: JSON.stringify({ global_params: globalParams })
     }),
   activeStrategy: () => apiRequest<Record<string, unknown>>("/strategy/active"),
-  engageStrategy: (body: Record<string, unknown>) =>
-    apiRequest<Record<string, unknown>>("/strategy/engage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }),
+  engageStrategy: (
+    body: Record<string, unknown>,
+    options: LiveSubmissionOptions = {}
+  ) => liveExecutionRequest("/strategy/engage", body, options),
   changePassword: (body: { current_password: string; new_password: string }) =>
     apiRequest<Record<string, string>>("/auth/change-password", {
       method: "POST",

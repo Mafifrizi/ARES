@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from ares.core.logger import get_logger, audit
@@ -55,6 +56,226 @@ class StrategyEngine:
         self._notifier     = notifier or OperatorNotifier()
         self._kb           = OutcomeKnowledgeBase()
         self._target_state = TargetStateMap()
+        # There is intentionally no production configuration surface for this
+        # seam.  The generation-11 catalog currently makes every descriptor
+        # ineligible, so production Strategy must stop before planning or any
+        # effect.  Tests may populate the private, canonical plan below to
+        # exercise the coordinator wiring without enabling a production path.
+        self._c_live_test_coordinator: Any | None = None
+        self._c_live_test_principal: Any | None = None
+        self._c_live_test_parent_key: str | None = None
+        self._c_live_test_plan_json: str | None = None
+        self._c_live_test_plan_digest: str | None = None
+
+    def _configure_c_live_test_plan(
+        self,
+        *,
+        coordinator: Any,
+        principal: Any,
+        idempotency_key: str,
+        plan: tuple[Mapping[str, Any], ...],
+    ) -> None:
+        """Install one pure deterministic plan for C-LIVE wiring tests only.
+
+        This leading-underscore seam is not read from settings, environment,
+        request data, or a plugin.  Production construction therefore cannot
+        activate Strategy while descriptors remain ineligible.
+        """
+        from ares.core.execution_admission import canonical_intent_digest
+        from ares.db.execution_lifecycle import TrustedPrincipal, valid_uuid
+
+        if (
+            not callable(getattr(coordinator, "execute_module", None))
+            or type(principal) is not TrustedPrincipal
+            or not valid_uuid(idempotency_key)
+            or type(plan) is not tuple
+        ):
+            raise ValueError("invalid deterministic C-LIVE strategy test plan")
+
+        occurrence_by_module: dict[str, int] = {}
+        normalized: list[dict[str, Any]] = []
+        for module_ordinal, value in enumerate(plan):
+            if not isinstance(value, Mapping) or set(value) - {
+                "module_id",
+                "params",
+                "stage_ordinal",
+                "decision_ordinal",
+            }:
+                raise ValueError("invalid deterministic C-LIVE strategy test plan")
+            module_id = value.get("module_id")
+            params = value.get("params", {})
+            stage_ordinal = value.get("stage_ordinal", module_ordinal)
+            decision_ordinal = value.get("decision_ordinal", 0)
+            if (
+                type(module_id) is not str
+                or not module_id
+                or not isinstance(params, Mapping)
+                or type(stage_ordinal) is not int
+                or type(decision_ordinal) is not int
+                or not 0 <= stage_ordinal <= 9_007_199_254_740_991
+                or not 0 <= decision_ordinal <= 9_007_199_254_740_991
+            ):
+                raise ValueError("invalid deterministic C-LIVE strategy test plan")
+            occurrence = occurrence_by_module.get(module_id, 0)
+            occurrence_by_module[module_id] = occurrence + 1
+            normalized.append(
+                {
+                    "module_id": module_id,
+                    "params": dict(params),
+                    "occurrence": occurrence,
+                    "stage_ordinal": stage_ordinal,
+                    "decision_ordinal": decision_ordinal,
+                    "module_ordinal": module_ordinal,
+                }
+            )
+
+        try:
+            plan_json = json.dumps(
+                normalized,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            frozen_plan = json.loads(plan_json)
+            digest = canonical_intent_digest(frozen_plan)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid deterministic C-LIVE strategy test plan") from exc
+
+        self._c_live_test_coordinator = coordinator
+        self._c_live_test_principal = principal
+        self._c_live_test_parent_key = idempotency_key
+        self._c_live_test_plan_json = plan_json
+        self._c_live_test_plan_digest = digest
+
+    @staticmethod
+    def _c_live_non_dispatchable(goal: str) -> EngagementResult:
+        return EngagementResult(
+            goal=goal,
+            total_rounds=0,
+            final_status="non_dispatchable",
+            rounds=[],
+            final_detection_score=0.0,
+            modules_succeeded=[],
+            modules_failed=[],
+            knowledge_updates=0,
+            elapsed_seconds=0.0,
+        )
+
+    async def _run_c_live_test_plan(self, campaign: Any, goal: str) -> EngagementResult:
+        """Dispatch the already-frozen test plan through admission, in order."""
+        from ares.core.engine import is_successful_module_outcome
+        from ares.core.execution_admission import (
+            DispatchDispositionV1,
+            DispatchRequestV1,
+            canonical_intent_digest,
+        )
+
+        started_at = time.monotonic()
+        if (
+            self._c_live_test_coordinator is None
+            or self._c_live_test_principal is None
+            or self._c_live_test_parent_key is None
+            or self._c_live_test_plan_json is None
+            or self._c_live_test_plan_digest is None
+        ):
+            return self._c_live_non_dispatchable(goal)
+
+        # Decode and verify the *complete* plan before the first coordinator
+        # call.  No provider, planner, module, notifier, or network helper runs
+        # while this fan-out is being formed.
+        try:
+            children = json.loads(self._c_live_test_plan_json)
+            if (
+                type(children) is not list
+                or canonical_intent_digest(children) != self._c_live_test_plan_digest
+                or not children
+            ):
+                raise ValueError
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return self._c_live_non_dispatchable(goal)
+
+        round_outcomes: list[ModuleOutcome] = []
+        modules_executed: list[str] = []
+        succeeded: list[str] = []
+        failed: list[str] = []
+        final_status = "terminal"
+
+        for child in children:
+            module_id = child["module_id"]
+            request = DispatchRequestV1(
+                campaign_id=campaign.id,
+                module_id=module_id,
+                ingress_code="strategy",
+                idempotency_key=self._c_live_test_parent_key,
+                raw_parameters=child["params"],
+                whole_intent_digest=self._c_live_test_plan_digest,
+                occurrence=child["occurrence"],
+                stage_ordinal=child["stage_ordinal"],
+                decision_ordinal=child["decision_ordinal"],
+                module_ordinal=child["module_ordinal"],
+            )
+            outcome = await self._c_live_test_coordinator.execute_module(
+                self._c_live_test_principal,
+                request,
+                campaign,
+            )
+            modules_executed.append(module_id)
+            if outcome.disposition is DispatchDispositionV1.REPLAYED:
+                round_outcomes.append(
+                    ModuleOutcome(
+                        module_id=module_id,
+                        success=False,
+                        quality=0.0,
+                        evidence="durable_terminal_replay",
+                    )
+                )
+                continue
+            if outcome.disposition is not DispatchDispositionV1.TERMINAL:
+                final_status = outcome.disposition.value
+                break
+
+            result = outcome.module_result
+            status = getattr(result, "outcome", None) or getattr(result, "status", "")
+            success = is_successful_module_outcome(status)
+            if success:
+                succeeded.append(module_id)
+            else:
+                failed.append(module_id)
+            round_outcomes.append(
+                ModuleOutcome(
+                    module_id=module_id,
+                    success=success,
+                    quality=1.0 if success else 0.0,
+                    evidence=str(
+                        getattr(result, "outcome_message", "")
+                        or getattr(result, "error", "")
+                        or status
+                    )[:200],
+                    findings_count=len(getattr(result, "findings", ()) or ()),
+                )
+            )
+
+        elapsed = max(0.0, time.monotonic() - started_at)
+        round_result = RoundResult(
+            round_num=1,
+            plan_confidence=1.0,
+            detection_score=0.0,
+            modules_executed=modules_executed,
+            outcomes=round_outcomes,
+            stopped_reason="" if final_status == "terminal" else final_status,
+        )
+        return EngagementResult(
+            goal=goal,
+            total_rounds=1,
+            final_status=final_status,
+            rounds=[round_result],
+            final_detection_score=0.0,
+            modules_succeeded=succeeded,
+            modules_failed=failed,
+            knowledge_updates=0,
+            elapsed_seconds=elapsed,
+        )
 
     async def run_autonomous_engagement(
         self,
@@ -85,6 +306,27 @@ class StrategyEngine:
             adversarial_sim:            Run blue-team simulation after each plan
             actor_role:                 RBAC role for module execution
         """
+        _ = (
+            max_rounds,
+            max_detection_probability,
+            confidence_threshold,
+            llm_backend,
+            secondary_backend,
+            adversarial_sim,
+            actor_role,
+            authorizations,
+            forbidden_modules,
+            allow_persistence,
+        )
+        # C-LIVE-v1 is safety wiring, not activation.  With all production
+        # descriptors disabled/ineligible, the public constructor always
+        # returns here before legacy Strategy helpers, planning, notifications,
+        # campaign runtime setup, or target-module execution.
+        return await self._run_c_live_test_plan(campaign, goal)
+
+        # The pre-C-LIVE autonomous implementation remains below only as
+        # historical context during this bounded batch; it is unreachable from
+        # the public entrypoint and every former effectful helper is fail-closed.
         start_time   = time.monotonic()
         rounds:       list[RoundResult] = []
         succeeded:    list[str] = []
@@ -491,92 +733,45 @@ class StrategyEngine:
         )
 
     async def _run_coverage_predictor(self, campaign: "Any") -> dict:
-        """Run opsec.coverage_predictor and return raw results."""
-        try:
-            from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
-            from ares.core.noise import NoiseController
-            mod = CoveragePredictorModule(
-                settings=self._settings, campaign=campaign,
-                noise=NoiseController(campaign),
-            )
-            findings, raw = await mod.run(campaign=campaign)
-            return raw
-        except Exception as exc:
-            logger.warning("coverage_predictor_failed", error=str(exc)[:100])
-            return {"detection_score": 0.0, "wait_recommendation": {"hours": 0, "reason": "predictor unavailable"}}
+        """Disabled C-LIVE-v1 helper; it never constructs or runs a module."""
+        del campaign
+        return {
+            "detection_score": 0.0,
+            "wait_recommendation": {
+                "hours": 0,
+                "reason": "c-live-strategy-non-dispatchable",
+            },
+        }
 
     async def _get_edr_context(self, campaign: "Any") -> dict:
-        """Get EDR bypass context from artifact store or return defaults."""
-        try:
-            from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule
-            from ares.core.noise import NoiseController
-            # Try to detect EDR vendor from fingerprint artifacts
-            edr_vendor = "unknown"
-            store = getattr(campaign, "_artifact_store", None)
-            if store:
-                for art in getattr(store, "_artifacts", []):
-                    if hasattr(art, "edr_vendors") and art.edr_vendors:
-                        edr_vendor = art.edr_vendors[0].value
-                        break
-            mod = EDRAdaptiveBypassModule(
-                settings=self._settings, campaign=campaign,
-                noise=NoiseController(campaign),
-            )
-            findings, raw = await mod.run(edr_vendor=edr_vendor)
-            raw["edr_vendor"] = edr_vendor
-            return raw
-        except Exception as exc:
-            logger.warning("edr_context_failed", error=str(exc)[:100])
-            return {"edr_vendor": "unknown", "viable_techniques": [], "recommended_approach": None}
+        """Disabled C-LIVE-v1 helper; it performs no artifact or module work."""
+        del campaign
+        return {
+            "edr_vendor": "unknown",
+            "viable_techniques": [],
+            "recommended_approach": None,
+        }
 
     async def _run_ai_planner(
         self, campaign: "Any", goal: str,
         llm_backend: str, secondary_backend: str,
         adversarial_sim: bool, extra_context: dict,
     ) -> dict:
-        """Run ai.autonomous_planner and return raw results."""
-        try:
-            from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
-            from ares.core.noise import NoiseController
-            mod = AIAutonomousPlannerModule(
-                settings=self._settings, campaign=campaign,
-                noise=NoiseController(campaign),
-            )
-            # Build context manually with extra data
-            from ares.modules.ai.autonomous_planner import CampaignContextBuilder, _build_user_prompt
-            builder = CampaignContextBuilder()
-            ctx = builder.build(campaign, vault=None, goal=goal)
-            ctx.update(extra_context)
-            findings, raw = await mod.run(
-                campaign=campaign, goal=goal,
-                llm_backend=llm_backend,
-                secondary_backend=secondary_backend,
-                adversarial_sim=adversarial_sim,
-                extra_context=extra_context,
-            )
-            return raw
-        except Exception as exc:
-            logger.warning("ai_planner_failed", error=str(exc)[:100])
-            return {"confidence_score": 0.0, "execution_plan": [], "warnings": [str(exc)[:100]]}
+        """Disabled C-LIVE-v1 helper; no LLM or planning network is used."""
+        del campaign, goal, llm_backend, secondary_backend, adversarial_sim, extra_context
+        return {
+            "confidence_score": 0.0,
+            "execution_plan": [],
+            "warnings": ["c-live-strategy-non-dispatchable"],
+        }
 
     async def _run_single_module(
         self, module_id: str, campaign: "Any",
         params: dict, actor_role: str,
     ) -> "Any":
-        """Execute a single module via AresEngine."""
-        try:
-            result = await self._engine.run_module(
-                module_id=module_id,
-                campaign=campaign,
-                params=params,
-                actor_role=actor_role,
-                timeout_seconds=120,
-            )
-            return result
-        except Exception as exc:
-            logger.warning("strategy_module_run_error",
-                           module=module_id, error=str(exc)[:100])
-            raise
+        """Reject the former direct-engine Strategy bypass."""
+        del module_id, campaign, params, actor_role
+        raise PermissionError("C-LIVE Strategy dispatch requires coordinator admission")
 
     def _build_base_params(self, campaign: "Any") -> dict:
         """

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 # ── env bootstrap (before any ares import) ────────────────────────────────────
@@ -42,6 +44,8 @@ os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
 
 
 _MOCK_PRINCIPAL_ROLES: dict[str, str] = {}
+_C_LIVE_TEST_KEY = "11111111-1111-4111-8111-111111111111"
+_PRODUCTION_C_LIVE_DESCRIPTOR_GATE: Any = None
 
 
 def _settings():
@@ -66,7 +70,144 @@ def _make_token(username: str, role: str) -> str:
 
 
 def _auth(username: str, role: str) -> dict:
-    return {"Authorization": f"Bearer {_make_token(username, role)}"}
+    return {
+        "Authorization": f"Bearer {_make_token(username, role)}",
+        "Idempotency-Key": _C_LIVE_TEST_KEY,
+    }
+
+
+class _UnitLiveCoordinator:
+    def __init__(self, engine: Any, role: str) -> None:
+        self._engine = engine
+        self._role = role
+
+    async def execute_module(self, principal: Any, request: Any, campaign: Any) -> Any:
+        del principal
+        from ares.core.execution_admission import (
+            DispatchDispositionV1,
+            DispatchOutcomeV1,
+            _identity,
+        )
+        from ares.db.execution_lifecycle import FixedResult
+
+        result = await self._engine.run_module(
+            request.module_id,
+            campaign,
+            dict(request.raw_parameters),
+            actor_role=self._role,
+        )
+        return DispatchOutcomeV1(
+            DispatchDispositionV1.TERMINAL,
+            _identity(request),
+            FixedResult.APPLIED,
+            4,
+            result,
+            True,
+            True,
+        )
+
+
+class _UnitLiveRuntime:
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    def bind(self, actor: Any) -> tuple[Any, _UnitLiveCoordinator]:
+        from ares.api.server import get_engine
+        from ares.db.execution_lifecycle import TrustedPrincipal
+
+        provider = self._app.dependency_overrides.get(get_engine)
+        engine = provider() if provider is not None else self._app.state.engine
+        source = actor.websocket_ticket_source
+        principal = TrustedPrincipal(source.user_id, source.user_id)
+        return principal, _UnitLiveCoordinator(engine, actor.role)
+
+
+def _c_live_result(module_id: str = "plugin.safe") -> Any:
+    result = SimpleNamespace(
+        module_id=module_id,
+        status="done",
+        findings=[],
+        error="",
+        duration_ms=1.0,
+    )
+    result.model_dump = lambda: {
+        "module_id": module_id,
+        "status": "done",
+        "findings": [],
+        "validation_results": [],
+        "raw_output": {},
+        "error": "",
+        "duration_ms": 1.0,
+    }
+    return result
+
+
+class _RecordingLiveCoordinator:
+    def __init__(self, outcome_factory: Any = None) -> None:
+        self.requests: list[Any] = []
+        self.principals: list[Any] = []
+        self._outcome_factory = outcome_factory
+
+    async def execute_module(self, principal: Any, request: Any, campaign: Any) -> Any:
+        del campaign
+        from ares.core.execution_admission import (
+            DispatchDispositionV1,
+            DispatchOutcomeV1,
+            _identity,
+        )
+        from ares.db.execution_lifecycle import FixedResult
+
+        self.principals.append(principal)
+        self.requests.append(request)
+        if self._outcome_factory is not None:
+            return self._outcome_factory(request)
+        return DispatchOutcomeV1(
+            DispatchDispositionV1.TERMINAL,
+            _identity(request),
+            FixedResult.APPLIED,
+            4,
+            _c_live_result(request.module_id),
+            True,
+            True,
+        )
+
+
+class _RecordingLiveRuntime:
+    def __init__(self, coordinator: _RecordingLiveCoordinator) -> None:
+        self.coordinator = coordinator
+
+    def bind(self, actor: Any) -> tuple[Any, _RecordingLiveCoordinator]:
+        from ares.db.execution_lifecycle import TrustedPrincipal
+
+        source = actor.websocket_ticket_source
+        return TrustedPrincipal(source.user_id, source.user_id), self.coordinator
+
+
+def _nonterminal_outcome(result: Any, disposition: Any) -> Any:
+    from ares.core.execution_admission import (
+        DispatchIdentityV1,
+        DispatchOutcomeV1,
+    )
+
+    identity = DispatchIdentityV1(
+        "10000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003",
+        "10000000-0000-4000-8000-000000000004",
+        "10000000-0000-4000-8000-000000000005",
+        "10000000-0000-4000-8000-000000000006",
+        "10000000-0000-4000-8000-000000000007",
+        "10000000-0000-4000-8000-000000000008",
+    )
+    return DispatchOutcomeV1(
+        disposition,
+        identity,
+        result,
+        0,
+        None,
+        disposition.value == "indeterminate",
+        False,
+    )
 
 
 def _issued_session(username: str = "admin", role: str = "team_lead"):
@@ -259,14 +400,16 @@ def test_module_outcome_success_mapping(outcome: str, expected: bool) -> None:
 
 @pytest.fixture(scope="module")
 def _app_mock_db():
+    global _PRODUCTION_C_LIVE_DESCRIPTOR_GATE
     # Clear lru_cache so unit tests always use UNIT env vars,
     # not a cached instance from a previous integration test run.
     from ares.core.config import get_settings as _get_settings_fn
 
     _get_settings_fn.cache_clear()
 
+    import ares.api.server as _server
     from ares.api.server import app as _app
-    from ares.api.server import get_db, get_settings
+    from ares.api.server import get_c_live_runtime, get_db, get_settings
     from ares.core.config import AresSettings
 
     mock_db = _make_mock_db()
@@ -277,9 +420,14 @@ def _app_mock_db():
 
     _app.dependency_overrides[get_db] = lambda: mock_db
     _app.dependency_overrides[get_settings] = lambda: fake_settings
+    _app.dependency_overrides[get_c_live_runtime] = lambda: _UnitLiveRuntime(_app)
+    original_descriptor_gate = _server._c_live_descriptor_gate
+    _PRODUCTION_C_LIVE_DESCRIPTOR_GATE = original_descriptor_gate
+    _server._c_live_descriptor_gate = lambda _module_id, _role: None
 
     yield _app, mock_db
 
+    _server._c_live_descriptor_gate = original_descriptor_gate
     _app.dependency_overrides.clear()
     # Clear cache again so the next test module starts fresh
     _get_settings_fn.cache_clear()
@@ -323,6 +471,64 @@ def aclient(_app_mock_db):
     )
     yield client, mock_db, _app
     asyncio.run(client.aclose())
+
+
+@pytest.fixture
+def c_live_route(aclient: Any) -> Any:
+    """Install one request-local fake admission runtime without changing production."""
+    from ares.api.server import get_c_live_runtime, get_engine
+
+    client, db, app = aclient
+    original_engine = app.dependency_overrides.get(get_engine)
+    original_runtime = app.dependency_overrides.get(get_c_live_runtime)
+    original_resolver_side_effect = db.resolve_access_token_principal.side_effect
+    original_resolver_return = db.resolve_access_token_principal.return_value
+    engine = SimpleNamespace(
+        registry=MagicMock(),
+        run_module=AsyncMock(return_value=_c_live_result()),
+        run_plan=AsyncMock(),
+        dry_run_module=MagicMock(
+            return_value={"status": "dry_run_ok", "module_id": "plugin.safe"}
+        ),
+        dry_run_plan=MagicMock(
+            return_value={"status": "dry_run_ok", "modules": [], "would_execute": True}
+        ),
+    )
+    app.dependency_overrides[get_engine] = lambda: engine
+    db.is_access_token_revoked.return_value = False
+    db.get_campaign.side_effect = None
+    db.get_campaign.return_value = {
+        "id": "camp-c-live",
+        "name": "C-LIVE",
+        "client": "Internal",
+        "operator": "legacy-username-must-not-authorize",
+        "noise_profile": "normal",
+        "status": "created",
+        "scope_json": "[]",
+        "targets_json": "[]",
+        "notes": "",
+    }
+
+    def install(coordinator: _RecordingLiveCoordinator) -> None:
+        app.dependency_overrides[get_c_live_runtime] = lambda: _RecordingLiveRuntime(
+            coordinator
+        )
+
+    install(_RecordingLiveCoordinator())
+    try:
+        yield client, db, app, engine, install
+    finally:
+        db.is_access_token_revoked.return_value = False
+        db.resolve_access_token_principal.side_effect = original_resolver_side_effect
+        db.resolve_access_token_principal.return_value = original_resolver_return
+        if original_engine is None:
+            app.dependency_overrides.pop(get_engine, None)
+        else:
+            app.dependency_overrides[get_engine] = original_engine
+        if original_runtime is None:
+            app.dependency_overrides.pop(get_c_live_runtime, None)
+        else:
+            app.dependency_overrides[get_c_live_runtime] = original_runtime
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -1805,31 +2011,44 @@ class TestHighNoiseAuthorizationPolicy:
         self, aclient: Any
     ) -> None:
         c, db, app = aclient
-        from ares.api.server import get_engine
+        from ares.api.server import get_c_live_runtime, get_engine
 
         _, high_noise_module = self._module_classes()
         engine = self._engine({"plugin.dynamic-high": high_noise_module})
+        runtime = MagicMock()
+        original_runtime = app.dependency_overrides[get_c_live_runtime]
         db.get_campaign.reset_mock()
+        db.get_campaign.side_effect = None
+        db.get_campaign.return_value = None
         app.dependency_overrides[get_engine] = lambda: engine
+        app.dependency_overrides[get_c_live_runtime] = lambda: runtime
         try:
-            response = await c.post(
-                "/modules/plugin.dynamic-high/run",
-                json={
-                    "campaign_id": "camp-plan-policy",
-                    "params": {"target": "target-marker"},
-                    "dry_run": False,
-                },
-                headers=_auth("operator-user", "operator"),
-            )
+            with patch(
+                "ares.api.server._broadcast_event",
+                new_callable=AsyncMock,
+            ) as broadcast:
+                response = await c.post(
+                    "/modules/plugin.dynamic-high/run",
+                    json={
+                        "campaign_id": "camp-plan-policy",
+                        "params": {"target": "target-marker"},
+                        "dry_run": False,
+                    },
+                    headers=_auth("operator-user", "operator"),
+                )
         finally:
             app.dependency_overrides.pop(get_engine, None)
+            app.dependency_overrides[get_c_live_runtime] = original_runtime
 
-        assert response.status_code == 403
-        assert response.json()["detail"] == (
-            "'plugin.dynamic-high' is HIGH_NOISE — team_lead only."
-        )
+        # Live authority starts with the durable campaign identity; legacy
+        # module classes are not an execution-authority source.
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Campaign not found"
+        db.get_campaign.assert_awaited_once_with("camp-plan-policy")
+        engine.registry.get.assert_not_called()
+        runtime.bind.assert_not_called()
         engine.run_module.assert_not_awaited()
-        db.get_campaign.assert_not_awaited()
+        broadcast.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_single_module_team_lead_high_noise_reaches_engine(
@@ -1922,20 +2141,17 @@ class TestHighNoiseAuthorizationPolicy:
             app.dependency_overrides.pop(get_engine, None)
 
         assert response.status_code == 200
-        assert response.json() == {
-            "campaign_id": "camp-plan-policy",
-            "modules_run": 1,
-            "results": {
-                "plugin.safe": {
-                    "status": "done",
-                    "findings_count": 0,
-                    "error": "",
-                    "duration_ms": 1.0,
-                }
-            },
-        }
-        engine.run_plan.assert_awaited_once()
-        assert engine.run_plan.await_args.kwargs["actor_role"] == "operator"
+        payload = response.json()
+        assert payload["campaign_id"] == "camp-plan-policy"
+        assert payload["modules_run"] == 1
+        assert [child["module_id"] for child in payload["children"]] == [
+            "plugin.safe"
+        ]
+        assert payload["children"][0]["status"] == "done"
+        assert payload["children"][0]["execution"]["attempt_id"]
+        engine.run_module.assert_awaited_once()
+        assert engine.run_module.await_args.kwargs["actor_role"] == "operator"
+        engine.run_plan.assert_not_awaited()
 
     @pytest.mark.parametrize(
         "stages",
@@ -1979,7 +2195,13 @@ class TestHighNoiseAuthorizationPolicy:
         finally:
             app.dependency_overrides.pop(get_engine, None)
 
-        assert response.status_code == 403
+        assert response.status_code == 200
+        expected_modules = [module_id for _name, module_ids in stages for module_id in module_ids]
+        assert [
+            call.args[0] for call in engine.run_module.await_args_list
+        ] == expected_modules
+        # The legacy HIGH_NOISE class is not an authority source. Descriptor
+        # minimum-role metadata is the sole live role gate.
         engine.run_plan.assert_not_awaited()
         engine.dry_run_plan.assert_not_called()
 
@@ -2007,7 +2229,9 @@ class TestHighNoiseAuthorizationPolicy:
             app.dependency_overrides.pop(get_engine, None)
 
         assert response.status_code == 200
-        engine.run_plan.assert_awaited_once()
+        engine.run_module.assert_awaited_once()
+        assert engine.run_module.await_args.kwargs["actor_role"] == "team_lead"
+        engine.run_plan.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_duplicate_high_noise_plan_detail_is_safe_and_deterministic(
@@ -2055,11 +2279,8 @@ class TestHighNoiseAuthorizationPolicy:
         finally:
             app.dependency_overrides.pop(get_engine, None)
 
-        assert response.status_code == 403
-        assert response.json()["detail"] == (
-            "'plugin.alpha-high', 'plugin.zeta-high' "
-            "are HIGH_NOISE — team_lead only."
-        )
+        assert response.status_code == 422
+        assert response.json()["detail"] == "raw_secret_material_forbidden"
         for sensitive_marker in (
             "plan-param-marker",
             "target-marker",
@@ -2067,6 +2288,7 @@ class TestHighNoiseAuthorizationPolicy:
             "evidence-marker",
         ):
             assert sensitive_marker not in response.text
+        engine.run_module.assert_not_awaited()
         engine.run_plan.assert_not_awaited()
 
     @pytest.mark.parametrize(
@@ -2228,8 +2450,10 @@ class TestHighNoiseAuthorizationPolicy:
             app.dependency_overrides.pop(get_engine, None)
 
         assert response.status_code == 200
-        engine.registry.get.assert_called_once_with("plugin.unknown")
-        engine.run_plan.assert_awaited_once()
+        engine.registry.get.assert_not_called()
+        engine.run_module.assert_awaited_once()
+        assert engine.run_module.await_args.args[0] == "plugin.unknown"
+        engine.run_plan.assert_not_awaited()
         engine.dry_run_plan.assert_not_called()
 
     @pytest.mark.asyncio
@@ -2284,8 +2508,9 @@ class TestHighNoiseAuthorizationPolicy:
         finally:
             app.dependency_overrides.pop(get_engine, None)
 
-        assert response.status_code == 403
-        engine.dry_run_plan.assert_not_called()
+        assert response.status_code == 200
+        assert response.json()["status"] == "dry_run_ok"
+        engine.dry_run_plan.assert_called_once()
         engine.run_plan.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -2341,6 +2566,7 @@ class TestHighNoiseAuthorizationPolicy:
 
         assert response.status_code == 404
         engine.registry.get.assert_not_called()
+        engine.run_module.assert_not_awaited()
         engine.run_plan.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -2366,8 +2592,12 @@ class TestHighNoiseAuthorizationPolicy:
         finally:
             app.dependency_overrides.pop(get_engine, None)
 
-        assert response.status_code == 404
+        # The legacy campaign.operator username is not canonical execution
+        # authority. The durable campaign grant is enforced by admission.
+        assert response.status_code == 200
+        assert response.json()["modules_run"] == 1
         engine.registry.get.assert_not_called()
+        engine.run_module.assert_awaited_once()
         engine.run_plan.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -2418,6 +2648,510 @@ class TestHighNoiseAuthorizationPolicy:
         assert response.status_code == 403
         db.get_campaign.assert_not_awaited()
         engine.run_plan.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing-bearer",
+        "invalid-bearer",
+        "revoked-bearer",
+        "deleted-user",
+        "inactive-user",
+        "demoted-role",
+        "exact-replay-no-engine",
+        "conflict-no-engine",
+    ],
+)
+@pytest.mark.asyncio
+async def test_c_live_http_authentication_and_submission_lookup(
+    case: str,
+    c_live_route: Any,
+) -> None:
+    from ares.core.execution_admission import DispatchDispositionV1
+    from ares.db.execution_lifecycle import FixedResult
+
+    client, db, _app, engine, install = c_live_route
+    db.get_campaign.reset_mock()
+    coordinator = _RecordingLiveCoordinator()
+    username = f"c-live-{case}"
+    headers = _auth(username, "operator")
+    expected_status = 401
+    if case == "missing-bearer":
+        headers = {"Idempotency-Key": _C_LIVE_TEST_KEY}
+    elif case == "invalid-bearer":
+        headers = {
+            "Authorization": "Bearer invalid.c-live.token",
+            "Idempotency-Key": _C_LIVE_TEST_KEY,
+        }
+    elif case == "revoked-bearer":
+        db.is_access_token_revoked.return_value = True
+    elif case in {"deleted-user", "inactive-user"}:
+        db.resolve_access_token_principal.side_effect = None
+        db.resolve_access_token_principal.return_value = None
+    elif case == "demoted-role":
+        headers = _auth(username, "reporter")
+        expected_status = 403
+    elif case == "exact-replay-no-engine":
+        coordinator = _RecordingLiveCoordinator(
+            lambda _request: _nonterminal_outcome(
+                FixedResult.REPLAYED,
+                DispatchDispositionV1.REPLAYED,
+            )
+        )
+        expected_status = 409
+    else:
+        coordinator = _RecordingLiveCoordinator(
+            lambda _request: _nonterminal_outcome(
+                FixedResult.CONFLICT_OPERATION,
+                DispatchDispositionV1.CONFLICT,
+            )
+        )
+        expected_status = 409
+    install(coordinator)
+
+    response = await client.post(
+        "/modules/plugin.safe/run",
+        json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+        headers=headers,
+    )
+
+    assert response.status_code == expected_status
+    engine.run_module.assert_not_awaited()
+    if case in {"exact-replay-no-engine", "conflict-no-engine"}:
+        assert len(coordinator.requests) == 1
+        assert len(coordinator.principals) == 1
+        assert coordinator.principals[0].subject_ref == coordinator.principals[0].user_id
+        assert coordinator.principals[0].user_id == f"mock-user-{username}"
+        assert coordinator.principals[0].subject_ref != username
+        assert db.get_campaign.await_count == 1
+    else:
+        assert not coordinator.requests
+        db.get_campaign.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", ["module", "plan", "strategy"])
+@pytest.mark.asyncio
+async def test_c_live_authenticated_dispatch_uses_v3_admission(
+    route: str,
+    c_live_route: Any,
+    monkeypatch: Any,
+) -> None:
+    import ares.api.server as server
+
+    client, _db, _app, engine, install = c_live_route
+    coordinator = _RecordingLiveCoordinator()
+    install(coordinator)
+    headers = _auth(f"c-live-{route}", "operator")
+    if route == "module":
+        response = await client.post(
+            "/modules/plugin.safe/run",
+            json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+            headers=headers,
+        )
+        expected_ingress = "api_module"
+    elif route == "plan":
+        response = await client.post(
+            "/campaigns/camp-c-live/run",
+            json={
+                "plan": {"stages": [{"name": "one", "modules": ["plugin.safe"]}]},
+                "global_params": {},
+                "dry_run": False,
+            },
+            headers=headers,
+        )
+        expected_ingress = "api_campaign_plan"
+    else:
+        monkeypatch.setattr(
+            server,
+            "_strategy_test_plan",
+            lambda _body: {"stages": [{"name": "one", "modules": ["plugin.safe"]}]},
+        )
+        response = await client.post(
+            "/strategy/engage",
+            json={"campaign_id": "camp-c-live"},
+            headers=headers,
+        )
+        expected_ingress = "strategy"
+
+    assert response.status_code == 200
+    assert [item.ingress_code for item in coordinator.requests] == [expected_ingress]
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", ["module", "plan", "strategy"])
+@pytest.mark.asyncio
+async def test_c_live_admission_denial_prevents_engine(
+    route: str,
+    c_live_route: Any,
+    monkeypatch: Any,
+) -> None:
+    import ares.api.server as server
+    from ares.core.execution_admission import DispatchDispositionV1
+    from ares.db.execution_lifecycle import FixedResult
+
+    client, _db, _app, engine, install = c_live_route
+    coordinator = _RecordingLiveCoordinator(
+        lambda _request: _nonterminal_outcome(
+            FixedResult.AUTHORITY_STALE,
+            DispatchDispositionV1.NON_DISPATCHABLE,
+        )
+    )
+    install(coordinator)
+    headers = _auth(f"c-live-denied-{route}", "operator")
+    if route == "module":
+        response = await client.post(
+            "/modules/plugin.safe/run",
+            json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+            headers=headers,
+        )
+    elif route == "plan":
+        response = await client.post(
+            "/campaigns/camp-c-live/run",
+            json={
+                "plan": {"stages": [{"name": "one", "modules": ["plugin.safe"]}]},
+                "global_params": {},
+                "dry_run": False,
+            },
+            headers=headers,
+        )
+    else:
+        monkeypatch.setattr(
+            server,
+            "_strategy_test_plan",
+            lambda _body: {"stages": [{"name": "one", "modules": ["plugin.safe"]}]},
+        )
+        response = await client.post(
+            "/strategy/engage",
+            json={"campaign_id": "camp-c-live"},
+            headers=headers,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["type"] == "execution_authority_stale"
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.parametrize("case", ["missing", "invalid"])
+@pytest.mark.asyncio
+async def test_c_live_idempotency_key_validation(case: str, c_live_route: Any) -> None:
+    client, db, _app, engine, _install = c_live_route
+    headers = {
+        "Authorization": f"Bearer {_make_token(f'key-{case}', 'operator')}"
+    }
+    if case == "invalid":
+        headers["Idempotency-Key"] = "11111111-1111-1111-8111-111111111111"
+    db.get_campaign.reset_mock()
+
+    response = await client.post(
+        "/modules/plugin.safe/run",
+        json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "idempotency_key_required" if case == "missing" else "idempotency_key_invalid"
+    )
+    assert db.get_campaign.await_count == 1
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_c_live_api_key_execution_is_denied(c_live_route: Any) -> None:
+    client, db, _app, engine, _install = c_live_route
+    db.verify_api_key.reset_mock()
+    response = await client.post(
+        "/modules/plugin.safe/run",
+        json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+        headers={"X-API-Key": "opaque-api-key", "Idempotency-Key": _C_LIVE_TEST_KEY},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "api_key_execution_denied"
+    db.verify_api_key.assert_not_awaited()
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_c_live_raw_credential_material_is_rejected(c_live_route: Any) -> None:
+    client, _db, _app, engine, _install = c_live_route
+    response = await client.post(
+        "/modules/plugin.safe/run",
+        json={
+            "campaign_id": "camp-c-live",
+            "params": {"password": "must-never-cross-live-boundary"},
+            "dry_run": False,
+        },
+        headers=_auth("raw-secret-user", "operator"),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "raw_secret_material_forbidden"
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.parametrize("route", ["module", "plan"])
+@pytest.mark.asyncio
+async def test_c_live_http_preview_executes_no_module_code(
+    route: str,
+    c_live_route: Any,
+) -> None:
+    client, _db, _app, engine, _install = c_live_route
+    headers = {"Authorization": f"Bearer {_make_token(f'preview-{route}', 'operator')}"}
+    if route == "module":
+        response = await client.post(
+            "/modules/plugin.safe/run",
+            json={"campaign_id": "camp-c-live", "params": {}, "dry_run": True},
+            headers=headers,
+        )
+        engine.dry_run_module.assert_called_once()
+    else:
+        response = await client.post(
+            "/campaigns/camp-c-live/run",
+            json={
+                "plan": {"stages": [{"name": "one", "modules": ["plugin.safe"]}]},
+                "global_params": {},
+                "dry_run": True,
+            },
+            headers=headers,
+        )
+        engine.dry_run_plan.assert_called_once()
+    assert response.status_code == 200
+    engine.run_module.assert_not_awaited()
+
+
+@pytest.mark.parametrize("authority", ["credential", "approval"])
+def test_c_live_required_authority_module_is_non_dispatchable(authority: str) -> None:
+    from ares.modules.descriptors import ContractState, FIRST_PARTY_DESCRIPTORS
+
+    assert _PRODUCTION_C_LIVE_DESCRIPTOR_GATE is not None
+    if authority == "approval":
+        descriptors = [
+            item for item in FIRST_PARTY_DESCRIPTORS.values() if item.explicit_attempt_approval
+        ]
+    else:
+        descriptors = [
+            item
+            for item in FIRST_PARTY_DESCRIPTORS.values()
+            if item.credential_policy.state is not ContractState.NOT_APPLICABLE
+        ]
+    assert descriptors
+    assert {
+        _PRODUCTION_C_LIVE_DESCRIPTOR_GATE(item.module_id, "team_lead")
+        for item in descriptors
+    } == {"descriptor_unavailable"}
+
+
+def test_c_live_production_descriptor_seam_cannot_escape_tests() -> None:
+    from ares.modules.descriptors import FIRST_PARTY_DESCRIPTORS
+
+    assert len(FIRST_PARTY_DESCRIPTORS) == 62
+    assert _PRODUCTION_C_LIVE_DESCRIPTOR_GATE is not None
+    assert all(
+        not item.future_gateway_eligible
+        and _PRODUCTION_C_LIVE_DESCRIPTOR_GATE(item.module_id, "team_lead")
+        == "descriptor_unavailable"
+        for item in FIRST_PARTY_DESCRIPTORS.values()
+    )
+
+
+def test_c_live_response_loss_status_inspection_is_stable_and_effect_free() -> None:
+    from ares.api.server import _c_live_error_response
+    from ares.core.execution_admission import DispatchDispositionV1
+    from ares.db.execution_lifecycle import FixedResult
+
+    outcome = _nonterminal_outcome(
+        FixedResult.REPLAYED,
+        DispatchDispositionV1.REPLAYED,
+    )
+    first = _c_live_error_response(outcome)
+    second = _c_live_error_response(outcome)
+    assert first.status_code == second.status_code == 409
+    assert json.loads(first.body) == json.loads(second.body)
+    assert json.loads(first.body)["redispatched"] is False
+    assert json.loads(first.body)["execution"] == {
+        "submission_id": "10000000-0000-4000-8000-000000000001",
+        "logical_execution_id": "10000000-0000-4000-8000-000000000002",
+        "attempt_id": "10000000-0000-4000-8000-000000000003",
+    }
+
+
+@pytest.mark.asyncio
+async def test_c_live_repeated_module_response_preserves_occurrence_and_stable_ids(
+    c_live_route: Any,
+) -> None:
+    client, _db, _app, _engine, install = c_live_route
+    coordinator = _RecordingLiveCoordinator()
+    install(coordinator)
+    response = await client.post(
+        "/campaigns/camp-c-live/run",
+        json={
+            "plan": {
+                "stages": [
+                    {"name": "repeat", "modules": ["plugin.safe", "plugin.safe"]}
+                ]
+            },
+            "global_params": {},
+            "dry_run": False,
+        },
+        headers=_auth("repeat-user", "operator"),
+    )
+
+    assert response.status_code == 200
+    children = response.json()["children"]
+    assert [item["occurrence"] for item in children] == [0, 1]
+    assert [item["module_id"] for item in children] == ["plugin.safe", "plugin.safe"]
+    assert children[0]["execution"]["attempt_id"] != children[1]["execution"]["attempt_id"]
+    assert {item.idempotency_key for item in coordinator.requests} == {_C_LIVE_TEST_KEY}
+    assert len({item.whole_intent_digest for item in coordinator.requests}) == 1
+
+
+@pytest.mark.parametrize(
+    ("role_case", "expected_status"),
+    [
+        ("operator", 200),
+        ("team-lead", 200),
+        ("reporter", 403),
+        ("recon", 403),
+        ("admin-not-synthesized", 401),
+    ],
+    ids=(
+        "operator",
+        "team-lead",
+        "reporter",
+        "recon",
+        "admin-not-synthesized",
+    ),
+)
+@pytest.mark.asyncio
+async def test_c_live_role_mapping(
+    role_case: str,
+    expected_status: int,
+    c_live_route: Any,
+) -> None:
+    client, db, _app, engine, _install = c_live_route
+    role = {
+        "team-lead": "team_lead",
+        "admin-not-synthesized": "admin",
+    }.get(role_case, role_case)
+    db.get_campaign.reset_mock()
+    response = await client.post(
+        "/modules/plugin.safe/run",
+        json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+        headers=_auth(f"role-{role_case}", role),
+    )
+
+    assert response.status_code == expected_status
+    engine.run_module.assert_not_awaited()
+    if expected_status != 200:
+        db.get_campaign.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "applied",
+        "replayed",
+        "changed-conflict",
+        "invalid-contract",
+        "conflict-state",
+        "authority-stale",
+        "capacity-failure",
+        "terminal-policy-outcome",
+        "settlement-pending",
+        "descriptor-unavailable",
+    ],
+)
+@pytest.mark.asyncio
+async def test_c_live_http_result_mapping(case: str, c_live_route: Any) -> None:
+    from ares.api.server import _c_live_error_response, _c_live_unavailable_response
+    from ares.core.execution_admission import DispatchDispositionV1
+    from ares.db.execution_lifecycle import FixedResult
+
+    client, _db, _app, _engine, install = c_live_route
+    if case == "applied":
+        install(_RecordingLiveCoordinator())
+        response = await client.post(
+            "/modules/plugin.safe/run",
+            json={"campaign_id": "camp-c-live", "params": {}, "dry_run": False},
+            headers=_auth("mapping-applied", "operator"),
+        )
+        assert response.status_code == 200
+        assert "execution" in response.json()
+        return
+    if case == "descriptor-unavailable":
+        response = _c_live_unavailable_response("descriptor_unavailable")
+        expected_status, expected_type = 409, "descriptor_unavailable"
+    elif case == "invalid-contract":
+        coordinator = _RecordingLiveCoordinator()
+        install(coordinator)
+        response = await client.post(
+            "/campaigns/camp-c-live/run",
+            json={"plan": {"stages": []}, "global_params": {}, "dry_run": False},
+            headers=_auth("mapping-invalid-contract", "operator"),
+        )
+        assert coordinator.requests == []
+        expected_status, expected_type = 422, "invalid_contract"
+    else:
+        cases = {
+            "replayed": (
+                FixedResult.REPLAYED,
+                DispatchDispositionV1.REPLAYED,
+                409,
+                "execution_replayed_no_redispatch",
+            ),
+            "changed-conflict": (
+                FixedResult.CONFLICT_OPERATION,
+                DispatchDispositionV1.CONFLICT,
+                409,
+                "idempotency_conflict",
+            ),
+            "conflict-state": (
+                FixedResult.CONFLICT_STATE,
+                DispatchDispositionV1.CONFLICT,
+                409,
+                "execution_not_dispatchable",
+            ),
+            "authority-stale": (
+                FixedResult.AUTHORITY_STALE,
+                DispatchDispositionV1.NON_DISPATCHABLE,
+                409,
+                "execution_authority_stale",
+            ),
+            "capacity-failure": (
+                FixedResult.CAPACITY_UNAVAILABLE,
+                DispatchDispositionV1.NON_DISPATCHABLE,
+                429,
+                "execution_capacity_unavailable",
+            ),
+            "terminal-policy-outcome": (
+                FixedResult.APPLIED,
+                DispatchDispositionV1.NON_DISPATCHABLE,
+                409,
+                "execution_not_dispatchable",
+            ),
+            "settlement-pending": (
+                FixedResult.APPLIED,
+                DispatchDispositionV1.INDETERMINATE,
+                503,
+                "execution_settlement_unconfirmed",
+            ),
+        }
+        result, disposition, expected_status, expected_type = cases[case]
+        response = _c_live_error_response(_nonterminal_outcome(result, disposition))
+    if isinstance(response, httpx.Response):
+        payload = response.json()
+    elif isinstance(response, JSONResponse):
+        payload = json.loads(response.body)
+    else:
+        raise AssertionError(
+            "unsupported response type: "
+            f"{type(response).__module__}.{type(response).__qualname__}"
+        )
+    assert response.status_code == expected_status
+    assert payload["detail"] == payload["type"] == expected_type
+    assert payload["redispatched"] is False
 
 
 class TestModuleRunEndpoint:
@@ -2554,17 +3288,17 @@ class TestModuleRunEndpoint:
         assert campaign.targets == ["127.0.0.1"]
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
-    async def test_kerberoast_dashboard_payload_passes_api_validation(
-        self, aclient: Any
-    ) -> None:
+    async def test_kerberoast_dashboard_payload_passes_api_validation(self, aclient: Any) -> None:
         c, db, app = aclient
-        from ares.api.server import get_engine
+        from ares.api.server import get_c_live_runtime, get_engine
         from ares.modules.ad.kerberoast import KerberoastModule
 
         captured: dict[str, Any] = {}
+        registry_calls: list[str] = []
 
         class FakeRegistry:
             def get(self, module_id: str) -> Any:
+                registry_calls.append(module_id)
                 return KerberoastModule if module_id == "ad.kerberoast" else None
 
         class FakeResult:
@@ -2611,38 +3345,46 @@ class TestModuleRunEndpoint:
             "created_at": "2026-06-27 02:15:19",
             "updated_at": "2026-06-27 02:15:19",
         }
+        runtime = MagicMock()
+        original_runtime = app.dependency_overrides[get_c_live_runtime]
         app.dependency_overrides[get_engine] = lambda: FakeEngine()
+        app.dependency_overrides[get_c_live_runtime] = lambda: runtime
         try:
-            r = await c.post(
-                "/modules/ad.kerberoast/run",
-                json={
-                    "campaign_id": "camp-kerberoast",
-                    "params": {
-                        "dc": "10.0.0.5",
-                        "domain": "corp.local",
-                        "username": "svc-roast",
-                        "password": "Passw0rd!",
-                        "use_ldaps": False,
-                        "target_user": "sqlsvc",
+            with patch(
+                "ares.api.server._broadcast_event",
+                new_callable=AsyncMock,
+            ) as broadcast:
+                r = await c.post(
+                    "/modules/ad.kerberoast/run",
+                    json={
+                        "campaign_id": "camp-kerberoast",
+                        "params": {
+                            "dc": "10.0.0.5",
+                            "domain": "corp.local",
+                            "username": "svc-roast",
+                            "password": "Passw0rd!",
+                            "use_ldaps": False,
+                            "target_user": "sqlsvc",
+                        },
+                        "dry_run": False,
                     },
-                    "dry_run": False,
-                },
-                headers=_auth("admin", "team_lead"),
-            )
+                    headers=_auth("admin", "team_lead"),
+                )
         finally:
             app.dependency_overrides.pop(get_engine, None)
+            app.dependency_overrides[get_c_live_runtime] = original_runtime
 
-        assert r.status_code == 200
-        assert captured["module_id"] == "ad.kerberoast"
-        assert captured["actor_role"] == "team_lead"
-        assert captured["params"] == {
-            "dc": "10.0.0.5",
-            "domain": "corp.local",
-            "username": "svc-roast",
-            "password": "Passw0rd!",
-            "use_ldaps": False,
-            "target_user": "sqlsvc",
+        assert r.status_code == 422
+        assert r.json() == {
+            "code": 422,
+            "detail": "raw_secret_material_forbidden",
+            "type": "api_error",
         }
+        assert "Passw0rd!" not in r.text
+        assert captured == {}
+        assert registry_calls == []
+        runtime.bind.assert_not_called()
+        broadcast.assert_not_awaited()
 
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_module_result_redacts_sensitive_hash_evidence(
@@ -2963,7 +3705,7 @@ class TestReportEndpoints:
     ) -> None:
         c, _, app = aclient
         import ares.modules.reporting.report_gen as report_gen
-        from ares.api.server import get_db, get_engine
+        from ares.api.server import get_c_live_runtime, get_db, get_engine
         from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         from ares.core.engine import EngineModuleResult, ModuleStatus
         from ares.core.security import create_access_token
@@ -2986,7 +3728,8 @@ class TestReportEndpoints:
         )
         assert issued.session is not None
         real_auth = {
-            "Authorization": f"Bearer {issued.session.access_token}"
+            "Authorization": f"Bearer {issued.session.access_token}",
+            "Idempotency-Key": _C_LIVE_TEST_KEY,
         }
         original_db = getattr(app.state, "db", None)
         campaign = Campaign(
@@ -2999,8 +3742,46 @@ class TestReportEndpoints:
         )
         await real_db.save_campaign(campaign)
 
+        registry_calls: list[str] = []
+        module_calls: list[str] = []
+
+        def finding_for(module_id: str) -> Finding:
+            if module_id == "ad.asreproast":
+                return Finding(
+                    title="ASREPRoast Hashes Captured (1)",
+                    description="Captured one AS-REP hash.",
+                    severity=Severity.HIGH,
+                    validated=True,
+                    module_id=module_id,
+                    mitre_technique="T1558.004",
+                    mitre_tactic="Credential Access",
+                    evidence={
+                        "hash_count": 1,
+                        "sample_hash": "$krb5asrep$23$user@LAB.LOCAL:abcdef",
+                    },
+                    remediation="Require Kerberos pre-authentication.",
+                    host="10.10.10.20",
+                )
+            return Finding(
+                title="Kerberoast Hashes Captured (1)",
+                description="Captured one TGS hash.",
+                severity=Severity.CRITICAL,
+                validated=True,
+                module_id=module_id,
+                mitre_technique="T1558.003",
+                mitre_tactic="Credential Access",
+                evidence={
+                    "hash_count": 1,
+                    "accounts": ["svc-sql"],
+                    "sample_hash": "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef",
+                },
+                remediation="Rotate service account credentials.",
+                host="10.10.10.20",
+            )
+
         class FakeRegistry:
             def get(self, module_id: str) -> Any:
+                registry_calls.append(module_id)
                 return None
 
         class FakeEngine:
@@ -3016,39 +3797,8 @@ class TestReportEndpoints:
                 params: dict[str, Any],
                 actor_role: str = "",
             ) -> EngineModuleResult:
-                if module_id == "ad.asreproast":
-                    finding = Finding(
-                        title="ASREPRoast Hashes Captured (1)",
-                        description="Captured one AS-REP hash.",
-                        severity=Severity.HIGH,
-                        validated=True,
-                        module_id=module_id,
-                        mitre_technique="T1558.004",
-                        mitre_tactic="Credential Access",
-                        evidence={
-                            "hash_count": 1,
-                            "sample_hash": "$krb5asrep$23$user@LAB.LOCAL:abcdef",
-                        },
-                        remediation="Require Kerberos pre-authentication.",
-                        host="10.10.10.20",
-                    )
-                else:
-                    finding = Finding(
-                        title="Kerberoast Hashes Captured (1)",
-                        description="Captured one TGS hash.",
-                        severity=Severity.CRITICAL,
-                        validated=True,
-                        module_id=module_id,
-                        mitre_technique="T1558.003",
-                        mitre_tactic="Credential Access",
-                        evidence={
-                            "hash_count": 1,
-                            "accounts": ["svc-sql"],
-                            "sample_hash": "$krb5tgs$23$*svc-sql$LAB.LOCAL$svc/sql*abcdef",
-                        },
-                        remediation="Rotate service account credentials.",
-                        host="10.10.10.20",
-                    )
+                module_calls.append(module_id)
+                finding = finding_for(module_id)
                 result = EngineModuleResult(
                     module_id=module_id,
                     status=ModuleStatus.DONE,
@@ -3069,11 +3819,32 @@ class TestReportEndpoints:
         def generator_factory(*args: Any, **kwargs: Any) -> Any:
             return real_report_generator(output_dir=str(tmp_path / "reports"), **kwargs)
 
+        async def effect_counts() -> tuple[int, ...]:
+            cursor = await real_db.conn.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM logical_executions),
+                    (SELECT COUNT(*) FROM execution_attempts),
+                    (SELECT COUNT(*) FROM execution_publication_outbox),
+                    (SELECT COUNT(*) FROM execution_operation_receipts),
+                    (SELECT COUNT(*) FROM module_runs),
+                    (SELECT COUNT(*) FROM findings)
+                """
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            return tuple(int(value) for value in row)
+
+        runtime = MagicMock()
+        original_runtime = app.dependency_overrides[get_c_live_runtime]
         app.state.db = real_db
         app.dependency_overrides[get_db] = lambda: real_db
         app.dependency_overrides[get_engine] = lambda: FakeEngine(real_db)
+        app.dependency_overrides[get_c_live_runtime] = lambda: runtime
         monkeypatch.setattr(report_gen, "ReportGenerator", generator_factory)
         try:
+            before_effects = await effect_counts()
+            assert before_effects == (0, 0, 0, 0, 0, 0)
             common_params = {
                 "dc": "10.10.10.20",
                 "domain": "lab.local",
@@ -3081,26 +3852,68 @@ class TestReportEndpoints:
                 "password": "CorrectHorseBatteryStaple!",
                 "use_ldaps": False,
             }
-            asrep = await c.post(
-                f"/modules/ad.asreproast/run",
-                headers=real_auth,
-                json={
-                    "campaign_id": campaign.id,
-                    "params": common_params,
-                    "dry_run": False,
-                },
-            )
-            kerb = await c.post(
-                f"/modules/ad.kerberoast/run",
-                headers=real_auth,
-                json={
-                    "campaign_id": campaign.id,
-                    "params": {**common_params, "target_user": "svc-sql"},
-                    "dry_run": False,
-                },
-            )
-            assert asrep.status_code == 200
-            assert kerb.status_code == 200
+            with patch(
+                "ares.api.server._broadcast_event",
+                new_callable=AsyncMock,
+            ) as broadcast:
+                asrep = await c.post(
+                    "/modules/ad.asreproast/run",
+                    headers=real_auth,
+                    json={
+                        "campaign_id": campaign.id,
+                        "params": common_params,
+                        "dry_run": False,
+                    },
+                )
+                kerb = await c.post(
+                    "/modules/ad.kerberoast/run",
+                    headers=real_auth,
+                    json={
+                        "campaign_id": campaign.id,
+                        "params": {**common_params, "target_user": "svc-sql"},
+                        "dry_run": False,
+                    },
+                )
+            assert asrep.status_code == 422
+            assert kerb.status_code == 422
+            assert asrep.json() == {
+                "code": 422,
+                "detail": "raw_secret_material_forbidden",
+                "type": "api_error",
+            }
+            assert kerb.json() == {
+                "code": 422,
+                "detail": "raw_secret_material_forbidden",
+                "type": "api_error",
+            }
+            assert "CorrectHorseBatteryStaple!" not in asrep.text
+            assert "CorrectHorseBatteryStaple!" not in kerb.text
+            assert registry_calls == []
+            assert module_calls == []
+            runtime.bind.assert_not_called()
+            broadcast.assert_not_awaited()
+            assert await effect_counts() == before_effects
+
+            # Seed equivalent historical rows explicitly after proving the two
+            # rejected requests had zero effect, so the persisted report-path
+            # assertions below remain independent of the live boundary.
+            for module_id in ("ad.asreproast", "ad.kerberoast"):
+                finding = finding_for(module_id)
+                result = EngineModuleResult(
+                    module_id=module_id,
+                    status=ModuleStatus.DONE,
+                    findings=[finding],
+                    raw_output={"confirmed": 1},
+                    duration_ms=12.0,
+                )
+                await real_db.save_finding(campaign.id, finding, module_id)
+                await real_db.record_module_run(
+                    campaign.id,
+                    module_id,
+                    result.outcome,
+                    True,
+                    result.duration_ms,
+                )
 
             # Legacy/current dashboard rows may be visible even if the validated
             # flag is not populated; report hydration must not use a stricter
@@ -3118,8 +3931,7 @@ class TestReportEndpoints:
             assert findings_response.status_code == 200
             assert len(findings_response.json()) == 2
             assert all(
-                row["evidence_json"] == '{"redacted":true}'
-                for row in findings_response.json()
+                row["evidence_json"] == '{"redacted":true}' for row in findings_response.json()
             )
             assert "$krb5asrep$" not in findings_response.text
             assert "$krb5tgs$" not in findings_response.text
@@ -3141,6 +3953,7 @@ class TestReportEndpoints:
         finally:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(get_engine, None)
+            app.dependency_overrides[get_c_live_runtime] = original_runtime
             app.state.db = original_db
             await real_db.close()
 

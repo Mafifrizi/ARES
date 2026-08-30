@@ -1,8 +1,9 @@
 # ARES API Reference
 
 > **Base URL:** `http://127.0.0.1:8080`
-> API endpoints require authentication unless noted otherwise. Automation
-> endpoints may accept `X-API-Key`; account/security management endpoints use
+> API endpoints require authentication unless noted otherwise. Non-execution
+> automation endpoints may accept `X-API-Key`; account/security management and
+> every C-LIVE execution endpoint use
 > JWT/browser sessions only. Browser auth is same-origin and CSRF protected;
 > `GET /health` is unauthenticated. API keys are the supported automation
 > credential.
@@ -300,12 +301,13 @@ Useful for verifying remediation between assessments.
 
 ### `POST /campaigns/{id}/run`
 
-Run an execution plan against the campaign.
-
-Plans execute live by default; set `dry_run` to `true` for a preview. If any
-module anywhere in the plan is classified `HIGH_NOISE`, the caller must have
-the `team_lead` role. The complete plan is authorized before execution or
-dry-run processing begins.
+Preview an execution plan or submit it to the C-LIVE boundary. `dry_run=true`
+is a local preview and executes no module code. A live submission is
+bearer-only, requires a canonical lowercase UUIDv4 `Idempotency-Key`, rejects
+raw secret material, and authorizes the complete plan before any child can be
+admitted. In C-LIVE-v1 every production descriptor is ineligible, so a
+production live request returns `409 descriptor_unavailable` with
+`redispatched=false` and performs no module or broadcast effect.
 
 ```json
 {
@@ -315,9 +317,12 @@ dry-run processing begins.
 }
 ```
 
-**Response:** `202 Accepted`
+An eligible private test seam responds synchronously only after every child is
+durably terminal:
+
+**Response:** `200 OK`
 ```json
-{ "execution_id": "exec-abc123", "status": "running", "total_modules": 1 }
+{ "campaign_id": "abc12345", "modules_run": 1, "children": [] }
 ```
 
 ---
@@ -366,7 +371,12 @@ truth for dynamic dashboard forms.
 
 ### `POST /modules/{module_id}/run`
 
-Run a single module directly.
+Preview one module or submit it to the bearer-only C-LIVE boundary. A live
+submission requires a canonical lowercase UUIDv4 `Idempotency-Key` and accepts
+opaque credential identifiers only. Production descriptors are ineligible in
+C-LIVE-v1, so the production response is `409 descriptor_unavailable` with
+`redispatched=false`; no module code or handler broadcast runs. `dry_run=true`
+returns a local preview without module execution.
 
 ```json
 {
@@ -542,8 +552,11 @@ List active autonomous engagements.
 
 ### `POST /strategy/engage`
 
-Start an autonomous engagement. Backend RBAC still enforces restricted module
-authorization.
+Submit a Strategy execution intent to the bearer-only C-LIVE boundary. In
+C-LIVE-v1 all production descriptors remain disabled/ineligible, so this route
+returns the frozen synchronous non-dispatchable response and performs no LLM,
+planning-network, module, or broadcast effect. A production planning provider
+cannot be selected through this request.
 
 Request body:
 
@@ -564,16 +577,14 @@ Notes:
 
 - `goal` can be `domain_admin`, `enterprise_admin`, `cloud_admin`,
   `data_exfil`, `persistence`, or `full_compromise`.
-- `llm_backend` can be `claude`, `openai`, or `local`.
-- The dashboard Strategy page uses the backend defaults. By default that means
-  Claude-backed planning, so `ANTHROPIC_API_KEY` must be present in the ARES
-  server environment.
-- `llm_backend=openai` requires `OPENAI_API_KEY`.
-- `llm_backend=local` expects Ollama at `http://localhost:11434`.
-- ARES dashboard API keys authenticate callers to ARES. They are not LLM
-  provider keys.
-- The endpoint returns immediately. Monitor progress through campaign events
-  or the dashboard `Live` page.
+- Legacy `llm_backend` fields are accepted only as inert request compatibility
+  data in this release; no Claude, OpenAI, Ollama, or other planning connection
+  is opened.
+- `X-API-Key` does not authorize this endpoint. Supply a current bearer and a
+  canonical lowercase UUIDv4 `Idempotency-Key`.
+- The response is synchronous. With the production descriptor gate closed it
+  is non-dispatchable; an eligible private test seam may return terminal `200`
+  only after durable settlement.
 
 ---
 
@@ -603,8 +614,9 @@ Generate an execution plan from a template.
 Template plans are deterministic and do not call an LLM. They return a plan for
 operator review and do not execute modules automatically.
 
-For LLM-backed planning, run module `ai.autonomous_planner` through the
-`/modules/{module_id}/run` endpoint or the dashboard Modules page.
+Production LLM-backed planning is inactive in C-LIVE-v1. The
+`ai.autonomous_planner` descriptor cannot be activated through this endpoint or
+the dashboard; production planning activation requires separate approval.
 
 ---
 
@@ -753,3 +765,29 @@ HTTP status codes:
 | 429 | Rate limit exceeded |
 | 500 | Internal server error |
 | 503 | Engine not ready |
+
+---
+
+## C-LIVE-v1 execution boundary
+
+Live requests to `POST /modules/{module_id}/run`,
+`POST /campaigns/{campaign_id}/run`, and `POST /strategy/engage` are
+bearer-only. `X-API-Key` never authorizes execution. Every non-preview request
+must carry `Idempotency-Key` as a canonical lowercase UUIDv4; missing or
+malformed keys return `422` after bearer/role and campaign-existence checks.
+Raw credential material is rejected. Callers may provide only opaque credential
+identifiers.
+
+C-LIVE-v1 is safety wiring, not descriptor activation. Production descriptors
+remain ineligible, so production Strategy performs no LLM/network planning and
+returns the generic non-dispatchable response. An eligible private test seam is
+synchronous and returns a terminal `200` only after durable settlement.
+
+An exact replay returns `409 execution_replayed_no_redispatch` with stable
+identifiers and never re-executes module code or emits a handler broadcast.
+Changed intent under the same key returns `409 idempotency_conflict`. Authority
+staleness returns `409`, capacity exhaustion `429`, inconsistent budget state
+`503`, invalid contracts `422`, invariant failures `500`, and purged lifecycle
+targets `410`. An unconfirmed terminal state returns
+`503 execution_settlement_unconfirmed`; clients must inspect status using the
+same key rather than submit a new logical execution.

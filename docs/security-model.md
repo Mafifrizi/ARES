@@ -10,13 +10,13 @@ ARES is an offensive framework. This document explains how ARES protects the **o
 
 | Threat | Mitigation |
 |--------|------------|
-| Community module exfiltrates data | SandboxRunner isolation (subprocess/Docker) + module signatures |
+| Community module exfiltrates data | Production descriptors are disabled; the real subprocess stdin entry rejects every payload |
 | Credential data leaked to logs | structlog sensitive field masking, vault encryption |
 | Out-of-scope host attacked | CampaignGuardrail scope check on every operation |
 | Lockout caused by spray | AccountLocked error stops ALL attempts, AdaptiveOpsecEngine |
 | Operator machine compromised | Encrypted checkpoints, no plaintext secrets on disk |
 | API unauthorized access | JWT bearer tokens, bcrypt hashing, rate limiting |
-| Replay attack on API | JWT expiry (1 hour default), nonce in sensitive endpoints |
+| Replay of live execution | Immutable UUIDv4 idempotency receipts; replay owns zero new dispatch or outbox delta |
 | Module marketplace malware | SHA-256 signed manifests, trusted registry only |
 
 ### What we do NOT protect against
@@ -58,11 +58,15 @@ stored sensitive records.
 - REST API: HTTPS (TLS 1.2+) — use a reverse proxy (nginx/caddy)
 - WebSocket dashboard: WSS
 - Redis cluster connection: `redis+tls://` with cert pinning
-- Inter-worker: subprocess stdin/stdout (local only)
+- C-LIVE worker IPC: none; subprocess stdin payloads are rejected
 
 ---
 
 ## Module Isolation (SandboxRunner)
+
+> The tiers below are a legacy target design and are not an active C-LIVE-v1
+> dispatch path. Production descriptors remain ineligible; authenticated worker
+> IPC or a serializable capability requires separate approval.
 
 ### Isolation tiers
 
@@ -95,7 +99,8 @@ resource.setrlimit(RLIMIT_NOFILE,(256, 256))     # 256 open file descriptors
 
 ### Authentication
 
-Most API endpoints require a valid JWT bearer token or an API key:
+Most non-execution API endpoints require a valid JWT bearer token or may accept
+an API key. C-LIVE execution endpoints are bearer-only:
 
 ```http
 Authorization: Bearer eyJhbGci...
@@ -418,3 +423,25 @@ ARES is intended for:
 **Do not use ARES against systems you do not own or have explicit written permission to test.**
 
 Anthropic and the ARES authors take no responsibility for misuse.
+
+---
+
+## C-LIVE-v1 execution authority
+
+Execution is stricter than general API authentication. Only a current bearer
+principal may submit live work; API keys and raw credential material are denied.
+`operator` maps to lifecycle operator and `team_lead` to lifecycle team lead.
+`reporter` and `recon` are rejected before admission, and `admin` is never
+synthesized.
+
+The bearer is revalidated before admission and again before queue ownership;
+each child and retry repeats that check. Point-in-time revocation is enforced,
+while transaction-linearizable revocation is outside this release. A canonical
+UUIDv4 Idempotency-Key names one immutable submission. Replays and changed-intent
+conflicts have zero new lifecycle/outbox delta, no target-module execution, and
+no handler-initiated broadcast.
+
+The only authorized effect capability is a nonserializable, process-local,
+single-use seal issued after `RUNNING/APPLIED`. The subprocess stdin boundary
+rejects all payloads, production descriptors remain ineligible, and uncertain
+post-running work cannot auto-retry.

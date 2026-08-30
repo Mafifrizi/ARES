@@ -151,6 +151,63 @@ async def db_and_user(tmp_path: Path) -> AsyncIterator[tuple[AresDatabase, str]]
 
 
 @pytest.mark.asyncio
+async def test_sqlite_c_live_trusted_store_factory_is_coordinator_only(
+    db_and_user: tuple[AresDatabase, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.rbac import AuthenticatedUser
+    from ares.api.server import _CLiveRuntime
+    from ares.db.websocket_tickets import BearerTicketSource
+
+    database, user_id = db_and_user
+    original_factory = database.execution_lifecycle_store
+    stores: list[object] = []
+
+    def tracked_factory() -> object:
+        store = original_factory()
+        stores.append(store)
+        return store
+
+    class SealedEngine:
+        def __init__(self) -> None:
+            self.store_ids: list[int] = []
+
+        def _bind_admission_store(self, store: object) -> None:
+            store_id = id(store)
+            if self.store_ids and self.store_ids[-1] != store_id:
+                raise PermissionError("cross-store binding")
+            self.store_ids.append(store_id)
+
+    monkeypatch.setattr(database, "execution_lifecycle_store", tracked_factory)
+    engine = SealedEngine()
+    runtime = _CLiveRuntime(database, engine)
+    family_id = __import__("base64").urlsafe_b64encode(
+        hashlib.sha256(b"sqlite-c-live-family").digest()
+    ).rstrip(b"=").decode("ascii")
+    actor = AuthenticatedUser(
+        username="sqlite-lifecycle-user",
+        role="operator",
+        websocket_ticket_source=BearerTicketSource(
+            user_id=user_id,
+            subject="sqlite-lifecycle-user",
+            jti="10000000-0000-4000-8000-000000000001",
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            family_id=family_id,
+            auth_epoch=1,
+        ),
+    )
+
+    first_principal, first = runtime.bind(actor)
+    second_principal, second = runtime.bind(actor)
+
+    assert len(stores) == 1
+    assert runtime.store is stores[0]
+    assert first is not second
+    assert first_principal is not second_principal
+    assert engine.store_ids == [id(stores[0]), id(stores[0])]
+
+
+@pytest.mark.asyncio
 async def test_rotation_before_connect_fails_without_creating_database(
     tmp_path: Path,
 ) -> None:

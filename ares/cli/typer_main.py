@@ -22,25 +22,32 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
 import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 import typer
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.markup import escape
 from rich import print as rprint
+from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
+from rich.table import Table
 
 app     = typer.Typer(
     name    = "ares",
@@ -61,6 +68,175 @@ console = Console()
 PYTHON_MIN_VERSION = (3, 10)
 PYTHON_MAX_VERSION_EXCLUSIVE = (3, 13)
 AD_IMPACKET_TESTED_PYTHON = (3, 12)
+_C_LIVE_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+_C_LIVE_MAX_RESPONSE_BYTES = 1_048_576
+
+
+class _CLiveCliError(RuntimeError):
+    """Fixed, non-sensitive C-LIVE CLI transport failure."""
+
+
+class _CLiveRejectRedirects(urllib_request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: Any,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
+def _c_live_api_url() -> tuple[str, bool]:
+    """Return the exact configured API origin and whether verified TLS is required."""
+    value = os.getenv("ARES_API_URL")
+    if type(value) is not str or not value or value != value.strip():
+        raise _CLiveCliError("c-live-cli:api-url-missing-or-invalid")
+    try:
+        parsed = urllib_parse.urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError):
+        raise _CLiveCliError("c-live-cli:api-url-missing-or-invalid") from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or host is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise _CLiveCliError("c-live-cli:api-url-missing-or-invalid")
+    host = host.lower()
+    if parsed.scheme == "http" and host not in _C_LIVE_LOOPBACK_HOSTS:
+        raise _CLiveCliError("c-live-cli:tls-required")
+    if ":" in host:
+        authority = f"[{host}]"
+    else:
+        authority = host
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return f"{parsed.scheme}://{authority}", parsed.scheme == "https"
+
+
+def _c_live_bearer() -> str:
+    """Read bearer authority from the environment or a protected prompt only."""
+    token = os.getenv("ARES_ACCESS_TOKEN")
+    if token is None:
+        token = getpass.getpass("ARES bearer token: ")
+    if (
+        type(token) is not str
+        or not token
+        or token != token.strip()
+        or len(token.encode("utf-8")) > 16_384
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in token)
+    ):
+        raise _CLiveCliError("c-live-cli:bearer-missing-or-invalid")
+    return token
+
+
+def _c_live_idempotency_key(value: str | None) -> str:
+    """Validate a supplied UUIDv4 or generate and display one exactly once."""
+    if value in {None, ""}:
+        generated = str(uuid.uuid4())
+        console.print(f"[cyan]Idempotency-Key:[/] {generated}")
+        return generated
+    if type(value) is not str:
+        raise _CLiveCliError("c-live-cli:idempotency-key-invalid")
+    try:
+        parsed = uuid.UUID(value)
+    except (AttributeError, ValueError):
+        raise _CLiveCliError("c-live-cli:idempotency-key-invalid") from None
+    if parsed.version != 4 or str(parsed) != value:
+        raise _CLiveCliError("c-live-cli:idempotency-key-invalid")
+    return value
+
+
+def _c_live_http_post(path: str, body: dict[str, Any], key: str | None) -> dict[str, Any]:
+    """Perform exactly one bearer HTTP POST; transport retry is caller-owned."""
+    base_url, use_tls = _c_live_api_url()
+    bearer = _c_live_bearer()
+    idempotency_key = _c_live_idempotency_key(key)
+    if type(path) is not str or not path.startswith("/") or path.startswith("//"):
+        raise _CLiveCliError("c-live-cli:path-invalid")
+    try:
+        data = json.dumps(
+            body,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        raise _CLiveCliError("c-live-cli:request-invalid") from None
+
+    outgoing = urllib_request.Request(  # noqa: S310 - origin is strictly constrained above
+        f"{base_url}{path}",
+        data=data,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {bearer}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": idempotency_key,
+        },
+        method="POST",
+    )
+    handlers: list[Any] = [_CLiveRejectRedirects()]
+    if use_tls:
+        handlers.append(urllib_request.HTTPSHandler(context=ssl.create_default_context()))
+    opener = urllib_request.build_opener(*handlers)
+    try:
+        with opener.open(outgoing, timeout=30) as response:  # noqa: S310
+            raw = response.read(_C_LIVE_MAX_RESPONSE_BYTES + 1)
+            status = int(response.status)
+    except urllib_error.HTTPError as exc:
+        status = int(exc.code)
+        raw = exc.read(_C_LIVE_MAX_RESPONSE_BYTES + 1)
+        if len(raw) > _C_LIVE_MAX_RESPONSE_BYTES:
+            raise _CLiveCliError(f"c-live-cli:http-{status}:response-too-large") from None
+        try:
+            decoded = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            decoded = {}
+        code = decoded.get("code") if isinstance(decoded, dict) else None
+        safe_code = (
+            code
+            if type(code) is str
+            and 1 <= len(code) <= 64
+            and all(character.isalnum() or character in "_-" for character in code)
+            else "request-rejected"
+        )
+        raise _CLiveCliError(f"c-live-cli:http-{status}:{safe_code}") from None
+    except (urllib_error.URLError, TimeoutError, OSError):
+        raise _CLiveCliError("c-live-cli:transport-unavailable") from None
+    finally:
+        bearer = ""
+
+    if len(raw) > _C_LIVE_MAX_RESPONSE_BYTES:
+        raise _CLiveCliError("c-live-cli:response-too-large")
+    try:
+        decoded = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise _CLiveCliError("c-live-cli:response-invalid") from None
+    return {
+        "status": status,
+        "body": decoded,
+        "idempotency_key": idempotency_key,
+    }
+
+
+def _display_c_live_http_result(result: dict[str, Any]) -> None:
+    body = result.get("body")
+    console.print(
+        Panel(
+            json.dumps(body, indent=2, sort_keys=True, default=str),
+            title=f"C-LIVE HTTP {result.get('status', 'unknown')}",
+        )
+    )
 
 
 def _python_minor(version_info: object | None = None) -> tuple[int, int]:
@@ -425,33 +601,38 @@ def module_info(
 def module_run(
     module_id:   str       = typer.Argument(..., help="Module ID"),
     target:      str       = typer.Option(..., "--target", "-t", help="Target host"),
-    campaign_id: str       = typer.Option("", "--campaign", "-c"),
+    campaign_id: str       = typer.Option(..., "--campaign", "-c"),
     domain:      str       = typer.Option("", "--domain", "-d"),
     profile:     str       = typer.Option("normal", "--profile", "-p"),
     dry_run:     bool      = typer.Option(False, "--dry-run", help="Simulate without network"),
     param:       list[str] = typer.Option([], "--param", help="k=v params (repeatable)"),
+    idempotency_key: str = typer.Option(
+        "", "--idempotency-key", help="Canonical lowercase UUIDv4 reused for transport retry"
+    ),
 ) -> None:
-    """Run a single module against a target."""
-    from ares.cli._store import get_store
-    store = get_store()
-
+    """Submit one module request to the authenticated ARES HTTP API."""
     params: dict = {}
     for p in param:
         if "=" in p:
             k, v = p.split("=", 1)
             params[k.strip()] = v.strip()
 
-    cid = campaign_id or store.active_campaign_id() or "adhoc"
-
     with console.status(f"[cyan]Running {module_id} → {target}...[/]"):
         result = asyncio.run(_run_module(
-            module_id, target, cid, domain, profile, dry_run, params
+            module_id,
+            target,
+            campaign_id,
+            domain,
+            profile,
+            dry_run,
+            params,
+            idempotency_key,
         ))
 
     if result:
-        _display_result(module_id, result)
+        _display_c_live_http_result(result)
     else:
-        console.print("[red]Module returned no result[/]")
+        raise typer.Exit(1)
 
 
 @module_app.command("install")
@@ -491,13 +672,16 @@ def chain_execute(
     goal:        str  = typer.Option(..., "--goal", "-g",
                                       help="Goal: domain_admin | data_exfil | cloud_access | full_compromise"),
     target:      str  = typer.Option(..., "--target", "-t", help="Primary target"),
-    campaign_id: str  = typer.Option("", "--campaign", "-c"),
+    campaign_id: str  = typer.Option(..., "--campaign", "-c"),
     domain:      str  = typer.Option("", "--domain", "-d", help="AD domain (CORP.LOCAL)"),
     profile:     str  = typer.Option("normal", "--profile", "-p"),
     dry_run:     bool = typer.Option(False, "--dry-run"),
     show_plan:   bool = typer.Option(False, "--plan-only", help="Show plan without executing"),
+    idempotency_key: str = typer.Option(
+        "", "--idempotency-key", help="Canonical lowercase UUIDv4 reused for transport retry"
+    ),
 ) -> None:
-    """Execute a goal-based attack chain."""
+    """Submit a deterministic ordered chain to the authenticated ARES HTTP API."""
     console.print(Panel(
         f"[bold]Goal:[/]    {goal}\n"
         f"[bold]Target:[/]  {target}\n"
@@ -513,7 +697,18 @@ def chain_execute(
         if not confirm:
             raise typer.Abort()
 
-    asyncio.run(_run_chain(goal, target, campaign_id, domain, profile, dry_run, show_plan))
+    asyncio.run(
+        _run_chain(
+            goal,
+            target,
+            campaign_id,
+            domain,
+            profile,
+            dry_run,
+            show_plan,
+            idempotency_key,
+        )
+    )
 
 
 @chain_app.command("list")
@@ -813,39 +1008,29 @@ async def _run_module(
     profile:    str,
     dry_run:    bool,
     params:     dict,
-) -> dict | None:
-    """Inner async runner for module execution."""
+    idempotency_key: str | None = None,
+) -> dict[str, Any] | None:
+    """Submit a module request without importing or constructing module code."""
     try:
-        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
-        from ares.core.config import AresSettings
-        from ares.core.noise import NoiseController
-        from ares.core.context import ExecutionContext
-        from ares.core.di import AresContainer
-
-        container = AresContainer.for_test()
-        settings  = container.settings()
-        noise_profiles = {
-            "stealth":    NoiseProfile.STEALTH,
-            "normal":     NoiseProfile.NORMAL,
-            "aggressive": NoiseProfile.AGGRESSIVE,
-        }
-        campaign = Campaign(
-            id=campaign_id, name="adhoc",
-            scope=[ScopeEntry(cidr="0.0.0.0/0")],
-            noise_profile=noise_profiles.get(profile, NoiseProfile.NORMAL),
-            operator="operator",
+        request_params = dict(params)
+        request_params.update(
+            {
+                "target": target,
+                "domain": domain,
+                "noise_profile": profile,
+            }
         )
-        ctx = ExecutionContext.build(
-            campaign=campaign, target=target,
-            module_id=module_id, domain=domain,
-            params=params, dry_run=dry_run,
+        return _c_live_http_post(
+            f"/modules/{urllib_parse.quote(module_id, safe='')}/run",
+            {
+                "campaign_id": campaign_id,
+                "params": request_params,
+                "dry_run": bool(dry_run),
+            },
+            idempotency_key,
         )
-        module = container.build_module(module_id, campaign)
-        await module.validate(ctx)
-        result = await module.execute(ctx)
-        return result.to_dict()
-    except Exception as exc:
-        console.print(f"[red]Module error:[/] {exc}")
+    except _CLiveCliError as exc:
+        console.print(f"[red]{exc}[/]")
         return None
 
 
@@ -857,39 +1042,27 @@ async def _run_chain(
     profile:     str,
     dry_run:     bool,
     show_plan:   bool,
+    idempotency_key: str | None = None,
 ) -> None:
     """
-    Execute a goal-based attack chain via GoalEngine.
-    Displays step-by-step progress with Rich tables.
+    Submit one complete deterministic chain without local module execution.
     """
     from rich.table import Table as RTable
-    from rich.live  import Live
-    import time
 
-    # ── 1. Build plan ───────────────────────────────────────────────────
+    # Static goal definitions provide a complete, ordered chain without
+    # invoking GoalEngine planning callbacks or loading executable modules.
     try:
-        from ares.goal.engine import GoalEngine, Goal as GoalEnum, GOAL_DEFINITIONS
-        from ares.state.target_state import OperatorSession
-        from ares.core.plugin.loader import ModuleRegistry
+        from ares.goal.engine import GOAL_DEFINITIONS, Goal as GoalEnum
 
-        goal_enum = GoalEnum(goal) if goal in [g.value for g in GoalEnum] else GoalEnum.DOMAIN_ADMIN
-        registry  = ModuleRegistry()
-        session   = OperatorSession(campaign_id=campaign_id or "adhoc")
-        engine    = GoalEngine(registry=registry, session=session)
-
-        ctx = {
-            "dc":            target,
-            "domain":        domain,
-            "target":        target,
-            "noise_profile": profile,
-        }
-        plan = engine.plan(goal_enum, context=ctx)
-
-    except (ImportError, ValueError) as exc:
-        console.print(f"[red]Chain planning error:[/] {exc}")
+        goal_enum = GoalEnum(goal)
+        modules = tuple(GOAL_DEFINITIONS[goal_enum].preferred_chain)
+    except (ImportError, KeyError, ValueError):
+        console.print("[red]c-live-cli:chain-intent-invalid[/]")
+        return
+    if not modules or any(type(module_id) is not str or not module_id for module_id in modules):
+        console.print("[red]c-live-cli:chain-intent-invalid[/]")
         return
 
-    # ── 2. Show plan ────────────────────────────────────────────────────
     plan_table = RTable(title=f"Attack Plan — [{goal}]", show_lines=True)
     plan_table.add_column("#",       width=4,  style="dim")
     plan_table.add_column("Module",  width=24, style="cyan")
@@ -897,76 +1070,44 @@ async def _run_chain(
     plan_table.add_column("OpSec",   width=12, style="yellow")
     plan_table.add_column("Status",  width=12)
 
-    step_statuses = ["[dim]pending[/]"] * len(plan.steps)
-    for i, step in enumerate(plan.steps):
-        cls = registry.get(step.module_id)
-        opsec = getattr(getattr(cls, "OPSEC_LEVEL", None), "value", "medium") if cls else "—"
+    for i, module_id in enumerate(modules, start=1):
         plan_table.add_row(
-            str(step.step_num), step.module_id,
-            step.reason[:46], opsec, step_statuses[i],
+            str(i), module_id, "deterministic configured chain", "—", "[dim]pending[/]",
         )
 
     console.print(plan_table)
+    estimated_duration_min = min(len(modules) * 3, 60)
     console.print(
-        f"\n[dim]Estimated duration: ~{plan.estimated_duration_min} min · "
-        f"Steps: {len(plan.steps)} · Goal: {goal}[/]\n"
+        f"\n[dim]Estimated duration: ~{estimated_duration_min} min · "
+        f"Steps: {len(modules)} · Goal: {goal}[/]\n"
     )
 
     if show_plan:
         return
-
-    if dry_run:
-        console.print("[yellow]● Dry run — plan shown above, no execution.[/]")
+    plan_body = {
+        "stages": [
+            {"name": f"step-{ordinal}", "modules": [module_id]}
+            for ordinal, module_id in enumerate(modules)
+        ]
+    }
+    try:
+        result = _c_live_http_post(
+            f"/campaigns/{urllib_parse.quote(campaign_id, safe='')}/run",
+            {
+                "plan": plan_body,
+                "global_params": {
+                    "target": target,
+                    "domain": domain,
+                    "noise_profile": profile,
+                },
+                "dry_run": bool(dry_run),
+            },
+            idempotency_key,
+        )
+    except _CLiveCliError as exc:
+        console.print(f"[red]{exc}[/]")
         return
-
-    # ── 3. Execute step-by-step ─────────────────────────────────────────
-    console.print(f"[bold]Executing {len(plan.steps)} steps...[/]\n")
-
-    results: list[dict] = []
-    t_start = time.monotonic()
-
-    for i, step in enumerate(plan.steps):
-        with console.status(
-            f"[cyan][{i+1}/{len(plan.steps)}] Running {step.module_id} → {target}...[/]"
-        ):
-            step_result = await _run_module(
-                step.module_id, target, campaign_id,
-                domain, profile, False, step.params,
-            )
-
-        status_ok = step_result and step_result.get("status") == "success"
-        status_icon  = "[green]✓[/]" if status_ok else "[yellow]⚠[/]"
-        status_label = "[green]success[/]" if status_ok else "[yellow]partial[/]"
-
-        if step_result:
-            finds = step_result.get("findings", 0)
-            creds = step_result.get("new_credentials", 0)
-            console.print(
-                f"  {status_icon} [cyan]{step.module_id}[/]  "
-                f"findings: [bold]{finds}[/]  creds: [bold]{creds}[/]  "
-                + ("[red]error: " + str(step_result.get("error", ""))[:40] + "[/]"
-                   if step_result.get("error") else "")
-            )
-            results.append(step_result)
-        else:
-            console.print(f"  [red]✗[/] [cyan]{step.module_id}[/]  [red]no result[/]")
-
-    # ── 4. Summary ──────────────────────────────────────────────────────
-    total_finds  = sum(r.get("findings", 0) for r in results)
-    total_creds  = sum(r.get("new_credentials", 0) for r in results)
-    achieved     = engine.check_goal_achieved(
-        goal_enum  # type: ignore[arg-type]
-    )
-
-    console.print(Panel(
-        f"[bold]Goal:[/]        {goal}\n"
-        f"[bold]Achieved:[/]    {'[green]YES ✓[/]' if achieved else '[yellow]Partial[/]'}\n"
-        f"[bold]Steps run:[/]   {len(results)}/{len(plan.steps)}\n"
-        f"[bold]Findings:[/]    {total_finds}\n"
-        f"[bold]Credentials:[/] {total_creds}\n"
-        f"[bold]Duration:[/]    {time.monotonic()-t_start:.1f}s",
-        title="[bold green]⛓  Chain Complete[/]" if achieved else "[bold yellow]⛓  Chain Partial[/]",
-    ))
+    _display_c_live_http_result(result)
 
 
 async def _generate_report(
@@ -2170,64 +2311,51 @@ def goal_run(
     dc:          str  = typer.Option("", "--dc", help="Domain Controller IP"),
     domain:      str  = typer.Option("", "--domain", help="AD domain (CORP.LOCAL)"),
     dry_run:     bool = typer.Option(False, "--dry-run", help="Show plan without executing"),
+    idempotency_key: str = typer.Option(
+        "", "--idempotency-key", help="Canonical lowercase UUIDv4 reused for transport retry"
+    ),
 ) -> None:
-    """Plan and execute a goal-based attack chain autonomously."""
-    import asyncio
-    from ares.core.config import get_settings
-    from ares.db.database import AresDatabase
-    from ares.core.plugin.loader import PluginLoader
-    from ares.state.target_state import OperatorSession
-    from ares.goal.engine import GoalEngine, Goal
+    """Preview locally or submit one goal request to the authenticated API."""
+    del dc, domain  # Strategy API owns target context for the selected campaign.
+    try:
+        from ares.goal.engine import GOAL_DEFINITIONS, Goal as GoalEnum
 
-    async def _run() -> None:
-        s = get_settings()
-        async with await AresDatabase.create(s.db_path, s.encryption_key_value) as db:
-            campaign = await db.get_campaign(campaign_id)
-            if not campaign:
-                console.print(f"[red]Campaign {campaign_id!r} not found[/red]")
-                raise typer.Exit(1)
+        goal_enum = GoalEnum(goal)
+        modules = tuple(GOAL_DEFINITIONS[goal_enum].preferred_chain)
+    except (ImportError, KeyError, ValueError):
+        console.print("[red]c-live-cli:goal-intent-invalid[/]")
+        raise typer.Exit(1) from None
+    if not modules or any(type(module_id) is not str or not module_id for module_id in modules):
+        console.print("[red]c-live-cli:goal-intent-invalid[/]")
+        raise typer.Exit(1)
 
-            registry = PluginLoader().load_all()
-            session  = OperatorSession(campaign_id=campaign_id, operator="cli")
-            engine   = GoalEngine(registry=registry, session=session)
+    table = Table(title=f"[bold]Goal Preview — {goal}[/bold]", show_lines=True)
+    table.add_column("Step", style="cyan", width=5)
+    table.add_column("Module", style="green")
+    table.add_column("Reason")
+    for ordinal, module_id in enumerate(modules, start=1):
+        table.add_row(str(ordinal), module_id, "deterministic configured chain")
+    console.print(table)
+    console.print(f"\n[dim]Estimated duration: {min(len(modules) * 3, 60)} min[/dim]")
 
-            context: dict = {}
-            if dc:     context["dc"]     = dc
-            if domain: context["domain"] = domain
+    if dry_run:
+        console.print("[yellow]Preview only — no HTTP request or module code executed.[/yellow]")
+        return
 
-            plan = engine.plan(goal, context)
-
-            # Display plan
-            table = Table(title=f"[bold]Attack Plan — {goal}[/bold]", show_lines=True)
-            table.add_column("Step", style="cyan", width=5)
-            table.add_column("Module", style="green")
-            table.add_column("Reason")
-            table.add_column("Params", style="dim")
-            for step in plan.steps:
-                table.add_row(
-                    str(step.step_num),
-                    step.module_id,
-                    step.reason,
-                    ", ".join(f"{k}={v}" for k, v in step.params.items() if v),
-                )
-            console.print(table)
-            console.print(f"\n[dim]Estimated duration: {plan.estimated_duration_min} min[/dim]")
-
-            if dry_run:
-                console.print("[yellow]Dry-run mode — no modules executed.[/yellow]")
-                return
-
-            from ares.core.campaign import Campaign as CM
-            c_obj = CM(**{k: v for k, v in campaign.items() if k in CM.model_fields})
-            results = await engine.execute(plan, c_obj)
-
-            achieved = results.get("achieved", False)
-            if achieved:
-                console.print(f"\n[bold green]✅ Goal '{goal}' ACHIEVED[/bold green]")
-            else:
-                console.print(f"\n[yellow]⚠️  Goal '{goal}' not fully achieved — check results[/yellow]")
-
-    asyncio.run(_run())
+    try:
+        result = _c_live_http_post(
+            "/strategy/engage",
+            {
+                "campaign_id": campaign_id,
+                "goal": goal_enum.value,
+                "llm_backend": "local",
+            },
+            idempotency_key,
+        )
+    except _CLiveCliError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from None
+    _display_c_live_http_result(result)
 
 
 @goal_app.command("list")

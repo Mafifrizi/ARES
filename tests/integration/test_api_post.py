@@ -24,6 +24,7 @@ Run: pytest tests/integration/test_api_post.py -v --timeout=30
 from __future__ import annotations
 
 import os
+from unittest.mock import AsyncMock
 
 # ── env must be set BEFORE any ares import ────────────────────────────────────
 _SECRET = "integration-post-test-secret-32ab"
@@ -302,7 +303,15 @@ class TestCampaignPostEndpoints:
         assert r.status_code == 200
         assert "x-total-count" in r.headers
 
-    def test_run_plan_dry_run(self, c, token, campaign_id):
+    def test_run_plan_dry_run(self, c, token, campaign_id, monkeypatch):
+        run_module = AsyncMock(
+            side_effect=AssertionError("dry-run must not execute module code")
+        )
+        run_plan = AsyncMock(
+            side_effect=AssertionError("dry-run must not enter the live plan engine")
+        )
+        monkeypatch.setattr(c.app.state.engine, "run_module", run_module)
+        monkeypatch.setattr(c.app.state.engine, "run_plan", run_plan)
         r = c.post(
             f"/campaigns/{campaign_id}/run",
             json={
@@ -320,7 +329,11 @@ class TestCampaignPostEndpoints:
             },
             headers=_auth(token),
         )
-        assert r.status_code in (200, 202), f"run plan: {r.text}"
+        assert r.status_code == 200, f"run plan: {r.text}"
+        assert r.json()["status"] == "dry_run_ok"
+        assert "x-ares-attempt-id" not in r.headers
+        run_module.assert_not_awaited()
+        run_plan.assert_not_awaited()
 
     def test_campaign_not_found_returns_404(self, c, token):
         r = c.get("/campaigns/nonexistent-xyz-id", headers=_auth(token))

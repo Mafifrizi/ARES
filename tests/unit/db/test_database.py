@@ -11,13 +11,13 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
 from unittest.mock import AsyncMock, patch
+from urllib.parse import unquote, urlparse
 
 import pytest
 
 import ares.core.plugin.loader as plugin_loader_module
-from ares.core.campaign import Campaign, Finding, NoiseProfile, Severity, ScopeEntry
+from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
 from ares.core.engine import AresEngine, ExecutionPlan, ModuleStatus
 from ares.core.plugin.loader import ModuleRegistry, PluginLoader
@@ -25,12 +25,11 @@ from ares.db.database import AresDatabase, Credential, Host, Loot
 from ares.modules.base import BaseModule
 from ares.modules.reporting.report_gen import (
     BROWSER_PDF_TIMEOUT_SECONDS,
-    ReportDependencyError,
-    ReportGenerator,
     WINDOWS_EDGE_ELEVATED_PDF_MESSAGE,
     WINDOWS_WEASYPRINT_NATIVE_HINT,
+    ReportDependencyError,
+    ReportGenerator,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -906,3 +905,33 @@ class TestReportGenerator:
         gen = ReportGenerator()
         with pytest.raises(ValueError, match="Unknown format"):
             gen.generate(campaign, fmt="excel")
+
+
+@pytest.mark.asyncio
+async def test_raw_sqlite_uri_uses_unstamped_runtime_generation_ten(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "runtime-generation-ten.db"
+    uri = f"file:{path.resolve().as_posix()}?mode=rwc"
+    database = AresDatabase(uri)
+    await database.connect()
+    try:
+        async with database._conn.execute(
+            "SELECT mode,revision FROM execution_gateway_state"
+        ) as cursor:
+            gateway = await cursor.fetchone()
+        async with database._conn.execute(
+            "SELECT count(*) FROM sqlite_schema WHERE name='alembic_version'"
+        ) as cursor:
+            managed_count = int((await cursor.fetchone())[0])
+        async with database._conn.execute(
+            "SELECT count(*) FROM sqlite_schema WHERE name='schema_version'"
+        ) as cursor:
+            legacy_marker_count = int((await cursor.fetchone())[0])
+    finally:
+        await database.close()
+    assert (tuple(gateway), managed_count, legacy_marker_count) == (
+        ("disabled", 0),
+        0,
+        1,
+    ), "raw SQLite runtime generation changed"

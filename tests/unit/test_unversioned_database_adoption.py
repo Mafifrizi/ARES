@@ -14,6 +14,7 @@ from alembic import command
 
 import ares.db.migrations.adoption as adoption_module
 from ares.db.database import AresDatabase
+from ares.db.execution_lifecycle import sqlite_admission_authority_runtime_script
 from ares.db.migrations.adoption import (
     SUPPORTED_GENERATIONS,
     AdoptionExit,
@@ -26,6 +27,7 @@ from ares.db.migrations.adoption import (
     sqlite_catalog_and_row_digest,
     verify_managed_connection_from_path,
 )
+from ares.db.schema import CREATE_TABLES
 
 
 async def _create_runtime(path: Path, *, generation: int = 7) -> None:
@@ -64,6 +66,8 @@ def test_supported_generation_contract_is_frozen() -> None:
         ("sqlite", 7, "0007", True),
         ("postgresql", 6, "0006", False),
         ("postgresql", 7, "0007", True),
+        ("sqlite", 10, "runtime-0010", True),
+        ("sqlite", 11, "runtime-0011", True),
     )
 
 
@@ -115,6 +119,39 @@ async def test_sqlite_runtime_generation_is_classified(
 
 
 @pytest.mark.asyncio
+async def test_runtime_generation_ten_adopts_by_exact_catalog_then_removes_marker(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "runtime-ten.db"
+    backup = tmp_path / "runtime-ten.backup"
+    connection = sqlite3.connect(path)
+    try:
+        generation_11_script = sqlite_admission_authority_runtime_script()
+        assert CREATE_TABLES.endswith(generation_11_script)
+        connection.executescript(CREATE_TABLES[: -len(generation_11_script)])
+    finally:
+        connection.close()
+    classified = inspect_sqlite_database(path)
+    adopted = await asyncio.to_thread(adopt_sqlite, path, backup)
+    connection = sqlite3.connect(path)
+    try:
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()[0]
+        legacy_marker = connection.execute(
+            "SELECT count(*) FROM sqlite_schema WHERE name='schema_version'"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+    assert (classified.predecessor, adopted.exit_code, revision, legacy_marker) == (
+        "runtime-0010",
+        AdoptionExit.OK,
+        "0011",
+        0,
+    ), "runtime generation ten adoption changed"
+
+
+@pytest.mark.asyncio
 async def test_unknown_sqlite_catalog_is_rejected_without_mutation(
     tmp_path: Path,
 ) -> None:
@@ -151,7 +188,7 @@ async def test_sqlite_adoption_uses_backup_and_normal_history(
     assert backup.is_file()
     assert _catalog_digest(backup) == before
     managed = verify_managed_connection_from_path(path)
-    assert managed.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009"
+    assert managed.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011"
     connection = sqlite3.connect(path)
     try:
         revision = connection.execute(
@@ -159,7 +196,7 @@ async def test_sqlite_adoption_uses_backup_and_normal_history(
         ).fetchone()[0]
     finally:
         connection.close()
-    assert revision == "0009"
+    assert revision == "0011"
 
 
 @pytest.mark.asyncio
@@ -178,7 +215,7 @@ async def test_sqlite_adoption_rerun_is_verified_noop(tmp_path: Path) -> None:
         second_backup.exists(),
     ) == (
         AdoptionExit.OK,
-        "ARES-M2B-ALREADY-MANAGED:0009",
+        "ARES-M2B-ALREADY-MANAGED:0011",
         True,
         False,
     )
@@ -278,7 +315,7 @@ async def test_startup_rejects_unversioned_without_alembic_side_effect(
 
 
 @pytest.mark.asyncio
-async def test_startup_rejects_noncanonical_fake_0009(tmp_path: Path) -> None:
+async def test_startup_requires_migration_for_managed_0009(tmp_path: Path) -> None:
     path = tmp_path / "runtime.db"
     await _create_runtime(path)
     connection = sqlite3.connect(path)
@@ -294,7 +331,7 @@ async def test_startup_rejects_noncanonical_fake_0009(tmp_path: Path) -> None:
         connection.close()
     before = _catalog_digest(path)
     database = AresDatabase(path)
-    with pytest.raises(RuntimeError, match="Invalid managed"):
+    with pytest.raises(RuntimeError, match="migration is required"):
         await database.connect()
     assert _catalog_digest(path) == before
 

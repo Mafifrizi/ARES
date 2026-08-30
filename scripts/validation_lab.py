@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 from urllib import error, parse, request
@@ -119,6 +120,21 @@ def _is_canonical_csrf(value: object) -> bool:
     return len(decoded) == 32 and hmac.compare_digest(canonical, value)
 
 
+def _canonical_idempotency_key(value: object) -> str | None:
+    """Accept only a non-secret canonical lowercase UUIDv4 header value."""
+    if value in {None, ""}:
+        return None
+    if not isinstance(value, str):
+        raise ValidationLabError("idempotency-key-invalid")
+    try:
+        parsed = uuid.UUID(value)
+    except (AttributeError, ValueError):
+        raise ValidationLabError("idempotency-key-invalid") from None
+    if parsed.version != 4 or str(parsed) != value:
+        raise ValidationLabError("idempotency-key-invalid")
+    return value
+
+
 class ApiClient:
     """Cookie-aware client whose representations never contain credentials."""
 
@@ -164,6 +180,7 @@ class ApiClient:
         authenticated: bool = True,
         browser_headers: bool = False,
         empty_body: bool = False,
+        idempotency_key: str | None = None,
     ) -> ApiResult:
         expected = expect or {200}
         url = f"{self.base_url}{path}"
@@ -183,6 +200,9 @@ class ApiClient:
             if self.access_token is None:
                 raise ValidationLabError("access-authority-missing")
             headers["Authorization"] = f"Bearer {self.access_token}"
+        canonical_key = _canonical_idempotency_key(idempotency_key)
+        if canonical_key is not None:
+            headers["Idempotency-Key"] = canonical_key
 
         outgoing = request.Request(  # noqa: S310 - URL origin was strictly validated
             url, data=data, headers=headers, method=method
@@ -417,6 +437,7 @@ def run_lab(args: argparse.Namespace) -> int:
                         "global_params": {},
                         "dry_run": True,
                     },
+                    idempotency_key=args.idempotency_key,
                 ).body
                 if (
                     not isinstance(result, dict)
@@ -431,6 +452,7 @@ def run_lab(args: argparse.Namespace) -> int:
                     "/modules/ad.kerberoast/run",
                     body={"campaign_id": campaign_id, "params": {}, "dry_run": True},
                     expect={200},
+                    idempotency_key=args.idempotency_key,
                 ).body
                 _validate_blocked_module_dry_run(result)
 
@@ -541,6 +563,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("ARES_LAB_BROWSER_ORIGIN") or os.getenv("ARES_BROWSER_ORIGIN"),
     )
     parser.add_argument("--username", default=os.getenv("ARES_LAB_USERNAME", "admin"))
+    parser.add_argument(
+        "--idempotency-key",
+        default=os.getenv("ARES_LAB_IDEMPOTENCY_KEY"),
+        help="Optional non-secret canonical UUIDv4 for preview requests.",
+    )
     parser.add_argument(
         "--allow-remote",
         action="store_true",

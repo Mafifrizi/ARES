@@ -24,10 +24,11 @@ Planning algorithm (backward chaining):
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
 from ares.state.target_state import CompromiseLevel, OperatorSession
@@ -332,8 +333,46 @@ class GoalEngine:
         self.registry         = registry
         self.session          = session
         self.vault            = vault
-        # Build capability graph from registry for dynamic chain resolution
-        self._capability_graph = CapabilityGraph.from_registry(registry)
+        # Planning infrastructure stays dormant unless the private repository-
+        # test planning seam invokes plan().  Production construction and
+        # execute() do not call registry/plugin hooks.
+        self._capability_graph: CapabilityGraph | None = None
+        # Private test-only admission binding.  No production setting, request,
+        # plugin, or environment variable can configure this seam while the
+        # generation-11 descriptor catalog remains ineligible.
+        self._c_live_test_coordinator: Any | None = None
+        self._c_live_test_principal: Any | None = None
+        self._c_live_test_parent_key: str | None = None
+        self._c_live_test_planning_enabled = False
+
+    def _configure_c_live_test_planning(self) -> None:
+        """Enable the pure deterministic planner for repository tests only.
+
+        Production settings, requests, plugins, and environment state have no
+        route to this leading-underscore seam.  With production descriptors
+        ineligible, public Goal planning therefore remains fail-closed.
+        """
+        self._c_live_test_planning_enabled = True
+
+    def _configure_c_live_test_dispatch(
+        self,
+        *,
+        coordinator: Any,
+        principal: Any,
+        idempotency_key: str,
+    ) -> None:
+        """Bind a coordinator to pure, deterministic Goal wiring tests only."""
+        from ares.db.execution_lifecycle import TrustedPrincipal, valid_uuid
+
+        if (
+            not callable(getattr(coordinator, "execute_module", None))
+            or type(principal) is not TrustedPrincipal
+            or not valid_uuid(idempotency_key)
+        ):
+            raise ValueError("invalid C-LIVE Goal test dispatch binding")
+        self._c_live_test_coordinator = coordinator
+        self._c_live_test_principal = principal
+        self._c_live_test_parent_key = idempotency_key
 
     def plan(
         self,
@@ -344,6 +383,8 @@ class GoalEngine:
         Build an attack plan for the given goal.
         Context may include: dc, domain, targets, noise_profile, etc.
         """
+        if not self._c_live_test_planning_enabled:
+            raise PermissionError("C-LIVE Goal planning is non-dispatchable")
         context = context or {}
         # Coerce string → Goal enum
         if isinstance(goal, str):
@@ -360,6 +401,9 @@ class GoalEngine:
             raise ValueError(f"Unknown goal: {goal.value}")
 
         logger.info("goal_plan_start", goal=goal.value, context_keys=list(context.keys()))
+
+        if self._capability_graph is None:
+            self._capability_graph = CapabilityGraph.from_registry(self.registry)
 
         # Choose chain: prefer primary, fall back if modules not available
         chain = self._select_chain(defn, context)
@@ -398,6 +442,8 @@ class GoalEngine:
 
         # 2. Capability-based dynamic chain from REQUIRES/OUTPUTS
         available_mids = [getattr(cls, "MODULE_ID", "") for cls in self.registry.all()]
+        if self._capability_graph is None:
+            raise RuntimeError("goal capability graph was not initialized")
         dynamic_chain = self._capability_graph.resolve_chain(
             goal_required_outputs=defn.required_outputs,
             available_modules=available_mids,
@@ -531,36 +577,141 @@ class GoalEngine:
         plan:     GoalAttackPlan,
         campaign: Any,
     ) -> dict[str, Any]:
+        """Dispatch a completely frozen Goal plan through C-LIVE admission.
+
+        The ordinary production constructor is intentionally non-dispatchable:
+        C-LIVE-v1 wires safety but does not activate any descriptor.  Only the
+        private deterministic test seam above can exercise this fan-out.
         """
-        Execute a GoalAttackPlan using the ARES async engine.
-        Returns aggregated results.
-        """
-        from ares.core.engine import AresEngine, ExecutionPlan
+        from ares.core.execution_admission import (
+            DispatchDispositionV1,
+            DispatchRequestV1,
+            canonical_intent_digest,
+        )
 
-        exec_plan = ExecutionPlan()
+        def _fixed_non_dispatchable() -> dict[str, Any]:
+            return {
+                "goal": plan.goal.value,
+                "achieved": False,
+                "steps_run": 0,
+                "duration_s": 0.0,
+                "status": "non_dispatchable",
+                "results": [],
+                "session": {},
+            }
 
-        # Build parallel stages based on step dependencies
-        # Steps with no depends_on run in first stage; others follow
-        stage0 = [s.module_id for s in plan.steps if not s.depends_on]
-        remaining = [s for s in plan.steps if s.depends_on]
+        if (
+            self._c_live_test_coordinator is None
+            or self._c_live_test_principal is None
+            or self._c_live_test_parent_key is None
+            or getattr(campaign, "id", None) is None
+        ):
+            return _fixed_non_dispatchable()
 
-        if stage0:
-            exec_plan.add_stage("goal_stage_0", stage0)
+        # Freeze every child, occurrence, ordinal, and parameter before any
+        # admission can cross the effect boundary.  Appending or changing any
+        # later child changes the digest bound into every admission receipt.
+        occurrence_by_module: dict[str, int] = {}
+        children: list[dict[str, Any]] = []
+        for module_ordinal, step in enumerate(plan.steps):
+            if (
+                type(step) is not GoalAttackStep
+                or type(step.module_id) is not str
+                or not step.module_id
+                or type(step.step_num) is not int
+                or step.step_num < 1
+                or step.step_num - 1 > 9_007_199_254_740_991
+                or module_ordinal > 9_007_199_254_740_991
+                or not isinstance(step.params, dict)
+            ):
+                return _fixed_non_dispatchable()
+            occurrence = occurrence_by_module.get(step.module_id, 0)
+            occurrence_by_module[step.module_id] = occurrence + 1
+            children.append(
+                {
+                    "module_id": step.module_id,
+                    "params": dict(step.params),
+                    "occurrence": occurrence,
+                    "stage_ordinal": module_ordinal,
+                    "decision_ordinal": step.step_num - 1,
+                    "module_ordinal": module_ordinal,
+                }
+            )
+        if not children:
+            return _fixed_non_dispatchable()
+        try:
+            # A JSON round trip is the deep-freeze boundary.  It severs every
+            # caller-owned nested dict/list reference before the first await,
+            # so a completed child cannot mutate a later child's bound bytes.
+            frozen_intent = json.loads(
+                json.dumps(
+                    {
+                        "goal": plan.goal.value,
+                        "children": children,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            )
+            if (
+                type(frozen_intent) is not dict
+                or type(frozen_intent.get("children")) is not list
+            ):
+                raise ValueError
+            children = frozen_intent["children"]
+            whole_intent_digest = canonical_intent_digest(frozen_intent)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return _fixed_non_dispatchable()
 
-        # Simple sequential for now — future: full DAG from depends_on
-        for step in remaining:
-            exec_plan.add_stage(f"step_{step.step_num}", [step.module_id])
-
-        engine  = AresEngine()
-        engine._registry = self.registry   # reuse GoalEngine's registry — avoid re-loading modules
-        t0      = time.monotonic()
-        results = await engine.run_plan(exec_plan, campaign, plan.context, actor_role="operator")
+        t0 = time.monotonic()
+        results: list[dict[str, Any]] = []
+        status = "terminal"
+        for child in children:
+            dispatch_request = DispatchRequestV1(
+                campaign_id=campaign.id,
+                module_id=child["module_id"],
+                ingress_code="goal_api",
+                idempotency_key=self._c_live_test_parent_key,
+                raw_parameters=child["params"],
+                whole_intent_digest=whole_intent_digest,
+                occurrence=child["occurrence"],
+                stage_ordinal=child["stage_ordinal"],
+                decision_ordinal=child["decision_ordinal"],
+                module_ordinal=child["module_ordinal"],
+            )
+            outcome = await self._c_live_test_coordinator.execute_module(
+                self._c_live_test_principal,
+                dispatch_request,
+                campaign,
+            )
+            identity = outcome.identity
+            results.append(
+                {
+                    "module_id": child["module_id"],
+                    "disposition": outcome.disposition.value,
+                    "attempt_id": None if identity is None else identity.attempt_id,
+                    "logical_execution_id": (
+                        None if identity is None else identity.logical_execution_id
+                    ),
+                    "lifecycle_result": outcome.lifecycle_result.value,
+                    "terminal_committed": bool(outcome.terminal_committed),
+                }
+            )
+            if outcome.disposition not in {
+                DispatchDispositionV1.TERMINAL,
+                DispatchDispositionV1.REPLAYED,
+            }:
+                status = outcome.disposition.value
+                break
 
         return {
-            "goal":       plan.goal.value,
-            "achieved":   self.check_goal_achieved(plan.goal),
-            "steps_run":  len(plan.steps),
+            "goal": plan.goal.value,
+            "achieved": self.check_goal_achieved(plan.goal) if status == "terminal" else False,
+            "steps_run": len(results),
             "duration_s": round(time.monotonic() - t0, 2),
-            "results":    results,
-            "session":    self.session.stats(),
+            "status": status,
+            "results": results,
+            "session": self.session.stats(),
         }

@@ -279,6 +279,10 @@ _EXPECTED_FOREIGN_KEYS = (
 )
 
 _EXPECTED_UNIQUES = (
+    ("findings", "uq_findings_campaign_id_id", ("campaign_id", "id")),
+    ("credentials", "uq_credentials_campaign_id_id", ("campaign_id", "id")),
+    ("hosts", "uq_hosts_campaign_id_id", ("campaign_id", "id")),
+    ("loot", "uq_loot_campaign_id_id", ("campaign_id", "id")),
     ("hosts", "uq_hosts_campaign_ip", ("campaign_id", "ip_address")),
     (
         "refresh_token_families",
@@ -858,7 +862,7 @@ class _PureManagedConnection:
         self,
         *,
         revision_present: bool = True,
-        revision_values: tuple[object, ...] = ("0009",),
+        revision_values: tuple[object, ...] = ("0011",),
     ) -> None:
         self.revision_present = revision_present
         self.revision_values = revision_values
@@ -1137,6 +1141,17 @@ async def _run_init(
         "_validate_websocket_ticket_schema",
         _validate_ticket,
     )
+    async def _validate_lifecycle(_connection: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "ares.db.postgres.validate_postgresql_lifecycle_catalog",
+        _validate_lifecycle,
+    )
+    monkeypatch.setattr(
+        "ares.db.postgres.validate_postgresql_admission_authority_catalog",
+        _validate_lifecycle,
+    )
     database = PostgresDatabase("synthetic")
     database._pool = _PurePool(connection)
     with patch("ares.db.postgres.logger.info", return_value=None):
@@ -1144,7 +1159,10 @@ async def _run_init(
     return validated
 
 
-@pytest.mark.parametrize("revision", ["0001", "0004", "0007", "0008"])
+@pytest.mark.parametrize(
+    "revision",
+    ["0001", "0004", "0007", "0008", "0009", "0010"],
+)
 def test_revision_classifier_requires_migration_for_known_older_heads(
     revision: str,
 ) -> None:
@@ -1165,10 +1183,10 @@ def test_revision_classifier_requires_migration_for_known_older_heads(
         (),
         (None,),
         ("",),
-        ("0009", "0009"),
-        ("0009", "0008"),
+        ("0011", "0011"),
+        ("0011", "0010"),
         ("9999",),
-        (" 0009",),
+        (" 0011",),
     ],
 )
 def test_revision_classifier_rejects_malformed_or_unknown_state(
@@ -1186,7 +1204,7 @@ def test_revision_classifier_rejects_malformed_or_unknown_state(
 
 
 def test_revision_classifier_accepts_only_exact_managed_head() -> None:
-    accepted = _classify_postgres_revision(("0009",)) == "0009"
+    accepted = _classify_postgres_revision(("0011",)) == "0011"
     _require_fixed(accepted, "managed PostgreSQL revision was rejected")
 
 
@@ -1602,7 +1620,7 @@ async def test_managed_inventory_rejects_catalog_drift(
 
 @pytest.mark.parametrize(
     "revision_values",
-    [("0003",), (), ("unknown",), ("0009", "0008")],
+    [("0003",), (), ("unknown",), ("0011", "0010")],
 )
 @pytest.mark.asyncio
 async def test_versioned_failure_never_enters_runtime_fallback(
@@ -1782,7 +1800,7 @@ async def test_real_postgres_managed_startup_preserves_unrelated_objects(
             "Managed-startup fixture must reach revision 0007 before 0008",
         )
         await harness._alembic(target, "upgrade", "0008")
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         connection = await harness._connect(target)
         try:
             await connection.execute(
@@ -1804,7 +1822,7 @@ async def test_real_postgres_managed_startup_preserves_unrelated_objects(
                     """
                     SELECT
                         (
-                            SELECT version_num='0009'
+                            SELECT version_num='0011'
                             FROM alembic_version
                         ) AS managed,
                         (
@@ -1856,7 +1874,7 @@ async def test_real_postgres_older_revision_requires_migration_and_recovers(
             and pools[0].close_count == 1
         )
 
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         try:
             recovered_state = (
                 await _fixed_connect_result(database) == "connected"
@@ -1893,24 +1911,24 @@ async def test_real_postgres_invalid_revision_state_closes_and_recovers(
     operations = {
         "empty": (
             "DELETE FROM alembic_version",
-            "INSERT INTO alembic_version(version_num) VALUES('0009')",
+            "INSERT INTO alembic_version(version_num) VALUES('0011')",
         ),
         "multiple": (
             "INSERT INTO alembic_version(version_num) VALUES('0007')",
             "DELETE FROM alembic_version WHERE version_num='0007'",
         ),
         "malformed": (
-            "UPDATE alembic_version SET version_num=' 0009'",
-            "UPDATE alembic_version SET version_num='0009'",
+            "UPDATE alembic_version SET version_num=' 0011'",
+            "UPDATE alembic_version SET version_num='0011'",
         ),
         "unknown": (
             "UPDATE alembic_version SET version_num='9999'",
-            "UPDATE alembic_version SET version_num='0009'",
+            "UPDATE alembic_version SET version_num='0011'",
         ),
     }
     mutation, repair = operations[revision_state]
     async with harness._postgres_harness() as target:
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         connection = await harness._connect(target)
         try:
             await connection.execute(mutation)
@@ -2138,7 +2156,7 @@ async def test_real_postgres_managed_catalog_drift_never_falls_back(
     }
     statement = statements[drift]
     async with harness._postgres_harness() as target:
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         connection = await harness._connect(target)
         try:
             await connection.execute(statement)
@@ -2912,7 +2930,7 @@ async def test_real_postgres_runtime_origin_converges_without_data_loss(
             )
         finally:
             await connection.close()
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         pools = _audit_runtime_pools(monkeypatch)
         database = _runtime_database(target)
         try:
@@ -3028,7 +3046,7 @@ async def test_real_postgres_supported_legacy_objects_converge(
             )
         finally:
             await connection.close()
-        await harness._alembic(target, "upgrade", "0009")
+        await harness._alembic(target, "upgrade", "0011")
         pools = _audit_runtime_pools(monkeypatch)
         database = _runtime_database(target)
         try:

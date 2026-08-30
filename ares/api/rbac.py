@@ -70,6 +70,12 @@ class AuthenticatedUser:
         return bool(set(allowed).intersection(self.api_key_scopes))
 
     @property
+    def canonical_user_id(self) -> str | None:
+        """Return the immutable bearer identity; usernames are never identity."""
+        source = self.websocket_ticket_source
+        return source.user_id if source is not None else None
+
+    @property
     def operator_role(self) -> OperatorRole:
         """Convert string role to OperatorRole enum (safe — defaults to REPORTER)."""
         try:
@@ -204,6 +210,103 @@ async def resolve_bearer_principal(
             ),
         ),
     )
+
+
+async def revalidate_bearer_principal(
+    source: BearerTicketSource,
+    *,
+    db: Any,
+) -> PrincipalDecision:
+    """Revalidate retained non-secret bearer facts without retaining the token."""
+    if type(source) is not BearerTicketSource:
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    if source.expires_at <= datetime.now(timezone.utc):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    if db is None:
+        return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)
+    try:
+        row = await db.resolve_access_token_principal(
+            source.subject,
+            source.jti,
+            source.family_id,
+            source.auth_epoch,
+        )
+    except Exception as exc:
+        logger.warning(
+            "auth_backend_principal_revalidation_failed",
+            error_type=type(exc).__name__,
+        )
+        return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)
+    if not isinstance(row, Mapping):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    user_id = row.get("id")
+    username = row.get("username")
+    role = row.get("role")
+    row_epoch = row.get("auth_epoch")
+    if (
+        user_id != source.user_id
+        or username != source.subject
+        or role not in _VALID_PRINCIPAL_ROLES
+        or type(row_epoch) is not int
+        or row_epoch != source.auth_epoch
+    ):
+        return PrincipalDecision(PrincipalDecisionStatus.INVALID)
+    return PrincipalDecision(
+        PrincipalDecisionStatus.AUTHORIZED,
+        AuthoritativePrincipal(
+            user_id=source.user_id,
+            username=source.subject,
+            role=str(role),
+            websocket_ticket_source=source,
+        ),
+    )
+
+
+async def resolve_execution_actor_authority_revision(
+    db: Any,
+    user_id: str,
+) -> int | None:
+    """Read the current lifecycle actor revision without widening DB APIs.
+
+    The lifecycle store deliberately keeps authority derivation internal.  The
+    live coordinator nevertheless needs the already-persisted actor revision
+    for its point-in-time QUEUED transition.  Keep this read-only adapter here,
+    beside bearer revalidation, and fail closed for unknown database backends.
+    """
+    try:
+        if db.__class__.__module__ == "ares.db.database":
+            connection = db._require_connected()
+            async with connection.execute(
+                "SELECT revision FROM execution_actor_authority_revisions "
+                "WHERE user_id=?",
+                (user_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            value = None if row is None else row["revision"]
+        elif db.__class__.__module__ == "ares.db.postgres":
+            pool = db._pool
+            if pool is None:
+                return None
+            async with pool.acquire() as connection:
+                value = await connection.fetchval(
+                    "SELECT revision FROM execution_actor_authority_revisions "
+                    "WHERE user_id=$1",
+                    user_id,
+                )
+        else:
+            resolver = getattr(db, "resolve_execution_actor_authority_revision", None)
+            if not callable(resolver):
+                return None
+            value = await resolver(user_id)
+    except Exception as exc:
+        logger.warning(
+            "execution_actor_authority_revision_lookup_failed",
+            error_type=type(exc).__name__,
+        )
+        return None
+    if type(value) is not int or not 0 <= value < 9_007_199_254_740_991:
+        return None
+    return value
 
 
 RATE_LIMITS: dict[str, int] = {
@@ -509,6 +612,40 @@ def require_role(*allowed_roles: str) -> Any:
 
 def require_operator() -> Any:
     return require_role("operator", "team_lead")
+
+
+def require_live_operator() -> Any:
+    """Bearer-only live authority with an explicit API-key denial."""
+
+    async def _check(
+        request: Request,
+        actor: AuthenticatedUser | None = Depends(get_current_user),
+    ) -> AuthenticatedUser:
+        if actor is None:
+            if request.headers.get("X-API-Key"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="api_key_execution_denied",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if actor.role not in {"operator", "team_lead"}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="live_execution_role_denied",
+            )
+        if actor.websocket_ticket_source is None or actor.canonical_user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return actor
+
+    return _check
 
 
 def require_team_lead() -> Any:

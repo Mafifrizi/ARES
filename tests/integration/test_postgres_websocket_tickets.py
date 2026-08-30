@@ -42,7 +42,9 @@ _SAFE_EXCEPTION_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _POSTGRES_OPERATION_TIMEOUT_SECONDS = 15.0
 _MIGRATION_PROCESS_TIMEOUT_SECONDS = 45.0
 _MIGRATION_ACTIONS = frozenset({"upgrade", "downgrade"})
-_MIGRATION_REVISIONS = frozenset({"0006", "0007", "0008", "0009"})
+_MIGRATION_REVISIONS = frozenset(
+    {"0006", "0007", "0008", "0009", "0010", "0011", "head"}
+)
 _OWNED_MIGRATION_PROCESSES: set[Any] = set()
 
 
@@ -619,7 +621,7 @@ async def _postgres_harness(
         database = PostgresDatabase(dsn, pool_min=1, pool_max=8)
         if initialize_runtime:
             try:
-                _run_ticket_migration(test_database, "upgrade", "0009")
+                _run_ticket_migration(test_database, "upgrade", "head")
                 await _bounded_operation(
                     "runtime-initialize",
                     database.connect(),

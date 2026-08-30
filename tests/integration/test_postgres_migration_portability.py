@@ -1,4 +1,5 @@
 """Real PostgreSQL execution tests for the historical Alembic chain."""
+
 from __future__ import annotations
 
 import asyncio
@@ -126,55 +127,142 @@ _POSTGRES_INDEX_TABLES = {
 }
 _EXPECTED_COLUMN_ORDER = {
     "campaigns": (
-        "id", "name", "client", "operator", "noise_profile", "status",
-        "scope_json", "targets_json", "notes", "created_at", "updated_at",
+        "id",
+        "name",
+        "client",
+        "operator",
+        "noise_profile",
+        "status",
+        "scope_json",
+        "targets_json",
+        "notes",
+        "created_at",
+        "updated_at",
     ),
     "module_runs": (
-        "id", "campaign_id", "module_id", "outcome", "success",
-        "duration_ms", "completed_at",
+        "id",
+        "campaign_id",
+        "module_id",
+        "outcome",
+        "success",
+        "duration_ms",
+        "completed_at",
     ),
     "findings": (
-        "id", "campaign_id", "module_id", "title", "description",
-        "severity", "confidence", "mitre_technique", "mitre_tactic",
-        "cvss_score", "cvss_vector", "evidence_json", "remediation",
-        "host", "validated", "false_positive", "discovered_at", "trace_id",
+        "id",
+        "campaign_id",
+        "module_id",
+        "title",
+        "description",
+        "severity",
+        "confidence",
+        "mitre_technique",
+        "mitre_tactic",
+        "cvss_score",
+        "cvss_vector",
+        "evidence_json",
+        "remediation",
+        "host",
+        "validated",
+        "false_positive",
+        "discovered_at",
+        "trace_id",
     ),
     "hosts": (
-        "id", "campaign_id", "ip_address", "hostname", "fqdn", "os",
-        "os_version", "domain", "is_dc", "open_ports_json", "tags_json",
-        "first_seen", "last_seen",
+        "id",
+        "campaign_id",
+        "ip_address",
+        "hostname",
+        "fqdn",
+        "os",
+        "os_version",
+        "domain",
+        "is_dc",
+        "open_ports_json",
+        "tags_json",
+        "first_seen",
+        "last_seen",
     ),
     "credentials": (
-        "id", "campaign_id", "host_id", "username", "secret_enc",
-        "cred_type", "domain", "source_module", "notes", "cracked",
-        "cracked_value_enc", "captured_at",
+        "id",
+        "campaign_id",
+        "host_id",
+        "username",
+        "secret_enc",
+        "cred_type",
+        "domain",
+        "source_module",
+        "notes",
+        "cracked",
+        "cracked_value_enc",
+        "captured_at",
     ),
     "loot": (
-        "id", "campaign_id", "host_id", "loot_type", "name",
-        "description", "content_enc", "size_bytes", "path_on_target",
-        "source_module", "tags_json", "captured_at",
+        "id",
+        "campaign_id",
+        "host_id",
+        "loot_type",
+        "name",
+        "description",
+        "content_enc",
+        "size_bytes",
+        "path_on_target",
+        "source_module",
+        "tags_json",
+        "captured_at",
     ),
     "audit_log": (
-        "id", "campaign_id", "actor", "action", "detail", "module_id",
+        "id",
+        "campaign_id",
+        "actor",
+        "action",
+        "detail",
+        "module_id",
         "timestamp",
     ),
     "users": (
-        "id", "username", "hashed_password", "role", "is_active",
-        "created_by", "created_at", "last_login",
+        "id",
+        "username",
+        "hashed_password",
+        "role",
+        "is_active",
+        "created_by",
+        "created_at",
+        "last_login",
     ),
     "api_keys": (
-        "id", "user_id", "name", "key_hash", "key_prefix", "scopes",
-        "is_active", "last_used", "expires_at", "created_at",
+        "id",
+        "user_id",
+        "name",
+        "key_hash",
+        "key_prefix",
+        "scopes",
+        "is_active",
+        "last_used",
+        "expires_at",
+        "created_at",
     ),
     "refresh_tokens": (
-        "id", "user_id", "is_revoked", "expires_at", "created_at",
+        "id",
+        "user_id",
+        "is_revoked",
+        "expires_at",
+        "created_at",
         "used_at",
     ),
     "revoked_access_tokens": (
-        "jti", "user_id", "revoked_at", "expires_at",
+        "jti",
+        "user_id",
+        "revoked_at",
+        "expires_at",
     ),
     "rate_limit_events": (
-        "id", "ip_address", "bucket", "username", "blocked", "timestamp",
+        "id",
+        "ip_address",
+        "bucket",
+        "username",
+        "blocked",
+        "timestamp",
     ),
 }
 _POSTGRES_INTEGER_COLUMNS = {
@@ -392,13 +480,9 @@ class _OwnedWorker:
 @dataclass(frozen=True)
 class _PostgresCatalogContract:
     tables: tuple[str, ...]
-    columns: tuple[
-        tuple[str, str, str, bool, str | None], ...
-    ]
+    columns: tuple[tuple[str, str, str, bool, str | None], ...]
     primary_keys: tuple[tuple[str, tuple[str, ...]], ...]
-    unique_constraints: tuple[
-        tuple[str, str, tuple[str, ...]], ...
-    ]
+    unique_constraints: tuple[tuple[str, str, tuple[str, ...]], ...]
     checks: tuple[tuple[str, str, str], ...]
     foreign_keys: tuple[
         tuple[
@@ -412,9 +496,7 @@ class _PostgresCatalogContract:
         ],
         ...,
     ]
-    indexes: tuple[
-        tuple[str, str, tuple[str, ...], bool, str | None], ...
-    ]
+    indexes: tuple[tuple[str, str, tuple[str, ...], bool, str | None], ...]
     sequences: tuple[str, ...]
 
 
@@ -513,15 +595,9 @@ def _requires_candidate_origin(name: str) -> bool:
 
 def _path_is_within_candidate(path: object, candidate_root: Path) -> bool:
     try:
-        resolved_path = os.path.normcase(
-            str(Path(path).resolve(strict=False))
-        )
-        resolved_root = os.path.normcase(
-            str(candidate_root.resolve(strict=True))
-        )
-        return os.path.commonpath((resolved_path, resolved_root)) == (
-            resolved_root
-        )
+        resolved_path = os.path.normcase(str(Path(path).resolve(strict=False)))
+        resolved_root = os.path.normcase(str(candidate_root.resolve(strict=True)))
+        return os.path.commonpath((resolved_path, resolved_root)) == (resolved_root)
     except (OSError, RuntimeError, TypeError, ValueError):
         return False
 
@@ -539,8 +615,7 @@ def _module_origin_is_candidate_local(
     if spec_origin not in {None, "built-in", "frozen"}:
         concrete_origins.append(spec_origin)
     concrete_is_local = not concrete_origins or all(
-        _path_is_within_candidate(origin, candidate_root)
-        for origin in concrete_origins
+        _path_is_within_candidate(origin, candidate_root) for origin in concrete_origins
     )
     search_locations = getattr(spec, "submodule_search_locations", None)
     if search_locations is None:
@@ -552,14 +627,9 @@ def _module_origin_is_candidate_local(
         locations = tuple(search_locations)
         has_locations = bool(locations)
         locations_are_local = has_locations and all(
-            _path_is_within_candidate(location, candidate_root)
-            for location in locations
+            _path_is_within_candidate(location, candidate_root) for location in locations
         )
-    return (
-        concrete_is_local
-        and locations_are_local
-        and (bool(concrete_origins) or has_locations)
-    )
+    return concrete_is_local and locations_are_local and (bool(concrete_origins) or has_locations)
 
 
 def _spec_origin_is_candidate_local(
@@ -571,8 +641,7 @@ def _spec_origin_is_candidate_local(
     if spec_origin not in {None, "built-in", "frozen"}:
         concrete_origins.append(spec_origin)
     concrete_is_local = not concrete_origins or all(
-        _path_is_within_candidate(origin, candidate_root)
-        for origin in concrete_origins
+        _path_is_within_candidate(origin, candidate_root) for origin in concrete_origins
     )
     search_locations = getattr(spec, "submodule_search_locations", None)
     if search_locations is None:
@@ -582,14 +651,9 @@ def _spec_origin_is_candidate_local(
         locations = tuple(search_locations)
         has_locations = bool(locations)
         locations_are_local = has_locations and all(
-            _path_is_within_candidate(location, candidate_root)
-            for location in locations
+            _path_is_within_candidate(location, candidate_root) for location in locations
         )
-    return (
-        concrete_is_local
-        and locations_are_local
-        and (bool(concrete_origins) or has_locations)
-    )
+    return concrete_is_local and locations_are_local and (bool(concrete_origins) or has_locations)
 
 
 def _relative_path_is_first_party(relative_path: Path) -> bool:
@@ -598,10 +662,10 @@ def _relative_path_is_first_party(relative_path: Path) -> bool:
         return False
     if folded_parts[0] in {"ares", "migrations"}:
         return True
-    return (
-        len(folded_parts) >= 2
-        and folded_parts[:2] in {("tests", "unit"), ("tests", "integration")}
-    )
+    return len(folded_parts) >= 2 and folded_parts[:2] in {
+        ("tests", "unit"),
+        ("tests", "integration"),
+    }
 
 
 def _frame_file_is_first_party(
@@ -630,8 +694,7 @@ def _frame_file_is_first_party(
     return (
         len(folded_parts) >= 3
         and folded_parts[-3:-1] == ("migrations", "versions")
-        and re.fullmatch(r"[0-9]{4}_[a-z0-9_]+\.py", folded_parts[-1])
-        is not None
+        and re.fullmatch(r"[0-9]{4}_[a-z0-9_]+\.py", folded_parts[-1]) is not None
     )
 
 
@@ -733,9 +796,7 @@ class _CandidateOriginLedger:
             raw_file = globals_map.get("__file__")
             try:
                 normalized_file = (
-                    os.fspath(raw_file)
-                    if isinstance(raw_file, (str, os.PathLike))
-                    else None
+                    os.fspath(raw_file) if isinstance(raw_file, (str, os.PathLike)) else None
                 )
             except TypeError:
                 normalized_file = None
@@ -819,18 +880,13 @@ def _loaded_first_party_origins_are_candidate_local(
 def _assert_candidate_origin_boundary(
     ledger: _CandidateOriginLedger | None = None,
 ) -> None:
-    ledgers = (
-        (ledger,)
-        if ledger is not None
-        else tuple(_ACTIVE_ORIGIN_LEDGERS)
-    )
+    ledgers = (ledger,) if ledger is not None else tuple(_ACTIVE_ORIGIN_LEDGERS)
     for active_ledger in ledgers:
         active_ledger.observe_modules(sys.modules)
     if not (
         _path_is_within_candidate(__file__, _REPO_ROOT)
         and all(
-            not active_ledger.violated
-            and active_ledger.installed_exactly()
+            not active_ledger.violated and active_ledger.installed_exactly()
             for active_ledger in ledgers
         )
         and _loaded_first_party_origins_are_candidate_local(
@@ -838,9 +894,7 @@ def _assert_candidate_origin_boundary(
             _REPO_ROOT,
         )
     ):
-        raise RuntimeError(
-            "first-party migration import escaped the source candidate"
-        )
+        raise RuntimeError("first-party migration import escaped the source candidate")
 
 
 @contextmanager
@@ -995,10 +1049,7 @@ def _prepare_child_migration(
         raise RuntimeError("worker-payload-error")
     postgres_config = _child_postgres_config()
     database_name = payload.get("database_name")
-    if (
-        not isinstance(database_name, str)
-        or _SAFE_DATABASE_NAME.fullmatch(database_name) is None
-    ):
+    if not isinstance(database_name, str) or _SAFE_DATABASE_NAME.fullmatch(database_name) is None:
         raise RuntimeError("worker-payload-error")
     if database_name == postgres_config.maintenance_database:
         raise RuntimeError("worker-payload-error")
@@ -1021,12 +1072,11 @@ def _prepare_child_migration(
             "0005-before-alter",
             "0005-after-alter",
             "0006-after-rename",
+            "0011-after-authority-ddl",
         }
     ):
         raise RuntimeError("worker-payload-error")
-    action = (
-        command.upgrade if operation == "upgrade" else command.downgrade
-    )
+    action = command.upgrade if operation == "upgrade" else command.downgrade
     return config, action, revision, fault
 
 
@@ -1146,46 +1196,68 @@ def _alembic_worker_entry(channel: Any) -> None:
                 ):
                     raise RuntimeError("worker-target-error")
                 if mode == "migrate" and fault is not None:
-                    from alembic.operations import Operations
+                    if fault == "0011-after-authority-ddl":
+                        from sqlalchemy.engine import Connection
 
-                    original_alter = Operations.alter_column
+                        from ares.db.execution_lifecycle import (
+                            POSTGRES_ADMISSION_AUTHORITY_V11_DDL,
+                        )
 
-                    def _failing_alter(
-                        operations: Operations,
-                        table_name: str,
-                        column_name: str,
-                        *args: object,
-                        **kwargs: object,
-                    ) -> object:
-                        is_trace = (
-                            table_name == "findings"
-                            and column_name == "trace_id"
+                        original_execute = Connection.execute
+                        final_authority_ddl = " ".join(
+                            POSTGRES_ADMISSION_AUTHORITY_V11_DDL[-1].split()
                         )
-                        is_credential = (
-                            table_name == "credentials"
-                            and column_name
-                            in {"cracked_value", "cracked_value_enc"}
-                        )
-                        if fault == "0005-before-alter" and is_trace:
-                            raise RuntimeError("worker-test-error")
-                        result = original_alter(
-                            operations,
-                            table_name,
-                            column_name,
-                            *args,
-                            **kwargs,
-                        )
-                        if (
-                            fault == "0005-after-alter"
-                            and is_trace
-                        ) or (
-                            fault == "0006-after-rename"
-                            and is_credential
-                        ):
-                            raise RuntimeError("worker-test-error")
-                        return result
 
-                    Operations.alter_column = _failing_alter
+                        def _fail_after_authority_ddl(
+                            connection: Connection,
+                            statement: object,
+                            *args: object,
+                            **kwargs: object,
+                        ) -> object:
+                            result = original_execute(
+                                connection,
+                                statement,
+                                *args,
+                                **kwargs,
+                            )
+                            if " ".join(str(statement).split()) == final_authority_ddl:
+                                raise RuntimeError("worker-test-error")
+                            return result
+
+                        Connection.execute = _fail_after_authority_ddl
+                    else:
+                        from alembic.operations import Operations
+
+                        original_alter = Operations.alter_column
+
+                        def _failing_alter(
+                            operations: Operations,
+                            table_name: str,
+                            column_name: str,
+                            *args: object,
+                            **kwargs: object,
+                        ) -> object:
+                            is_trace = table_name == "findings" and column_name == "trace_id"
+                            is_credential = table_name == "credentials" and column_name in {
+                                "cracked_value",
+                                "cracked_value_enc",
+                            }
+                            if fault == "0005-before-alter" and is_trace:
+                                raise RuntimeError("worker-test-error")
+                            result = original_alter(
+                                operations,
+                                table_name,
+                                column_name,
+                                *args,
+                                **kwargs,
+                            )
+                            if (fault == "0005-after-alter" and is_trace) or (
+                                fault == "0006-after-rename" and is_credential
+                            ):
+                                raise RuntimeError("worker-test-error")
+                            return result
+
+                        Operations.alter_column = _failing_alter
             elif mode in {
                 "success",
                 "success-dirty-origin",
@@ -1277,10 +1349,7 @@ def _add_fixed_cleanup_note(
     action: str,
     cleanup_error: Exception,
 ) -> None:
-    primary.add_note(
-        f"Alembic worker cleanup failed [{action}: "
-        f"{type(cleanup_error).__name__}]"
-    )
+    primary.add_note(f"Alembic worker cleanup failed [{action}: {type(cleanup_error).__name__}]")
 
 
 def _close_unowned_endpoint(
@@ -1345,11 +1414,7 @@ async def _settle_worker(
     if worker.closed:
         raise RuntimeError("Alembic worker ownership was already closed")
     if worker.death_proven:
-        exit_code = (
-            -1
-            if worker.settled_exit_code is None
-            else worker.settled_exit_code
-        )
+        exit_code = -1 if worker.settled_exit_code is None else worker.settled_exit_code
         _close_settled_worker_resources(worker)
         return exit_code
     process = worker.process
@@ -1406,9 +1471,7 @@ async def _receive_worker_frame(
             except (BrokenPipeError, EOFError, OSError):
                 worker.eof = True
                 return None
-            if not isinstance(frame, tuple) or not all(
-                isinstance(item, str) for item in frame
-            ):
+            if not isinstance(frame, tuple) or not all(isinstance(item, str) for item in frame):
                 raise RuntimeError("Alembic worker failed [ProtocolError]")
             return frame
         if not worker.process.is_alive():
@@ -1449,9 +1512,7 @@ async def _run_worker(
             raise RuntimeError("worker-pipe-construction-error")
         parent_channel, child_channel = pipe_resources
     except Exception as exc:
-        primary = RuntimeError(
-            f"Alembic worker startup failed [{type(exc).__name__}]"
-        )
+        primary = RuntimeError(f"Alembic worker startup failed [{type(exc).__name__}]")
         for index, endpoint in enumerate(pipe_resources):
             _close_unowned_endpoint(
                 endpoint,
@@ -1466,9 +1527,7 @@ async def _run_worker(
             name="ares-alembic-worker",
         )
     except Exception as exc:
-        primary = RuntimeError(
-            f"Alembic worker startup failed [{type(exc).__name__}]"
-        )
+        primary = RuntimeError(f"Alembic worker startup failed [{type(exc).__name__}]")
         _close_unowned_endpoint(
             parent_channel,
             "close-parent-endpoint",
@@ -1495,16 +1554,10 @@ async def _run_worker(
         worker.child_closed = True
         parent_channel.send(("PAYLOAD", payload))
     except Exception as exc:
-        worker.may_have_started = (
-            worker.may_have_started or _process_may_have_started(process)
-        )
-        primary = RuntimeError(
-            f"Alembic worker startup failed [{type(exc).__name__}]"
-        )
+        worker.may_have_started = worker.may_have_started or _process_may_have_started(process)
+        primary = RuntimeError(f"Alembic worker startup failed [{type(exc).__name__}]")
         try:
-            await asyncio.shield(
-                _settle_worker(worker, terminate=True)
-            )
+            await asyncio.shield(_settle_worker(worker, terminate=True))
         except Exception as cleanup_error:
             _add_fixed_cleanup_note(
                 primary,
@@ -1538,9 +1591,7 @@ async def _run_worker(
                     terminate=False,
                 )
                 if after_setup_error is None and exit_code == 70:
-                    raise RuntimeError(
-                        f"Alembic worker failed [{ready[1]}]"
-                    ) from None
+                    raise RuntimeError(f"Alembic worker failed [{ready[1]}]") from None
             raise RuntimeError("Alembic worker failed [ProtocolError]")
         if started is not None:
             started.set()
@@ -1571,9 +1622,7 @@ async def _run_worker(
         if terminal == ("OK",) and exit_code == 0:
             return
         if terminal[0] == "ERROR" and exit_code == 70:
-            raise RuntimeError(
-                f"Alembic worker failed [{terminal[1]}]"
-            ) from None
+            raise RuntimeError(f"Alembic worker failed [{terminal[1]}]") from None
         raise RuntimeError("Alembic worker failed [ProtocolError]")
     except TimeoutError:
         protocol_failure = True
@@ -1587,13 +1636,9 @@ async def _run_worker(
     finally:
         if worker in _OWNED_WORKERS:
             try:
-                await asyncio.shield(
-                    _settle_worker(worker, terminate=protocol_failure)
-                )
+                await asyncio.shield(_settle_worker(worker, terminate=protocol_failure))
             except RuntimeError:
-                raise RuntimeError(
-                    "Alembic worker settlement failed"
-                ) from None
+                raise RuntimeError("Alembic worker settlement failed") from None
 
 
 async def _alembic(
@@ -1602,6 +1647,7 @@ async def _alembic(
     revision: str,
     *,
     fault: str | None = None,
+    timeout: float = _WORKER_TIMEOUT_SECONDS,
 ) -> None:
     if operation not in {"upgrade", "downgrade"}:
         raise AssertionError("unknown migration operation")
@@ -1615,14 +1661,12 @@ async def _alembic(
         payload["fault"] = fault
     await _run_worker(
         payload,
-        timeout=_WORKER_TIMEOUT_SECONDS,
+        timeout=timeout,
     )
 
 
 def _sanitized_setup_failure(action: str, exc: Exception) -> RuntimeError:
-    return RuntimeError(
-        f"PostgreSQL migration setup failed [{action}: {type(exc).__name__}]"
-    )
+    return RuntimeError(f"PostgreSQL migration setup failed [{action}: {type(exc).__name__}]")
 
 
 async def _attempt_cleanup(
@@ -1646,15 +1690,12 @@ async def _settle_owned_workers_for_cleanup(
         try:
             await _settle_worker(worker, terminate=True)
         except Exception as exc:
-            failures.append(
-                f"settle-alembic-worker: {type(exc).__name__}"
-            )
+            failures.append(f"settle-alembic-worker: {type(exc).__name__}")
     return not _OWNED_WORKERS
 
 
 @asynccontextmanager
-async def _postgres_harness(
-) -> AsyncIterator[_MigrationHarness]:
+async def _postgres_harness() -> AsyncIterator[_MigrationHarness]:
     config = _postgres_config()
     try:
         import asyncpg
@@ -1706,9 +1747,7 @@ async def _postgres_harness(
         )
     finally:
         primary_failure = sys.exception()
-        workers_settled = await _settle_owned_workers_for_cleanup(
-            cleanup_failures
-        )
+        workers_settled = await _settle_owned_workers_for_cleanup(cleanup_failures)
         if creation_attempted and admin is not None and workers_settled:
 
             async def _drop_database() -> None:
@@ -1724,10 +1763,7 @@ async def _postgres_harness(
                     timeout=_POSTGRES_OPERATION_TIMEOUT_SECONDS,
                 )
                 await asyncio.wait_for(
-                    admin.execute(
-                        f'DROP DATABASE IF EXISTS "{database_name}" '
-                        "WITH (FORCE)"
-                    ),
+                    admin.execute(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'),
                     timeout=_POSTGRES_OPERATION_TIMEOUT_SECONDS,
                 )
 
@@ -1747,13 +1783,10 @@ async def _postgres_harness(
         if cleanup_failures:
             if primary_failure is not None:
                 for failure in cleanup_failures:
-                    primary_failure.add_note(
-                        f"PostgreSQL migration cleanup failure [{failure}]"
-                    )
+                    primary_failure.add_note(f"PostgreSQL migration cleanup failure [{failure}]")
             else:
                 raise RuntimeError(
-                    "PostgreSQL migration cleanup failed: "
-                    + "; ".join(cleanup_failures)
+                    "PostgreSQL migration cleanup failed: " + "; ".join(cleanup_failures)
                 ) from None
 
 
@@ -2113,12 +2146,8 @@ def _isolation_fingerprint_has_no_ares_state(
     fingerprint: _PostgresIsolationFingerprint,
 ) -> bool:
     forbidden_relations = _EXPECTED_TABLES | {"alembic_version"}
-    return (
-        not fingerprint.versions
-        and all(
-            str(relation[1]) not in forbidden_relations
-            for relation in fingerprint.relations
-        )
+    return not fingerprint.versions and all(
+        str(relation[1]) not in forbidden_relations for relation in fingerprint.relations
     )
 
 
@@ -2168,8 +2197,7 @@ async def _database_revision(
         except Exception as cleanup_error:
             if primary is not None:
                 primary.add_note(
-                    "PostgreSQL migration revision cleanup failed "
-                    f"[{type(cleanup_error).__name__}]"
+                    f"PostgreSQL migration revision cleanup failed [{type(cleanup_error).__name__}]"
                 )
             else:
                 raise _sanitized_setup_failure(
@@ -2179,14 +2207,10 @@ async def _database_revision(
 
 
 async def _version(connection: Any) -> str | None:
-    exists = await connection.fetchval(
-        "SELECT to_regclass('alembic_version') IS NOT NULL"
-    )
+    exists = await connection.fetchval("SELECT to_regclass('alembic_version') IS NOT NULL")
     if not exists:
         return None
-    value = await connection.fetchval(
-        "SELECT version_num FROM alembic_version"
-    )
+    value = await connection.fetchval("SELECT version_num FROM alembic_version")
     return None if value is None else str(value)
 
 
@@ -2509,9 +2533,7 @@ def _fixed_postgres_contract(revision: str) -> _PostgresCatalogContract:
         if table in tables
     }
     if revision == "0001":
-        order["findings"] = tuple(
-            column for column in order["findings"] if column != "trace_id"
-        )
+        order["findings"] = tuple(column for column in order["findings"] if column != "trace_id")
     if revision < "0006":
         order["credentials"] = tuple(
             "cracked_value" if column == "cracked_value_enc" else column
@@ -2520,11 +2542,7 @@ def _fixed_postgres_contract(revision: str) -> _PostgresCatalogContract:
     columns: list[tuple[str, str, str, bool, str | None]] = []
     for table in ordered_tables:
         for column in order[table]:
-            canonical_column = (
-                "cracked_value_enc"
-                if column == "cracked_value"
-                else column
-            )
+            canonical_column = "cracked_value_enc" if column == "cracked_value" else column
             key = (table, canonical_column)
             if key in _POSTGRES_INTEGER_COLUMNS:
                 data_type = "integer"
@@ -2549,11 +2567,7 @@ def _fixed_postgres_contract(revision: str) -> _PostgresCatalogContract:
     primary_keys = tuple(
         (
             table,
-            (
-                "jti"
-                if table == "revoked_access_tokens"
-                else "id",
-            ),
+            ("jti" if table == "revoked_access_tokens" else "id",),
         )
         for table in ordered_tables
     )
@@ -2596,9 +2610,7 @@ def _fixed_postgres_contract(revision: str) -> _PostgresCatalogContract:
     if revision == "0001":
         index_names.discard("idx_findings_cvss")
     if revision < "0003":
-        index_names.difference_update(
-            {"idx_rle_ip", "idx_rle_timestamp", "idx_rle_blocked"}
-        )
+        index_names.difference_update({"idx_rle_ip", "idx_rle_timestamp", "idx_rle_blocked"})
     if revision < "0004":
         index_names.discard("idx_rat_expires")
     indexes = tuple(
@@ -2618,15 +2630,9 @@ def _fixed_postgres_contract(revision: str) -> _PostgresCatalogContract:
         (
             table,
             name,
-            (
-                f"{column}isnullorisfinite{column}"
-                if nullable
-                else f"isfinite{column}"
-            ),
+            (f"{column}isnullorisfinite{column}" if nullable else f"isfinite{column}"),
         )
-        for (table, column), (name, nullable) in (
-            _POSTGRES_FINITE_TIMESTAMP_CONSTRAINTS.items()
-        )
+        for (table, column), (name, nullable) in (_POSTGRES_FINITE_TIMESTAMP_CONSTRAINTS.items())
         if table in tables
     ]
     if revision >= "0003":
@@ -2656,9 +2662,7 @@ def _fixed_legacy_postgres_contract(
     revision: str,
 ) -> _PostgresCatalogContract:
     repaired = _fixed_postgres_contract(revision)
-    tables = tuple(
-        table for table in repaired.tables if table != "module_runs"
-    )
+    tables = tuple(table for table in repaired.tables if table != "module_runs")
     columns = tuple(
         (
             table,
@@ -2666,8 +2670,7 @@ def _fixed_legacy_postgres_contract(
             data_type,
             (
                 True
-                if table == "findings"
-                and column in {"cvss_score", "cvss_vector", "trace_id"}
+                if table == "findings" and column in {"cvss_score", "cvss_vector", "trace_id"}
                 else nullable
             ),
             default,
@@ -2675,9 +2678,7 @@ def _fixed_legacy_postgres_contract(
         for table, column, data_type, nullable, default in repaired.columns
         if table != "module_runs"
     )
-    indexes = tuple(
-        index for index in repaired.indexes if index[0] != "module_runs"
-    ) + (
+    indexes = tuple(index for index in repaired.indexes if index[0] != "module_runs") + (
         (
             "findings",
             "idx_findings_validated",
@@ -2690,9 +2691,7 @@ def _fixed_legacy_postgres_contract(
         repaired,
         tables=tables,
         columns=columns,
-        primary_keys=tuple(
-            item for item in repaired.primary_keys if item[0] != "module_runs"
-        ),
+        primary_keys=tuple(item for item in repaired.primary_keys if item[0] != "module_runs"),
         checks=(),
         foreign_keys=(),
         indexes=tuple(sorted(indexes)),
@@ -2764,9 +2763,7 @@ def _postgres_runtime_legacy_recipe(
     return _PostgresLegacyRecipe(
         constraints_to_drop=tuple(
             (table, constraint)
-            for introduced, table, constraint in (
-                _POSTGRES_RUNTIME_LEGACY_CONSTRAINT_RECIPE
-            )
+            for introduced, table, constraint in (_POSTGRES_RUNTIME_LEGACY_CONSTRAINT_RECIPE)
             if introduced <= revision
         ),
         tables_to_drop=("module_runs",),
@@ -2835,9 +2832,7 @@ def test_postgres_legacy_recipe_and_oracle_have_no_mutable_alias() -> None:
     oracle = _fixed_legacy_postgres_contract("0005")
     recipe_constraints = list(recipe.constraints_to_drop)
     oracle_tables = list(oracle.tables)
-    recipe_constraints.append(
-        ("synthetic_table", "synthetic_constraint")
-    )
+    recipe_constraints.append(("synthetic_table", "synthetic_constraint"))
     oracle_tables.append("synthetic_table")
     independent = (
         tuple(recipe_constraints) != recipe.constraints_to_drop
@@ -3067,11 +3062,7 @@ async def test_owned_worker_completion_and_error_are_settled() -> None:
 
 
 def test_worker_ready_operation_and_settlement_budgets_are_independent() -> None:
-    worst_case = (
-        _WORKER_READY_SECONDS
-        + _WORKER_TIMEOUT_SECONDS
-        + (2 * _WORKER_SETTLE_SECONDS)
-    )
+    worst_case = _WORKER_READY_SECONDS + _WORKER_TIMEOUT_SECONDS + (2 * _WORKER_SETTLE_SECONDS)
     budgets_are_independent = (
         _WORKER_READY_SECONDS == 15.0
         and _WORKER_TIMEOUT_SECONDS == 25.0
@@ -3257,18 +3248,10 @@ def _integration_origin_probe(
 ) -> Iterator[Callable[[], None]]:
     finder = _IntegrationOriginProbeFinder(name, spec)
     parent_name, _, child_name = name.rpartition(".")
-    parent = (
-        importlib.import_module(parent_name)
-        if parent_name
-        else None
-    )
+    parent = importlib.import_module(parent_name) if parent_name else None
     missing = object()
     previous_module = sys.modules.pop(name, missing)
-    previous_attribute = (
-        parent.__dict__.get(child_name, missing)
-        if parent is not None
-        else missing
-    )
+    previous_attribute = parent.__dict__.get(child_name, missing) if parent is not None else missing
     sys.meta_path.insert(0, finder)
 
     def _import_then_remove() -> None:
@@ -3377,10 +3360,7 @@ def test_integration_origin_ledger_rechecks_reused_code(
             "__name__": "migrations.versions.integration_reused_probe",
             "__package__": "migrations.versions",
             "__file__": str(
-                _REPO_ROOT
-                / "migrations"
-                / "versions"
-                / "0006_integration_reused_probe.py"
+                _REPO_ROOT / "migrations" / "versions" / "0006_integration_reused_probe.py"
             ),
         },
     )
@@ -3390,10 +3370,7 @@ def test_integration_origin_ledger_rechecks_reused_code(
             "__name__": "migrations.versions.integration_reused_probe",
             "__package__": "migrations.versions",
             "__file__": str(
-                tmp_path
-                / "migrations"
-                / "versions"
-                / "0007_integration_reused_probe.py"
+                tmp_path / "migrations" / "versions" / "0007_integration_reused_probe.py"
             ),
         },
     )
@@ -3418,9 +3395,7 @@ def test_integration_origin_ledger_ignores_unrelated_migrations_directory(
         {
             "__name__": "third_party.integration_origin_probe",
             "__package__": "third_party",
-            "__file__": str(
-                tmp_path / "migrations" / "integration_origin_probe.py"
-            ),
+            "__file__": str(tmp_path / "migrations" / "integration_origin_probe.py"),
         },
     )
     with _candidate_origin_boundary(isolated=True):
@@ -3465,15 +3440,14 @@ class _IpcConfidentialityAudit:
             return
         if isinstance(value, bytes):
             lowered = value.lower()
-            if any(
-                marker.encode("utf-8") in value
-                for marker in self.forbidden_values
-            ) or b"postgresql" in lowered:
+            if (
+                any(marker.encode("utf-8") in value for marker in self.forbidden_values)
+                or b"postgresql" in lowered
+            ):
                 self.sensitive_seen = True
             return
         if isinstance(value, int) and any(
-            marker.isdecimal() and int(marker) == value
-            for marker in self.forbidden_values
+            marker.isdecimal() and int(marker) == value for marker in self.forbidden_values
         ):
             self.sensitive_seen = True
             return
@@ -3589,9 +3563,7 @@ async def test_migration_ipc_uses_only_fixed_control_data(
     for name, value in canonical_values.items():
         monkeypatch.setenv(name, value)
     real_context = multiprocessing.get_context("spawn")
-    audit = _IpcConfidentialityAudit(
-        tuple(canonical_values.values())
-    )
+    audit = _IpcConfidentialityAudit(tuple(canonical_values.values()))
     audited_context = _AuditedSpawnContext(real_context, audit)
     monkeypatch.setattr(
         multiprocessing,
@@ -3617,19 +3589,13 @@ async def test_migration_ipc_uses_only_fixed_control_data(
         and getattr(audited_context.child_endpoint, "closed", False)
     )
     expected_received = (
-        [("READY", 1), ("OK", 1)]
-        if should_succeed
-        else [("READY", 1), ("ERROR", 2)]
+        [("READY", 1), ("OK", 1)] if should_succeed else [("READY", 1), ("ERROR", 2)]
     )
     result_safe = (
         (caught is None if should_succeed else type(caught) is RuntimeError)
-        and (
-            should_succeed
-            or str(caught) == "Alembic worker failed [RuntimeError]"
-        )
+        and (should_succeed or str(caught) == "Alembic worker failed [RuntimeError]")
         and audit.process_args_safe
-        and audit.sent_signatures
-        == [("PAYLOAD", 2), ("GO", 1)]
+        and audit.sent_signatures == [("PAYLOAD", 2), ("GO", 1)]
         and audit.received_signatures == expected_received
         and not audit.sensitive_seen
         and not audit.unsafe_object_seen
@@ -3853,9 +3819,7 @@ class _ProcessFailureContext:
 
 class _StartFailureContext:
     def __init__(self, *, fail_parent_close_once: bool = False) -> None:
-        self.parent = _ConstructionEndpoint(
-            fail_close_once=fail_parent_close_once
-        )
+        self.parent = _ConstructionEndpoint(fail_close_once=fail_parent_close_once)
         self.child = _ConstructionEndpoint()
         self.process = _NeverStartedProcess()
 
@@ -3890,8 +3854,7 @@ async def test_worker_pipe_construction_failure_leaves_no_owned_resource(
         caught = error
     failed_closed = (
         type(caught) is RuntimeError
-        and str(caught)
-        == "Alembic worker startup failed [_WorkerConstructionError]"
+        and str(caught) == "Alembic worker startup failed [_WorkerConstructionError]"
         and bool(getattr(caught, "__suppress_context__", False))
         and not _OWNED_WORKERS
     )
@@ -3916,11 +3879,7 @@ async def test_worker_partial_pipe_result_closes_obtained_endpoint(
         await _run_worker({"mode": "success"}, timeout=1.0)
     except RuntimeError as error:
         caught = error
-    failed_closed = (
-        type(caught) is RuntimeError
-        and context.endpoint.closed
-        and not _OWNED_WORKERS
-    )
+    failed_closed = type(caught) is RuntimeError and context.endpoint.closed and not _OWNED_WORKERS
     _require_fixed(
         failed_closed,
         "partial Pipe construction leaked its obtained endpoint",
@@ -4009,13 +3968,9 @@ async def test_worker_start_failure_preserves_fixed_primary_when_close_fails(
     retained = tuple(_OWNED_WORKERS)
     primary_preserved = (
         type(caught) is RuntimeError
-        and str(caught)
-        == "Alembic worker startup failed [_WorkerStartError]"
+        and str(caught) == "Alembic worker startup failed [_WorkerStartError]"
         and tuple(getattr(caught, "__notes__", ()))
-        == (
-            "Alembic worker cleanup failed "
-            "[settle-startup-worker: RuntimeError]",
-        )
+        == ("Alembic worker cleanup failed [settle-startup-worker: RuntimeError]",)
         and len(retained) == 1
     )
     if retained:
@@ -4068,9 +4023,7 @@ class _AmbiguousStartContext:
         self,
         **kwargs: object,
     ) -> _AmbiguousStartProcess:
-        self.process = _AmbiguousStartProcess(
-            self._context.Process(**kwargs)
-        )
+        self.process = _AmbiguousStartProcess(self._context.Process(**kwargs))
         return self.process
 
 
@@ -4090,9 +4043,8 @@ async def test_worker_ambiguous_start_failure_settles_real_child(
         await _run_worker({"mode": "success"}, timeout=1.0)
     except RuntimeError as error:
         caught = error
-    endpoints_closed = (
-        context.endpoints is not None
-        and all(endpoint.closed for endpoint in context.endpoints)
+    endpoints_closed = context.endpoints is not None and all(
+        endpoint.closed for endpoint in context.endpoints
     )
     child_settled = (
         context.process is not None
@@ -4100,10 +4052,7 @@ async def test_worker_ambiguous_start_failure_settles_real_child(
         and not context.process.is_alive()
     )
     _require_fixed(
-        type(caught) is RuntimeError
-        and endpoints_closed
-        and child_settled
-        and not _OWNED_WORKERS,
+        type(caught) is RuntimeError and endpoints_closed and child_settled and not _OWNED_WORKERS,
         "ambiguous Process.start failure left a live child or endpoint",
     )
 
@@ -4186,9 +4135,7 @@ async def test_unproven_worker_death_retains_ownership_and_blocks_cleanup(
     except RuntimeError:
         failed = True
     cleanup_failures: list[str] = []
-    cleanup_allowed = await _settle_owned_workers_for_cleanup(
-        cleanup_failures
-    )
+    cleanup_allowed = await _settle_owned_workers_for_cleanup(cleanup_failures)
     retained = worker in _OWNED_WORKERS
     process._alive = False
     process.exitcode = -9
@@ -4217,10 +4164,7 @@ async def test_empty_postgres_base_to_0006_uses_only_alembic() -> None:
                 """
             )
             no_alembic_version = (
-                await connection.fetchval(
-                    "SELECT to_regclass('alembic_version') IS NULL"
-                )
-                is True
+                await connection.fetchval("SELECT to_regclass('alembic_version') IS NULL") is True
             )
         finally:
             await connection.close()
@@ -4245,9 +4189,7 @@ async def test_empty_postgres_base_to_0006_uses_only_alembic() -> None:
                 )
             }
             reached_revision = await _version(connection) == "0006"
-            migration_only_tables = (
-                tables == _EXPECTED_TABLES | {"alembic_version"}
-            )
+            migration_only_tables = tables == _EXPECTED_TABLES | {"alembic_version"}
         finally:
             await connection.close()
 
@@ -4269,13 +4211,10 @@ async def test_explicit_postgres_target_excludes_environment_decoy(
         async with _postgres_harness() as decoy:
             distinct_safe_targets = (
                 selected.database_name != decoy.database_name
-                and selected.database_name
-                != selected.config.maintenance_database
+                and selected.database_name != selected.config.maintenance_database
                 and decoy.database_name != decoy.config.maintenance_database
-                and _SAFE_DATABASE_NAME.fullmatch(selected.database_name)
-                is not None
-                and _SAFE_DATABASE_NAME.fullmatch(decoy.database_name)
-                is not None
+                and _SAFE_DATABASE_NAME.fullmatch(selected.database_name) is not None
+                and _SAFE_DATABASE_NAME.fullmatch(decoy.database_name) is not None
             )
             _require_fixed(
                 distinct_safe_targets,
@@ -4293,10 +4232,9 @@ async def test_explicit_postgres_target_excludes_environment_decoy(
                 decoy.config,
                 decoy.database_name,
             )
-            empty_baselines = (
-                _isolation_fingerprint_has_no_ares_state(selected_before)
-                and _isolation_fingerprint_has_no_ares_state(decoy_before)
-            )
+            empty_baselines = _isolation_fingerprint_has_no_ares_state(
+                selected_before
+            ) and _isolation_fingerprint_has_no_ares_state(decoy_before)
             _require_fixed(
                 empty_baselines,
                 "PostgreSQL isolation baselines were not empty",
@@ -4517,10 +4455,9 @@ async def test_postgres_revision_round_trip_preserves_rows() -> None:
             }
         finally:
             await connection.close()
-        parent_is_repaired = (
-            {"cvss_score", "cvss_vector"}.issubset(parent_columns)
-            and "trace_id" not in parent_columns
-        )
+        parent_is_repaired = {"cvss_score", "cvss_vector"}.issubset(
+            parent_columns
+        ) and "trace_id" not in parent_columns
         _require_fixed(
             parent_is_repaired,
             "PostgreSQL revision 0002 downgrade contradicted its parent",
@@ -4624,15 +4561,8 @@ async def test_postgres_0006_catalog_types_defaults_fks_and_indexes() -> None:
                         expected_type = "timestamp with time zone"
                     else:
                         expected_type = "text"
-                    expected_nullable = (
-                        "YES"
-                        if key in _POSTGRES_NULLABLE_COLUMNS
-                        else "NO"
-                    )
-                    if (
-                        data_type != expected_type
-                        or nullable != expected_nullable
-                    ):
+                    expected_nullable = "YES" if key in _POSTGRES_NULLABLE_COLUMNS else "NO"
+                    if data_type != expected_type or nullable != expected_nullable:
                         columns_are_exact = False
                         break
                 if not columns_are_exact:
@@ -4748,10 +4678,7 @@ async def test_postgres_0006_catalog_types_defaults_fks_and_indexes() -> None:
                 GROUP BY index_class.relname
                 """,
             )
-            indexes = {
-                str(row["index_name"]): tuple(row["columns"])
-                for row in index_rows
-            }
+            indexes = {str(row["index_name"]): tuple(row["columns"]) for row in index_rows}
             primary_key_tables = {
                 str(row["table_name"])
                 for row in await connection.fetch(
@@ -4871,22 +4798,16 @@ async def test_postgres_all_timestamp_columns_reject_infinity() -> None:
                 (
                     str(row["table_name"]),
                     str(row["constraint_name"]),
-                ): " ".join(
-                    str(row["definition"]).lower().replace('"', "").split()
-                )
+                ): " ".join(str(row["definition"]).lower().replace('"', "").split())
                 for row in constraint_rows
             }
             semantic_constraints_match = True
             for (
                 table,
                 column,
-            ), (name, nullable) in (
-                _POSTGRES_FINITE_TIMESTAMP_CONSTRAINTS.items()
-            ):
+            ), (name, nullable) in _POSTGRES_FINITE_TIMESTAMP_CONSTRAINTS.items():
                 definition = observed_constraints.get((table, name), "")
-                compact = definition.replace(" ", "").replace("(", "").replace(
-                    ")", ""
-                )
+                compact = definition.replace(" ", "").replace("(", "").replace(")", "")
                 has_finite = f"isfinite{column}" in compact
                 has_nullable = f"{column}isnullor" in compact
                 if not has_finite or has_nullable != nullable:
@@ -4933,7 +4854,7 @@ async def test_postgres_all_timestamp_columns_reject_infinity() -> None:
                     connection,
                     (
                         f'UPDATE "{table}" '  # noqa: S608
-                        f'SET "{column}"=\'infinity\'::timestamptz '
+                        f"SET \"{column}\"='infinity'::timestamptz "
                         f'WHERE "{key_name}"=$1'
                     ),
                     key_value,
@@ -4950,7 +4871,7 @@ async def test_postgres_all_timestamp_columns_reject_infinity() -> None:
                     connection,
                     (
                         f'UPDATE "{table}" '  # noqa: S608
-                        f'SET "{column}"=\'-infinity\'::timestamptz '
+                        f"SET \"{column}\"='-infinity'::timestamptz "
                         f'WHERE "{key_name}"=$1'
                     ),
                     key_value,
@@ -5061,9 +4982,7 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                         break
 
             foreign_keys_rejected = True
-            for table, local, _remote, _action in sorted(
-                _EXPECTED_FOREIGN_KEYS
-            ):
+            for table, local, _remote, _action in sorted(_EXPECTED_FOREIGN_KEYS):
                 key_name, key_value = key_by_table[table]
                 statement = (
                     f'UPDATE "{table}" SET "{local}"=$1 '  # noqa: S608
@@ -5150,11 +5069,9 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                         ) AS audit_cleared
                     """
                 )
-                campaign_actions_enforced = (
-                    campaign_actions is not None
-                    and tuple(campaign_actions.values())
-                    == (0, 0, 0, 0, 0, True)
-                )
+                campaign_actions_enforced = campaign_actions is not None and tuple(
+                    campaign_actions.values()
+                ) == (0, 0, 0, 0, 0, True)
             finally:
                 await transaction.rollback()
 
@@ -5173,10 +5090,9 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                             AS refresh_tokens
                     """
                 )
-                user_cascade_enforced = (
-                    user_actions is not None
-                    and tuple(user_actions.values()) == (0, 0)
-                )
+                user_cascade_enforced = user_actions is not None and tuple(
+                    user_actions.values()
+                ) == (0, 0)
             finally:
                 await transaction.rollback()
 
@@ -5201,17 +5117,12 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                         AS rate_limit
                 """
             )
-            timestamp_defaults_execute = (
-                timestamp_values is not None
-                and all(
-                    isinstance(value, datetime)
-                    and value.utcoffset() is not None
-                    for value in timestamp_values.values()
-                )
+            timestamp_defaults_execute = timestamp_values is not None and all(
+                isinstance(value, datetime) and value.utcoffset() is not None
+                for value in timestamp_values.values()
             )
-            integer_defaults_execute = (
-                await connection.fetchrow(
-                    """
+            integer_defaults_execute = await connection.fetchrow(
+                """
                     SELECT
                         (SELECT success=0 FROM module_runs LIMIT 1) AS run,
                         (
@@ -5228,11 +5139,9 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                         (SELECT blocked=0 FROM rate_limit_events LIMIT 1)
                             AS rate_limit
                     """
-                )
             )
-            integer_defaults_match = (
-                integer_defaults_execute is not None
-                and all(integer_defaults_execute.values())
+            integer_defaults_match = integer_defaults_execute is not None and all(
+                integer_defaults_execute.values()
             )
 
             audit_second = await connection.fetchval(
@@ -5275,9 +5184,8 @@ async def test_postgres_0006_enforces_complete_relational_contract() -> None:
                 "192.0.2.22",
                 "synthetic-bucket",
             )
-            monotonic_sequences = (
-                int(audit_third) > int(audit_second)
-                and int(rate_third) > int(rate_second)
+            monotonic_sequences = int(audit_third) > int(audit_second) and int(rate_third) > int(
+                rate_second
             )
         finally:
             await connection.close()
@@ -5411,11 +5319,7 @@ async def test_postgres_0003_blocked_integer_contract_is_enforced() -> None:
             and valid_contract["timestamps_present"] is True
         )
         _require_fixed(
-            valid_values
-            and rejected == 4
-            and invalid_rows == 0
-            and check_is_semantic
-            and reusable,
+            valid_values and rejected == 4 and invalid_rows == 0 and check_is_semantic and reusable,
             "PostgreSQL blocked integer contract was not enforced",
         )
 
@@ -5423,10 +5327,7 @@ async def test_postgres_0003_blocked_integer_contract_is_enforced() -> None:
         connection = await _connect(harness)
         try:
             removed = (
-                await connection.fetchval(
-                    "SELECT to_regclass('rate_limit_events') IS NULL"
-                )
-                is True
+                await connection.fetchval("SELECT to_regclass('rate_limit_events') IS NULL") is True
             )
         finally:
             await connection.close()
@@ -5446,9 +5347,7 @@ async def test_postgres_0003_blocked_integer_contract_is_enforced() -> None:
                     2,
                 )
             except Exception as exc:
-                reupgrade_rejected = (
-                    type(exc).__name__ == "CheckViolationError"
-                )
+                reupgrade_rejected = type(exc).__name__ == "CheckViolationError"
         finally:
             await connection.close()
         _require_fixed(
@@ -5504,10 +5403,7 @@ async def test_postgres_0005_trace_normalization_round_trip() -> None:
             )
         finally:
             await connection.close()
-        upgraded_correctly = (
-            upgraded is not None
-            and tuple(upgraded.values()) == (3, 0, 2, 1, 3)
-        )
+        upgraded_correctly = upgraded is not None and tuple(upgraded.values()) == (3, 0, 2, 1, 3)
         _require_fixed(
             upgraded_correctly,
             "PostgreSQL trace normalization changed protected state",
@@ -5548,10 +5444,7 @@ async def test_postgres_0005_trace_normalization_round_trip() -> None:
             )
         finally:
             await connection.close()
-        reupgraded_correctly = (
-            reupgraded is not None
-            and tuple(reupgraded.values()) == (4, 0, 3, 1)
-        )
+        reupgraded_correctly = reupgraded is not None and tuple(reupgraded.values()) == (4, 0, 3, 1)
         _require_fixed(
             reupgraded_correctly,
             "PostgreSQL trace re-upgrade diverged",
@@ -5581,13 +5474,8 @@ async def _install_postgres_version_failure(connection: Any) -> None:
 
 
 async def _remove_postgres_version_failure(connection: Any) -> None:
-    await connection.execute(
-        "DROP TRIGGER IF EXISTS migration_version_failure "
-        "ON alembic_version"
-    )
-    await connection.execute(
-        "DROP FUNCTION IF EXISTS migration_version_failure()"
-    )
+    await connection.execute("DROP TRIGGER IF EXISTS migration_version_failure ON alembic_version")
+    await connection.execute("DROP FUNCTION IF EXISTS migration_version_failure()")
 
 
 @pytest.mark.asyncio
@@ -5703,11 +5591,11 @@ async def test_postgres_0005_failure_boundaries_roll_back_atomically(
             await _alembic(harness, "downgrade", "0004")
         connection = await _connect(harness)
         try:
-            recovered = (
-                await _version(connection) == result_revision
-                and await _postgres_catalog_contract(connection)
-                == _fixed_postgres_contract(result_revision)
-            )
+            recovered = await _version(
+                connection
+            ) == result_revision and await _postgres_catalog_contract(
+                connection
+            ) == _fixed_postgres_contract(result_revision)
         finally:
             await connection.close()
         _require_fixed(
@@ -5726,16 +5614,8 @@ async def test_postgres_0006_failure_after_rename_rolls_back_atomically(
     async with _postgres_harness() as harness:
         starting_revision = "0005" if direction == "upgrade" else "0006"
         result_revision = "0006" if direction == "upgrade" else "0005"
-        source_column = (
-            "cracked_value"
-            if direction == "upgrade"
-            else "cracked_value_enc"
-        )
-        result_column = (
-            "cracked_value_enc"
-            if direction == "upgrade"
-            else "cracked_value"
-        )
+        source_column = "cracked_value" if direction == "upgrade" else "cracked_value_enc"
+        result_column = "cracked_value_enc" if direction == "upgrade" else "cracked_value"
         await _alembic(harness, "upgrade", starting_revision)
         connection = await _connect(harness)
         try:
@@ -5769,22 +5649,14 @@ async def test_postgres_0006_failure_after_rename_rolls_back_atomically(
                     harness,
                     "upgrade",
                     "0006",
-                    fault=(
-                        "0006-after-rename"
-                        if boundary == "rename"
-                        else None
-                    ),
+                    fault=("0006-after-rename" if boundary == "rename" else None),
                 )
             else:
                 await _alembic(
                     harness,
                     "downgrade",
                     "0005",
-                    fault=(
-                        "0006-after-rename"
-                        if boundary == "rename"
-                        else None
-                    ),
+                    fault=("0006-after-rename" if boundary == "rename" else None),
                 )
         except RuntimeError:
             failed = True
@@ -5795,15 +5667,11 @@ async def test_postgres_0006_failure_after_rename_rolls_back_atomically(
                 await _remove_postgres_version_failure(connection)
             after_contract = await _postgres_catalog_contract(connection)
             source_value_query = (
-                "SELECT count(*) FROM credentials "
-                "WHERE cracked_value IS NOT NULL"
+                "SELECT count(*) FROM credentials WHERE cracked_value IS NOT NULL"
                 if source_column == "cracked_value"
-                else "SELECT count(*) FROM credentials "
-                "WHERE cracked_value_enc IS NOT NULL"
+                else "SELECT count(*) FROM credentials WHERE cracked_value_enc IS NOT NULL"
             )
-            unchanged_value = await connection.fetchval(
-                source_value_query
-            )
+            unchanged_value = await connection.fetchval(source_value_query)
             current_revision = await _version(connection)
             reusable = await connection.fetchval("SELECT 1") == 1
         finally:
@@ -5824,15 +5692,11 @@ async def test_postgres_0006_failure_after_rename_rolls_back_atomically(
         connection = await _connect(harness)
         try:
             result_value_query = (
-                "SELECT count(*) FROM credentials "
-                "WHERE cracked_value IS NOT NULL"
+                "SELECT count(*) FROM credentials WHERE cracked_value IS NOT NULL"
                 if result_column == "cracked_value"
-                else "SELECT count(*) FROM credentials "
-                "WHERE cracked_value_enc IS NOT NULL"
+                else "SELECT count(*) FROM credentials WHERE cracked_value_enc IS NOT NULL"
             )
-            recovered_value = await connection.fetchval(
-                result_value_query
-            )
+            recovered_value = await connection.fetchval(result_value_query)
             recovered = (
                 await _version(connection) == result_revision
                 and await _postgres_catalog_contract(connection)
@@ -5853,22 +5717,14 @@ async def _transform_postgres_runtime_legacy_catalog(
 ) -> None:
     recipe = _postgres_runtime_legacy_recipe(revision)
     for table, name in recipe.constraints_to_drop:
-        await connection.execute(
-            f'ALTER TABLE "{table}" DROP CONSTRAINT "{name}"'
-        )
+        await connection.execute(f'ALTER TABLE "{table}" DROP CONSTRAINT "{name}"')
     for table in recipe.tables_to_drop:
         await connection.execute(f'DROP TABLE "{table}"')
     for table, column in recipe.nullable_columns:
-        await connection.execute(
-            f'ALTER TABLE "{table}" ALTER COLUMN "{column}" DROP NOT NULL'
-        )
+        await connection.execute(f'ALTER TABLE "{table}" ALTER COLUMN "{column}" DROP NOT NULL')
     for name, table, columns in recipe.indexes_to_create:
-        rendered_columns = ", ".join(
-            f'"{column}"' for column in columns
-        )
-        await connection.execute(
-            f'CREATE INDEX "{name}" ON "{table}" ({rendered_columns})'
-        )
+        rendered_columns = ", ".join(f'"{column}"' for column in columns)
+        await connection.execute(f'CREATE INDEX "{name}" ON "{table}" ({rendered_columns})')
 
 
 async def _seed_postgres_legacy_catalog(
@@ -6022,8 +5878,7 @@ async def test_complete_postgres_runtime_legacy_catalogs_are_preserved(
         finally:
             await connection.close()
         _require_fixed(
-            initial_contract
-            == _fixed_legacy_postgres_contract(legacy_revision),
+            initial_contract == _fixed_legacy_postgres_contract(legacy_revision),
             "constructed PostgreSQL legacy catalog diverged",
         )
 
@@ -6051,13 +5906,8 @@ async def test_complete_postgres_runtime_legacy_catalogs_are_preserved(
                 """
             )
             structural_drift_deferred = (
-                await connection.fetchval(
-                    "SELECT to_regclass('module_runs') IS NULL"
-                )
-                is True
-                and not (
-                    await _postgres_catalog_contract(connection)
-                ).foreign_keys
+                await connection.fetchval("SELECT to_regclass('module_runs') IS NULL") is True
+                and not (await _postgres_catalog_contract(connection)).foreign_keys
             )
             current_revision = await _version(connection)
             reusable = await connection.fetchval("SELECT 1") == 1
@@ -6065,8 +5915,7 @@ async def test_complete_postgres_runtime_legacy_catalogs_are_preserved(
             await connection.close()
         preserved = (
             row_counts is not None
-            and tuple(row_counts.values())
-            == (1, 1, 1, 1, 1, 1, 1, 1, 1)
+            and tuple(row_counts.values()) == (1, 1, 1, 1, 1, 1, 1, 1, 1)
             and protected_value_present == 1
             and structural_drift_deferred
             and current_revision == "0006"
@@ -6093,16 +5942,10 @@ async def test_postgres_legacy_missing_column_variants(
         connection = await _connect(harness)
         try:
             if revision == "0002":
-                await connection.execute(
-                    "ALTER TABLE findings DROP COLUMN cvss_score"
-                )
-                await connection.execute(
-                    "ALTER TABLE findings DROP COLUMN cvss_vector"
-                )
+                await connection.execute("ALTER TABLE findings DROP COLUMN cvss_score")
+                await connection.execute("ALTER TABLE findings DROP COLUMN cvss_vector")
             else:
-                await connection.execute(
-                    "ALTER TABLE findings DROP COLUMN trace_id"
-                )
+                await connection.execute("ALTER TABLE findings DROP COLUMN trace_id")
         finally:
             await connection.close()
 
@@ -6143,17 +5986,14 @@ async def test_postgres_0006_catalog_variants(variant: str) -> None:
         try:
             if variant == "target-only":
                 await connection.execute(
-                    "ALTER TABLE credentials "
-                    "RENAME COLUMN cracked_value TO cracked_value_enc"
+                    "ALTER TABLE credentials RENAME COLUMN cracked_value TO cracked_value_enc"
                 )
             elif variant == "both":
                 await connection.execute(
                     "ALTER TABLE credentials ADD COLUMN cracked_value_enc TEXT"
                 )
             else:
-                await connection.execute(
-                    "ALTER TABLE credentials DROP COLUMN cracked_value"
-                )
+                await connection.execute("ALTER TABLE credentials DROP COLUMN cracked_value")
         finally:
             await connection.close()
 
@@ -6255,33 +6095,20 @@ async def _prepare_postgres_0006_variant(
     if variant == "source-only":
         return
     if variant == "target-only":
-        await connection.execute(
-            f'ALTER TABLE credentials RENAME COLUMN "{source}" TO "{target}"'
-        )
+        await connection.execute(f'ALTER TABLE credentials RENAME COLUMN "{source}" TO "{target}"')
         return
     if variant == "both":
-        await connection.execute(
-            f'ALTER TABLE credentials ADD COLUMN "{target}" TEXT'
-        )
+        await connection.execute(f'ALTER TABLE credentials ADD COLUMN "{target}" TEXT')
         return
     if variant == "neither":
-        await connection.execute(
-            f'ALTER TABLE credentials DROP COLUMN "{source}"'
-        )
+        await connection.execute(f'ALTER TABLE credentials DROP COLUMN "{source}"')
         return
     if variant == "target-default-null-equivalent":
-        await connection.execute(
-            f'ALTER TABLE credentials DROP COLUMN "{source}"'
-        )
-        await connection.execute(
-            f'ALTER TABLE credentials ADD COLUMN "{target}" '
-            "TEXT DEFAULT NULL"
-        )
+        await connection.execute(f'ALTER TABLE credentials DROP COLUMN "{source}"')
+        await connection.execute(f'ALTER TABLE credentials ADD COLUMN "{target}" TEXT DEFAULT NULL')
         return
     if variant.startswith("wrong-target-"):
-        await connection.execute(
-            f'ALTER TABLE credentials DROP COLUMN "{source}"'
-        )
+        await connection.execute(f'ALTER TABLE credentials DROP COLUMN "{source}"')
         inspected = target
         if variant.endswith("-type"):
             definition = "VARCHAR(64)"
@@ -6291,21 +6118,17 @@ async def _prepare_postgres_0006_variant(
             definition = "TEXT DEFAULT ''::text"
         else:
             raise AssertionError("unknown PostgreSQL target variant")
-        await connection.execute(
-            f'ALTER TABLE credentials ADD COLUMN "{inspected}" {definition}'
-        )
+        await connection.execute(f'ALTER TABLE credentials ADD COLUMN "{inspected}" {definition}')
         return
     if variant == "source-default-null-equivalent":
         await connection.execute(
-            f'ALTER TABLE credentials ALTER COLUMN "{source}" '
-            "SET DEFAULT NULL"
+            f'ALTER TABLE credentials ALTER COLUMN "{source}" SET DEFAULT NULL'
         )
         return
     if variant.startswith("wrong-source-"):
         if variant.endswith("-type"):
             await connection.execute(
-                f'ALTER TABLE credentials ALTER COLUMN "{source}" '
-                "TYPE VARCHAR(64)"
+                f'ALTER TABLE credentials ALTER COLUMN "{source}" TYPE VARCHAR(64)'
             )
         elif variant.endswith("-nullability"):
             await connection.execute(
@@ -6313,8 +6136,7 @@ async def _prepare_postgres_0006_variant(
             )
         elif variant.endswith("-default"):
             await connection.execute(
-                f'ALTER TABLE credentials ALTER COLUMN "{source}" '
-                "SET DEFAULT ''::text"
+                f"ALTER TABLE credentials ALTER COLUMN \"{source}\" SET DEFAULT ''::text"
             )
         else:
             raise AssertionError("unknown PostgreSQL source variant")
@@ -6381,7 +6203,9 @@ async def test_postgres_0006_exact_column_state_machine(
             value_column = (
                 source
                 if source in present_columns
-                else target if target in present_columns else None
+                else target
+                if target in present_columns
+                else None
             )
             await connection.execute(
                 "INSERT INTO campaigns(id, name) VALUES($1, $2)",
@@ -6414,12 +6238,8 @@ async def test_postgres_0006_exact_column_state_machine(
                     "password",
                     "synthetic-marker",
                 )
-            before_catalog = await _postgres_credential_catalog_fingerprint(
-                connection
-            )
-            before_rows = await connection.fetchval(
-                "SELECT count(*) FROM credentials"
-            )
+            before_catalog = await _postgres_credential_catalog_fingerprint(connection)
+            before_rows = await connection.fetchval("SELECT count(*) FROM credentials")
         finally:
             await connection.close()
 
@@ -6434,12 +6254,8 @@ async def test_postgres_0006_exact_column_state_machine(
 
         connection = await _connect(harness)
         try:
-            after_catalog = await _postgres_credential_catalog_fingerprint(
-                connection
-            )
-            after_rows = await connection.fetchval(
-                "SELECT count(*) FROM credentials"
-            )
+            after_catalog = await _postgres_credential_catalog_fingerprint(connection)
+            after_rows = await connection.fetchval("SELECT count(*) FROM credentials")
             target_definition = await connection.fetchrow(
                 """
                 SELECT data_type, udt_name, is_nullable, column_default
@@ -6531,3 +6347,27 @@ async def test_postgres_0006_exact_column_state_machine(
                 reusable,
                 "PostgreSQL revision 0006 left connection unusable",
             )
+
+
+def test_revision_0010_postgres_ddl_has_ten_tables_and_dialect_cycle_order() -> None:
+    from ares.db.execution_lifecycle import (
+        LIFECYCLE_TABLES,
+        POSTGRES_LIFECYCLE_DDL,
+    )
+
+    created = tuple(
+        statement.split("(", maxsplit=1)[0].removeprefix("CREATE TABLE ").strip()
+        for statement in POSTGRES_LIFECYCLE_DDL
+        if statement.startswith("CREATE TABLE ")
+    )
+    closing_index = next(
+        index
+        for index, statement in enumerate(POSTGRES_LIFECYCLE_DDL)
+        if statement.startswith("ALTER TABLE logical_executions ADD CONSTRAINT")
+    )
+    _require_fixed(created == LIFECYCLE_TABLES, "lifecycle DDL order changed")
+    _require_fixed(closing_index == 2, "cyclic foreign-key order changed")
+    _require_fixed(
+        "DEFERRABLE INITIALLY DEFERRED" in POSTGRES_LIFECYCLE_DDL[closing_index],
+        "cyclic foreign-key deferral changed",
+    )

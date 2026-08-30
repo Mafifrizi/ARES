@@ -19,6 +19,16 @@ export interface WebSocketTicketResponse {
   expires_in: 30;
 }
 
+export interface LiveSubmissionOptions {
+  idempotencyKey?: string;
+  startNewSubmission?: boolean;
+}
+
+export interface LiveExecutionResponse {
+  idempotency_key: string;
+  [key: string]: unknown;
+}
+
 export interface Campaign {
   id: string;
   name: string;

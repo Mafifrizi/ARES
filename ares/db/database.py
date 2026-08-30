@@ -2,21 +2,24 @@
 ARES Database — async SQLite via aiosqlite.
 All credential/token content encrypted at rest via Fernet.
 """
+
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import secrets
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, TypeVar
 from urllib.parse import unquote
 
 import aiosqlite
+
 from ares.core.logger import get_logger
 from ares.core.token_sessions import (
     FAMILY_ABSOLUTE_LIFETIME_DAYS,
@@ -33,13 +36,21 @@ from ares.core.token_sessions import (
     generate_refresh_token,
     hash_refresh_token,
 )
+from ares.db.execution_lifecycle import (
+    SYSTEM_PRINCIPAL_SUBJECT_REF,
+    ExecutionLifecycleStore,
+    FixedResult,
+    OperationResult,
+    valid_uuid,
+    validate_sqlite_admission_authority_catalog_async,
+)
 from ares.db.websocket_tickets import (
+    WEBSOCKET_TICKET_TTL_SECONDS,
     ApiKeyTicketSource,
     BearerTicketSource,
     ConsumedWebSocketTicket,
     WebSocketTicketCredentialKind,
     WebSocketTicketPrincipal,
-    WEBSOCKET_TICKET_TTL_SECONDS,
     format_sqlite_utc,
     generate_websocket_ticket,
     hash_websocket_ticket,
@@ -50,6 +61,21 @@ from ares.db.websocket_tickets import (
 )
 
 logger = get_logger("ares.db")
+
+_CAMPAIGN_DELETE_OPERATION_DOMAIN = b"ares.campaign-delete.compat-operation.v1\x00"
+
+
+def _campaign_delete_operation_id(campaign_id: str) -> str:
+    """Derive the stable UUIDv4-shaped identity for an implicit delete operation."""
+    digest = bytearray(
+        hashlib.sha256(_CAMPAIGN_DELETE_OPERATION_DOMAIN + campaign_id.encode("utf-8")).digest()[
+            :16
+        ]
+    )
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
+
 
 from ares.core.campaign import Campaign, Finding
 from ares.core.security import DataEncryptor, hash_password, verify_password
@@ -251,10 +277,7 @@ def _extract_named_checks(table_sql: str) -> tuple[dict[str, str], int]:
             character = table_sql[index]
             if quote is not None:
                 if character == quote:
-                    if (
-                        index + 1 < len(table_sql)
-                        and table_sql[index + 1] == quote
-                    ):
+                    if index + 1 < len(table_sql) and table_sql[index + 1] == quote:
                         index += 1
                     else:
                         quote = None
@@ -271,9 +294,7 @@ def _extract_named_checks(table_sql: str) -> tuple[dict[str, str], int]:
             index += 1
         if depth != 0 or name in checks:
             return {}, check_count
-        checks[name] = _normalize_sql_fragment(
-            table_sql[expression_start:index]
-        )
+        checks[name] = _normalize_sql_fragment(table_sql[expression_start:index])
     return checks, check_count
 
 
@@ -344,14 +365,9 @@ def _extract_named_foreign_keys(
     if opening < 0 or closing <= opening:
         return {}
     foreign_keys: dict[str, tuple[str, str, str, str, str]] = {}
-    for raw_fragment in _split_sql_list(table_sql[opening + 1:closing]):
+    for raw_fragment in _split_sql_list(table_sql[opening + 1 : closing]):
         fragment = _normalize_sql_fragment(raw_fragment)
-        fragment = (
-            fragment.replace('"', "")
-            .replace("`", "")
-            .replace("[", "")
-            .replace("]", "")
-        )
+        fragment = fragment.replace('"', "").replace("`", "").replace("[", "").replace("]", "")
         name_match = re.search(
             r"""\bconstraint\s+
                 (?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|
@@ -362,11 +378,7 @@ def _extract_named_foreign_keys(
         )
         if name_match is None:
             continue
-        name = next(
-            group
-            for group in name_match.groups()
-            if group is not None
-        ).lower()
+        name = next(group for group in name_match.groups() if group is not None).lower()
         if name not in _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES:
             continue
         table_level = re.search(
@@ -394,9 +406,7 @@ def _extract_named_foreign_keys(
             if local_match is None or reference_match is None:
                 return {}
             local_column = next(
-                group
-                for group in local_match.groups()
-                if group is not None
+                group for group in local_match.groups() if group is not None
             ).lower()
             target_table, target_column = reference_match.groups()
         if name in foreign_keys:
@@ -449,10 +459,7 @@ def _remove_suppressed_cancellations(
     if task is None:
         return 0
     removed = 0
-    while (
-        removed < caught_cancellations
-        and task.cancelling() > cancellation_baseline
-    ):
+    while removed < caught_cancellations and task.cancelling() > cancellation_baseline:
         task.uncancel()
         removed += 1
     return removed
@@ -530,52 +537,57 @@ def _normalize_sqlite_target(db_path: str) -> tuple[str, bool, str]:
 
 # ── Domain models ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Host:
     """Domain model for a discovered host. Consistent with Campaign/Finding (Pydantic)."""
-    campaign_id:     str
-    ip_address:      str
-    hostname:        str | None          = None
-    fqdn:            str | None          = None
-    os:              str | None          = None
-    os_version:      str | None          = None
-    domain:          str | None          = None
-    is_dc:           bool                = False
-    open_ports:      list[int]           = field(default_factory=list)
-    tags:            list[str]           = field(default_factory=list)
-    id:              str                 = field(default_factory=lambda: str(uuid.uuid4()))
+
+    campaign_id: str
+    ip_address: str
+    hostname: str | None = None
+    fqdn: str | None = None
+    os: str | None = None
+    os_version: str | None = None
+    domain: str | None = None
+    is_dc: bool = False
+    open_ports: list[int] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass
 class DBCredential:
     """Domain model for a stored credential. Consistent with vault Credential model."""
-    campaign_id:     str
-    username:        str
-    cred_type:       str
-    secret:          str | None          = None
-    domain:          str | None          = None
-    host_id:         str | None          = None
-    source_module:   str | None          = None
-    notes:           str                 = ""
-    id:              str                 = field(default_factory=lambda: str(uuid.uuid4()))
+
+    campaign_id: str
+    username: str
+    cred_type: str
+    secret: str | None = None
+    domain: str | None = None
+    host_id: str | None = None
+    source_module: str | None = None
+    notes: str = ""
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass
 class Loot:
     """Domain model for collected loot (files, tokens, keys)."""
-    campaign_id:     str
-    loot_type:       str
-    name:            str
-    description:     str                 = ""
-    content:         str | bytes | None  = None
-    host_id:         str | None          = None
-    path_on_target:  str | None          = None
-    source_module:   str | None          = None
-    tags:            list[str]           = field(default_factory=list)
-    id:              str                 = field(default_factory=lambda: str(uuid.uuid4()))
+
+    campaign_id: str
+    loot_type: str
+    name: str
+    description: str = ""
+    content: str | bytes | None = None
+    host_id: str | None = None
+    path_on_target: str | None = None
+    source_module: str | None = None
+    tags: list[str] = field(default_factory=list)
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
+
 
 class AresDatabase:
     """Async SQLite database wrapper with encryption support."""
@@ -663,9 +675,7 @@ class AresDatabase:
 
         cancellation_baseline = _cancel_count()
         caught_cancellations = [0]
-        open_task = asyncio.ensure_future(
-            self._open_primary_connection()
-        )
+        open_task = asyncio.ensure_future(self._open_primary_connection())
         self._name_owned_task(open_task, "ares-sqlite-primary-connect")
         connection = await _await_task_completion(
             open_task,
@@ -714,7 +724,7 @@ class AresDatabase:
         cls,
         db_path: "str | Path" = "ares.db",
         encryption_key: str | None = None,
-    ) -> "AresDatabase | PostgresDatabase":   # type: ignore[return]
+    ) -> "AresDatabase | PostgresDatabase":  # type: ignore[return]
         """
         Factory that returns the correct backend based on db_path / DATABASE_URL.
 
@@ -726,20 +736,20 @@ class AresDatabase:
         """
         # Resolve database URL: explicit arg wins, then env var
         import os as _os
+
         url = str(db_path)
         if not url or url == "ares.db":
             url = _os.environ.get("ARES_DATABASE_URL", url)
 
         if url.startswith(("postgresql", "postgres")):
             from ares.db.postgres import PostgresDatabase
-            return await PostgresDatabase.create(
-                dsn=url, encryption_key=encryption_key
-            )
+
+            return await PostgresDatabase.create(dsn=url, encryption_key=encryption_key)
 
         # SQLite path — strip dialect prefix if present
         for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
             if url.startswith(prefix):
-                url = url[len(prefix):]
+                url = url[len(prefix) :]
 
         db = cls(url, encryption_key)
         return await db.connect()
@@ -759,22 +769,16 @@ class AresDatabase:
                 )
             except AdoptionFailure as exc:
                 if exc.exit_code == AdoptionExit.MANAGED_METADATA:
-                    raise RuntimeError(
-                        "Invalid managed SQLite database metadata"
-                    ) from None
+                    raise RuntimeError("Invalid managed SQLite database metadata") from None
                 raise RuntimeError("Incompatible SQLite database catalog") from None
 
             if ownership.diagnostic.startswith("ARES-M2B-ADOPTION-READY:"):
                 raise RuntimeError("SQLite database adoption is required")
-            if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009":
+            if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011":
+                await validate_sqlite_admission_authority_catalog_async(self._conn)
                 return
             if ownership.exit_code == AdoptionExit.MIGRATION_REQUIRED:
-                if ownership.predecessor not in {
-                    f"{revision:04d}" for revision in range(1, 9)
-                }:
-                    raise RuntimeError(
-                        "Invalid managed SQLite database metadata"
-                    )
+                raise RuntimeError("SQLite schema migration is required")
             elif ownership.diagnostic != "ARES-M2B-EMPTY-DATABASE":
                 raise RuntimeError("Incompatible SQLite database catalog")
 
@@ -785,23 +789,24 @@ class AresDatabase:
                         self._db_path,
                     )
                 except AdoptionFailure:
-                    raise RuntimeError(
-                        "SQLite managed initialization failed"
-                    ) from None
-                if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0009":
+                    raise RuntimeError("SQLite managed initialization failed") from None
+                if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0011":
                     raise RuntimeError("SQLite managed initialization failed")
+                await validate_sqlite_admission_authority_catalog_async(self._conn)
                 return
 
         async with self._conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type='table' AND name='websocket_tickets'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='websocket_tickets'"
         ) as cursor:
             ticket_table_exists = await cursor.fetchone() is not None
+        runtime_catalog_exists = False
         if ticket_table_exists:
             await self._validate_websocket_ticket_schema()
+            await validate_sqlite_admission_authority_catalog_async(self._conn)
+            runtime_catalog_exists = True
 
         alembic_applied = await self._run_alembic_migrations()
-        if not alembic_applied:
+        if not alembic_applied and not runtime_catalog_exists:
             schema_body_marker = "PRAGMA foreign_keys = ON;"
             if CREATE_TABLES.count(schema_body_marker) != 1:
                 raise RuntimeError("SQLite schema bootstrap is unavailable")
@@ -810,16 +815,16 @@ class AresDatabase:
                 maxsplit=1,
             )[1]
             try:
-                await self._conn.executescript(
-                    f"BEGIN IMMEDIATE;\n{schema_body}"
-                )
+                await self._conn.executescript(f"BEGIN IMMEDIATE;\n{schema_body}")
                 await self._validate_websocket_ticket_schema()
+                await validate_sqlite_admission_authority_catalog_async(self._conn)
                 await self._conn.commit()
             except BaseException:
                 await self._conn.rollback()
                 raise
         await self._reconcile_sqlite_schema()
         await self._validate_websocket_ticket_schema()
+        await validate_sqlite_admission_authority_catalog_async(self._conn)
         logger.info(
             "db_ready",
             database=self._database_label,
@@ -874,22 +879,13 @@ class AresDatabase:
         if connection is None:
             raise RuntimeError("Database not connected")
 
-        async with connection.execute(
-            "PRAGMA index_list(websocket_tickets)"
-        ) as cursor:
+        async with connection.execute("PRAGMA index_list(websocket_tickets)") as cursor:
             index_rows = await cursor.fetchall()
-        primary_index_rows = tuple(
-            row
-            for row in index_rows
-            if str(row["origin"]).lower() == "pk"
-        )
+        primary_index_rows = tuple(row for row in index_rows if str(row["origin"]).lower() == "pk")
         if len(primary_index_rows) != 1:
             raise RuntimeError("Incompatible WebSocket ticket schema")
         primary_index_row = primary_index_rows[0]
-        if (
-            int(primary_index_row["unique"]) != 1
-            or int(primary_index_row["partial"]) != 0
-        ):
+        if int(primary_index_row["unique"]) != 1 or int(primary_index_row["partial"]) != 0:
             raise RuntimeError("Incompatible WebSocket ticket schema")
         primary_index_name = str(primary_index_row["name"])
         if not primary_index_name:
@@ -907,40 +903,31 @@ class AresDatabase:
         expected_index_definitions = {
             "idx_ws_tickets_api_key": frozenset(
                 {
-                    "createindexidx_ws_tickets_api_key"
-                    "onwebsocket_tickets(api_key_id)",
-                    "createindexifnotexistsidx_ws_tickets_api_key"
-                    "onwebsocket_tickets(api_key_id)",
+                    "createindexidx_ws_tickets_api_keyonwebsocket_tickets(api_key_id)",
+                    "createindexifnotexistsidx_ws_tickets_api_keyonwebsocket_tickets(api_key_id)",
                 }
             ),
             "idx_ws_tickets_campaign": frozenset(
                 {
-                    "createindexidx_ws_tickets_campaign"
-                    "onwebsocket_tickets(campaign_id)",
-                    "createindexifnotexistsidx_ws_tickets_campaign"
-                    "onwebsocket_tickets(campaign_id)",
+                    "createindexidx_ws_tickets_campaignonwebsocket_tickets(campaign_id)",
+                    "createindexifnotexistsidx_ws_tickets_campaignonwebsocket_tickets(campaign_id)",
                 }
             ),
             "idx_ws_tickets_expires": frozenset(
                 {
-                    "createindexidx_ws_tickets_expires"
-                    "onwebsocket_tickets(expires_at)",
-                    "createindexifnotexistsidx_ws_tickets_expires"
-                    "onwebsocket_tickets(expires_at)",
+                    "createindexidx_ws_tickets_expiresonwebsocket_tickets(expires_at)",
+                    "createindexifnotexistsidx_ws_tickets_expiresonwebsocket_tickets(expires_at)",
                 }
             ),
             "idx_ws_tickets_user": frozenset(
                 {
-                    "createindexidx_ws_tickets_user"
-                    "onwebsocket_tickets(user_id)",
-                    "createindexifnotexistsidx_ws_tickets_user"
-                    "onwebsocket_tickets(user_id)",
+                    "createindexidx_ws_tickets_useronwebsocket_tickets(user_id)",
+                    "createindexifnotexistsidx_ws_tickets_useronwebsocket_tickets(user_id)",
                 }
             ),
             "idx_ws_tickets_bearer_family": frozenset(
                 {
-                    "createindexidx_ws_tickets_bearer_family"
-                    "onwebsocket_tickets(bearer_family_id)",
+                    "createindexidx_ws_tickets_bearer_familyonwebsocket_tickets(bearer_family_id)",
                     "createindexifnotexistsidx_ws_tickets_bearer_family"
                     "onwebsocket_tickets(bearer_family_id)",
                 }
@@ -991,9 +978,7 @@ class AresDatabase:
         ):
             raise RuntimeError("Incompatible WebSocket ticket schema")
 
-        async with connection.execute(
-            "PRAGMA table_xinfo(websocket_tickets)"
-        ) as cursor:
+        async with connection.execute("PRAGMA table_xinfo(websocket_tickets)") as cursor:
             columns = await cursor.fetchall()
         actual_columns = tuple(
             (
@@ -1010,9 +995,7 @@ class AresDatabase:
         if actual_columns != _WEBSOCKET_TICKET_COLUMNS:
             raise RuntimeError("Incompatible WebSocket ticket schema")
 
-        async with connection.execute(
-            "PRAGMA foreign_key_list(websocket_tickets)"
-        ) as cursor:
+        async with connection.execute("PRAGMA foreign_key_list(websocket_tickets)") as cursor:
             foreign_keys = tuple(
                 sorted(
                     (
@@ -1037,9 +1020,7 @@ class AresDatabase:
         for row in index_rows:
             index_name = str(row["name"])
             quoted_name = index_name.replace('"', '""')
-            async with connection.execute(
-                f'PRAGMA index_xinfo("{quoted_name}")'
-            ) as cursor:
+            async with connection.execute(f'PRAGMA index_xinfo("{quoted_name}")') as cursor:
                 index_columns = tuple(
                     (
                         int(index_row["seqno"]),
@@ -1116,27 +1097,18 @@ class AresDatabase:
                 ),
             ),
         }
-        if (
-            primary_index != expected_primary_index
-            or actual_indexes != expected_indexes
-        ):
+        if primary_index != expected_primary_index or actual_indexes != expected_indexes:
             raise RuntimeError("Incompatible WebSocket ticket schema")
 
         async with connection.execute(
-            "SELECT sql FROM sqlite_master "
-            "WHERE type='table' AND name='websocket_tickets'"
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='websocket_tickets'"
         ) as cursor:
             table_row = await cursor.fetchone()
         table_sql = str(table_row["sql"] if table_row else "")
         normalized_table_sql = _normalize_sql_fragment(table_sql)
-        if (
-            not normalized_table_sql.startswith(
-                "createtablewebsocket_tickets("
-            )
-            and not normalized_table_sql.startswith(
-                "createtableifnotexistswebsocket_tickets("
-            )
-        ):
+        if not normalized_table_sql.startswith(
+            "createtablewebsocket_tickets("
+        ) and not normalized_table_sql.startswith("createtableifnotexistswebsocket_tickets("):
             raise RuntimeError("Incompatible WebSocket ticket schema")
         if (
             "withoutrowid" in normalized_table_sql
@@ -1154,25 +1126,15 @@ class AresDatabase:
             name: _normalize_sql_fragment(expression)
             for name, expression in _WEBSOCKET_TICKET_CHECKS.items()
         }
-        if named_checks != expected_checks or check_count != len(
-            expected_checks
-        ):
+        if named_checks != expected_checks or check_count != len(expected_checks):
             raise RuntimeError("Incompatible WebSocket ticket schema")
 
         expected_constraint_names = tuple(
-            sorted(
-                set(expected_checks)
-                | _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES
-            )
+            sorted(set(expected_checks) | _WEBSOCKET_TICKET_FOREIGN_KEY_NAMES)
         )
-        if tuple(sorted(_extract_named_constraints(table_sql))) != (
-            expected_constraint_names
-        ):
+        if tuple(sorted(_extract_named_constraints(table_sql))) != (expected_constraint_names):
             raise RuntimeError("Incompatible WebSocket ticket schema")
-        if (
-            _extract_named_foreign_keys(table_sql)
-            != _WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS
-        ):
+        if _extract_named_foreign_keys(table_sql) != _WEBSOCKET_TICKET_NAMED_FOREIGN_KEYS:
             raise RuntimeError("Incompatible WebSocket ticket schema")
 
     async def _run_alembic_migrations(self) -> bool:
@@ -1197,9 +1159,7 @@ class AresDatabase:
             def _upgrade() -> None:
                 with migration_config() as configured:
                     alembic_cfg: AlembicConfig = configured
-                    alembic_cfg.cmd_opts = SimpleNamespace(
-                        x=[f"db_url={db_url}"]
-                    )
+                    alembic_cfg.cmd_opts = SimpleNamespace(x=[f"db_url={db_url}"])
                     alembic_command.upgrade(alembic_cfg, "head")
 
             await loop.run_in_executor(
@@ -1216,8 +1176,7 @@ class AresDatabase:
             raise RuntimeError("SQLite managed initialization failed") from None
         except Exception as exc:
             raise RuntimeError(
-                "SQLite managed initialization failed "
-                f"[{type(exc).__name__}]"
+                f"SQLite managed initialization failed [{type(exc).__name__}]"
             ) from None
 
     # ── Backup / export ───────────────────────────────────────────────────────
@@ -1246,9 +1205,7 @@ class AresDatabase:
             backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(backup_dir / f"ares_export_{ts}.json")
 
-        async with self._conn.execute(
-            "SELECT * FROM campaigns ORDER BY created_at DESC"
-        ) as cur:
+        async with self._conn.execute("SELECT * FROM campaigns ORDER BY created_at DESC") as cur:
             campaigns = [dict(r) for r in await cur.fetchall()]
 
         for campaign in campaigns:
@@ -1273,8 +1230,7 @@ class AresDatabase:
         with open(output_path, "w") as fh:
             json.dump(export, fh, indent=2, default=str)
 
-        logger.info("db_export_complete", path=output_path,
-                    campaigns=len(campaigns))
+        logger.info("db_export_complete", path=output_path, campaigns=len(campaigns))
         return output_path
 
     async def close(self) -> None:
@@ -1289,9 +1245,7 @@ class AresDatabase:
             return
         cancellation_baseline = _cancel_count()
         caught_cancellations = [0]
-        close_task = asyncio.ensure_future(
-            self._close_primary_connection(connection)
-        )
+        close_task = asyncio.ensure_future(self._close_primary_connection(connection))
         self._name_owned_task(close_task, "ares-sqlite-primary-close")
         try:
             await _await_task_completion(
@@ -1314,7 +1268,8 @@ class AresDatabase:
     # ── Campaigns ─────────────────────────────────────────────────────────────
 
     async def save_campaign(self, c: Campaign) -> None:
-        await self._conn.execute("""
+        await self._conn.execute(
+            """
             INSERT INTO campaigns(id,name,client,operator,noise_profile,status,scope_json,targets_json,notes)
             VALUES(?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
@@ -1323,16 +1278,23 @@ class AresDatabase:
               scope_json=excluded.scope_json, targets_json=excluded.targets_json,
               notes=excluded.notes,
               updated_at=datetime('now')
-        """, (c.id, c.name, c.client, c.operator, c.noise_profile.value,
-              c.status.value if hasattr(c.status, 'value') else str(c.status),
-              json.dumps([s.model_dump() for s in c.scope]),
-              json.dumps(c.targets), c.notes))
+        """,
+            (
+                c.id,
+                c.name,
+                c.client,
+                c.operator,
+                c.noise_profile.value,
+                c.status.value if hasattr(c.status, "value") else str(c.status),
+                json.dumps([s.model_dump() for s in c.scope]),
+                json.dumps(c.targets),
+                c.notes,
+            ),
+        )
         await self._conn.commit()
 
     async def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
-        async with self._conn.execute(
-            "SELECT * FROM campaigns WHERE id=?", (campaign_id,)
-        ) as cur:
+        async with self._conn.execute("SELECT * FROM campaigns WHERE id=?", (campaign_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -1360,64 +1322,318 @@ class AresDatabase:
         return rows, total
 
     async def delete_campaign(self, campaign_id: str) -> bool:
+        """Delete once through the stable compatibility receipt authority."""
+        result = await self.delete_campaign_lifecycle(campaign_id)
+        return result.result is FixedResult.APPLIED
+
+    async def delete_campaign_lifecycle(
+        self,
+        campaign_id: str,
+        *,
+        operation_id: str | None = None,
+        lifecycle_operation_id: str | None = None,
+        principal_kind: str = "system",
+        principal_subject_ref: str | None = None,
+        principal_user_id: str | None = None,
+        principal_authority_revision: int | None = None,
+    ) -> OperationResult:
+        """Delete a campaign with explicit immutable operation/principal binding."""
+        if (
+            operation_id is not None
+            and lifecycle_operation_id is not None
+            and operation_id != lifecycle_operation_id
+        ):
+            return OperationResult(FixedResult.INVALID_CONTRACT, None)
+        resolved_operation_id = operation_id if operation_id is not None else lifecycle_operation_id
+        if resolved_operation_id is None:
+            if not valid_uuid(campaign_id):
+                return OperationResult(FixedResult.INVALID_CONTRACT, None)
+            resolved_operation_id = _campaign_delete_operation_id(campaign_id)
+        if principal_subject_ref is None:
+            if principal_kind != "system":
+                return OperationResult(FixedResult.INVALID_CONTRACT, None)
+            principal_subject_ref = SYSTEM_PRINCIPAL_SUBJECT_REF
+
+        store = ExecutionLifecycleStore(self._conn, "sqlite")
         try:
-            await self._conn.execute("BEGIN")
+            receipt_spec = store._receipt_spec(
+                operation_id=resolved_operation_id,
+                operation_code="campaign_delete",
+                campaign_id=campaign_id,
+                primary_target_id=campaign_id,
+                principal_kind=principal_kind,
+                principal_subject_ref=principal_subject_ref,
+                principal_user_id=principal_user_id,
+                principal_authority_revision=principal_authority_revision,
+            )
+        except ValueError:
+            return OperationResult(FixedResult.INVALID_CONTRACT, None)
+
+        async with store._transaction() as connection:
+            await store._acquire_transaction_key(connection, resolved_operation_id)
+            replay = await store._classify_receipt(connection, receipt_spec, current_revision=None)
+            if replay is not None:
+                return replay
+            await store._acquire_transaction_key(connection, campaign_id)
+            async with connection.execute(
+                "SELECT singleton_id FROM execution_gateway_state WHERE singleton_id=1"
+            ) as cursor:
+                await cursor.fetchone()
+            async with connection.execute(
+                "SELECT id FROM campaigns WHERE id=?", (campaign_id,)
+            ) as cursor:
+                if await cursor.fetchone() is None:
+                    return OperationResult(FixedResult.NOT_FOUND_OR_PURGED, None)
             for statement in (
-                "DELETE FROM loot WHERE campaign_id=?",
-                "DELETE FROM credentials WHERE campaign_id=?",
-                "DELETE FROM hosts WHERE campaign_id=?",
-                "DELETE FROM findings WHERE campaign_id=?",
+                "SELECT campaign_id FROM campaign_execution_authority_revisions "
+                "WHERE campaign_id=?",
+                "SELECT actor_user_id FROM campaign_execution_actor_grants "
+                "WHERE campaign_id=? ORDER BY actor_user_id",
+                "SELECT campaign_id FROM campaign_execution_destination_authorities "
+                "WHERE campaign_id=?",
+                "SELECT id FROM execution_approval_authorities WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM logical_executions WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM execution_attempts WHERE campaign_id=? ORDER BY ordinal,id",
+                "SELECT attempt_id || ':' || CAST(ordinal AS TEXT) "
+                "FROM execution_attempt_destination_observations "
+                "WHERE campaign_id=? ORDER BY attempt_id,ordinal",
+                "SELECT attempt_id || ':' || CAST(ordinal AS TEXT) "
+                "FROM execution_attempt_credential_observations "
+                "WHERE campaign_id=? ORDER BY attempt_id,ordinal",
+                "SELECT id FROM campaign_execution_budgets WHERE campaign_id=? "
+                "ORDER BY budget_kind,id",
+                "SELECT id FROM campaign_execution_budget_ledger WHERE campaign_id=? "
+                "ORDER BY budget_kind,id",
+                "SELECT id FROM hosts WHERE campaign_id=? ORDER BY ip_address,id",
+                "SELECT id FROM findings WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM credentials WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM loot WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM execution_output_links WHERE campaign_id=? ORDER BY id",
+                "SELECT id FROM execution_publication_outbox WHERE campaign_id=? ORDER BY id",
             ):
-                await self._conn.execute(statement, (campaign_id,))
-            async with self._conn.execute(
-                "DELETE FROM campaigns WHERE id=?", (campaign_id,)
+                async with connection.execute(statement, (campaign_id,)) as cursor:
+                    await cursor.fetchall()
+            async with connection.execute(
+                "SELECT 1 FROM execution_attempts WHERE campaign_id=? "
+                "AND state IN ('accepted','queued','dispatching','running','cancelling',"
+                "'settlement_pending') LIMIT 1",
+                (campaign_id,),
+            ) as cursor:
+                if await cursor.fetchone() is not None:
+                    raise RuntimeError("Campaign lifecycle deletion is blocked")
+            async with connection.execute(
+                "SELECT 1 FROM logical_executions WHERE campaign_id=? "
+                "AND closed_at IS NULL LIMIT 1",
+                (campaign_id,),
+            ) as cursor:
+                if await cursor.fetchone() is not None:
+                    raise RuntimeError("Campaign lifecycle deletion is blocked")
+            async with connection.execute(
+                "SELECT 1 FROM execution_publication_outbox WHERE campaign_id=? "
+                "AND publication_state='claimed' LIMIT 1",
+                (campaign_id,),
+            ) as cursor:
+                if await cursor.fetchone() is not None:
+                    raise RuntimeError("Campaign lifecycle deletion is blocked")
+            async with connection.execute(
+                "SELECT id FROM execution_attempts WHERE campaign_id=? ORDER BY ordinal DESC",
+                (campaign_id,),
+            ) as cursor:
+                attempt_ids = tuple(str(row[0]) for row in await cursor.fetchall())
+
+            async def delete_exact(statement: str, expected: tuple[str, ...]) -> None:
+                async with connection.execute(statement, (campaign_id,)) as cursor:
+                    observed = tuple(sorted(str(row[0]) for row in await cursor.fetchall()))
+                if observed != tuple(sorted(expected)):
+                    raise RuntimeError("Campaign lifecycle deletion invariant failed")
+
+            identities: dict[str, tuple[str, ...]] = {}
+            for key, statement in (
+                ("links", "SELECT id FROM execution_output_links WHERE campaign_id=?"),
+                ("outbox", "SELECT id FROM execution_publication_outbox WHERE campaign_id=?"),
+                ("approvals", "SELECT id FROM execution_attempt_approvals WHERE campaign_id=?"),
+                (
+                    "approval_authorities",
+                    "SELECT id FROM execution_approval_authorities WHERE campaign_id=?",
+                ),
+                (
+                    "destination_observations",
+                    "SELECT attempt_id || ':' || CAST(ordinal AS TEXT) "
+                    "FROM execution_attempt_destination_observations WHERE campaign_id=?",
+                ),
+                (
+                    "credential_observations",
+                    "SELECT attempt_id || ':' || CAST(ordinal AS TEXT) "
+                    "FROM execution_attempt_credential_observations WHERE campaign_id=?",
+                ),
+                ("ledgers", "SELECT id FROM campaign_execution_budget_ledger WHERE campaign_id=?"),
+                ("logical", "SELECT id FROM logical_executions WHERE campaign_id=?"),
+                ("budgets", "SELECT id FROM campaign_execution_budgets WHERE campaign_id=?"),
+                (
+                    "actor_grants",
+                    "SELECT actor_user_id FROM campaign_execution_actor_grants WHERE campaign_id=?",
+                ),
+                (
+                    "destination_authorities",
+                    "SELECT campaign_id FROM campaign_execution_destination_authorities "
+                    "WHERE campaign_id=?",
+                ),
+            ):
+                async with connection.execute(statement, (campaign_id,)) as cursor:
+                    identities[key] = tuple(str(row[0]) for row in await cursor.fetchall())
+            await delete_exact(
+                "DELETE FROM execution_output_links WHERE campaign_id=? RETURNING id",
+                identities["links"],
+            )
+            await delete_exact(
+                "DELETE FROM execution_publication_outbox WHERE campaign_id=? RETURNING id",
+                identities["outbox"],
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_approvals WHERE campaign_id=? RETURNING id",
+                identities["approvals"],
+            )
+            await delete_exact(
+                "DELETE FROM execution_approval_authorities WHERE campaign_id=? RETURNING id",
+                identities["approval_authorities"],
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_destination_observations WHERE campaign_id=? "
+                "RETURNING attempt_id || ':' || CAST(ordinal AS TEXT)",
+                identities["destination_observations"],
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_credential_observations WHERE campaign_id=? "
+                "RETURNING attempt_id || ':' || CAST(ordinal AS TEXT)",
+                identities["credential_observations"],
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_budget_ledger WHERE campaign_id=? RETURNING id",
+                identities["ledgers"],
+            )
+            for attempt_id in attempt_ids:
+                async with connection.execute(
+                    "DELETE FROM execution_attempts WHERE id=? RETURNING id", (attempt_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if row is None or str(row[0]) != attempt_id:
+                    raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            await delete_exact(
+                "DELETE FROM logical_executions WHERE campaign_id=? RETURNING id",
+                identities["logical"],
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_budgets WHERE campaign_id=? RETURNING id",
+                identities["budgets"],
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_actor_grants WHERE campaign_id=? "
+                "RETURNING actor_user_id",
+                identities["actor_grants"],
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_destination_authorities WHERE campaign_id=? "
+                "RETURNING campaign_id",
+                identities["destination_authorities"],
+            )
+            async with connection.execute(
+                "DELETE FROM campaign_execution_authority_revisions WHERE campaign_id=? "
+                "RETURNING campaign_id",
+                (campaign_id,),
+            ) as cursor:
+                authority_rows = await cursor.fetchall()
+            if len(authority_rows) > 1:
+                raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            for statement in (
+                "DELETE FROM loot WHERE campaign_id=? RETURNING id",
+                "DELETE FROM credentials WHERE campaign_id=? RETURNING id",
+                "DELETE FROM hosts WHERE campaign_id=? RETURNING id",
+                "DELETE FROM findings WHERE campaign_id=? RETURNING id",
+            ):
+                async with connection.execute(statement, (campaign_id,)) as cursor:
+                    await cursor.fetchall()
+            await store._insert_receipt(
+                connection,
+                receipt_spec,
+                result=FixedResult.APPLIED,
+                exact_replay_code=FixedResult.REPLAYED,
+                result_identity=campaign_id,
+                result_revision=None,
+                result_fields=(("deleted", True),),
+            )
+            async with connection.execute(
+                "DELETE FROM campaigns WHERE id=? RETURNING id", (campaign_id,)
             ) as cur:
-                changed = cur.rowcount
-            await self._conn.commit()
-            return changed > 0
-        except Exception:
-            await self._conn.rollback()
-            raise
+                deleted_campaign = await cur.fetchall()
+            if len(deleted_campaign) != 1 or str(deleted_campaign[0][0]) != campaign_id:
+                raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            return OperationResult(FixedResult.APPLIED, None)
 
     # ── Findings ──────────────────────────────────────────────────────────────
 
     async def save_finding(self, campaign_id: str, f: Finding, module_id: str = "") -> None:
         """FIX: module_id sekarang opsional (default '')."""
-        await self._conn.execute("""
-            INSERT OR REPLACE INTO findings
+        await self._conn.execute(
+            """
+            INSERT INTO findings
             (id,campaign_id,module_id,title,description,severity,cvss_score,cvss_vector,
              confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id,
              validated,false_positive)
             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (f.id, campaign_id, module_id or getattr(f, "module_id", ""),
-              f.title, f.description,
-              f.severity.value if hasattr(f.severity, "value") else str(f.severity),
-              getattr(f, "cvss_score", 0.0), getattr(f, "cvss_vector", ""),
-              f.confidence, f.mitre_technique, f.mitre_tactic,
-              json.dumps(f.evidence), f.remediation, f.host,
-              getattr(f, "trace_id", ""), int(bool(getattr(f, "validated", False))),
-              int(bool(getattr(f, "false_positive", False)))))
+            ON CONFLICT(id) DO UPDATE SET
+              module_id=excluded.module_id,title=excluded.title,
+              description=excluded.description,severity=excluded.severity,
+              cvss_score=excluded.cvss_score,cvss_vector=excluded.cvss_vector,
+              confidence=excluded.confidence,mitre_technique=excluded.mitre_technique,
+              mitre_tactic=excluded.mitre_tactic,evidence_json=excluded.evidence_json,
+              remediation=excluded.remediation,host=excluded.host,
+              trace_id=excluded.trace_id,validated=excluded.validated,
+              false_positive=excluded.false_positive
+        """,
+            (
+                f.id,
+                campaign_id,
+                module_id or getattr(f, "module_id", ""),
+                f.title,
+                f.description,
+                f.severity.value if hasattr(f.severity, "value") else str(f.severity),
+                getattr(f, "cvss_score", 0.0),
+                getattr(f, "cvss_vector", ""),
+                f.confidence,
+                f.mitre_technique,
+                f.mitre_tactic,
+                json.dumps(f.evidence),
+                f.remediation,
+                f.host,
+                getattr(f, "trace_id", ""),
+                int(bool(getattr(f, "validated", False))),
+                int(bool(getattr(f, "false_positive", False))),
+            ),
+        )
         await self._conn.commit()
 
     async def list_findings(
         self,
         campaign_id: str,
-        page:        int = 1,
-        per_page:    int = 50,
-        severity:    str | None = None,
+        page: int = 1,
+        per_page: int = 50,
+        severity: str | None = None,
         false_positive: bool | None = None,
-        validated:   bool | None = None,
+        validated: bool | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         conditions = ["campaign_id=?"]
         params_list: list[Any] = [campaign_id]
         if severity:
-            conditions.append("severity=?"); params_list.append(severity)
+            conditions.append("severity=?")
+            params_list.append(severity)
         if false_positive is not None:
-            conditions.append("false_positive=?"); params_list.append(int(false_positive))
+            conditions.append("false_positive=?")
+            params_list.append(int(false_positive))
         if validated is not None:
-            conditions.append("validated=?"); params_list.append(int(validated))
+            conditions.append("validated=?")
+            params_list.append(int(validated))
 
-        where  = " AND ".join(conditions)
+        where = " AND ".join(conditions)
         offset = (page - 1) * per_page
 
         async with self._conn.execute(
@@ -1427,14 +1643,14 @@ class AresDatabase:
 
         async with self._conn.execute(
             f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC LIMIT ? OFFSET ?",
-            params_list + [per_page, offset]
+            params_list + [per_page, offset],
         ) as cur:
             rows = [dict(r) for r in await cur.fetchall()]
         return rows, total
 
     async def get_findings(
         self,
-        campaign_id:   str,
+        campaign_id: str,
         confirmed_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Return flat list of all findings for a campaign (no pagination)."""
@@ -1458,7 +1674,12 @@ class AresDatabase:
         ) as cur:
             rows = await cur.fetchall()
         stats: dict[str, Any] = {
-            "total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+            "total": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
         }
         for r in rows:
             sev = r["severity"]
@@ -1491,10 +1712,7 @@ class AresDatabase:
             (period,),
         ) as cur:
             rows = await cur.fetchall()
-        series = [
-            {"date": str(row["finding_date"]), "count": int(row["n"])}
-            for row in rows
-        ]
+        series = [{"date": str(row["finding_date"]), "count": int(row["n"])} for row in rows]
         return {
             "period": period,
             "label": "Security signals this cycle",
@@ -1548,12 +1766,8 @@ class AresDatabase:
             index = max(0, min(len(durations) - 1, int(len(durations) * fraction + 0.999999) - 1))
             return round(durations[index], 1)
 
-        recent_cutoff = (
-            datetime.now(timezone.utc) - timedelta(seconds=60)
-        ).isoformat()
-        recent_runs = sum(
-            1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff
-        )
+        recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        recent_runs = sum(1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff)
 
         async with self._conn.execute(
             """
@@ -1592,22 +1806,23 @@ class AresDatabase:
     async def campaign_summary(self, campaign_id: str) -> dict[str, Any]:
         """High-level stats for a campaign."""
         findings = await self.get_findings(campaign_id)
-        hosts    = await self.get_hosts(campaign_id)
-        creds    = await self.get_credentials(campaign_id)
-        loot     = await self.get_loot(campaign_id)
+        hosts = await self.get_hosts(campaign_id)
+        creds = await self.get_credentials(campaign_id)
+        loot = await self.get_loot(campaign_id)
         return {
-            "campaign_id":      campaign_id,
-            "findings":         findings,
-            "finding_count":    len(findings),
-            "host_count":       len(hosts),
+            "campaign_id": campaign_id,
+            "findings": findings,
+            "finding_count": len(findings),
+            "host_count": len(hosts),
             "credential_count": len(creds),
-            "loot_count":       len(loot),
+            "loot_count": len(loot),
         }
 
     # ── Hosts ─────────────────────────────────────────────────────────────────
 
     async def upsert_host(self, h: Host) -> str:
-        await self._conn.execute("""
+        await self._conn.execute(
+            """
             INSERT INTO hosts(id,campaign_id,ip_address,hostname,fqdn,os,os_version,
                 domain,is_dc,open_ports_json,tags_json)
             VALUES(?,?,?,?,?,?,?,?,?,?,?)
@@ -1615,11 +1830,31 @@ class AresDatabase:
               hostname=excluded.hostname, fqdn=excluded.fqdn, os=excluded.os,
               is_dc=excluded.is_dc, open_ports_json=excluded.open_ports_json,
               tags_json=excluded.tags_json, last_seen=datetime('now')
-        """, (h.id, h.campaign_id, h.ip_address, h.hostname, h.fqdn,
-              h.os, h.os_version, h.domain, int(h.is_dc),
-              json.dumps(h.open_ports), json.dumps(h.tags)))
+        """,
+            (
+                h.id,
+                h.campaign_id,
+                h.ip_address,
+                h.hostname,
+                h.fqdn,
+                h.os,
+                h.os_version,
+                h.domain,
+                int(h.is_dc),
+                json.dumps(h.open_ports),
+                json.dumps(h.tags),
+            ),
+        )
+        async with self._conn.execute(
+            "SELECT id FROM hosts WHERE campaign_id=? AND ip_address=?",
+            (h.campaign_id, h.ip_address),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            await self._conn.rollback()
+            raise RuntimeError("Canonical host persistence failed")
         await self._conn.commit()
-        return h.id
+        return str(row["id"])
 
     async def get_hosts(self, campaign_id: str) -> list[dict]:
         """FIX: method getter yang sebelumnya tidak ada."""
@@ -1632,12 +1867,29 @@ class AresDatabase:
     # ── Credentials ───────────────────────────────────────────────────────────
 
     async def save_credential(self, c: DBCredential) -> None:
-        await self._conn.execute("""
-            INSERT OR REPLACE INTO credentials
+        await self._conn.execute(
+            """
+            INSERT INTO credentials
             (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
             VALUES(?,?,?,?,?,?,?,?,?)
-        """, (c.id, c.campaign_id, c.host_id, c.username,
-              self._enc_val(c.secret), c.cred_type, c.domain, c.source_module, c.notes))
+            ON CONFLICT(id) DO UPDATE SET
+              host_id=excluded.host_id,username=excluded.username,
+              secret_enc=excluded.secret_enc,cred_type=excluded.cred_type,
+              domain=excluded.domain,source_module=excluded.source_module,
+              notes=excluded.notes
+        """,
+            (
+                c.id,
+                c.campaign_id,
+                c.host_id,
+                c.username,
+                self._enc_val(c.secret),
+                c.cred_type,
+                c.domain,
+                c.source_module,
+                c.notes,
+            ),
+        )
         await self._conn.commit()
 
     async def save_credential_preencrypted(self, c: DBCredential) -> None:
@@ -1647,7 +1899,8 @@ class AresDatabase:
         Uses INSERT OR IGNORE so re-running after a crash doesn't overwrite
         existing secrets with the same ID.
         """
-        await self._conn.execute("""
+        await self._conn.execute(
+            """
             INSERT INTO credentials
                 (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
             VALUES(?,?,?,?,?,?,?,?,?)
@@ -1655,9 +1908,19 @@ class AresDatabase:
                 secret_enc    = excluded.secret_enc,
                 source_module = excluded.source_module,
                 notes         = excluded.notes
-        """, (c.id, c.campaign_id, c.host_id, c.username,
-              c.secret,   # already vault-encrypted — store verbatim
-              c.cred_type, c.domain, c.source_module, c.notes))
+        """,
+            (
+                c.id,
+                c.campaign_id,
+                c.host_id,
+                c.username,
+                c.secret,  # already vault-encrypted — store verbatim
+                c.cred_type,
+                c.domain,
+                c.source_module,
+                c.notes,
+            ),
+        )
         await self._conn.commit()
 
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
@@ -1668,7 +1931,7 @@ class AresDatabase:
         """
         async with self._conn.execute(
             "SELECT * FROM credentials WHERE campaign_id=? ORDER BY captured_at DESC",
-            (campaign_id,)
+            (campaign_id,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
@@ -1692,15 +1955,36 @@ class AresDatabase:
 
     async def save_loot(self, l: Loot) -> None:
         content_str = json.dumps(l.content) if isinstance(l.content, (dict, list)) else l.content
-        await self._conn.execute("""
-            INSERT OR REPLACE INTO loot
+        await self._conn.execute(
+            """
+            INSERT INTO loot
             (id,campaign_id,host_id,loot_type,name,description,content_enc,
              path_on_target,source_module,tags_json)
             VALUES(?,?,?,?,?,?,?,?,?,?)
-        """, (l.id, l.campaign_id, l.host_id, l.loot_type, l.name, l.description,
-              self._enc_val(content_str), l.path_on_target, l.source_module,
-              json.dumps(l.tags)))
+            ON CONFLICT(id) DO UPDATE SET
+              host_id=excluded.host_id,loot_type=excluded.loot_type,
+              name=excluded.name,description=excluded.description,
+              content_enc=excluded.content_enc,path_on_target=excluded.path_on_target,
+              source_module=excluded.source_module,tags_json=excluded.tags_json
+        """,
+            (
+                l.id,
+                l.campaign_id,
+                l.host_id,
+                l.loot_type,
+                l.name,
+                l.description,
+                self._enc_val(content_str),
+                l.path_on_target,
+                l.source_module,
+                json.dumps(l.tags),
+            ),
+        )
         await self._conn.commit()
+
+    def execution_lifecycle_store(self) -> ExecutionLifecycleStore:
+        """Return the additive internal lifecycle persistence primitive."""
+        return ExecutionLifecycleStore(self._conn, "sqlite")
 
     async def get_loot(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
         """FIX: method getter yang sebelumnya tidak ada."""
@@ -1769,11 +2053,17 @@ class AresDatabase:
 
     # ── Audit log ─────────────────────────────────────────────────────────────
 
-    async def audit(self, actor: str, action: str, detail: str = "",
-                    campaign_id: str | None = None, module_id: str | None = None) -> None:
+    async def audit(
+        self,
+        actor: str,
+        action: str,
+        detail: str = "",
+        campaign_id: str | None = None,
+        module_id: str | None = None,
+    ) -> None:
         await self._conn.execute(
             "INSERT INTO audit_log(campaign_id,actor,action,detail,module_id) VALUES(?,?,?,?,?)",
-            (campaign_id, actor, action, detail, module_id)
+            (campaign_id, actor, action, detail, module_id),
         )
         await self._conn.commit()
 
@@ -1785,7 +2075,7 @@ class AresDatabase:
         user_id = str(uuid.uuid4())
         await self._conn.execute(
             "INSERT INTO users(id,username,hashed_password,role,created_by) VALUES(?,?,?,?,?)",
-            (user_id, username, hash_password(password), role, created_by)
+            (user_id, username, hash_password(password), role, created_by),
         )
         await self._conn.commit()
         logger.info("user_created", username=username, role=role, by=created_by)
@@ -1853,9 +2143,7 @@ class AresDatabase:
         return user
 
     async def user_exists(self, username: str) -> bool:
-        async with self._conn.execute(
-            "SELECT 1 FROM users WHERE username=?", (username,)
-        ) as cur:
+        async with self._conn.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
             return (await cur.fetchone()) is not None
 
     async def update_password(self, user_id: str, new_hash: str) -> None:
@@ -1877,28 +2165,32 @@ class AresDatabase:
             n = (await cur.fetchone())["n"]
         if n == 0:
             await self.create_user("admin", admin_password, "team_lead", "bootstrap")
-            logger.warning("default_admin_created",
-                           msg="CHANGE admin password immediately: POST /auth/change-password")
+            logger.warning(
+                "default_admin_created",
+                msg="CHANGE admin password immediately: POST /auth/change-password",
+            )
             return True
         return False
 
     # ── API Keys (v5) ─────────────────────────────────────────────────────────
 
     async def create_api_key(
-        self, user_id: str, name: str, scopes: str = "read",
+        self,
+        user_id: str,
+        name: str,
+        scopes: str = "read",
         expires_days: int | None = None,
     ) -> tuple[str, str]:
-        raw_key    = "ares_" + secrets.token_urlsafe(40)
+        raw_key = "ares_" + secrets.token_urlsafe(40)
         key_prefix = raw_key[:12]
-        key_id     = str(uuid.uuid4())
+        key_id = str(uuid.uuid4())
         expires_at = None
         if expires_days:
-            expires_at = (datetime.now(timezone.utc) +
-                          timedelta(days=expires_days)).isoformat()
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
         await self._conn.execute(
             "INSERT INTO api_keys(id,user_id,name,key_hash,key_prefix,scopes,expires_at) "
             "VALUES(?,?,?,?,?,?,?)",
-            (key_id, user_id, name, hash_password(raw_key), key_prefix, scopes, expires_at)
+            (key_id, user_id, name, hash_password(raw_key), key_prefix, scopes, expires_at),
         )
         await self._conn.commit()
         logger.info("api_key_created", user_id=user_id, name=name, prefix=key_prefix)
@@ -1920,7 +2212,7 @@ class AresDatabase:
                        AND julianday(ak.expires_at) > julianday('now')
                    )
                )""",
-            (prefix,)
+            (prefix,),
         ) as cur:
             rows = [dict(r) for r in await cur.fetchall()]
 
@@ -1959,14 +2251,15 @@ class AresDatabase:
     async def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:
         async with self._conn.execute(
             "SELECT id,name,key_prefix,scopes,is_active,last_used,expires_at,created_at "
-            "FROM api_keys WHERE user_id=? AND is_active=1 ORDER BY created_at DESC", (user_id,)
+            "FROM api_keys WHERE user_id=? AND is_active=1 ORDER BY created_at DESC",
+            (user_id,),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
     async def revoke_api_key(self, key_id: str, user_id: str) -> bool:
         async with self._conn.execute(
             "UPDATE api_keys SET is_active=0 WHERE id=? AND user_id=? AND is_active=1",
-            (key_id, user_id)
+            (key_id, user_id),
         ) as cur:
             changed = cur.rowcount
         await self._conn.commit()
@@ -2032,9 +2325,7 @@ class AresDatabase:
             try:
                 open_cancellation_baseline = _cancel_count()
                 open_cancellations = [0]
-                open_task = asyncio.ensure_future(
-                    self._open_websocket_ticket_connection()
-                )
+                open_task = asyncio.ensure_future(self._open_websocket_ticket_connection())
                 self._name_owned_task(
                     open_task,
                     "ares-sqlite-websocket-ticket-connect",
@@ -2074,11 +2365,7 @@ class AresDatabase:
                 committed = True
                 transaction_started = False
             except BaseException:
-                if (
-                    connection is not None
-                    and transaction_started
-                    and not committed
-                ):
+                if connection is not None and transaction_started and not committed:
                     cleanup_cancellation_baseline = _cancel_count()
                     cleanup_cancellations = [0]
                     cleanup_action = (
@@ -2096,14 +2383,10 @@ class AresDatabase:
             finally:
                 if connection is not None:
                     close_cancellation_baseline = (
-                        commit_cancellation_baseline
-                        if committed
-                        else _cancel_count()
+                        commit_cancellation_baseline if committed else _cancel_count()
                     )
                     close_cancellations = (
-                        commit_cancellations
-                        if committed
-                        else noncommit_close_cancellations
+                        commit_cancellations if committed else noncommit_close_cancellations
                     )
                     await self._finish_websocket_ticket_cleanup(
                         connection.close(),
@@ -2393,9 +2676,7 @@ class AresDatabase:
                     or handle.bearer_auth_epoch is None
                 ):
                     return None
-                source_expiry = format_sqlite_utc(
-                    handle.bearer_expires_at
-                )
+                source_expiry = format_sqlite_utc(handle.bearer_expires_at)
                 async with connection.execute(
                     """
                     SELECT u.id, u.username, u.role
@@ -2436,9 +2717,7 @@ class AresDatabase:
                     ),
                 ) as cursor:
                     row = await cursor.fetchone()
-                if row is None or not is_valid_websocket_principal_role(
-                    row["role"]
-                ):
+                if row is None or not is_valid_websocket_principal_role(row["role"]):
                     return None
                 return WebSocketTicketPrincipal(
                     user_id=row["id"],
@@ -2448,8 +2727,7 @@ class AresDatabase:
                 )
 
             if (
-                handle.credential_kind
-                is not WebSocketTicketCredentialKind.API_KEY
+                handle.credential_kind is not WebSocketTicketCredentialKind.API_KEY
                 or handle.api_key_id is None
                 or handle.required_scope != "read"
             ):
@@ -2495,9 +2773,7 @@ class AresDatabase:
                 ),
             ) as cursor:
                 row = await cursor.fetchone()
-            if row is None or not is_valid_websocket_principal_role(
-                row["role"]
-            ):
+            if row is None or not is_valid_websocket_principal_role(row["role"]):
                 return None
             scopes = normalize_api_key_scopes(row["scopes"])
             if not set(scopes).intersection({"read", "write", "admin"}):
@@ -2659,16 +2935,20 @@ class AresDatabase:
                 (username,),
             ) as cursor:
                 row = await cursor.fetchone()
-            if row is None or int(row["is_active"]) != 1 or not verify_password(
-                password, row["hashed_password"]
+            if (
+                row is None
+                or int(row["is_active"]) != 1
+                or not verify_password(password, row["hashed_password"])
             ):
                 return SessionIssueResult(SessionIssueStatus.INVALID)
-            family_id, raw_token, absolute_expiry = (
-                await self._insert_initial_family_token_with_expiry(
-                    tx,
-                    user_id=row["id"],
-                    auth_epoch=int(row["auth_epoch"]),
-                )
+            (
+                family_id,
+                raw_token,
+                absolute_expiry,
+            ) = await self._insert_initial_family_token_with_expiry(
+                tx,
+                user_id=row["id"],
+                auth_epoch=int(row["auth_epoch"]),
             )
             access_token = token_factory(
                 {
@@ -2702,20 +2982,19 @@ class AresDatabase:
 
         return await self._run_refresh_family_transaction(_login)
 
-    async def _legacy_create_refresh_token(
-        self, user_id: str, expires_days: int = 30
-    ) -> str:
+    async def _legacy_create_refresh_token(self, user_id: str, expires_days: int = 30) -> str:
         import hashlib
+
         # Generate cryptographically strong random token
-        raw_token  = secrets.token_urlsafe(48)           # 384 bits — URL-safe, client sees this
+        raw_token = secrets.token_urlsafe(48)  # 384 bits — URL-safe, client sees this
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()  # stored in DB
         expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
         await self._conn.execute(
             "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
-            (token_hash, user_id, expires_at)
+            (token_hash, user_id, expires_at),
         )
         await self._conn.commit()
-        return raw_token   # client gets raw; DB stores only hash
+        return raw_token  # client gets raw; DB stores only hash
 
     async def _open_refresh_rotation_connection(self) -> aiosqlite.Connection:
         return await aiosqlite.connect(
@@ -2949,9 +3228,7 @@ class AresDatabase:
         try:
             open_cancellation_baseline = _cancel_count()
             open_cancellations = [0]
-            open_task = asyncio.ensure_future(
-                self._open_refresh_rotation_connection()
-            )
+            open_task = asyncio.ensure_future(self._open_refresh_rotation_connection())
             self._name_owned_task(
                 open_task,
                 "ares-sqlite-refresh-connect",
@@ -3010,9 +3287,7 @@ class AresDatabase:
                     row = dict(row)
                     new_raw = secrets.token_urlsafe(48)
                     new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
-                    expires_at = (
-                        datetime.now(timezone.utc) + timedelta(days=30)
-                    ).isoformat()
+                    expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
                     await self._insert_refresh_successor(
                         tx,
                         new_hash,
@@ -3043,9 +3318,7 @@ class AresDatabase:
                 cleanup_cancellation_baseline = _cancel_count()
                 cleanup_cancellations = [0]
                 cleanup_action = (
-                    "rollback_after_commit_failure"
-                    if commit_started
-                    else "rollback_before_commit"
+                    "rollback_after_commit_failure" if commit_started else "rollback_before_commit"
                 )
                 await self._finish_refresh_rotation_cleanup(
                     tx.rollback(),
@@ -3057,14 +3330,10 @@ class AresDatabase:
         finally:
             if tx is not None:
                 close_cancellation_baseline = (
-                    commit_cancellation_baseline
-                    if committed
-                    else _cancel_count()
+                    commit_cancellation_baseline if committed else _cancel_count()
                 )
                 close_cancellations = (
-                    commit_cancellations
-                    if committed
-                    else noncommit_close_cancellations
+                    commit_cancellations if committed else noncommit_close_cancellations
                 )
                 await self._finish_refresh_rotation_cleanup(
                     tx.close(),
@@ -3165,8 +3434,7 @@ class AresDatabase:
                 reason="logout_current",
             )
             await tx.execute(
-                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) "
-                "VALUES(?,?,?)",
+                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) VALUES(?,?,?)",
                 (jti, user_id, format_sqlite_utc(expires_at)),
             )
             if changed:
@@ -3212,8 +3480,7 @@ class AresDatabase:
                     else "logout_cookie_replay_family_revoked"
                 )
                 await tx.execute(
-                    "INSERT INTO audit_log(actor,action,detail) VALUES("
-                    "'auth-system',?,'')",
+                    "INSERT INTO audit_log(actor,action,detail) VALUES('auth-system',?,'')",
                     (action,),
                 )
                 return SessionRevocationResult(SessionRevocationStatus.REVOKED)
@@ -3230,23 +3497,18 @@ class AresDatabase:
     ) -> SessionRevocationResult:
         async def _revoke(tx: aiosqlite.Connection) -> SessionRevocationResult:
             async with tx.execute(
-                "UPDATE users SET auth_epoch=auth_epoch+1 "
-                "WHERE id=? AND is_active=1",
+                "UPDATE users SET auth_epoch=auth_epoch+1 WHERE id=? AND is_active=1",
                 (user_id,),
             ) as cursor:
                 if cursor.rowcount != 1:
                     return SessionRevocationResult(SessionRevocationStatus.INVALID)
-            await self._revoke_family_rows(
-                tx, user_id=user_id, reason="logout_all"
-            )
+            await self._revoke_family_rows(tx, user_id=user_id, reason="logout_all")
             await tx.execute(
-                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) "
-                "VALUES(?,?,?)",
+                "INSERT OR IGNORE INTO revoked_access_tokens(jti,user_id,expires_at) VALUES(?,?,?)",
                 (jti, user_id, format_sqlite_utc(expires_at)),
             )
             await tx.execute(
-                "INSERT INTO audit_log(actor,action,detail) VALUES("
-                "'auth-system','logout_all','')"
+                "INSERT INTO audit_log(actor,action,detail) VALUES('auth-system','logout_all','')"
             )
             return SessionRevocationResult(SessionRevocationStatus.REVOKED)
 
@@ -3281,8 +3543,7 @@ class AresDatabase:
                     return False
             await self._revoke_family_rows(tx, user_id=user_id, reason=reason)
             await tx.execute(
-                "INSERT INTO audit_log(actor,action,detail) VALUES("
-                "'auth-system',?,'')",
+                "INSERT INTO audit_log(actor,action,detail) VALUES('auth-system',?,'')",
                 (reason,),
             )
             return True
@@ -3291,9 +3552,7 @@ class AresDatabase:
 
     async def revoke_all_refresh_tokens(self, user_id: str) -> None:
         async def _revoke(tx: aiosqlite.Connection) -> None:
-            await self._revoke_family_rows(
-                tx, user_id=user_id, reason="operator_revoke"
-            )
+            await self._revoke_family_rows(tx, user_id=user_id, reason="operator_revoke")
 
         await self._run_refresh_family_transaction(_revoke)
 
@@ -3306,21 +3565,29 @@ class AresDatabase:
     async def save_bypass_outcome(
         self,
         technique_id: str,
-        edr_vendor:   str,
-        edr_version:  str,
-        success:      bool,
-        campaign_id:  str,
-        notes:        str = "",
+        edr_vendor: str,
+        edr_version: str,
+        success: bool,
+        campaign_id: str,
+        notes: str = "",
     ) -> None:
         """Persist bypass technique outcome for cross-session learning."""
         import time as _time
+
         try:
             await self._conn.execute(
                 """INSERT INTO bypass_outcomes
                    (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (technique_id, edr_vendor, edr_version,
-                 int(success), campaign_id, notes[:500], _time.time()),
+                (
+                    technique_id,
+                    edr_vendor,
+                    edr_version,
+                    int(success),
+                    campaign_id,
+                    notes[:500],
+                    _time.time(),
+                ),
             )
             await self._conn.commit()
         except Exception:
@@ -3330,22 +3597,30 @@ class AresDatabase:
                 """INSERT INTO bypass_outcomes
                    (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (technique_id, edr_vendor, edr_version,
-                 int(success), campaign_id, notes[:500], _time.time()),
+                (
+                    technique_id,
+                    edr_vendor,
+                    edr_version,
+                    int(success),
+                    campaign_id,
+                    notes[:500],
+                    _time.time(),
+                ),
             )
             await self._conn.commit()
 
     async def get_bypass_success_rate(
         self,
         technique_id: str,
-        edr_vendor:   str,
-        min_samples:  int = 3,
+        edr_vendor: str,
+        min_samples: int = 3,
     ) -> float | None:
         """
         Return historical success rate for a bypass technique against an EDR vendor.
         Returns None if fewer than min_samples recorded.
         """
         import time as _time
+
         try:
             async with self._conn.execute(
                 """SELECT COUNT(*) as total, COALESCE(SUM(success), 0) as successes
@@ -3377,16 +3652,15 @@ class AresDatabase:
         )
         await self._conn.commit()
 
-
     async def purge_expired_tokens(self) -> int:
         async with self._conn.execute(
-            "DELETE FROM refresh_token_families "
-            "WHERE julianday(retain_until) <= julianday('now')"
+            "DELETE FROM refresh_token_families WHERE julianday(retain_until) <= julianday('now')"
         ) as cur:
             n = cur.rowcount
         await self._conn.commit()
         await self.purge_expired_websocket_tickets()
         return n
+
 
 # Backward-compat alias
 Credential = DBCredential  # noqa

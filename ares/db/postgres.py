@@ -25,6 +25,7 @@ Production checklist:
   □ Run alembic upgrade head before first start
   □ Set max_connections in postgresql.conf to > (max_workers × pool_max + 5)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,7 @@ import json
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ares.core.logger import get_logger
@@ -53,13 +54,21 @@ from ares.core.token_sessions import (
     generate_refresh_token,
     hash_refresh_token,
 )
+from ares.db.execution_lifecycle import (
+    SYSTEM_PRINCIPAL_SUBJECT_REF,
+    ExecutionLifecycleStore,
+    FixedResult,
+    OperationResult,
+    valid_uuid,
+    validate_postgresql_admission_authority_catalog,
+)
 from ares.db.websocket_tickets import (
+    WEBSOCKET_TICKET_TTL_SECONDS,
     ApiKeyTicketSource,
     BearerTicketSource,
     ConsumedWebSocketTicket,
     WebSocketTicketCredentialKind,
     WebSocketTicketPrincipal,
-    WEBSOCKET_TICKET_TTL_SECONDS,
     generate_websocket_ticket,
     hash_websocket_ticket,
     is_canonical_websocket_ticket,
@@ -70,13 +79,24 @@ from ares.db.websocket_tickets import (
 logger = get_logger("ares.db.postgres")
 
 _REFRESH_TOKEN_LOCK_NAMESPACE = b"ares:refresh-token-user:v1\x00"
+_CAMPAIGN_DELETE_OPERATION_DOMAIN = b"ares.campaign-delete.compat-operation.v1\x00"
+
+
+def _campaign_delete_operation_id(campaign_id: str) -> str:
+    """Derive the stable UUIDv4-shaped identity for an implicit delete operation."""
+    digest = bytearray(
+        hashlib.sha256(_CAMPAIGN_DELETE_OPERATION_DOMAIN + campaign_id.encode("utf-8")).digest()[
+            :16
+        ]
+    )
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 def _refresh_token_user_lock_key(user_id: str) -> int:
     """Return a stable signed BIGINT key for a user's refresh-token writes."""
-    digest = hashlib.sha256(
-        _REFRESH_TOKEN_LOCK_NAMESPACE + user_id.encode("utf-8")
-    ).digest()
+    digest = hashlib.sha256(_REFRESH_TOKEN_LOCK_NAMESPACE + user_id.encode("utf-8")).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 
@@ -91,9 +111,7 @@ def _parse_postgres_timestamptz(value: str) -> datetime:
     """Convert the public access-token expiry string to an aware datetime."""
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
-            tzinfo=timezone.utc
-        )
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
 
 
@@ -372,9 +390,7 @@ _POSTGRES_FALLBACK_DDL_CODES = (
 )
 
 
-def _postgres_fallback_statement_spans() -> tuple[
-    tuple[str, int, int], ...
-]:
+def _postgres_fallback_statement_spans() -> tuple[tuple[str, int, int], ...]:
     spans: list[tuple[str, int, int]] = []
     start = 0
     for code in _POSTGRES_FALLBACK_DDL_CODES:
@@ -414,12 +430,8 @@ _POSTGRES_TICKET_RELATION_PROPERTY_BITS = {
     "user_rule_count": 0x200,
 }
 _POSTGRES_TICKET_RELATION_PROPERTY_MASK = 0x3FF
-_POSTGRES_TICKET_RELATION_AGGREGATE_ONLY = (
-    "ticket-relation-metadata:aggregate-comparison-only"
-)
-_POSTGRES_TICKET_RELATION_METADATA_PREFIX = (
-    "ticket-relation-metadata:"
-)
+_POSTGRES_TICKET_RELATION_AGGREGATE_ONLY = "ticket-relation-metadata:aggregate-comparison-only"
+_POSTGRES_TICKET_RELATION_METADATA_PREFIX = "ticket-relation-metadata:"
 _POSTGRES_TICKET_RELATION_MISSING = object()
 _POSTGRES_TICKET_RELATION_UNREADABLE = object()
 
@@ -541,11 +553,7 @@ def _postgres_ticket_relation_diagnostic_invariant(
     ):
         return "ticket-validation-unclassified"
     mismatched, alternate, unexpected, missing = masks
-    if any(
-        value < 0
-        or value & ~_POSTGRES_TICKET_RELATION_PROPERTY_MASK
-        for value in masks
-    ):
+    if any(value < 0 or value & ~_POSTGRES_TICKET_RELATION_PROPERTY_MASK for value in masks):
         return "ticket-validation-unclassified"
     if (
         alternate & ~mismatched
@@ -568,7 +576,7 @@ def _is_postgres_ticket_relation_diagnostic(invariant: str) -> bool:
     prefix = _POSTGRES_TICKET_RELATION_METADATA_PREFIX
     if not invariant.startswith(prefix):
         return False
-    parts = invariant[len(prefix):].split(";")
+    parts = invariant[len(prefix) :].split(";")
     if len(parts) != 4:
         return False
     expected_keys = ("m", "a", "x", "n")
@@ -583,42 +591,110 @@ def _is_postgres_ticket_relation_diagnostic(invariant: str) -> bool:
         ):
             return False
         values.append(int(encoded, 16))
-    return (
-        _postgres_ticket_relation_diagnostic_invariant(tuple(values))
-        == invariant
-    )
+    return _postgres_ticket_relation_diagnostic_invariant(tuple(values)) == invariant
 
 
 _POSTGRES_TICKET_CENSUS_FIELDS = (
-    ("r", (("m", 0x3FF, 3), ("a", 0x3FF, 3), ("x", 0x3FF, 3),
-           ("n", 0x3FF, 3), ("g", 0x1, 1))),
-    ("c", (("m", 0x3FFF, 4), ("e", 0x1, 1), ("o", 0x3FFF, 4),
-           ("t", 0x3FFF, 4), ("u", 0x3FFF, 4), ("d", 0x3FFF, 4),
-           ("l", 0x3FFF, 4), ("i", 0x3FFF, 4), ("a", 0x3FFF, 4),
-           ("x", 0x3FFF, 4), ("g", 0x1, 1))),
-    ("q", (("m", 0xFFFF, 4), ("e", 0x1, 1), ("t", 0xFFFF, 4),
-           ("v", 0xFFFF, 4), ("f", 0xFFFF, 4), ("d", 0xFFFF, 4),
-           ("s", 0xFFFF, 4), ("b", 0xFFFF, 4), ("a", 0xFFFF, 4),
-           ("x", 0xFFFF, 4), ("g", 0x1, 1))),
-    ("p", (("l", 0x1, 1), ("r", 0x1, 1), ("n", 0x1, 1),
-           ("i", 0x1, 1), ("a", 0x1, 1), ("x", 0x1, 1),
-           ("g", 0x1, 1))),
-    ("h", (("t", 0x7FF, 3), ("v", 0x7FF, 3), ("f", 0x7FF, 3),
-           ("d", 0x7FF, 3), ("s", 0x7FF, 3), ("a", 0x7FF, 3),
-           ("x", 0x7FF, 3), ("g", 0x1, 1))),
-    ("f", (("l", 0xF, 1), ("s", 0xF, 1), ("t", 0xF, 1),
-           ("r", 0xF, 1), ("u", 0xF, 1), ("d", 0xF, 1),
-           ("i", 0xF, 1), ("a", 0xF, 1), ("x", 0xF, 1),
-           ("g", 0x1, 1))),
-    ("i", (("m", 0x3F, 2), ("e", 0x1, 1), ("o", 0x3F, 2),
-           ("b", 0x3F, 2), ("u", 0x3F, 2), ("p", 0x3F, 2),
-           ("v", 0x3F, 2), ("r", 0x3F, 2), ("l", 0x3F, 2),
-           ("k", 0x3F, 2), ("n", 0x3F, 2), ("c", 0x3F, 2),
-           ("d", 0x3F, 2), ("a", 0x3F, 2), ("j", 0x3F, 2),
-           ("s", 0x3F, 2), ("t", 0x3F, 2), ("y", 0x3F, 2),
-           ("h", 0x3F, 2), ("x", 0x3F, 2), ("g", 0x1, 1))),
-    ("o", (("m", 0x3, 1), ("e", 0x1, 1), ("x", 0x3, 1),
-           ("g", 0x1, 1))),
+    ("r", (("m", 0x3FF, 3), ("a", 0x3FF, 3), ("x", 0x3FF, 3), ("n", 0x3FF, 3), ("g", 0x1, 1))),
+    (
+        "c",
+        (
+            ("m", 0x3FFF, 4),
+            ("e", 0x1, 1),
+            ("o", 0x3FFF, 4),
+            ("t", 0x3FFF, 4),
+            ("u", 0x3FFF, 4),
+            ("d", 0x3FFF, 4),
+            ("l", 0x3FFF, 4),
+            ("i", 0x3FFF, 4),
+            ("a", 0x3FFF, 4),
+            ("x", 0x3FFF, 4),
+            ("g", 0x1, 1),
+        ),
+    ),
+    (
+        "q",
+        (
+            ("m", 0xFFFF, 4),
+            ("e", 0x1, 1),
+            ("t", 0xFFFF, 4),
+            ("v", 0xFFFF, 4),
+            ("f", 0xFFFF, 4),
+            ("d", 0xFFFF, 4),
+            ("s", 0xFFFF, 4),
+            ("b", 0xFFFF, 4),
+            ("a", 0xFFFF, 4),
+            ("x", 0xFFFF, 4),
+            ("g", 0x1, 1),
+        ),
+    ),
+    (
+        "p",
+        (
+            ("l", 0x1, 1),
+            ("r", 0x1, 1),
+            ("n", 0x1, 1),
+            ("i", 0x1, 1),
+            ("a", 0x1, 1),
+            ("x", 0x1, 1),
+            ("g", 0x1, 1),
+        ),
+    ),
+    (
+        "h",
+        (
+            ("t", 0x7FF, 3),
+            ("v", 0x7FF, 3),
+            ("f", 0x7FF, 3),
+            ("d", 0x7FF, 3),
+            ("s", 0x7FF, 3),
+            ("a", 0x7FF, 3),
+            ("x", 0x7FF, 3),
+            ("g", 0x1, 1),
+        ),
+    ),
+    (
+        "f",
+        (
+            ("l", 0xF, 1),
+            ("s", 0xF, 1),
+            ("t", 0xF, 1),
+            ("r", 0xF, 1),
+            ("u", 0xF, 1),
+            ("d", 0xF, 1),
+            ("i", 0xF, 1),
+            ("a", 0xF, 1),
+            ("x", 0xF, 1),
+            ("g", 0x1, 1),
+        ),
+    ),
+    (
+        "i",
+        (
+            ("m", 0x3F, 2),
+            ("e", 0x1, 1),
+            ("o", 0x3F, 2),
+            ("b", 0x3F, 2),
+            ("u", 0x3F, 2),
+            ("p", 0x3F, 2),
+            ("v", 0x3F, 2),
+            ("r", 0x3F, 2),
+            ("l", 0x3F, 2),
+            ("k", 0x3F, 2),
+            ("n", 0x3F, 2),
+            ("c", 0x3F, 2),
+            ("d", 0x3F, 2),
+            ("a", 0x3F, 2),
+            ("j", 0x3F, 2),
+            ("s", 0x3F, 2),
+            ("t", 0x3F, 2),
+            ("y", 0x3F, 2),
+            ("h", 0x3F, 2),
+            ("x", 0x3F, 2),
+            ("g", 0x1, 1),
+        ),
+    ),
+    ("o", (("m", 0x3, 1), ("e", 0x1, 1), ("x", 0x3, 1), ("g", 0x1, 1))),
     ("z", (("q", 0x7F, 2), ("x", 0x7F, 2))),
 )
 
@@ -841,13 +917,27 @@ def _is_postgres_q78_failure(value: str) -> bool:
 
 
 _POSTGRES_Q78_SPLIT_INDEX_FIELDS = (
-    ("m", 0x3F, 2), ("e", 0x1, 1), ("o", 0x3F, 2),
-    ("b", 0x3F, 2), ("u", 0x3F, 2), ("p", 0x3F, 2),
-    ("v", 0x3F, 2), ("r", 0x3F, 2), ("l", 0x3F, 2),
-    ("k", 0x3F, 2), ("n", 0x3F, 2), ("c", 0x3F, 2),
-    ("d", 0x3F, 2), ("a", 0x3F, 2), ("j", 0x3F, 2),
-    ("s", 0x3F, 2), ("t", 0x3F, 2), ("y", 0x3F, 2),
-    ("h", 0x3F, 2), ("x", 0x3F, 2), ("g", 0x1, 1),
+    ("m", 0x3F, 2),
+    ("e", 0x1, 1),
+    ("o", 0x3F, 2),
+    ("b", 0x3F, 2),
+    ("u", 0x3F, 2),
+    ("p", 0x3F, 2),
+    ("v", 0x3F, 2),
+    ("r", 0x3F, 2),
+    ("l", 0x3F, 2),
+    ("k", 0x3F, 2),
+    ("n", 0x3F, 2),
+    ("c", 0x3F, 2),
+    ("d", 0x3F, 2),
+    ("a", 0x3F, 2),
+    ("j", 0x3F, 2),
+    ("s", 0x3F, 2),
+    ("t", 0x3F, 2),
+    ("y", 0x3F, 2),
+    ("h", 0x3F, 2),
+    ("x", 0x3F, 2),
+    ("g", 0x1, 1),
 )
 
 
@@ -888,16 +978,14 @@ def _postgres_q78_split_invariant(
         query_failure,
     )
     if (
-        any(
-            type(value) is not int or not 0 <= value <= 0xF
-            for value in scalar_values[:-1]
-        )
+        any(type(value) is not int or not 0 <= value <= 0xF for value in scalar_values[:-1])
         or type(query_failure) is not int
         or not 0 <= query_failure <= 0xF
     ):
         return "q78-split-unclassified"
     return (
-        "q78-split:i=" + ",".join(encoded_index)
+        "q78-split:i="
+        + ",".join(encoded_index)
         + f";p=i{primary_binding:x}"
         + f";o=m{opclass_missing:x},e{opclass_extra:x},x{opclass_shape:x}"
         + f";s=m{schema_mismatch:x},x{schema_shape:x}"
@@ -991,34 +1079,104 @@ def _postgres_q78_index_split_census(
     section = {field: 0 for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS}
     expected = {
         "idx_ws_tickets_api_key": (
-            "btree", False, False, True, True, True,
-            1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
+            "btree",
+            False,
+            False,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("api_key_id",),
+            (0,),
+            ("text_ops",),
+            (True,),
+            None,
+            None,
         ),
         "idx_ws_tickets_bearer_family": (
-            "btree", False, False, True, True, True,
-            1, 1, ("bearer_family_id",), (0,), ("text_ops",), (True,), None, None,
+            "btree",
+            False,
+            False,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("bearer_family_id",),
+            (0,),
+            ("text_ops",),
+            (True,),
+            None,
+            None,
         ),
         "idx_ws_tickets_campaign": (
-            "btree", False, False, True, True, True,
-            1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
+            "btree",
+            False,
+            False,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("campaign_id",),
+            (0,),
+            ("text_ops",),
+            (True,),
+            None,
+            None,
         ),
         "idx_ws_tickets_expires": (
-            "btree", False, False, True, True, True,
-            1, 1, ("expires_at",), (0,), ("timestamptz_ops",), (True,), None, None,
+            "btree",
+            False,
+            False,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("expires_at",),
+            (0,),
+            ("timestamptz_ops",),
+            (True,),
+            None,
+            None,
         ),
         "idx_ws_tickets_user": (
-            "btree", False, False, True, True, True,
-            1, 1, ("user_id",), (0,), ("text_ops",), (True,), None, None,
+            "btree",
+            False,
+            False,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("user_id",),
+            (0,),
+            ("text_ops",),
+            (True,),
+            None,
+            None,
         ),
         "websocket_tickets_pkey": (
-            "btree", True, True, True, True, True,
-            1, 1, ("ticket_hash",), (0,), ("text_ops",), (True,), None, None,
+            "btree",
+            True,
+            True,
+            True,
+            True,
+            True,
+            1,
+            1,
+            ("ticket_hash",),
+            (0,),
+            ("text_ops",),
+            (True,),
+            None,
+            None,
         ),
     }
     expected_names = tuple(expected)
-    expected_ordinals = {
-        name: ordinal for ordinal, name in enumerate(expected_names)
-    }
+    expected_ordinals = {name: ordinal for ordinal, name in enumerate(expected_names)}
     if type(rows) not in {list, tuple}:
         section["x"] = 0x3F
         return section, 1
@@ -1034,30 +1192,21 @@ def _postgres_q78_index_split_census(
             ordinal = expected_ordinals.get(name)
             bit = 0 if ordinal is None else 1 << ordinal
             index_oid = int(raw_row["index_oid"])
-            relkind, relkind_alternate, relkind_unexpected = (
-                _postgres_internal_character(raw_row["index_relkind"])
+            relkind, relkind_alternate, relkind_unexpected = _postgres_internal_character(
+                raw_row["index_relkind"]
             )
             persistence, persistence_alternate, persistence_unexpected = (
                 _postgres_internal_character(raw_row["index_relpersistence"])
             )
-            operator_classes = tuple(
-                str(value) for value in raw_row["operator_classes"]
-            )
-            operator_class_oids = tuple(
-                int(value) for value in raw_row["operator_class_oids"]
-            )
-            canonical_oids = tuple(
-                canonical_opclasses.get(value, -1) for value in operator_classes
-            )
+            operator_classes = tuple(str(value) for value in raw_row["operator_classes"])
+            operator_class_oids = tuple(int(value) for value in raw_row["operator_class_oids"])
+            canonical_oids = tuple(canonical_opclasses.get(value, -1) for value in operator_classes)
             identity_noncodec_is_exact = (
                 int(raw_row["table_oid"]) == table_oid
                 and int(raw_row["index_schema_oid"]) == schema_oid
                 and str(raw_row["index_schema"]) == schema_name
                 and not bool(raw_row["index_is_partition"])
-                and tuple(
-                    str(value)
-                    for value in raw_row["operator_class_namespaces"]
-                )
+                and tuple(str(value) for value in raw_row["operator_class_namespaces"])
                 == ("pg_catalog",)
                 and operator_class_oids == canonical_oids
                 and index_oid not in index_oids
@@ -1092,10 +1241,7 @@ def _postgres_q78_index_split_census(
                 bool(raw_row["indislive"]),
                 int(raw_row["indnkeyatts"]),
                 int(raw_row["indnatts"]),
-                tuple(
-                    None if value is None else str(value)
-                    for value in raw_row["columns"]
-                ),
+                tuple(None if value is None else str(value) for value in raw_row["columns"]),
                 tuple(int(value) for value in raw_row["column_options"]),
                 operator_classes,
                 tuple(bool(value) for value in raw_row["column_collations_match"]),
@@ -1111,8 +1257,7 @@ def _postgres_q78_index_split_census(
     for name in set(expected_names) - actual_name_set:
         section["m"] |= 1 << expected_ordinals[name]
     section["e"] = int(
-        bool(actual_name_set - set(expected_names))
-        or len(actual) != len(actual_names)
+        bool(actual_name_set - set(expected_names)) or len(actual) != len(actual_names)
     )
     for ordinal, name in enumerate(expected_names):
         bit = 1 << ordinal
@@ -1123,10 +1268,20 @@ def _postgres_q78_index_split_census(
             continue
         expected_item = expected[name]
         for field, position in (
-            ("b", 0), ("u", 1), ("p", 2), ("v", 3),
-            ("r", 4), ("l", 5), ("k", 6), ("n", 7),
-            ("c", 8), ("d", 9), ("a", 10), ("j", 11),
-            ("s", 12), ("t", 13),
+            ("b", 0),
+            ("u", 1),
+            ("p", 2),
+            ("v", 3),
+            ("r", 4),
+            ("l", 5),
+            ("k", 6),
+            ("n", 7),
+            ("c", 8),
+            ("d", 9),
+            ("a", 10),
+            ("j", 11),
+            ("s", 12),
+            ("t", 13),
         ):
             if actual_item[position] != expected_item[position]:
                 section[field] |= bit
@@ -1137,10 +1292,7 @@ def _postgres_q78_index_split_census(
         for raw_row in constraint_rows:
             try:
                 if raw_row["conname"] == "websocket_tickets_pkey":
-                    primary_binding = int(
-                        int(raw_row["constraint_index_oid"])
-                        != primary_index_oid
-                    )
+                    primary_binding = int(int(raw_row["constraint_index_oid"]) != primary_index_oid)
                     break
             except (KeyError, IndexError, TypeError, ValueError):
                 continue
@@ -1316,16 +1468,12 @@ async def _postgres_q78_split_observation(
     if type(opclass_rows) in {list, tuple}:
         try:
             canonical_opclasses = {
-                str(row["opcname"]): int(row["opclass_oid"])
-                for row in opclass_rows
+                str(row["opcname"]): int(row["opclass_oid"]) for row in opclass_rows
             }
-            opclass_missing = (
-                int("text_ops" not in canonical_opclasses)
-                | (int("timestamptz_ops" not in canonical_opclasses) << 1)
+            opclass_missing = int("text_ops" not in canonical_opclasses) | (
+                int("timestamptz_ops" not in canonical_opclasses) << 1
             )
-            opclass_extra = int(
-                bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"})
-            )
+            opclass_extra = int(bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"}))
         except (KeyError, IndexError, TypeError, ValueError):
             opclass_shape = 1
     else:
@@ -1359,8 +1507,7 @@ async def _postgres_q78_split_observation(
         try:
             reference_names = [str(row["relname"]) for row in referenced_rows]
             reference_oids = {
-                str(row["relname"]): int(row["relation_oid"])
-                for row in referenced_rows
+                str(row["relname"]): int(row["relation_oid"]) for row in referenced_rows
             }
             reference_missing = 0
             for ordinal, name in enumerate(expected_reference_names):
@@ -1382,17 +1529,13 @@ async def _postgres_q78_split_observation(
             if type(constraint_rows) not in {list, tuple}:
                 reference_binding = 0xF
             else:
-                constraints = {
-                    str(row["conname"]): row for row in constraint_rows
-                }
+                constraints = {str(row["conname"]): row for row in constraint_rows}
                 for ordinal, (constraint_name, relation_name) in enumerate(
                     zip(expected_constraint_names, expected_reference_names, strict=True)
                 ):
                     row = constraints.get(constraint_name)
-                    if (
-                        row is None
-                        or int(row["referenced_oid"])
-                        != reference_oids.get(relation_name)
+                    if row is None or int(row["referenced_oid"]) != reference_oids.get(
+                        relation_name
                     ):
                         reference_binding |= 1 << ordinal
         except (KeyError, IndexError, TypeError, ValueError):
@@ -1515,9 +1658,7 @@ def _postgres_ticket_column_census(
             (raw_identity, expected_item[3]),
             (raw_generated, expected_item[4]),
         ):
-            semantic, alternate, unexpected = _postgres_internal_character(
-                raw_internal
-            )
+            semantic, alternate, unexpected = _postgres_internal_character(raw_internal)
             if unexpected:
                 section["x"] |= bit
             elif semantic != expected_internal:
@@ -1602,10 +1743,7 @@ def _postgres_operational_category(error: BaseException) -> str:
         return "timeout"
     if isinstance(error, ConnectionError):
         return "connection"
-    error_type_names = {
-        base.__name__
-        for base in type(error).__mro__
-    }
+    error_type_names = {base.__name__ for base in type(error).__mro__}
     if error_type_names & {
         "PostgresError",
         "InterfaceError",
@@ -1631,24 +1769,16 @@ class _PostgresStartupDiagnosticError(RuntimeError):
     ) -> None:
         super().__init__(public_message)
         self.diagnostic_stage = (
-            diagnostic_stage
-            if diagnostic_stage in _POSTGRES_STARTUP_STAGES
-            else "unclassified"
+            diagnostic_stage if diagnostic_stage in _POSTGRES_STARTUP_STAGES else "unclassified"
         )
         self.diagnostic_invariant = (
             diagnostic_invariant
             if (
                 diagnostic_invariant in _POSTGRES_STARTUP_INVARIANTS
-                or _is_postgres_ticket_relation_diagnostic(
-                    diagnostic_invariant
-                )
-                or _is_postgres_ticket_schema_census(
-                    diagnostic_invariant
-                )
+                or _is_postgres_ticket_relation_diagnostic(diagnostic_invariant)
+                or _is_postgres_ticket_schema_census(diagnostic_invariant)
                 or (
-                    diagnostic_invariant.startswith(
-                        ("managed-check-", "managed-foreign-")
-                    )
+                    diagnostic_invariant.startswith(("managed-check-", "managed-foreign-"))
                     and len(diagnostic_invariant)
                     in {len("managed-check-00"), len("managed-foreign-00")}
                     and diagnostic_invariant[-2:].isdigit()
@@ -1658,16 +1788,11 @@ class _PostgresStartupDiagnosticError(RuntimeError):
         )
         self.operational_category = (
             operational_category
-            if operational_category
-            in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
+            if operational_category in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
             else "other"
         )
-        self.q78_failure = (
-            q78_failure if _is_postgres_q78_failure(q78_failure) else ""
-        )
-        self.q78_split = (
-            q78_split if _is_postgres_q78_split(q78_split) else ""
-        )
+        self.q78_failure = q78_failure if _is_postgres_q78_failure(q78_failure) else ""
+        self.q78_split = q78_split if _is_postgres_q78_split(q78_split) else ""
 
 
 def _postgres_startup_diagnostic_label(error: BaseException) -> str:
@@ -1683,24 +1808,14 @@ def _postgres_startup_diagnostic_label(error: BaseException) -> str:
     if (
         error.diagnostic_stage not in _POSTGRES_STARTUP_STAGES
         or (
-            error.diagnostic_invariant
-            not in _POSTGRES_STARTUP_INVARIANTS
-            and not _is_postgres_ticket_relation_diagnostic(
-                error.diagnostic_invariant
-            )
-            and not _is_postgres_ticket_schema_census(
-                error.diagnostic_invariant
-            )
+            error.diagnostic_invariant not in _POSTGRES_STARTUP_INVARIANTS
+            and not _is_postgres_ticket_relation_diagnostic(error.diagnostic_invariant)
+            and not _is_postgres_ticket_schema_census(error.diagnostic_invariant)
         )
-        or error.operational_category
-        not in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
+        or error.operational_category not in _POSTGRES_STARTUP_OPERATIONAL_CATEGORIES
     ):
         return "unclassified"
-    label = (
-        f"{error.diagnostic_stage}:"
-        f"{error.diagnostic_invariant}:"
-        f"{error.operational_category}"
-    )
+    label = f"{error.diagnostic_stage}:{error.diagnostic_invariant}:{error.operational_category}"
     if error.q78_failure or error.q78_split:
         if not error.q78_failure or not error.q78_split:
             return "unclassified"
@@ -1715,11 +1830,7 @@ def _postgres_startup_error(
     invariant: str,
     cause: BaseException | None = None,
 ) -> _PostgresStartupDiagnosticError:
-    category = (
-        "none"
-        if cause is None
-        else _postgres_operational_category(cause)
-    )
+    category = "none" if cause is None else _postgres_operational_category(cause)
     return _PostgresStartupDiagnosticError(
         public_message,
         diagnostic_stage=stage,
@@ -1769,16 +1880,25 @@ def _postgres_ticket_schema_error(
         invariant=invariant,
         cause=cause,
     )
-    error.q78_failure = (
-        q78_failure if _is_postgres_q78_failure(q78_failure) else ""
-    )
+    error.q78_failure = q78_failure if _is_postgres_q78_failure(q78_failure) else ""
     error.q78_split = q78_split if _is_postgres_q78_split(q78_split) else ""
     return error
 
 
-_POSTGRES_MANAGED_REVISION = "0009"
+_POSTGRES_MANAGED_REVISION = "0011"
 _POSTGRES_OLDER_REVISIONS = frozenset(
-    {"0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"}
+    {
+        "0001",
+        "0002",
+        "0003",
+        "0004",
+        "0005",
+        "0006",
+        "0007",
+        "0008",
+        "0009",
+        "0010",
+    }
 )
 _POSTGRES_MIGRATION_REQUIRED_ERROR = "PostgreSQL schema migration required"
 _POSTGRES_MANAGED_SCHEMA_ERROR = "Incompatible managed PostgreSQL schema"
@@ -1826,6 +1946,11 @@ _POSTGRES_MANAGED_INDEXES = (
     ("credentials", "idx_creds_campaign", ("campaign_id",)),
     ("credentials", "idx_creds_username", ("username",)),
     ("credentials", "idx_creds_type", ("cred_type",)),
+    (
+        "credentials",
+        "ix_credentials_execution_authority",
+        ("campaign_id", "execution_authority_state", "id"),
+    ),
     ("loot", "idx_loot_campaign", ("campaign_id",)),
     ("loot", "idx_loot_type", ("loot_type",)),
     ("audit_log", "idx_audit_campaign", ("campaign_id",)),
@@ -2008,6 +2133,10 @@ _POSTGRES_MANAGED_FOREIGN_KEYS = (
 )
 
 _POSTGRES_MANAGED_UNIQUES = (
+    ("findings", "uq_findings_campaign_id_id", ("campaign_id", "id")),
+    ("credentials", "uq_credentials_campaign_id_id", ("campaign_id", "id")),
+    ("hosts", "uq_hosts_campaign_id_id", ("campaign_id", "id")),
+    ("loot", "uq_loot_campaign_id_id", ("campaign_id", "id")),
     ("hosts", "uq_hosts_campaign_ip", ("campaign_id", "ip_address")),
     ("users", "uq_users_username", ("username",)),
     (
@@ -2054,6 +2183,17 @@ _POSTGRES_MANAGED_FINITE_CHECKS = (
     ("rate_limit_events", "timestamp", False),
     ("revoked_access_tokens", "revoked_at", False),
     ("revoked_access_tokens", "expires_at", False),
+)
+
+_POSTGRES_V11_CREDENTIAL_AUTHORITY_COLUMNS = frozenset(
+    {
+        "execution_authority_state",
+        "execution_authority_revision",
+        "execution_authority_binding_digest",
+        "execution_authority_latest_operation_id",
+        "execution_authority_latest_operation_base_revision",
+        "execution_authority_latest_operation_code",
+    }
 )
 
 
@@ -2147,21 +2287,19 @@ class PostgresDatabase:
 
     def __init__(
         self,
-        dsn:            str,
+        dsn: str,
         encryption_key: str | None = None,
-        pool_min:       int = 2,
-        pool_max:       int = 10,
+        pool_min: int = 2,
+        pool_max: int = 10,
     ) -> None:
         # Strip SQLAlchemy dialect prefix — asyncpg uses plain postgres:// DSN
-        self._dsn = (
-            dsn
-            .replace("postgresql+asyncpg://", "postgresql://")
-            .replace("postgres+asyncpg://",   "postgres://")
+        self._dsn = dsn.replace("postgresql+asyncpg://", "postgresql://").replace(
+            "postgres+asyncpg://", "postgres://"
         )
         self._enc: DataEncryptor | None = DataEncryptor(encryption_key) if encryption_key else None
         self._pool_min = pool_min
         self._pool_max = pool_max
-        self._pool: Any = None   # asyncpg.Pool
+        self._pool: Any = None  # asyncpg.Pool
         self._startup_trace: list[str] = []
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -2202,10 +2340,7 @@ class PostgresDatabase:
             await pool.close()
         except Exception as cleanup_error:
             cleanup_category = _postgres_operational_category(cleanup_error)
-            primary.add_note(
-                "PostgreSQL startup cleanup failure "
-                f"[pool-close: {cleanup_category}]"
-            )
+            primary.add_note(f"PostgreSQL startup cleanup failure [pool-close: {cleanup_category}]")
         finally:
             if self._pool is pool:
                 self._pool = None
@@ -2224,7 +2359,7 @@ class PostgresDatabase:
     @classmethod
     async def create(
         cls,
-        dsn:            str,
+        dsn: str,
         encryption_key: str | None = None,
     ) -> "PostgresDatabase":
         db = cls(dsn, encryption_key)
@@ -2318,15 +2453,15 @@ class PostgresDatabase:
             relation_contract = (
                 str(relation["relkind"]),
                 str(relation["relpersistence"]),
-                 bool(relation["relispartition"]),
-                 bool(relation["relrowsecurity"]),
-                 bool(relation["relforcerowsecurity"]),
-                 int(relation["parent_count"]),
-                 int(relation["child_count"]),
-                 int(relation["policy_count"]),
-                 int(relation["user_trigger_count"]),
-                 int(relation["user_rule_count"]),
-             )
+                bool(relation["relispartition"]),
+                bool(relation["relrowsecurity"]),
+                bool(relation["relforcerowsecurity"]),
+                int(relation["parent_count"]),
+                int(relation["child_count"]),
+                int(relation["policy_count"]),
+                int(relation["user_trigger_count"]),
+                int(relation["user_rule_count"]),
+            )
         except (KeyError, TypeError, ValueError):
             raise _PostgresManagedSchemaError(
                 _POSTGRES_MANAGED_SCHEMA_ERROR,
@@ -2337,10 +2472,8 @@ class PostgresDatabase:
             not isinstance(schema_name, str)
             or not schema_name
             or type_oid <= 0
-            or type_contract
-            != (schema_name, "alembic_version", "c", table_oid)
-            or relation_contract
-            != ("r", "p", False, False, False, 0, 0, 0, 0, 0)
+            or type_contract != (schema_name, "alembic_version", "c", table_oid)
+            or relation_contract != ("r", "p", False, False, False, 0, 0, 0, 0, 0)
         ):
             raise _PostgresManagedSchemaError(
                 _POSTGRES_MANAGED_SCHEMA_ERROR,
@@ -2571,17 +2704,9 @@ class PostgresDatabase:
                     row["constraint_name"],
                     tuple(str(column) for column in row["columns"]),
                     tuple(int(option) for option in row["column_options"]),
-                    tuple(
-                        str(opclass) for opclass in row["operator_classes"]
-                    ),
-                    tuple(
-                        str(namespace)
-                        for namespace in row["operator_class_namespaces"]
-                    ),
-                    tuple(
-                        bool(value)
-                        for value in row["column_collations_match"]
-                    ),
+                    tuple(str(opclass) for opclass in row["operator_classes"]),
+                    tuple(str(namespace) for namespace in row["operator_class_namespaces"]),
+                    tuple(bool(value) for value in row["column_collations_match"]),
                     row["expressions"],
                     row["predicate"],
                 )
@@ -2745,11 +2870,7 @@ class PostgresDatabase:
                     0,
                 )
             )
-            actual = (
-                metadata[1:4]
-                if table == "websocket_tickets"
-                else metadata[1:11]
-            )
+            actual = metadata[1:4] if table == "websocket_tickets" else metadata[1:11]
             (
                 table_schema,
                 type_oid,
@@ -2769,9 +2890,7 @@ class PostgresDatabase:
             ):
                 raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
 
-        non_ticket_tables = sorted(
-            _POSTGRES_MANAGED_TABLES - {"websocket_tickets"}
-        )
+        non_ticket_tables = sorted(_POSTGRES_MANAGED_TABLES - {"websocket_tickets"})
         legacy_index_rows = await connection.fetch(
             """
             SELECT table_rel.relname AS table_name,
@@ -2898,17 +3017,9 @@ class PostgresDatabase:
                     int(row["indnkeyatts"]),
                     int(row["indnatts"]),
                     tuple(int(option) for option in row["column_options"]),
-                    tuple(
-                        str(opclass) for opclass in row["operator_classes"]
-                    ),
-                    tuple(
-                        str(namespace)
-                        for namespace in row["operator_class_namespaces"]
-                    ),
-                    tuple(
-                        bool(value)
-                        for value in row["column_collations_match"]
-                    ),
+                    tuple(str(opclass) for opclass in row["operator_classes"]),
+                    tuple(str(namespace) for namespace in row["operator_class_namespaces"]),
+                    tuple(bool(value) for value in row["column_collations_match"]),
                     row["expressions"],
                 )
                 for row in index_rows
@@ -2916,8 +3027,7 @@ class PostgresDatabase:
         except (KeyError, TypeError, ValueError):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
         expected_indexes = {
-            (table, name): columns
-            for table, name, columns in _POSTGRES_MANAGED_INDEXES
+            (table, name): columns for table, name, columns in _POSTGRES_MANAGED_INDEXES
         }
         if set(index_contract) != set(expected_indexes):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
@@ -2943,10 +3053,7 @@ class PostgresDatabase:
                 len(columns),
                 len(columns),
                 (0,) * len(columns),
-                tuple(
-                    _postgres_index_opclass(key[0], column)
-                    for column in columns
-                ),
+                tuple(_postgres_index_opclass(key[0], column) for column in columns),
                 ("pg_catalog",) * len(columns),
                 (True,) * len(columns),
                 None,
@@ -3015,29 +3122,32 @@ class PostgresDatabase:
         except (KeyError, TypeError, ValueError):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
         expected_primary_keys = {
-            (table, name): columns
-            for table, name, columns in _POSTGRES_MANAGED_PRIMARY_KEYS
+            (table, name): columns for table, name, columns in _POSTGRES_MANAGED_PRIMARY_KEYS
         }
         if set(primary_contract) != set(expected_primary_keys):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
         for key, columns in expected_primary_keys.items():
             actual = primary_contract[key]
-            if actual != (
-                "p",
-                True,
-                False,
-                False,
-                columns,
-                actual[5],
-                "i",
-                "p",
-                False,
-                True,
-                True,
-                True,
-                True,
-                True,
-            ) or actual[5] <= 0:
+            if (
+                actual
+                != (
+                    "p",
+                    True,
+                    False,
+                    False,
+                    columns,
+                    actual[5],
+                    "i",
+                    "p",
+                    False,
+                    True,
+                    True,
+                    True,
+                    True,
+                    True,
+                )
+                or actual[5] <= 0
+            ):
                 raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
 
         await PostgresDatabase._validate_managed_constraints(
@@ -3166,9 +3276,36 @@ class PostgresDatabase:
             non_ticket_tables,
         )
         try:
+            delegated_v11_checks = tuple(
+                row
+                for row in rows
+                if str(row["table_name"]) == "credentials"
+                and str(row["contype"]) == "c"
+                and tuple(str(column) for column in row["local_columns"])
+                in {
+                    (column,)
+                    for column in _POSTGRES_V11_CREDENTIAL_AUTHORITY_COLUMNS
+                }
+            )
+            if (
+                len(delegated_v11_checks)
+                != len(_POSTGRES_V11_CREDENTIAL_AUTHORITY_COLUMNS)
+                or {
+                    str(row["local_columns"][0])
+                    for row in delegated_v11_checks
+                }
+                != _POSTGRES_V11_CREDENTIAL_AUTHORITY_COLUMNS
+            ):
+                raise ValueError
+            delegated_v11_keys = {
+                (str(row["table_name"]), str(row["conname"]))
+                for row in delegated_v11_checks
+            }
             actual = {
                 (str(row["table_name"]), str(row["conname"])): row
                 for row in rows
+                if (str(row["table_name"]), str(row["conname"]))
+                not in delegated_v11_keys
             }
         except (KeyError, TypeError, ValueError):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
@@ -3192,8 +3329,7 @@ class PostgresDatabase:
             ) in _POSTGRES_MANAGED_FOREIGN_KEYS
         }
         expected_unique = {
-            (table, name): columns
-            for table, name, columns in _POSTGRES_MANAGED_UNIQUES
+            (table, name): columns for table, name, columns in _POSTGRES_MANAGED_UNIQUES
         }
         expected_checks = {
             (
@@ -3204,9 +3340,7 @@ class PostgresDatabase:
                 if nullable
                 else f"CHECK (isfinite({column}))"
             )
-            for table, column, nullable in (
-                _POSTGRES_MANAGED_FINITE_CHECKS
-            )
+            for table, column, nullable in (_POSTGRES_MANAGED_FINITE_CHECKS)
         }
         expected_checks[
             (
@@ -3216,15 +3350,11 @@ class PostgresDatabase:
         ] = "CHECK (blocked = ANY (ARRAY[0, 1]))"
         expected_checks.update(
             {
-                ("users", "ck_users_auth_epoch"): (
-                    "CHECK (auth_epoch >= 1)"
-                ),
+                ("users", "ck_users_auth_epoch"): ("CHECK (auth_epoch >= 1)"),
                 ("refresh_token_families", "ck_refresh_family_id"): (
                     "CHECK (id ~ '^[A-Za-z0-9_-]{43}$'::text)"
                 ),
-                ("refresh_token_families", "ck_refresh_family_epoch"): (
-                    "CHECK (auth_epoch >= 1)"
-                ),
+                ("refresh_token_families", "ck_refresh_family_epoch"): ("CHECK (auth_epoch >= 1)"),
                 ("refresh_token_families", "ck_refresh_family_state"): (
                     "CHECK (state = ANY (ARRAY['active'::text, 'revoked'::text]))"
                 ),
@@ -3258,16 +3388,13 @@ class PostgresDatabase:
                 ("refresh_tokens", "ck_refresh_token_hash"): (
                     "CHECK (id ~ '^[0-9a-f]{64}$'::text)"
                 ),
-                ("refresh_tokens", "ck_refresh_token_generation"): (
-                    "CHECK (generation >= 0)"
-                ),
+                ("refresh_tokens", "ck_refresh_token_generation"): ("CHECK (generation >= 0)"),
                 ("refresh_tokens", "ck_refresh_token_parent_shape"): (
                     "CHECK (generation = 0 AND parent_id IS NULL "
                     "OR generation > 0 AND parent_id IS NOT NULL)"
                 ),
                 ("refresh_tokens", "ck_refresh_token_state"): (
-                    "CHECK (state = ANY (ARRAY['active'::text, "
-                    "'consumed'::text, 'retired'::text]))"
+                    "CHECK (state = ANY (ARRAY['active'::text, 'consumed'::text, 'retired'::text]))"
                 ),
                 ("refresh_tokens", "ck_refresh_token_state_shape"): (
                     "CHECK (state = 'active'::text AND is_revoked = 0 "
@@ -3282,12 +3409,11 @@ class PostgresDatabase:
                 ),
             }
         )
-        expected_keys = (
-            set(expected_foreign)
-            | set(expected_unique)
-            | set(expected_checks)
-        )
-        if len(rows) != len(actual) or set(actual) != expected_keys:
+        expected_keys = set(expected_foreign) | set(expected_unique) | set(expected_checks)
+        if (
+            len(rows) - len(delegated_v11_checks) != len(actual)
+            or set(actual) != expected_keys
+        ):
             raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
 
         for key, contract in actual.items():
@@ -3298,19 +3424,11 @@ class PostgresDatabase:
                     bool(contract["condeferrable"]),
                     bool(contract["condeferred"]),
                 )
-                definition = _postgres_constraint_definition(
-                    contract["definition"]
-                )
-                local_columns = tuple(
-                    str(column) for column in contract["local_columns"]
-                )
-                remote_columns = tuple(
-                    str(column) for column in contract["remote_columns"]
-                )
+                definition = _postgres_constraint_definition(contract["definition"])
+                local_columns = tuple(str(column) for column in contract["local_columns"])
+                remote_columns = tuple(str(column) for column in contract["remote_columns"])
             except (KeyError, TypeError, ValueError):
-                raise RuntimeError(
-                    _POSTGRES_MANAGED_SCHEMA_ERROR
-                ) from None
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
             expected_common = (
                 (True, True, True)
                 if key == ("refresh_tokens", "fk_refresh_token_parent")
@@ -3355,8 +3473,7 @@ class PostgresDatabase:
                     or definition != expected_definition
                     or local_columns != expected_local
                     or remote_columns != expected_remote
-                    or str(contract["referenced_schema"])
-                    != source_schema
+                    or str(contract["referenced_schema"]) != source_schema
                     or str(contract["referenced_table"]) != parent
                     or str(contract["confupdtype"]) != "a"
                     or str(contract["confdeltype"]) != delete_code
@@ -3378,37 +3495,18 @@ class PostgresDatabase:
                         bool(contract["indislive"]),
                         int(contract["indnkeyatts"]),
                         int(contract["indnatts"]),
+                        tuple(str(column) for column in contract["index_columns"]),
+                        tuple(int(option) for option in contract["column_options"]),
+                        tuple(str(opclass) for opclass in contract["operator_classes"]),
                         tuple(
-                            str(column)
-                            for column in contract["index_columns"]
+                            str(namespace) for namespace in contract["operator_class_namespaces"]
                         ),
-                        tuple(
-                            int(option)
-                            for option in contract["column_options"]
-                        ),
-                        tuple(
-                            str(opclass)
-                            for opclass in contract["operator_classes"]
-                        ),
-                        tuple(
-                            str(namespace)
-                            for namespace in contract[
-                                "operator_class_namespaces"
-                            ]
-                        ),
-                        tuple(
-                            bool(value)
-                            for value in contract[
-                                "column_collations_match"
-                            ]
-                        ),
+                        tuple(bool(value) for value in contract["column_collations_match"]),
                         contract["expressions"],
                         contract["predicate"],
                     )
                 except (KeyError, TypeError, ValueError):
-                    raise RuntimeError(
-                        _POSTGRES_MANAGED_SCHEMA_ERROR
-                    ) from None
+                    raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
                 reference_index_name = {
                     (
                         "refresh_tokens",
@@ -3420,29 +3518,33 @@ class PostgresDatabase:
                     ): "uq_refresh_token_family_hash",
                 }.get(key, f"{parent}_pkey")
                 reference_is_primary = reference_index_name.endswith("_pkey")
-                if foreign_index_contract != (
-                    foreign_index_contract[0],
-                    source_schema,
-                    reference_index_name,
-                    "i",
-                    "p",
-                    False,
-                    "btree",
-                    True,
-                    reference_is_primary,
-                    True,
-                    True,
-                    True,
-                    len(expected_remote),
-                    len(expected_remote),
-                    expected_remote,
-                    (0,) * len(expected_remote),
-                    ("text_ops",) * len(expected_remote),
-                    ("pg_catalog",) * len(expected_remote),
-                    (True,) * len(expected_remote),
-                    None,
-                    None,
-                ) or foreign_index_contract[0] <= 0:
+                if (
+                    foreign_index_contract
+                    != (
+                        foreign_index_contract[0],
+                        source_schema,
+                        reference_index_name,
+                        "i",
+                        "p",
+                        False,
+                        "btree",
+                        True,
+                        reference_is_primary,
+                        True,
+                        True,
+                        True,
+                        len(expected_remote),
+                        len(expected_remote),
+                        expected_remote,
+                        (0,) * len(expected_remote),
+                        ("text_ops",) * len(expected_remote),
+                        ("pg_catalog",) * len(expected_remote),
+                        (True,) * len(expected_remote),
+                        None,
+                        None,
+                    )
+                    or foreign_index_contract[0] <= 0
+                ):
                     ordinal = sorted(expected_foreign).index(key)
                     raise _PostgresManagedSchemaError(
                         _POSTGRES_MANAGED_SCHEMA_ERROR,
@@ -3474,68 +3576,48 @@ class PostgresDatabase:
                     bool(contract["indislive"]),
                     int(contract["indnkeyatts"]),
                     int(contract["indnatts"]),
-                    tuple(
-                        str(column)
-                        for column in contract["index_columns"]
-                    ),
-                    tuple(
-                        int(option)
-                        for option in contract["column_options"]
-                    ),
-                    tuple(
-                        str(opclass)
-                        for opclass in contract["operator_classes"]
-                    ),
-                    tuple(
-                        str(namespace)
-                        for namespace in (
-                            contract["operator_class_namespaces"]
-                        )
-                    ),
-                    tuple(
-                        bool(value)
-                        for value in contract[
-                            "column_collations_match"
-                        ]
-                    ),
+                    tuple(str(column) for column in contract["index_columns"]),
+                    tuple(int(option) for option in contract["column_options"]),
+                    tuple(str(opclass) for opclass in contract["operator_classes"]),
+                    tuple(str(namespace) for namespace in (contract["operator_class_namespaces"])),
+                    tuple(bool(value) for value in contract["column_collations_match"]),
                     contract["expressions"],
                     contract["predicate"],
                 )
             except (KeyError, TypeError, ValueError):
-                raise RuntimeError(
-                    _POSTGRES_MANAGED_SCHEMA_ERROR
-                ) from None
-            if unique_contract != (
-                "u",
-                expected_definition,
-                columns,
-                None,
-                None,
-                (),
-                source_schema,
-                key[1],
-                "i",
-                "p",
-                False,
-                "btree",
-                True,
-                False,
-                True,
-                True,
-                True,
-                len(columns),
-                len(columns),
-                columns,
-                (0,) * len(columns),
-                tuple(
-                    _postgres_index_opclass(key[0], column)
-                    for column in columns
-                ),
-                ("pg_catalog",) * len(columns),
-                (True,) * len(columns),
-                None,
-                None,
-            ) or int(contract["constraint_index_oid"]) <= 0:
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
+            if (
+                unique_contract
+                != (
+                    "u",
+                    expected_definition,
+                    columns,
+                    None,
+                    None,
+                    (),
+                    source_schema,
+                    key[1],
+                    "i",
+                    "p",
+                    False,
+                    "btree",
+                    True,
+                    False,
+                    True,
+                    True,
+                    True,
+                    len(columns),
+                    len(columns),
+                    columns,
+                    (0,) * len(columns),
+                    tuple(_postgres_index_opclass(key[0], column) for column in columns),
+                    ("pg_catalog",) * len(columns),
+                    (True,) * len(columns),
+                    None,
+                    None,
+                )
+                or int(contract["constraint_index_oid"]) <= 0
+            ):
                 raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
 
     @staticmethod
@@ -3640,9 +3722,7 @@ class PostgresDatabase:
                     row["column_default"],
                 )
             except (KeyError, TypeError, ValueError):
-                raise RuntimeError(
-                    _POSTGRES_MANAGED_SCHEMA_ERROR
-                ) from None
+                raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR) from None
             if owner is None or name in seen:
                 raise RuntimeError(_POSTGRES_MANAGED_SCHEMA_ERROR)
             if contract != (
@@ -3693,6 +3773,7 @@ class PostgresDatabase:
                     try:
                         await self._validate_managed_schema(conn)
                         await self._validate_websocket_ticket_schema(conn)
+                        await validate_postgresql_admission_authority_catalog(conn)
                     except _PostgresMigrationRequiredError:
                         raise
                     except _PostgresStartupDiagnosticError as exc:
@@ -3707,9 +3788,7 @@ class PostgresDatabase:
                             raise _PostgresManagedSchemaError(
                                 _POSTGRES_MANAGED_SCHEMA_ERROR,
                                 diagnostic_stage="managed-validation",
-                                diagnostic_invariant=(
-                                    "managed-validation-unclassified"
-                                ),
+                                diagnostic_invariant=("managed-validation-unclassified"),
                             ) from None
                         raise _postgres_startup_error(
                             _POSTGRES_SCHEMA_VALIDATION_ERROR,
@@ -3800,12 +3879,8 @@ class PostgresDatabase:
             schema_oid = int(relation["schema_oid"])
             schema_name = str(relation["schema_name"])
             if not _postgres_ticket_relation_is_canonical(relation):
-                relation_masks = _postgres_ticket_relation_diagnostic_masks(
-                    relation
-                )
-                for field, value in zip(
-                    ("m", "a", "x", "n"), relation_masks, strict=True
-                ):
+                relation_masks = _postgres_ticket_relation_diagnostic_masks(relation)
+                for field, value in zip(("m", "a", "x", "n"), relation_masks, strict=True):
                     census["r"][field] = value
                 if relation_masks == (0, 0, 0, 0):
                     census["r"]["g"] = 1
@@ -3952,10 +4027,7 @@ class PostgresDatabase:
             constraint_rows = []
             census["z"]["q"] |= 0x04
             rejected = True
-        actual_constraints = {
-            str(row["conname"]): row
-            for row in constraint_rows
-        }
+        actual_constraints = {str(row["conname"]): row for row in constraint_rows}
         expected_constraint_names = {
             "ck_ws_ticket_bearer_expires_finite",
             "ck_ws_ticket_consumed_at",
@@ -3975,8 +4047,7 @@ class PostgresDatabase:
             "websocket_tickets_pkey",
         }
         constraint_ordinals = {
-            name: ordinal
-            for ordinal, name in enumerate(sorted(expected_constraint_names))
+            name: ordinal for ordinal, name in enumerate(sorted(expected_constraint_names))
         }
         if set(actual_constraints) != expected_constraint_names:
             for name in expected_constraint_names - set(actual_constraints):
@@ -3999,8 +4070,10 @@ class PostgresDatabase:
             raise
         except Exception:
             q78_split = _postgres_q78_split_invariant(
-                {field: (0x3F if field == "x" else 0)
-                 for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS},
+                {
+                    field: (0x3F if field == "x" else 0)
+                    for field, _maximum, _width in _POSTGRES_Q78_SPLIT_INDEX_FIELDS
+                },
                 primary_binding=1,
                 opclass_missing=3,
                 opclass_extra=0,
@@ -4135,36 +4208,29 @@ class PostgresDatabase:
                     subphase=_postgres_q78_subphase(exc),
                 )
         canonical_opclasses = {
-            str(row["opcname"]): int(row["opclass_oid"])
-            for row in canonical_opclass_rows
+            str(row["opcname"]): int(row["opclass_oid"]) for row in canonical_opclass_rows
         }
         if set(canonical_opclasses) != {"text_ops", "timestamptz_ops"}:
-            census["o"]["m"] = (
-                int("text_ops" not in canonical_opclasses)
-                | (int("timestamptz_ops" not in canonical_opclasses) << 1)
+            census["o"]["m"] = int("text_ops" not in canonical_opclasses) | (
+                int("timestamptz_ops" not in canonical_opclasses) << 1
             )
-            census["o"]["e"] = int(
-                bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"})
-            )
+            census["o"]["e"] = int(bool(set(canonical_opclasses) - {"text_ops", "timestamptz_ops"}))
             rejected = True
 
         index_oids: set[int] = set()
         index_identity_failures: set[str] = set()
         index_identity_alternates: set[str] = set()
         for row in index_rows:
-            operator_classes = tuple(
-                str(opclass) for opclass in row["operator_classes"]
-            )
+            operator_classes = tuple(str(opclass) for opclass in row["operator_classes"])
             operator_class_oids = tuple(
                 int(opclass_oid) for opclass_oid in row["operator_class_oids"]
             )
             canonical_oids = tuple(
-                canonical_opclasses.get(opclass, -1)
-                for opclass in operator_classes
+                canonical_opclasses.get(opclass, -1) for opclass in operator_classes
             )
             index_oid = int(row["index_oid"])
-            relkind, relkind_alternate, relkind_unexpected = (
-                _postgres_internal_character(row["index_relkind"])
+            relkind, relkind_alternate, relkind_unexpected = _postgres_internal_character(
+                row["index_relkind"]
             )
             persistence, persistence_alternate, persistence_unexpected = (
                 _postgres_internal_character(row["index_relpersistence"])
@@ -4174,10 +4240,7 @@ class PostgresDatabase:
                 and int(row["index_schema_oid"]) == schema_oid
                 and str(row["index_schema"]) == schema_name
                 and not bool(row["index_is_partition"])
-                and tuple(
-                    str(namespace)
-                    for namespace in row["operator_class_namespaces"]
-                )
+                and tuple(str(namespace) for namespace in row["operator_class_namespaces"])
                 == ("pg_catalog",) * len(operator_classes)
                 and operator_class_oids == canonical_oids
                 and index_oid > 0
@@ -4213,10 +4276,7 @@ class PostgresDatabase:
                 bool(row["indislive"]),
                 int(row["indnkeyatts"]),
                 int(row["indnatts"]),
-                tuple(
-                    None if column is None else str(column)
-                    for column in row["columns"]
-                ),
+                tuple(None if column is None else str(column) for column in row["columns"]),
                 tuple(int(option) for option in row["column_options"]),
                 tuple(str(opclass) for opclass in row["operator_classes"]),
                 tuple(bool(value) for value in row["column_collations_match"]),
@@ -4227,37 +4287,105 @@ class PostgresDatabase:
         }
         expected_indexes = {
             "idx_ws_tickets_api_key": (
-                "btree", False, False, True, True, True,
-                1, 1, ("api_key_id",), (0,), ("text_ops",), (True,), None, None,
+                "btree",
+                False,
+                False,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("api_key_id",),
+                (0,),
+                ("text_ops",),
+                (True,),
+                None,
+                None,
             ),
             "idx_ws_tickets_bearer_family": (
-                "btree", False, False, True, True, True,
-                1, 1, ("bearer_family_id",), (0,), ("text_ops",), (True,),
-                None, None,
+                "btree",
+                False,
+                False,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("bearer_family_id",),
+                (0,),
+                ("text_ops",),
+                (True,),
+                None,
+                None,
             ),
             "idx_ws_tickets_campaign": (
-                "btree", False, False, True, True, True,
-                1, 1, ("campaign_id",), (0,), ("text_ops",), (True,), None, None,
+                "btree",
+                False,
+                False,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("campaign_id",),
+                (0,),
+                ("text_ops",),
+                (True,),
+                None,
+                None,
             ),
             "idx_ws_tickets_expires": (
-                "btree", False, False, True, True, True,
-                1, 1, ("expires_at",), (0,), ("timestamptz_ops",), (True,),
-                None, None,
+                "btree",
+                False,
+                False,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("expires_at",),
+                (0,),
+                ("timestamptz_ops",),
+                (True,),
+                None,
+                None,
             ),
             "idx_ws_tickets_user": (
-                "btree", False, False, True, True, True,
-                1, 1, ("user_id",), (0,), ("text_ops",), (True,), None, None,
+                "btree",
+                False,
+                False,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("user_id",),
+                (0,),
+                ("text_ops",),
+                (True,),
+                None,
+                None,
             ),
             "websocket_tickets_pkey": (
-                "btree", True, True, True, True, True,
-                1, 1, ("ticket_hash",), (0,), ("text_ops",), (True,), None, None,
+                "btree",
+                True,
+                True,
+                True,
+                True,
+                True,
+                1,
+                1,
+                ("ticket_hash",),
+                (0,),
+                ("text_ops",),
+                (True,),
+                None,
+                None,
             ),
         }
         if actual_indexes != expected_indexes:
             expected_index_names = tuple(expected_indexes)
-            index_ordinals = {
-                name: ordinal for ordinal, name in enumerate(expected_index_names)
-            }
+            index_ordinals = {name: ordinal for ordinal, name in enumerate(expected_index_names)}
             actual_index_names = tuple(str(row["index_name"]) for row in index_rows)
             actual_index_name_set = set(actual_index_names)
             for name in set(expected_index_names) - actual_index_name_set:
@@ -4275,18 +4403,26 @@ class PostgresDatabase:
                     continue
                 expected = expected_indexes[name]
                 for field, position in (
-                    ("b", 0), ("u", 1), ("p", 2), ("v", 3),
-                    ("r", 4), ("l", 5), ("k", 6), ("n", 7),
-                    ("c", 8), ("d", 9), ("a", 10), ("j", 11),
-                    ("s", 12), ("t", 13),
+                    ("b", 0),
+                    ("u", 1),
+                    ("p", 2),
+                    ("v", 3),
+                    ("r", 4),
+                    ("l", 5),
+                    ("k", 6),
+                    ("n", 7),
+                    ("c", 8),
+                    ("d", 9),
+                    ("a", 10),
+                    ("j", 11),
+                    ("s", 12),
+                    ("t", 13),
                 ):
                     if actual[position] != expected[position]:
                         census["i"][field] |= bit
             rejected = True
 
-        expected_index_ordinals = {
-            name: ordinal for ordinal, name in enumerate(expected_indexes)
-        }
+        expected_index_ordinals = {name: ordinal for ordinal, name in enumerate(expected_indexes)}
         for name in index_identity_failures:
             ordinal = expected_index_ordinals.get(name)
             if ordinal is None:
@@ -4325,9 +4461,7 @@ class PostgresDatabase:
             if row is None:
                 continue
             bit = 1 << constraint_ordinals[name]
-            contype, alternate, unexpected = _postgres_internal_character(
-                row["contype"]
-            )
+            contype, alternate, unexpected = _postgres_internal_character(row["contype"])
             mismatch = False
             if unexpected:
                 census["q"]["x"] |= bit
@@ -4358,11 +4492,7 @@ class PostgresDatabase:
                 "fetchval",
                 "SELECT current_schema()",
             )
-            referenced_schema = (
-                raw_referenced_schema
-                if type(raw_referenced_schema) is str
-                else ""
-            )
+            referenced_schema = raw_referenced_schema if type(raw_referenced_schema) is str else ""
             if not referenced_schema:
                 census["z"]["x"] |= 0x20
                 rejected = True
@@ -4380,13 +4510,28 @@ class PostgresDatabase:
                 )
         expected_foreign_keys = {
             "fk_ws_ticket_campaign": (
-                ("campaign_id",), referenced_schema, "campaigns", ("id",), "a", "c",
+                ("campaign_id",),
+                referenced_schema,
+                "campaigns",
+                ("id",),
+                "a",
+                "c",
             ),
             "fk_ws_ticket_user": (
-                ("user_id",), referenced_schema, "users", ("id",), "a", "c",
+                ("user_id",),
+                referenced_schema,
+                "users",
+                ("id",),
+                "a",
+                "c",
             ),
             "fk_ws_ticket_api_key": (
-                ("api_key_id",), referenced_schema, "api_keys", ("id",), "a", "c",
+                ("api_key_id",),
+                referenced_schema,
+                "api_keys",
+                ("id",),
+                "a",
+                "c",
             ),
             "fk_ws_ticket_bearer_family": (
                 ("bearer_family_id", "user_id"),
@@ -4422,10 +4567,7 @@ class PostgresDatabase:
                     exc,
                     subphase=_postgres_q78_subphase(exc),
                 )
-        referenced_oids = {
-            str(row["relname"]): int(row["relation_oid"])
-            for row in referenced_rows
-        }
+        referenced_oids = {str(row["relname"]): int(row["relation_oid"]) for row in referenced_rows}
         if set(referenced_oids) != {
             "api_keys",
             "campaigns",
@@ -4441,9 +4583,7 @@ class PostgresDatabase:
                 census["q"]["b"] |= 1 << ordinal
                 rejected = True
 
-        foreign_key_ordinals = {
-            name: ordinal for ordinal, name in enumerate(expected_foreign_keys)
-        }
+        foreign_key_ordinals = {name: ordinal for ordinal, name in enumerate(expected_foreign_keys)}
         for name, expected in expected_foreign_keys.items():
             row = actual_constraints.get(name)
             if row is None:
@@ -4460,8 +4600,7 @@ class PostgresDatabase:
             reference_identity_is_exact = (
                 row["referenced_schema_oid"] is not None
                 and int(row["referenced_schema_oid"]) == schema_oid
-                and int(row["referenced_oid"])
-                == referenced_oids.get(expected[2])
+                and int(row["referenced_oid"]) == referenced_oids.get(expected[2])
             )
             for field, actual_value, expected_value in zip(
                 ("l", "s", "t", "r"), actual[:4], expected[:4], strict=True
@@ -4473,9 +4612,7 @@ class PostgresDatabase:
                 ("u", row["confupdtype"], expected[4]),
                 ("d", row["confdeltype"], expected[5]),
             ):
-                semantic, alternate, unexpected = _postgres_internal_character(
-                    raw_value
-                )
+                semantic, alternate, unexpected = _postgres_internal_character(raw_value)
                 if unexpected:
                     census["f"]["x"] |= bit
                     rejected = True
@@ -4491,51 +4628,35 @@ class PostgresDatabase:
 
         primary = actual_constraints.get("websocket_tickets_pkey")
         primary_index = next(
-            (
-                row for row in index_rows
-                if str(row["index_name"]) == "websocket_tickets_pkey"
-            ),
+            (row for row in index_rows if str(row["index_name"]) == "websocket_tickets_pkey"),
             None,
         )
         if primary is not None:
-            if tuple(str(column) for column in primary["local_columns"]) != (
-                "ticket_hash",
-            ):
+            if tuple(str(column) for column in primary["local_columns"]) != ("ticket_hash",):
                 census["p"]["l"] = 1
                 rejected = True
             if tuple(primary["remote_columns"]):
                 census["p"]["r"] = 1
                 rejected = True
-            if (
-                primary["referenced_schema"] is not None
-                or primary["referenced_table"] is not None
-            ):
+            if primary["referenced_schema"] is not None or primary["referenced_table"] is not None:
                 census["p"]["n"] = 1
                 rejected = True
-            if (
-                primary_index is None
-                or int(primary["constraint_index_oid"])
-                != int(primary_index["index_oid"])
+            if primary_index is None or int(primary["constraint_index_oid"]) != int(
+                primary_index["index_oid"]
             ):
                 census["p"]["i"] = 1
                 rejected = True
 
         expected_check_definitions = {
-            "ck_ws_ticket_hash": (
-                "CHECK (ticket_hash ~ '^[0-9a-f]{64}$'::text)"
-            ),
+            "ck_ws_ticket_hash": ("CHECK (ticket_hash ~ '^[0-9a-f]{64}$'::text)"),
             "ck_ws_ticket_kind": (
-                "CHECK (credential_kind = ANY "
-                "(ARRAY['bearer'::text, 'api_key'::text]))"
+                "CHECK (credential_kind = ANY (ARRAY['bearer'::text, 'api_key'::text]))"
             ),
             "ck_ws_ticket_created_at": "CHECK (created_at < expires_at)",
             "ck_ws_ticket_expires_at": "CHECK (expires_at > created_at)",
-            "ck_ws_ticket_consumed_at": (
-                "CHECK (consumed_at IS NULL OR consumed_at < expires_at)"
-            ),
+            "ck_ws_ticket_consumed_at": ("CHECK (consumed_at IS NULL OR consumed_at < expires_at)"),
             "ck_ws_ticket_bearer_expires_finite": (
-                "CHECK (bearer_expires_at IS NULL "
-                "OR isfinite(bearer_expires_at))"
+                "CHECK (bearer_expires_at IS NULL OR isfinite(bearer_expires_at))"
             ),
             "ck_ws_ticket_created_finite": "CHECK (isfinite(created_at))",
             "ck_ws_ticket_expires_finite": "CHECK (isfinite(expires_at))",
@@ -4572,18 +4693,14 @@ class PostgresDatabase:
                 "AND required_scope = 'read'::text)"
             ),
         }
-        check_ordinals = {
-            name: ordinal for ordinal, name in enumerate(expected_check_definitions)
-        }
+        check_ordinals = {name: ordinal for ordinal, name in enumerate(expected_check_definitions)}
         for name, expected_definition in expected_check_definitions.items():
             row = actual_constraints.get(name)
             if row is None:
                 continue
             bit = 1 << check_ordinals[name]
             constraint_bit = 1 << constraint_ordinals[name]
-            contype, alternate, unexpected = _postgres_internal_character(
-                row["contype"]
-            )
+            contype, alternate, unexpected = _postgres_internal_character(row["contype"])
             if unexpected:
                 census["h"]["x"] |= bit
                 census["q"]["x"] |= constraint_bit
@@ -4645,8 +4762,10 @@ class PostgresDatabase:
 
     async def save_campaign(self, c: Any) -> None:
         from ares.core.campaign import Campaign
+
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO campaigns(id,name,client,operator,noise_profile,status,scope_json,targets_json,notes)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
                 ON CONFLICT(id) DO UPDATE SET
@@ -4655,11 +4774,19 @@ class PostgresDatabase:
                   scope_json=EXCLUDED.scope_json, targets_json=EXCLUDED.targets_json,
                   notes=EXCLUDED.notes,
                   updated_at=now()
-            """, c.id, c.name, c.client, c.operator,
-                c.noise_profile.value if hasattr(c.noise_profile, "value") else str(c.noise_profile),
+            """,
+                c.id,
+                c.name,
+                c.client,
+                c.operator,
+                c.noise_profile.value
+                if hasattr(c.noise_profile, "value")
+                else str(c.noise_profile),
                 c.status.value if hasattr(c.status, "value") else str(c.status),
                 json.dumps([s.model_dump() for s in c.scope]),
-                json.dumps(c.targets), c.notes)
+                json.dumps(c.targets),
+                c.notes,
+            )
 
     async def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
         async with self._pool.acquire() as conn:
@@ -4670,39 +4797,269 @@ class PostgresDatabase:
         self, page: int = 1, per_page: int = 50, operator: str | None = None
     ) -> tuple[list[dict[str, Any]], int]:
         offset = (page - 1) * per_page
-        where  = "WHERE operator=$1" if operator else ""
+        where = "WHERE operator=$1" if operator else ""
         params = [operator] if operator else []
 
         async with self._pool.acquire() as conn:
-            total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM campaigns {where}", *params
-            )
+            total = await conn.fetchval(f"SELECT COUNT(*) FROM campaigns {where}", *params)
             rows = await conn.fetch(
-                f"SELECT * FROM campaigns {where} ORDER BY created_at DESC LIMIT ${ len(params)+1 } OFFSET ${ len(params)+2 }",
-                *params, per_page, offset,
+                f"SELECT * FROM campaigns {where} ORDER BY created_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}",
+                *params,
+                per_page,
+                offset,
             )
         return [self._row_to_dict(r) for r in rows], total or 0
 
-    async def delete_campaign(self, campaign_id: str) -> bool:
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                for statement in (
-                    "DELETE FROM loot WHERE campaign_id=$1",
-                    "DELETE FROM credentials WHERE campaign_id=$1",
-                    "DELETE FROM hosts WHERE campaign_id=$1",
-                    "DELETE FROM findings WHERE campaign_id=$1",
-                ):
-                    await conn.execute(statement, campaign_id)
-                result = await conn.execute(
-                    "DELETE FROM campaigns WHERE id=$1", campaign_id
+    async def delete_campaign(
+        self,
+        campaign_id: str,
+    ) -> bool:
+        """Delete once through the stable compatibility receipt authority."""
+        result = await self.delete_campaign_lifecycle(campaign_id)
+        return result.result is FixedResult.APPLIED
+
+    async def delete_campaign_lifecycle(
+        self,
+        campaign_id: str,
+        *,
+        operation_id: str | None = None,
+        lifecycle_operation_id: str | None = None,
+        principal_kind: str = "system",
+        principal_subject_ref: str | None = None,
+        principal_user_id: str | None = None,
+        principal_authority_revision: int | None = None,
+    ) -> OperationResult:
+        """Delete a campaign with explicit immutable operation/principal binding."""
+        if (
+            operation_id is not None
+            and lifecycle_operation_id is not None
+            and operation_id != lifecycle_operation_id
+        ):
+            return OperationResult(FixedResult.INVALID_CONTRACT, None)
+        resolved_operation_id = operation_id if operation_id is not None else lifecycle_operation_id
+        if resolved_operation_id is None:
+            if not valid_uuid(campaign_id):
+                return OperationResult(FixedResult.INVALID_CONTRACT, None)
+            resolved_operation_id = _campaign_delete_operation_id(campaign_id)
+        if principal_subject_ref is None:
+            if principal_kind != "system":
+                return OperationResult(FixedResult.INVALID_CONTRACT, None)
+            principal_subject_ref = SYSTEM_PRINCIPAL_SUBJECT_REF
+
+        store = ExecutionLifecycleStore(self._pool, "postgresql")
+        try:
+            receipt_spec = store._receipt_spec(
+                operation_id=resolved_operation_id,
+                operation_code="campaign_delete",
+                campaign_id=campaign_id,
+                primary_target_id=campaign_id,
+                principal_kind=principal_kind,
+                principal_subject_ref=principal_subject_ref,
+                principal_user_id=principal_user_id,
+                principal_authority_revision=principal_authority_revision,
+            )
+        except ValueError:
+            return OperationResult(FixedResult.INVALID_CONTRACT, None)
+
+        async with store._transaction() as conn:
+            await store._acquire_transaction_key(conn, resolved_operation_id)
+            replay = await store._classify_receipt(conn, receipt_spec, current_revision=None)
+            if replay is not None:
+                return replay
+            await store._acquire_transaction_key(conn, campaign_id)
+            await conn.fetchrow(
+                "SELECT singleton_id FROM execution_gateway_state WHERE singleton_id=1 FOR UPDATE"
+            )
+            campaign_row = await conn.fetchrow(
+                "SELECT id FROM campaigns WHERE id=$1 FOR UPDATE", campaign_id
+            )
+            if campaign_row is None:
+                return OperationResult(FixedResult.NOT_FOUND_OR_PURGED, None)
+            await conn.fetch(
+                "SELECT campaign_id FROM campaign_execution_authority_revisions "
+                "WHERE campaign_id=$1 FOR UPDATE",
+                campaign_id,
+            )
+            actor_grant_rows = await conn.fetch(
+                "SELECT actor_user_id AS id FROM campaign_execution_actor_grants "
+                "WHERE campaign_id=$1 ORDER BY actor_user_id FOR UPDATE",
+                campaign_id,
+            )
+            destination_authority_rows = await conn.fetch(
+                "SELECT campaign_id AS id FROM campaign_execution_destination_authorities "
+                "WHERE campaign_id=$1 FOR UPDATE",
+                campaign_id,
+            )
+            approval_authority_rows = await conn.fetch(
+                "SELECT id FROM execution_approval_authorities WHERE campaign_id=$1 "
+                "ORDER BY id FOR UPDATE",
+                campaign_id,
+            )
+            logical_rows = await conn.fetch(
+                "SELECT id,closed_at FROM logical_executions WHERE campaign_id=$1 "
+                "ORDER BY id FOR UPDATE",
+                campaign_id,
+            )
+            attempt_rows = await conn.fetch(
+                "SELECT id,state,ordinal FROM execution_attempts WHERE campaign_id=$1 "
+                "ORDER BY ordinal,id FOR UPDATE",
+                campaign_id,
+            )
+            destination_observation_rows = await conn.fetch(
+                "SELECT attempt_id || ':' || ordinal::text AS id "
+                "FROM execution_attempt_destination_observations WHERE campaign_id=$1 "
+                "ORDER BY attempt_id,ordinal FOR UPDATE",
+                campaign_id,
+            )
+            credential_observation_rows = await conn.fetch(
+                "SELECT attempt_id || ':' || ordinal::text AS id "
+                "FROM execution_attempt_credential_observations WHERE campaign_id=$1 "
+                "ORDER BY attempt_id,ordinal FOR UPDATE",
+                campaign_id,
+            )
+            budget_rows = await conn.fetch(
+                "SELECT id,budget_kind FROM campaign_execution_budgets WHERE campaign_id=$1 "
+                "ORDER BY budget_kind,id FOR UPDATE",
+                campaign_id,
+            )
+            ledger_rows = await conn.fetch(
+                "SELECT id,budget_kind FROM campaign_execution_budget_ledger "
+                "WHERE campaign_id=$1 ORDER BY budget_kind,id FOR UPDATE",
+                campaign_id,
+            )
+            await conn.fetch(
+                "SELECT id FROM hosts WHERE campaign_id=$1 ORDER BY ip_address,id FOR UPDATE",
+                campaign_id,
+            )
+            for table in ("findings", "credentials", "loot"):
+                await conn.fetch(
+                    f"SELECT id FROM {table} WHERE campaign_id=$1 ORDER BY id FOR UPDATE",
+                    campaign_id,
                 )
-        return result == "DELETE 1"
+            link_rows = await conn.fetch(
+                "SELECT id FROM execution_output_links WHERE campaign_id=$1 ORDER BY id FOR UPDATE",
+                campaign_id,
+            )
+            outbox_rows = await conn.fetch(
+                "SELECT id,publication_state FROM execution_publication_outbox "
+                "WHERE campaign_id=$1 ORDER BY id FOR UPDATE",
+                campaign_id,
+            )
+            approval_rows = await conn.fetch(
+                "SELECT id FROM execution_attempt_approvals WHERE campaign_id=$1 "
+                "ORDER BY id FOR UPDATE",
+                campaign_id,
+            )
+            blocked = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM execution_attempts WHERE campaign_id=$1 "
+                "AND state IN ('accepted','queued','dispatching','running','cancelling',"
+                "'settlement_pending')) "
+                "OR EXISTS(SELECT 1 FROM logical_executions WHERE campaign_id=$1 "
+                "AND closed_at IS NULL) "
+                "OR EXISTS(SELECT 1 FROM execution_publication_outbox WHERE campaign_id=$1 "
+                "AND publication_state='claimed')",
+                campaign_id,
+            )
+            if blocked:
+                raise RuntimeError("Campaign lifecycle deletion is blocked")
+
+            async def delete_exact(statement: str, expected: tuple[str, ...]) -> None:
+                deleted = await conn.fetch(statement, campaign_id)
+                observed = tuple(sorted(str(row["id"]) for row in deleted))
+                if observed != tuple(sorted(expected)):
+                    raise RuntimeError("Campaign lifecycle deletion invariant failed")
+
+            await delete_exact(
+                "DELETE FROM execution_output_links WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in link_rows),
+            )
+            await delete_exact(
+                "DELETE FROM execution_publication_outbox WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in outbox_rows),
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_approvals WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in approval_rows),
+            )
+            await delete_exact(
+                "DELETE FROM execution_approval_authorities WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in approval_authority_rows),
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_destination_observations WHERE campaign_id=$1 "
+                "RETURNING attempt_id || ':' || ordinal::text AS id",
+                tuple(str(row["id"]) for row in destination_observation_rows),
+            )
+            await delete_exact(
+                "DELETE FROM execution_attempt_credential_observations WHERE campaign_id=$1 "
+                "RETURNING attempt_id || ':' || ordinal::text AS id",
+                tuple(str(row["id"]) for row in credential_observation_rows),
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_budget_ledger WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in ledger_rows),
+            )
+            for attempt in reversed(attempt_rows):
+                deleted = await conn.fetchrow(
+                    "DELETE FROM execution_attempts WHERE id=$1 RETURNING id",
+                    attempt["id"],
+                )
+                if deleted is None or str(deleted["id"]) != str(attempt["id"]):
+                    raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            await delete_exact(
+                "DELETE FROM logical_executions WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in logical_rows),
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_budgets WHERE campaign_id=$1 RETURNING id",
+                tuple(str(row["id"]) for row in budget_rows),
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_actor_grants WHERE campaign_id=$1 "
+                "RETURNING actor_user_id AS id",
+                tuple(str(row["id"]) for row in actor_grant_rows),
+            )
+            await delete_exact(
+                "DELETE FROM campaign_execution_destination_authorities WHERE campaign_id=$1 "
+                "RETURNING campaign_id AS id",
+                tuple(str(row["id"]) for row in destination_authority_rows),
+            )
+            authority_deleted = await conn.fetch(
+                "DELETE FROM campaign_execution_authority_revisions "
+                "WHERE campaign_id=$1 RETURNING campaign_id AS id",
+                campaign_id,
+            )
+            if len(authority_deleted) > 1:
+                raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            for statement in (
+                "DELETE FROM loot WHERE campaign_id=$1 RETURNING id",
+                "DELETE FROM credentials WHERE campaign_id=$1 RETURNING id",
+                "DELETE FROM hosts WHERE campaign_id=$1 RETURNING id",
+                "DELETE FROM findings WHERE campaign_id=$1 RETURNING id",
+            ):
+                await conn.fetch(statement, campaign_id)
+            await store._insert_receipt(
+                conn,
+                receipt_spec,
+                result=FixedResult.APPLIED,
+                exact_replay_code=FixedResult.REPLAYED,
+                result_identity=campaign_id,
+                result_revision=None,
+                result_fields=(("deleted", True),),
+            )
+            deleted_campaign = await conn.fetchrow(
+                "DELETE FROM campaigns WHERE id=$1 RETURNING id", campaign_id
+            )
+            if deleted_campaign is None or str(deleted_campaign["id"]) != campaign_id:
+                raise RuntimeError("Campaign lifecycle deletion invariant failed")
+            return OperationResult(FixedResult.APPLIED, None)
 
     # ── Findings ───────────────────────────────────────────────────────────────
 
     async def save_finding(self, campaign_id: str, f: Any, module_id: str = "") -> None:
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO findings
                 (id,campaign_id,module_id,title,description,severity,cvss_score,cvss_vector,
                  confidence,mitre_technique,mitre_tactic,evidence_json,remediation,host,trace_id,
@@ -4712,36 +5069,49 @@ class PostgresDatabase:
                   title=EXCLUDED.title, description=EXCLUDED.description,
                   severity=EXCLUDED.severity, evidence_json=EXCLUDED.evidence_json,
                   validated=EXCLUDED.validated, false_positive=EXCLUDED.false_positive
-            """, f.id, campaign_id, module_id or getattr(f, "module_id", ""),
-                f.title, f.description,
+            """,
+                f.id,
+                campaign_id,
+                module_id or getattr(f, "module_id", ""),
+                f.title,
+                f.description,
                 f.severity.value if hasattr(f.severity, "value") else str(f.severity),
-                getattr(f, "cvss_score", 0.0), getattr(f, "cvss_vector", ""),
-                f.confidence, f.mitre_technique, f.mitre_tactic,
-                json.dumps(f.evidence), f.remediation, f.host,
+                getattr(f, "cvss_score", 0.0),
+                getattr(f, "cvss_vector", ""),
+                f.confidence,
+                f.mitre_technique,
+                f.mitre_tactic,
+                json.dumps(f.evidence),
+                f.remediation,
+                f.host,
                 getattr(f, "trace_id", ""),
                 int(bool(getattr(f, "validated", False))),
-                int(bool(getattr(f, "false_positive", False))))
+                int(bool(getattr(f, "false_positive", False))),
+            )
 
     async def list_findings(
         self,
-        campaign_id:    str,
-        page:           int = 1,
-        per_page:       int = 50,
-        severity:       str | None = None,
+        campaign_id: str,
+        page: int = 1,
+        per_page: int = 50,
+        severity: str | None = None,
         false_positive: bool | None = None,
-        validated:      bool | None = None,
+        validated: bool | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         conditions = ["campaign_id=$1"]
         params: list[Any] = [campaign_id]
 
         if severity:
-            params.append(severity);        conditions.append(f"severity=${len(params)}")
+            params.append(severity)
+            conditions.append(f"severity=${len(params)}")
         if false_positive is not None:
-            params.append(int(false_positive)); conditions.append(f"false_positive=${len(params)}")
+            params.append(int(false_positive))
+            conditions.append(f"false_positive=${len(params)}")
         if validated is not None:
-            params.append(int(validated));  conditions.append(f"validated=${len(params)}")
+            params.append(int(validated))
+            conditions.append(f"validated=${len(params)}")
 
-        where  = " AND ".join(conditions)
+        where = " AND ".join(conditions)
         offset = (page - 1) * per_page
 
         async with self._pool.acquire() as conn:
@@ -4749,7 +5119,7 @@ class PostgresDatabase:
             params_page = params + [per_page, offset]
             rows = await conn.fetch(
                 f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC"
-                f" LIMIT ${len(params)+1} OFFSET ${len(params)+2}",
+                f" LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}",
                 *params_page,
             )
         return [self._row_to_dict(r) for r in rows], total or 0
@@ -4773,7 +5143,14 @@ class PostgresDatabase:
                 "SELECT severity, COUNT(*) as n FROM findings WHERE campaign_id=$1 GROUP BY severity",
                 campaign_id,
             )
-        stats: dict[str, Any] = {"total": 0, "critical":0,"high":0,"medium":0,"low":0,"info":0}
+        stats: dict[str, Any] = {
+            "total": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+        }
         for r in rows:
             stats[r["severity"]] = r["n"]
             stats["total"] += r["n"]
@@ -4812,10 +5189,7 @@ class PostgresDatabase:
                 period_start,
                 next_month,
             )
-        series = [
-            {"date": row["finding_date"].isoformat(), "count": int(row["n"])}
-            for row in rows
-        ]
+        series = [{"date": row["finding_date"].isoformat(), "count": int(row["n"])} for row in rows]
         return {
             "period": period,
             "label": "Security signals this cycle",
@@ -4911,17 +5285,34 @@ class PostgresDatabase:
 
     async def upsert_host(self, h: Any) -> str:
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            canonical_id = await conn.fetchval(
+                """
                 INSERT INTO hosts(id,campaign_id,ip_address,hostname,fqdn,os,os_version,
                     domain,is_dc,open_ports_json,tags_json)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 ON CONFLICT(campaign_id,ip_address) DO UPDATE SET
                   hostname=EXCLUDED.hostname, os=EXCLUDED.os, is_dc=EXCLUDED.is_dc,
-                  open_ports_json=EXCLUDED.open_ports_json, last_seen=now()
-            """, h.id, h.campaign_id, h.ip_address, h.hostname, h.fqdn,
-                h.os, h.os_version, h.domain, int(h.is_dc),
-                json.dumps(h.open_ports), json.dumps(h.tags))
-        return h.id
+                  fqdn=EXCLUDED.fqdn, os=EXCLUDED.os,
+                  os_version=EXCLUDED.os_version, domain=EXCLUDED.domain,
+                  is_dc=EXCLUDED.is_dc, open_ports_json=EXCLUDED.open_ports_json,
+                  tags_json=EXCLUDED.tags_json, last_seen=now()
+                RETURNING id
+            """,
+                h.id,
+                h.campaign_id,
+                h.ip_address,
+                h.hostname,
+                h.fqdn,
+                h.os,
+                h.os_version,
+                h.domain,
+                int(h.is_dc),
+                json.dumps(h.open_ports),
+                json.dumps(h.tags),
+            )
+        if canonical_id is None:
+            raise RuntimeError("Canonical host persistence failed")
+        return str(canonical_id)
 
     async def get_hosts(self, campaign_id: str) -> list[dict]:
         async with self._pool.acquire() as conn:
@@ -4934,13 +5325,27 @@ class PostgresDatabase:
 
     async def save_credential(self, c: Any) -> None:
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO credentials
                 (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                ON CONFLICT(id) DO NOTHING
-            """, c.id, c.campaign_id, c.host_id, c.username,
-                self._enc_val(c.secret), c.cred_type, c.domain, c.source_module, c.notes)
+                ON CONFLICT(id) DO UPDATE SET
+                  host_id=EXCLUDED.host_id,username=EXCLUDED.username,
+                  secret_enc=EXCLUDED.secret_enc,cred_type=EXCLUDED.cred_type,
+                  domain=EXCLUDED.domain,source_module=EXCLUDED.source_module,
+                  notes=EXCLUDED.notes
+            """,
+                c.id,
+                c.campaign_id,
+                c.host_id,
+                c.username,
+                self._enc_val(c.secret),
+                c.cred_type,
+                c.domain,
+                c.source_module,
+                c.notes,
+            )
 
     async def get_credentials(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:
@@ -4961,7 +5366,8 @@ class PostgresDatabase:
         Mirrors database.py implementation — required by engine._persist_vault_credentials().
         """
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO credentials
                     (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -4969,9 +5375,17 @@ class PostgresDatabase:
                     secret_enc    = EXCLUDED.secret_enc,
                     source_module = EXCLUDED.source_module,
                     notes         = EXCLUDED.notes
-            """, cred.id, cred.campaign_id, cred.host_id, cred.username,
-                cred.secret,   # already vault-encrypted — store verbatim, no _enc_val()
-                cred.cred_type, cred.domain, cred.source_module, cred.notes)
+            """,
+                cred.id,
+                cred.campaign_id,
+                cred.host_id,
+                cred.username,
+                cred.secret,  # already vault-encrypted — store verbatim, no _enc_val()
+                cred.cred_type,
+                cred.domain,
+                cred.source_module,
+                cred.notes,
+            )
 
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
@@ -4992,15 +5406,34 @@ class PostgresDatabase:
     async def save_loot(self, l: Any) -> None:
         content_str = json.dumps(l.content) if isinstance(l.content, (dict, list)) else l.content
         async with self._pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO loot
                 (id,campaign_id,host_id,loot_type,name,description,content_enc,
                  path_on_target,source_module,tags_json)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                ON CONFLICT(id) DO NOTHING
-            """, l.id, l.campaign_id, l.host_id, l.loot_type, l.name, l.description,
-                self._enc_val(content_str), l.path_on_target, l.source_module,
-                json.dumps(l.tags))
+                ON CONFLICT(id) DO UPDATE SET
+                  host_id=EXCLUDED.host_id,loot_type=EXCLUDED.loot_type,
+                  name=EXCLUDED.name,description=EXCLUDED.description,
+                  content_enc=EXCLUDED.content_enc,
+                  path_on_target=EXCLUDED.path_on_target,
+                  source_module=EXCLUDED.source_module,tags_json=EXCLUDED.tags_json
+            """,
+                l.id,
+                l.campaign_id,
+                l.host_id,
+                l.loot_type,
+                l.name,
+                l.description,
+                self._enc_val(content_str),
+                l.path_on_target,
+                l.source_module,
+                json.dumps(l.tags),
+            )
+
+    def execution_lifecycle_store(self) -> ExecutionLifecycleStore:
+        """Return the additive internal lifecycle persistence primitive."""
+        return ExecutionLifecycleStore(self._pool, "postgresql")
 
     async def get_loot(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
         async with self._pool.acquire() as conn:
@@ -5064,37 +5497,52 @@ class PostgresDatabase:
 
     async def campaign_summary(self, campaign_id: str) -> dict[str, Any]:
         findings = await self.get_findings(campaign_id)
-        hosts    = await self.get_hosts(campaign_id)
-        creds    = await self.get_credentials(campaign_id)
-        loot     = await self.get_loot(campaign_id)
+        hosts = await self.get_hosts(campaign_id)
+        creds = await self.get_credentials(campaign_id)
+        loot = await self.get_loot(campaign_id)
         return {
-            "campaign_id":      campaign_id,
-            "findings":         findings,
-            "finding_count":    len(findings),
-            "host_count":       len(hosts),
+            "campaign_id": campaign_id,
+            "findings": findings,
+            "finding_count": len(findings),
+            "host_count": len(hosts),
             "credential_count": len(creds),
-            "loot_count":       len(loot),
+            "loot_count": len(loot),
         }
 
     # ── Audit ──────────────────────────────────────────────────────────────────
 
-    async def audit(self, actor: str, action: str, detail: str = "",
-                    campaign_id: str | None = None, module_id: str | None = None) -> None:
+    async def audit(
+        self,
+        actor: str,
+        action: str,
+        detail: str = "",
+        campaign_id: str | None = None,
+        module_id: str | None = None,
+    ) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO audit_log(campaign_id,actor,action,detail,module_id) VALUES($1,$2,$3,$4,$5)",
-                campaign_id, actor, action, detail, module_id,
+                campaign_id,
+                actor,
+                action,
+                detail,
+                module_id,
             )
 
     # ── Users ──────────────────────────────────────────────────────────────────
 
-    async def create_user(self, username: str, password: str, role: str,
-                          created_by: str = "system") -> str:
+    async def create_user(
+        self, username: str, password: str, role: str, created_by: str = "system"
+    ) -> str:
         user_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO users(id,username,hashed_password,role,created_by) VALUES($1,$2,$3,$4,$5)",
-                user_id, username, hash_password(password), role, created_by,
+                user_id,
+                username,
+                hash_password(password),
+                role,
+                created_by,
             )
         logger.info("user_created", username=username, role=role)
         return user_id
@@ -5108,9 +5556,7 @@ class PostgresDatabase:
 
     async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM users WHERE id=$1 AND is_active=1", user_id
-            )
+            row = await conn.fetchrow("SELECT * FROM users WHERE id=$1 AND is_active=1", user_id)
         return self._row_to_dict(row) if row else None
 
     async def resolve_access_token_principal(
@@ -5164,15 +5610,11 @@ class PostgresDatabase:
 
     async def user_exists(self, username: str) -> bool:
         async with self._pool.acquire() as conn:
-            return bool(await conn.fetchval(
-                "SELECT 1 FROM users WHERE username=$1", username
-            ))
+            return bool(await conn.fetchval("SELECT 1 FROM users WHERE username=$1", username))
 
     async def update_password(self, user_id: str, new_hash: str) -> None:
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE users SET hashed_password=$1 WHERE id=$2", new_hash, user_id
-            )
+            await conn.execute("UPDATE users SET hashed_password=$1 WHERE id=$2", new_hash, user_id)
 
     async def list_users(self) -> list[dict[str, Any]]:
         async with self._pool.acquire() as conn:
@@ -5186,25 +5628,35 @@ class PostgresDatabase:
             n = await conn.fetchval("SELECT COUNT(*) FROM users")
         if n == 0:
             await self.create_user("admin", admin_password, "team_lead", "bootstrap")
-            logger.warning("default_admin_created",
-                           msg="CHANGE password immediately: POST /auth/change-password")
+            logger.warning(
+                "default_admin_created",
+                msg="CHANGE password immediately: POST /auth/change-password",
+            )
             return True
         return False
 
     # ── API Keys ───────────────────────────────────────────────────────────────
 
-    async def create_api_key(self, user_id: str, name: str, scopes: str = "read",
-                             expires_days: int | None = None) -> tuple[str, str]:
-        raw_key    = "ares_" + secrets.token_urlsafe(40)
+    async def create_api_key(
+        self, user_id: str, name: str, scopes: str = "read", expires_days: int | None = None
+    ) -> tuple[str, str]:
+        raw_key = "ares_" + secrets.token_urlsafe(40)
         key_prefix = raw_key[:12]
-        key_id     = str(uuid.uuid4())
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days) \
-                     if expires_days else None
+        key_id = str(uuid.uuid4())
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(days=expires_days) if expires_days else None
+        )
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO api_keys(id,user_id,name,key_hash,key_prefix,scopes,expires_at) "
                 "VALUES($1,$2,$3,$4,$5,$6,$7)",
-                key_id, user_id, name, hash_password(raw_key), key_prefix, scopes, expires_at,
+                key_id,
+                user_id,
+                name,
+                hash_password(raw_key),
+                key_prefix,
+                scopes,
+                expires_at,
             )
         return key_id, raw_key
 
@@ -5252,7 +5704,8 @@ class PostgresDatabase:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT id,name,key_prefix,scopes,is_active,last_used,expires_at,created_at "
-                "FROM api_keys WHERE user_id=$1 AND is_active=1 ORDER BY created_at DESC", user_id,
+                "FROM api_keys WHERE user_id=$1 AND is_active=1 ORDER BY created_at DESC",
+                user_id,
             )
         return [self._row_to_dict(r) for r in rows]
 
@@ -5274,9 +5727,7 @@ class PostgresDatabase:
 
     @staticmethod
     async def _purge_websocket_ticket_rows(connection: Any) -> None:
-        await connection.execute(
-            "DELETE FROM websocket_tickets WHERE expires_at <= now()"
-        )
+        await connection.execute("DELETE FROM websocket_tickets WHERE expires_at <= now()")
 
     async def issue_websocket_ticket(
         self,
@@ -5437,9 +5888,7 @@ class PostgresDatabase:
                     consumed = ConsumedWebSocketTicket(
                         campaign_id=row["campaign_id"],
                         user_id=row["user_id"],
-                        credential_kind=WebSocketTicketCredentialKind(
-                            row["credential_kind"]
-                        ),
+                        credential_kind=WebSocketTicketCredentialKind(row["credential_kind"]),
                         bearer_subject=row["bearer_subject"],
                         bearer_jti=row["bearer_jti"],
                         bearer_expires_at=row["bearer_expires_at"],
@@ -5602,12 +6051,10 @@ class PostgresDatabase:
         user_id: str,
         auth_epoch: int,
     ) -> tuple[str, str]:
-        family_id, raw_token, _ = (
-            await PostgresDatabase._insert_initial_family_token_with_expiry(
-                conn,
-                user_id=user_id,
-                auth_epoch=auth_epoch,
-            )
+        family_id, raw_token, _ = await PostgresDatabase._insert_initial_family_token_with_expiry(
+            conn,
+            user_id=user_id,
+            auth_epoch=auth_epoch,
         )
         return family_id, raw_token
 
@@ -5621,8 +6068,7 @@ class PostgresDatabase:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
-                    "SELECT auth_epoch FROM users WHERE id=$1 AND is_active=1 "
-                    "FOR UPDATE",
+                    "SELECT auth_epoch FROM users WHERE id=$1 AND is_active=1 FOR UPDATE",
                     user_id,
                 )
                 if row is None:
@@ -5647,17 +6093,23 @@ class PostgresDatabase:
                     "FROM users WHERE username=$1 FOR UPDATE",
                     username,
                 )
-                if row is None or not bool(row["is_active"]) or not verify_password(
-                    password,
-                    row["hashed_password"],
+                if (
+                    row is None
+                    or not bool(row["is_active"])
+                    or not verify_password(
+                        password,
+                        row["hashed_password"],
+                    )
                 ):
                     return SessionIssueResult(SessionIssueStatus.INVALID)
-                family_id, raw_token, absolute_expiry = (
-                    await self._insert_initial_family_token_with_expiry(
-                        conn,
-                        user_id=row["id"],
-                        auth_epoch=int(row["auth_epoch"]),
-                    )
+                (
+                    family_id,
+                    raw_token,
+                    absolute_expiry,
+                ) = await self._insert_initial_family_token_with_expiry(
+                    conn,
+                    user_id=row["id"],
+                    auth_epoch=int(row["auth_epoch"]),
                 )
                 access_token = token_factory(
                     {
@@ -5697,8 +6149,7 @@ class PostgresDatabase:
         reason: str,
     ) -> bool:
         family = await conn.fetchrow(
-            "SELECT absolute_expires_at,state FROM refresh_token_families "
-            "WHERE id=$1 FOR UPDATE",
+            "SELECT absolute_expires_at,state FROM refresh_token_families WHERE id=$1 FOR UPDATE",
             family_id,
         )
         if family is None:
@@ -5855,17 +6306,17 @@ class PostgresDatabase:
             await conn.execute(
                 "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) VALUES($1,$2,$3) "
                 "ON CONFLICT(jti) DO NOTHING",
-                jti, user_id, parsed_expires_at,
+                jti,
+                user_id,
+                parsed_expires_at,
             )
-            await conn.execute(
-                "DELETE FROM revoked_access_tokens WHERE expires_at < now()"
-            )
+            await conn.execute("DELETE FROM revoked_access_tokens WHERE expires_at < now()")
 
     async def is_access_token_revoked(self, jti: str) -> bool:
         async with self._pool.acquire() as conn:
-            return bool(await conn.fetchval(
-                "SELECT 1 FROM revoked_access_tokens WHERE jti=$1", jti
-            ))
+            return bool(
+                await conn.fetchval("SELECT 1 FROM revoked_access_tokens WHERE jti=$1", jti)
+            )
 
     async def revoke_all_refresh_tokens(self, user_id: str) -> None:
         async with self._pool.acquire() as conn:
@@ -5893,8 +6344,7 @@ class PostgresDatabase:
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 owner = await conn.fetchval(
-                    "SELECT 1 FROM refresh_token_families "
-                    "WHERE id=$1 AND user_id=$2 FOR UPDATE",
+                    "SELECT 1 FROM refresh_token_families WHERE id=$1 AND user_id=$2 FOR UPDATE",
                     family_id,
                     user_id,
                 )
@@ -5918,9 +6368,7 @@ class PostgresDatabase:
                         "'auth-system','logout_current','')"
                     )
         return SessionRevocationResult(
-            SessionRevocationStatus.REVOKED
-            if changed
-            else SessionRevocationStatus.ALREADY_REVOKED
+            SessionRevocationStatus.REVOKED if changed else SessionRevocationStatus.ALREADY_REVOKED
         )
 
     async def revoke_refresh_cookie_session(
@@ -5941,9 +6389,7 @@ class PostgresDatabase:
                 if row is None:
                     return SessionRevocationResult(SessionRevocationStatus.INVALID)
                 if row["family_state"] != "active":
-                    return SessionRevocationResult(
-                        SessionRevocationStatus.ALREADY_REVOKED
-                    )
+                    return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)
                 reason = "logout_current" if row["state"] == "active" else "replay"
                 changed = await self._revoke_family_rows(
                     conn,
@@ -5957,14 +6403,11 @@ class PostgresDatabase:
                         else "logout_cookie_replay_family_revoked"
                     )
                     await conn.execute(
-                        "INSERT INTO audit_log(actor,action,detail) VALUES("
-                        "'auth-system',$1,'')",
+                        "INSERT INTO audit_log(actor,action,detail) VALUES('auth-system',$1,'')",
                         action,
                     )
                     return SessionRevocationResult(SessionRevocationStatus.REVOKED)
-                return SessionRevocationResult(
-                    SessionRevocationStatus.ALREADY_REVOKED
-                )
+                return SessionRevocationResult(SessionRevocationStatus.ALREADY_REVOKED)
 
     async def revoke_all_sessions(
         self,
@@ -6052,8 +6495,7 @@ class PostgresDatabase:
                         reason=reason,
                     )
                 await conn.execute(
-                    "INSERT INTO audit_log(actor,action,detail) VALUES("
-                    "'auth-system',$1,'')",
+                    "INSERT INTO audit_log(actor,action,detail) VALUES('auth-system',$1,'')",
                     reason,
                 )
         return True
@@ -6075,22 +6517,28 @@ class PostgresDatabase:
     async def save_bypass_outcome(
         self,
         technique_id: str,
-        edr_vendor:   str,
-        edr_version:  str,
-        success:      bool,
-        campaign_id:  str,
-        notes:        str = "",
+        edr_vendor: str,
+        edr_version: str,
+        success: bool,
+        campaign_id: str,
+        notes: str = "",
     ) -> None:
         """Persist bypass technique outcome for cross-session learning."""
         import time as _time
+
         try:
             async with self._pool.acquire() as conn:
                 await conn.execute(
                     """INSERT INTO bypass_outcomes
                        (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                        VALUES ($1, $2, $3, $4, $5, $6, $7)""",
-                    technique_id, edr_vendor, edr_version,
-                    int(success), campaign_id, notes[:500], _time.time(),
+                    technique_id,
+                    edr_vendor,
+                    edr_version,
+                    int(success),
+                    campaign_id,
+                    notes[:500],
+                    _time.time(),
                 )
         except Exception:
             await self._ensure_bypass_outcomes_table()
@@ -6099,18 +6547,24 @@ class PostgresDatabase:
                     """INSERT INTO bypass_outcomes
                        (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                        VALUES ($1, $2, $3, $4, $5, $6, $7)""",
-                    technique_id, edr_vendor, edr_version,
-                    int(success), campaign_id, notes[:500], _time.time(),
+                    technique_id,
+                    edr_vendor,
+                    edr_version,
+                    int(success),
+                    campaign_id,
+                    notes[:500],
+                    _time.time(),
                 )
 
     async def get_bypass_success_rate(
         self,
         technique_id: str,
-        edr_vendor:   str,
-        min_samples:  int = 3,
+        edr_vendor: str,
+        min_samples: int = 3,
     ) -> float | None:
         """Return historical success rate for a bypass technique against an EDR vendor."""
         import time as _time
+
         try:
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -6118,7 +6572,9 @@ class PostgresDatabase:
                        FROM bypass_outcomes
                        WHERE technique_id = $1 AND edr_vendor = $2
                        AND ts > $3""",
-                    technique_id, edr_vendor, _time.time() - 7_776_000,
+                    technique_id,
+                    edr_vendor,
+                    _time.time() - 7_776_000,
                 )
             if not row or row["total"] < min_samples:
                 return None
@@ -6149,6 +6605,7 @@ class PostgresDatabase:
         """Export all campaigns + findings to JSON (same interface as SQLite backend)."""
         import json as _json
         from pathlib import Path
+
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         if not output_path:
             backup_dir = Path.home() / ".ares" / "backups"
@@ -6156,18 +6613,26 @@ class PostgresDatabase:
             output_path = str(backup_dir / f"ares_export_{ts}.json")
 
         async with self._pool.acquire() as conn:
-            campaigns = [self._row_to_dict(r)
-                         for r in await conn.fetch("SELECT * FROM campaigns ORDER BY created_at DESC")]
+            campaigns = [
+                self._row_to_dict(r)
+                for r in await conn.fetch("SELECT * FROM campaigns ORDER BY created_at DESC")
+            ]
         for c in campaigns:
             cid = c["id"]
             async with self._pool.acquire() as conn:
-                c["_findings"] = [self._row_to_dict(r)
-                                  for r in await conn.fetch(
-                                      "SELECT * FROM findings WHERE campaign_id=$1 ORDER BY discovered_at DESC",
-                                      cid)]
-                c["_hosts"]    = [self._row_to_dict(r)
-                                  for r in await conn.fetch(
-                                      "SELECT * FROM hosts WHERE campaign_id=$1 ORDER BY first_seen", cid)]
+                c["_findings"] = [
+                    self._row_to_dict(r)
+                    for r in await conn.fetch(
+                        "SELECT * FROM findings WHERE campaign_id=$1 ORDER BY discovered_at DESC",
+                        cid,
+                    )
+                ]
+                c["_hosts"] = [
+                    self._row_to_dict(r)
+                    for r in await conn.fetch(
+                        "SELECT * FROM hosts WHERE campaign_id=$1 ORDER BY first_seen", cid
+                    )
+                ]
 
         export = {"export_version": "1.0", "exported_at": ts, "campaigns": campaigns}
         with open(output_path, "w") as fh:

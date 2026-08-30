@@ -1,12 +1,17 @@
 # ARES Module SDK
 
-**Version:** 1.0.0 | **Status:** Active
+**Version:** 1.0.0 | **Status:** authoring/preview only in C-LIVE-v1
 
 > Complete guide for ARES module authors.
 > Everything needed to build, test, sign, and publish an ARES module.
 
 `ares.sdk` is the preferred public import path for new modules. The older
 `ares.modules.sdk` path remains available for existing modules.
+
+> C-LIVE-v1 keeps all production descriptors disabled/ineligible. SDK authoring
+> and metadata validation remain available, but `ModuleTestHelper.run` and
+> `run_full` are preview-only and never invoke module `validate`, `run`, or
+> `execute` methods.
 
 ---
 
@@ -313,9 +318,11 @@ finding = self.finding(
 
 ---
 
-## Testing Your Module
+## Preview-only module validation
 
-Use `ModuleTestHelper` from the SDK:
+Use `ModuleTestHelper` to validate metadata, parameters, and the shape of a
+dry-run preview. These examples do not execute `validate`, `run`, or `execute`
+on the module class:
 
 ```python
 # tests/test_my_module.py
@@ -340,7 +347,7 @@ class TestMyModule:
             params={"dc": "10.0.0.1"},
             dry_run=True,
         )
-        assert result.status == "dry_run"
+        assert result.status == "preview_only"
 
     @pytest.mark.asyncio
     async def test_validate_missing_dc(self, helper):
@@ -422,3 +429,16 @@ Before submitting a module to the ARES marketplace:
 - [ ] Unit tests with `ModuleTestHelper`
 - [ ] `@module_metadata` decorator validates clean (no errors)
 - [ ] Module signed with Ed25519 key
+
+---
+
+## C-LIVE-v1 SDK status
+
+`ModuleTestHelper` is preview-only. Its `run` and `run_full` surfaces validate
+and describe a module but do not invoke module `validate`, `run`, or `execute`
+methods. Public engine calls also reject an absent, fabricated, stale,
+transferred, or reused coordinator seal.
+
+All production descriptors remain disabled/ineligible in C-LIVE-v1. Tests may
+use a private deterministic plan/admission seam, but production cannot import or
+configure that seam and the SDK never advertises it as executable capability.

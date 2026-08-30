@@ -14,18 +14,191 @@ Run: pytest tests/unit/test_strategy_engine.py -v
 """
 from __future__ import annotations
 
-import asyncio
 import sys
-import time
-from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock, patch
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 _ROOT = Path(__file__).parent.parent.parent.resolve()
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+
+def _c_live_strategy_engine_with(
+    coordinator: Any,
+    plan: tuple[dict[str, Any], ...],
+):
+    from ares.db.execution_lifecycle import TrustedPrincipal
+    from ares.strategy.engine import StrategyEngine
+
+    engine = StrategyEngine(ares_engine=MagicMock(), settings=MagicMock())
+    engine._configure_c_live_test_plan(
+        coordinator=coordinator,
+        principal=TrustedPrincipal(
+            "00000000-0000-4000-8000-000000000021",
+            "00000000-0000-4000-8000-000000000021",
+        ),
+        idempotency_key="00000000-0000-4000-8000-000000000048",
+        plan=plan,
+    )
+    return engine
+
+
+def _c_live_strategy_outcome(disposition: Any, *, status: str = "success") -> Any:
+    from ares.db.execution_lifecycle import FixedResult
+
+    return SimpleNamespace(
+        disposition=disposition,
+        identity=None,
+        lifecycle_result=FixedResult.APPLIED,
+        module_result=SimpleNamespace(status=status, findings=[]),
+        terminal_committed=disposition.value == "terminal",
+    )
+
+
+@pytest.mark.asyncio
+async def test_c_live_strategy_single_module_uses_coordinator():
+    from ares.core.execution_admission import DispatchDispositionV1
+
+    coordinator = SimpleNamespace(
+        execute_module=AsyncMock(
+            return_value=_c_live_strategy_outcome(DispatchDispositionV1.TERMINAL)
+        )
+    )
+    engine = _c_live_strategy_engine_with(
+        coordinator,
+        ({"module_id": "ad.test", "params": {"target": "10.0.0.1"}},),
+    )
+
+    result = await engine.run_autonomous_engagement(SimpleNamespace(id="campaign-21"))
+
+    assert result.final_status == "terminal"
+    assert result.modules_succeeded == ["ad.test"]
+    coordinator.execute_module.assert_awaited_once()
+    request = coordinator.execute_module.await_args.args[1]
+    assert request.ingress_code == "strategy"
+    assert request.module_id == "ad.test"
+
+
+@pytest.mark.asyncio
+async def test_c_live_strategy_child_revalidates_after_principal_revocation():
+    from ares.core.execution_admission import DispatchDispositionV1
+
+    coordinator = SimpleNamespace(
+        execute_module=AsyncMock(
+            side_effect=[
+                _c_live_strategy_outcome(DispatchDispositionV1.TERMINAL),
+                _c_live_strategy_outcome(DispatchDispositionV1.NON_DISPATCHABLE),
+            ]
+        )
+    )
+    engine = _c_live_strategy_engine_with(
+        coordinator,
+        (
+            {"module_id": "ad.first", "params": {}},
+            {"module_id": "ad.revoked", "params": {}},
+        ),
+    )
+
+    result = await engine.run_autonomous_engagement(SimpleNamespace(id="campaign-48"))
+
+    assert result.final_status == "non_dispatchable"
+    assert coordinator.execute_module.await_count == 2
+
+
+@pytest.mark.parametrize(
+    "helper_name",
+    ["coverage-predictor", "edr-context", "ai-planner"],
+    ids=["coverage-predictor", "edr-context", "ai-planner"],
+)
+@pytest.mark.asyncio
+async def test_c_live_strategy_helper_is_disabled_without_network(helper_name):
+    from ares.strategy.engine import StrategyEngine
+
+    engine = StrategyEngine(ares_engine=MagicMock(), settings=MagicMock())
+    campaign = MagicMock()
+    if helper_name == "coverage-predictor":
+        value = await engine._run_coverage_predictor(campaign)
+        assert value["detection_score"] == 0.0
+    elif helper_name == "edr-context":
+        value = await engine._get_edr_context(campaign)
+        assert value["viable_techniques"] == []
+    else:
+        value = await engine._run_ai_planner(campaign, "goal", "local", "", False, {})
+        assert value["execution_plan"] == []
+    engine._engine.run_module.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_c_live_strategy_parent_child_partial_completion_is_durable_and_not_redispatched():
+    from ares.core.execution_admission import DispatchDispositionV1
+
+    effects: dict[str, int] = {}
+    calls = 0
+
+    async def execute_module(principal, request, campaign):
+        nonlocal calls
+        del principal, campaign
+        calls += 1
+        if calls == 2:
+            return _c_live_strategy_outcome(DispatchDispositionV1.NON_DISPATCHABLE)
+        if effects.get(request.module_id):
+            return _c_live_strategy_outcome(DispatchDispositionV1.REPLAYED)
+        effects[request.module_id] = 1
+        return _c_live_strategy_outcome(DispatchDispositionV1.TERMINAL)
+
+    coordinator = SimpleNamespace(execute_module=execute_module)
+    engine = _c_live_strategy_engine_with(
+        coordinator,
+        (
+            {"module_id": "ad.first", "params": {}},
+            {"module_id": "ad.second", "params": {}},
+        ),
+    )
+    campaign = SimpleNamespace(id="campaign-74")
+
+    first = await engine.run_autonomous_engagement(campaign)
+    second = await engine.run_autonomous_engagement(campaign)
+
+    assert first.final_status == "non_dispatchable"
+    assert second.final_status == "terminal"
+    assert effects == {"ad.first": 1, "ad.second": 1}
+
+
+@pytest.mark.asyncio
+async def test_c_live_test_plan_is_complete_before_first_module_effect():
+    from ares.core.execution_admission import DispatchDispositionV1
+
+    original_params = {"target": "10.0.0.75"}
+    engine_holder: dict[str, Any] = {}
+
+    async def execute_module(principal, request, campaign):
+        del principal, campaign
+        frozen = engine_holder["engine"]._c_live_test_plan_json
+        assert frozen is not None
+        assert '"ad.first"' in frozen
+        assert '"ad.second"' in frozen
+        if request.module_id == "ad.first":
+            assert request.raw_parameters == {"target": "10.0.0.75"}
+        return _c_live_strategy_outcome(DispatchDispositionV1.TERMINAL)
+
+    engine = _c_live_strategy_engine_with(
+        SimpleNamespace(execute_module=execute_module),
+        (
+            {"module_id": "ad.first", "params": original_params},
+            {"module_id": "ad.second", "params": {}},
+        ),
+    )
+    engine_holder["engine"] = engine
+    original_params["target"] = "mutated-after-freeze"
+
+    result = await engine.run_autonomous_engagement(SimpleNamespace(id="campaign-75"))
+
+    assert result.final_status == "terminal"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

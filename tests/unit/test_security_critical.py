@@ -14,6 +14,7 @@ Coverage:
 Pattern: httpx.ASGITransport + dependency_overrides (no lifespan needed).
 All tests are self-contained — no shared mutable state between classes.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,8 +24,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # ── env bootstrap (before any ares import) ────────────────────────────────────
-os.environ.setdefault("ARES_SECRET_KEY",             "test-sec-critical-min32-chars!!!!")
-os.environ.setdefault("ARES_ENCRYPTION_KEY",         "test-enc-critical-min32-chars!!!!")
+os.environ.setdefault("ARES_SECRET_KEY", "test-sec-critical-min32-chars!!!!")
+os.environ.setdefault("ARES_ENCRYPTION_KEY", "test-enc-critical-min32-chars!!!!")
 os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestCriticalPass1!")
 os.environ.setdefault("ARES_DEBUG", "true")
 os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
@@ -46,6 +47,7 @@ def _isolate_server_dependencies():
 
 def _settings():
     from ares.core.config import get_settings
+
     get_settings.cache_clear()
     return get_settings()
 
@@ -69,17 +71,18 @@ def _auth(username: str, role: str) -> dict:
 
 def _make_mock_db():
     db = MagicMock()
-    db.verify_user               = AsyncMock(return_value=None)
-    db.get_user                  = AsyncMock(return_value=None)
-    db.user_exists               = AsyncMock(return_value=False)
-    db.create_user               = AsyncMock()
-    db.create_refresh_token      = AsyncMock(return_value="raw-mock-refresh-token")
-    db.rotate_refresh_token      = AsyncMock(return_value=(None, None))
+    db.verify_user = AsyncMock(return_value=None)
+    db.get_user = AsyncMock(return_value=None)
+    db.user_exists = AsyncMock(return_value=False)
+    db.create_user = AsyncMock()
+    db.create_refresh_token = AsyncMock(return_value="raw-mock-refresh-token")
+    db.rotate_refresh_token = AsyncMock(return_value=(None, None))
     db.revoke_all_refresh_tokens = AsyncMock()
     from ares.core.token_sessions import (
         SessionRevocationResult,
         SessionRevocationStatus,
     )
+
     db.revoke_current_session = AsyncMock(
         return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
     )
@@ -89,8 +92,8 @@ def _make_mock_db():
     db.revoke_all_sessions = AsyncMock(
         return_value=SessionRevocationResult(SessionRevocationStatus.REVOKED)
     )
-    db.revoke_access_token       = AsyncMock()
-    db.is_access_token_revoked   = AsyncMock(return_value=False)
+    db.revoke_access_token = AsyncMock()
+    db.is_access_token_revoked = AsyncMock(return_value=False)
 
     async def resolve_access_token_principal(
         subject: str,
@@ -110,20 +113,19 @@ def _make_mock_db():
             "auth_epoch": auth_epoch,
         }
 
-    db.resolve_access_token_principal = AsyncMock(
-        side_effect=resolve_access_token_principal
-    )
-    db.audit                     = AsyncMock()
-    db.purge_expired_tokens      = AsyncMock(return_value=0)
-    db.list_campaigns            = AsyncMock(return_value=([], 0))
-    db.get_campaign              = AsyncMock(return_value=None)
-    db.verify_api_key            = AsyncMock(return_value=None)
-    db.load_credentials_raw      = AsyncMock(return_value=[])
+    db.resolve_access_token_principal = AsyncMock(side_effect=resolve_access_token_principal)
+    db.audit = AsyncMock()
+    db.purge_expired_tokens = AsyncMock(return_value=0)
+    db.list_campaigns = AsyncMock(return_value=([], 0))
+    db.get_campaign = AsyncMock(return_value=None)
+    db.verify_api_key = AsyncMock(return_value=None)
+    db.load_credentials_raw = AsyncMock(return_value=[])
     return db
 
 
 def _reset_limiter() -> None:
     from ares.api.rbac import _limiter
+
     _limiter._windows.clear()
 
 
@@ -158,12 +160,8 @@ def _browser_client(app):
         base_url="http://localhost:5173",
         event_hooks={"request": [_headers]},
     )
-    client.cookies.set(
-        "ares-dev-csrf", "A" * 43, domain="localhost.local", path="/"
-    )
-    client.cookies.set(
-        "ares-dev-refresh", "r" * 64, domain="localhost.local", path="/"
-    )
+    client.cookies.set("ares-dev-csrf", "A" * 43, domain="localhost.local", path="/")
+    client.cookies.set("ares-dev-refresh", "r" * 64, domain="localhost.local", path="/")
     return client
 
 
@@ -206,6 +204,7 @@ def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
 
     from ares.api.server import campaign_events, _take_campaign_websocket_ticket
     from uvicorn.config import UvicornDeprecationWarning
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         warnings.simplefilter("ignore", UvicornDeprecationWarning)
@@ -242,9 +241,9 @@ def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
 
     call_count, marker_absent = _run(exercise())
     route_body = ast.parse(textwrap.dedent(inspect.getsource(campaign_events))).body[0].body
-    helper_body = ast.parse(
-        textwrap.dedent(inspect.getsource(_take_campaign_websocket_ticket))
-    ).body[0].body
+    helper_body = (
+        ast.parse(textwrap.dedent(inspect.getsource(_take_campaign_websocket_ticket))).body[0].body
+    )
     route_first_operation_is_scrub = (
         isinstance(route_body[1], ast.Assign)
         and isinstance(route_body[1].value, ast.Call)
@@ -275,6 +274,7 @@ def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
 # TEST CLASS 1 — TOKEN REVOCATION
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestTokenRevocation:
     """
     After logout, a still-valid (not-expired) access token must be rejected.
@@ -286,8 +286,9 @@ class TestTokenRevocation:
 
     def _client(self, mock_db):
         from ares.api.server import app, get_db, get_settings
+
         app.state.db = mock_db
-        app.dependency_overrides[get_db]       = lambda: mock_db
+        app.dependency_overrides[get_db] = lambda: mock_db
         app.dependency_overrides[get_settings] = lambda: _settings()
         return _browser_client(app)
 
@@ -303,22 +304,20 @@ class TestTokenRevocation:
                 f"Revoked token must return 401, got {r.status_code}. "
                 "Logout is ineffective — token still works after revocation!"
             )
+
         _run(_run_test())
 
     def test_valid_token_accepted(self):
         """Token not in blacklist must work normally."""
         db = _make_mock_db()
         db.is_access_token_revoked = AsyncMock(return_value=False)
-        db.get_user = AsyncMock(return_value={
-            "id": "u1", "username": "alice", "role": "operator"
-        })
+        db.get_user = AsyncMock(return_value={"id": "u1", "username": "alice", "role": "operator"})
 
         async def _run_test():
             async with self._client(db) as c:
                 r = await c.get("/auth/me", headers=_auth("alice", "operator"))
-            assert r.status_code == 200, (
-                f"Valid token must return 200, got {r.status_code}"
-            )
+            assert r.status_code == 200, f"Valid token must return 200, got {r.status_code}"
+
         _run(_run_test())
 
     def test_expired_token_rejected(self):
@@ -328,20 +327,16 @@ class TestTokenRevocation:
 
         async def _run_test():
             async with self._client(db) as c:
-                r = await c.get("/auth/me",
-                                headers={"Authorization": f"Bearer {token}"})
-            assert r.status_code == 401, (
-                f"Expired token must return 401, got {r.status_code}"
-            )
+                r = await c.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 401, f"Expired token must return 401, got {r.status_code}"
+
         _run(_run_test())
 
     def test_logout_triggers_cookie_family_revocation(self):
         """POST /auth/logout must use refresh-cookie family authority."""
         db = _make_mock_db()
         db.is_access_token_revoked = AsyncMock(return_value=False)
-        db.get_user = AsyncMock(return_value={
-            "id": "u1", "username": "alice", "role": "operator"
-        })
+        db.get_user = AsyncMock(return_value={"id": "u1", "username": "alice", "role": "operator"})
 
         async def _run_test():
             async with self._client(db) as c:
@@ -349,12 +344,14 @@ class TestTokenRevocation:
             assert r.status_code == 204
             db.revoke_refresh_cookie_session.assert_awaited_once()
             db.revoke_current_session.assert_not_awaited()
+
         _run(_run_test())
 
 
 # ══════════════════════════════════════════════════════════════════════
 # TEST CLASS 2 — DASHBOARD AUTHENTICATION
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestDashboardAuthentication:
     """
@@ -363,17 +360,18 @@ class TestDashboardAuthentication:
     """
 
     PROTECTED = [
-        ("GET",  "/api/status"),
-        ("GET",  "/api/campaigns"),
-        ("GET",  "/api/campaigns/test-id/findings"),
-        ("GET",  "/api/campaigns/test-id/hosts"),
-        ("GET",  "/api/campaigns/test-id/summary"),
-        ("GET",  "/api/workers"),
+        ("GET", "/api/status"),
+        ("GET", "/api/campaigns"),
+        ("GET", "/api/campaigns/test-id/findings"),
+        ("GET", "/api/campaigns/test-id/hosts"),
+        ("GET", "/api/campaigns/test-id/summary"),
+        ("GET", "/api/workers"),
     ]
 
     def _client(self):
         import httpx
         from ares.api.dashboard.app import dashboard_app
+
         dashboard_app.state.db = _make_mock_db()
         return httpx.AsyncClient(
             transport=httpx.ASGITransport(app=dashboard_app),
@@ -383,6 +381,7 @@ class TestDashboardAuthentication:
     @pytest.mark.parametrize("method,path", PROTECTED)
     def test_endpoint_requires_auth(self, method, path):
         """Each protected endpoint must return 401 with no token."""
+
         async def _run_test():
             async with self._client() as c:
                 r = await c.request(method, path)
@@ -390,14 +389,17 @@ class TestDashboardAuthentication:
                 f"Dashboard [{method}] {path} returned {r.status_code} without auth. "
                 "This endpoint exposes campaign data without authentication!"
             )
+
         _run(_run_test())
 
     def test_root_accessible_without_auth(self):
         """GET / (HTML shell) is intentionally public."""
+
         async def _run_test():
             async with self._client() as c:
                 r = await c.get("/")
             assert r.status_code == 200
+
         _run(_run_test())
 
     def test_valid_token_grants_access(self):
@@ -408,21 +410,23 @@ class TestDashboardAuthentication:
         async def _run_test():
             import httpx
             from ares.api.dashboard.app import dashboard_app
+
             db.is_access_token_revoked = AsyncMock(return_value=False)
             dashboard_app.state.db = db
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=dashboard_app),
                 base_url="http://localhost",
             ) as c:
-                r = await c.get("/api/campaigns",
-                                headers=_auth("alice", "operator"))
+                r = await c.get("/api/campaigns", headers=_auth("alice", "operator"))
             assert r.status_code == 200
+
         _run(_run_test())
 
 
 # ══════════════════════════════════════════════════════════════════════
 # TEST CLASS 3 — RBAC ENFORCEMENT PER ROLE
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_legacy_dashboard_escapes_api_fields_before_innerhtml():
     """API-derived strings must be escaped before legacy dashboard innerHTML use."""
@@ -458,7 +462,7 @@ def test_legacy_dashboard_escapes_api_fields_before_innerhtml():
         "${c.name}</div>",
         "${c.client}",
         "${f.mitre_technique}</span>",
-        "<span class=\"ip\">${h.ip_address}</span>",
+        '<span class="ip">${h.ip_address}</span>',
         ">(${h.hostname})</span>",
         "${h.os || 'Unknown OS'}",
         "' ' + h.os_version",
@@ -488,20 +492,21 @@ class TestRBACEnforcement:
 
     def _client(self, mock_db=None):
         from ares.api.server import app, get_db, get_settings
+
         db = mock_db or _make_mock_db()
         app.state.db = db
-        app.dependency_overrides[get_db]       = lambda: db
+        app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_settings] = lambda: _settings()
         return _browser_client(app)
 
     def test_no_token_returns_401(self):
         """Unauthenticated request must return 401, not 403."""
+
         async def _run_test():
             async with self._client() as c:
                 r = await c.get("/campaigns")
-            assert r.status_code == 401, (
-                f"No token must return 401, not {r.status_code}"
-            )
+            assert r.status_code == 401, f"No token must return 401, not {r.status_code}"
+
         _run(_run_test())
 
     def test_reporter_blocked_from_creating_campaign(self):
@@ -518,6 +523,7 @@ class TestRBACEnforcement:
             assert r.status_code == 403, (
                 f"Reporter must get 403 on POST /campaigns, got {r.status_code}"
             )
+
         _run(_run_test())
 
     def test_reporter_can_read_campaigns(self):
@@ -526,11 +532,11 @@ class TestRBACEnforcement:
 
         async def _run_test():
             async with self._client(db) as c:
-                r = await c.get("/campaigns",
-                                headers=_auth("reporter1", "reporter"))
+                r = await c.get("/campaigns", headers=_auth("reporter1", "reporter"))
             assert r.status_code == 200, (
                 f"Reporter must be able to read campaigns, got {r.status_code}"
             )
+
         _run(_run_test())
 
     def test_operator_blocked_from_registering_users(self):
@@ -541,13 +547,13 @@ class TestRBACEnforcement:
             async with self._client(db) as c:
                 r = await c.post(
                     "/auth/register",
-                    json={"username": "newuser", "password": "Password1!",
-                          "role": "operator"},
+                    json={"username": "newuser", "password": "Password1!", "role": "operator"},
                     headers=_auth("op1", "operator"),
                 )
             assert r.status_code == 403, (
                 f"Operator must be blocked from /auth/register, got {r.status_code}"
             )
+
         _run(_run_test())
 
     def test_team_lead_can_register_users(self):
@@ -560,18 +566,19 @@ class TestRBACEnforcement:
             async with self._client(db) as c:
                 r = await c.post(
                     "/auth/register",
-                    json={"username": "newuser", "password": "StrongPass1!",
-                          "role": "operator"},
+                    json={"username": "newuser", "password": "StrongPass1!", "role": "operator"},
                     headers=_auth("lead1", "team_lead"),
                 )
             assert r.status_code in (200, 201, 422), (
                 f"team_lead must reach /auth/register (200/201), got {r.status_code}"
             )
+
         _run(_run_test())
 
     def test_can_run_module_rbac_operator(self):
         """operator may run ad.* and lateral.* modules."""
         from ares.api.rbac import AuthenticatedUser
+
         user = AuthenticatedUser(username="op1", role="operator")
         assert user.can_run_module("ad.kerberoast")
         assert user.can_run_module("lateral.psexec")
@@ -580,6 +587,7 @@ class TestRBACEnforcement:
     def test_can_run_module_rbac_recon(self):
         """recon may only run enumeration modules."""
         from ares.api.rbac import AuthenticatedUser
+
         user = AuthenticatedUser(username="recon1", role="recon")
         assert user.can_run_module("ad.enum_users")
         assert user.can_run_module("network.port_scan")
@@ -590,6 +598,7 @@ class TestRBACEnforcement:
     def test_can_run_module_rbac_reporter(self):
         """reporter may not run any module."""
         from ares.api.rbac import AuthenticatedUser
+
         user = AuthenticatedUser(username="rep1", role="reporter")
         assert not user.can_run_module("ad.enum_users")
         assert not user.can_run_module("reporting.report_gen")
@@ -598,6 +607,7 @@ class TestRBACEnforcement:
         """Unknown role string must default to most restrictive (reporter)."""
         from ares.api.rbac import AuthenticatedUser
         from ares.collab.manager import OperatorRole
+
         user = AuthenticatedUser(username="mystery", role="god_mode")
         assert user.operator_role == OperatorRole.REPORTER
         assert not user.can_run_module("ad.kerberoast")
@@ -607,6 +617,7 @@ class TestRBACEnforcement:
 # TEST CLASS 4 — REFRESH TOKEN RATE LIMITING
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestRefreshTokenRateLimit:
     """POST /auth/refresh must be rate-limited to prevent token flooding."""
 
@@ -615,15 +626,17 @@ class TestRefreshTokenRateLimit:
 
     def _client(self, mock_db=None):
         from ares.api.server import app, get_db, get_settings
+
         db = mock_db or _make_mock_db()
         app.state.db = db
-        app.dependency_overrides[get_db]       = lambda: db
+        app.dependency_overrides[get_db] = lambda: db
         app.dependency_overrides[get_settings] = lambda: _settings()
         return _browser_client(app)
 
     def test_rate_limited_after_many_attempts(self):
         """After N refresh calls from same IP, 429 must be returned."""
         from ares.api.rbac import RATE_LIMITS
+
         limit = RATE_LIMITS["auth"]
 
         async def _run_test():
@@ -632,14 +645,14 @@ class TestRefreshTokenRateLimit:
                 for _ in range(limit + 2):
                     r = await c.post("/auth/refresh")
                     statuses.append(r.status_code)
-            assert 429 in statuses, (
-                f"Expected 429 after {limit} attempts, got statuses: {statuses}"
-            )
+            assert 429 in statuses, f"Expected 429 after {limit} attempts, got statuses: {statuses}"
+
         _run(_run_test())
 
     def test_429_has_retry_after_header(self):
         """Rate-limit 429 response must include Retry-After header."""
         from ares.api.rbac import RATE_LIMITS
+
         limit = RATE_LIMITS["auth"]
 
         async def _run_test():
@@ -653,12 +666,14 @@ class TestRefreshTokenRateLimit:
                         )
                         return
             pytest.fail("Never received 429 — rate limiting not working")
+
         _run(_run_test())
 
 
 # ══════════════════════════════════════════════════════════════════════
 # TEST CLASS 5 — CREDENTIAL VAULT PERSISTENCE
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestCredentialVaultPersistence:
     """Credentials found during a module run must persist to DB and be restorable."""
@@ -673,12 +688,13 @@ class TestCredentialVaultPersistence:
         db.save_credential_preencrypted = AsyncMock()
 
         campaign = Campaign(
-            name="persist-test", client="test",
+            name="persist-test",
+            client="test",
             scope=[ScopeEntry(cidr="10.0.0.0/8")],
             noise_profile=NoiseProfile.NORMAL,
         )
         vault = CredentialVault(encryption_key="test-vault-key-32-chars-ok!!!!")
-        cred  = Credential(
+        cred = Credential(
             campaign_id=campaign.id,
             username="administrator",
             domain="CORP",
@@ -696,8 +712,9 @@ class TestCredentialVaultPersistence:
             db.save_credential_preencrypted.assert_called_once()
             call = db.save_credential_preencrypted.call_args[0][0]
             assert call.username == "administrator"
-            assert call.domain   == "CORP"
+            assert call.domain == "CORP"
             assert "ntlm" in call.cred_type.lower()
+
         _run(_run_test())
 
     def test_restore_from_db_records(self):
@@ -708,36 +725,40 @@ class TestCredentialVaultPersistence:
 
         # Vault A: store a credential
         vault_a = CredentialVault(encryption_key=enc_key)
-        cred    = Credential(
-            id="cred-restore-001", campaign_id="camp-001",
-            username="svc_sql", domain="CORP",
+        cred = Credential(
+            id="cred-restore-001",
+            campaign_id="camp-001",
+            username="svc_sql",
+            domain="CORP",
             cred_type=CredentialType.CLEARTEXT,
             source_module="test",
         )
         vault_a.store(cred, "SuperSecret99!")
 
-        stored      = vault_a._store["cred-restore-001"]
-        secret_enc  = stored.secret_enc
-        secret_str  = secret_enc.decode() if isinstance(secret_enc, bytes) else secret_enc
+        stored = vault_a._store["cred-restore-001"]
+        secret_enc = stored.secret_enc
+        secret_str = secret_enc.decode() if isinstance(secret_enc, bytes) else secret_enc
 
         # Simulate what DB returns
-        db_records = [{
-            "id":           "cred-restore-001",
-            "campaign_id":  "camp-001",
-            "username":     "svc_sql",
-            "domain":       "CORP",
-            "cred_type":    "cleartext",
-            "secret_enc":   secret_str,
-            "source_module": "test",
-            "host_id":      None,
-            "notes":        "",
-        }]
+        db_records = [
+            {
+                "id": "cred-restore-001",
+                "campaign_id": "camp-001",
+                "username": "svc_sql",
+                "domain": "CORP",
+                "cred_type": "cleartext",
+                "secret_enc": secret_str,
+                "source_module": "test",
+                "host_id": None,
+                "notes": "",
+            }
+        ]
 
         # Vault B: restore from DB — share salt/fernet for compatibility
         vault_b = CredentialVault(encryption_key=enc_key)
-        vault_b._salt     = vault_a._salt
+        vault_b._salt = vault_a._salt
         vault_b._salt_hex = vault_a._salt_hex
-        vault_b._fernet   = vault_a._fernet
+        vault_b._fernet = vault_a._fernet
 
         count = vault_b.restore_from_db_records(db_records)
 
@@ -759,7 +780,8 @@ class TestCredentialVaultPersistence:
         db.save_credential_preencrypted = AsyncMock()
 
         campaign = Campaign(
-            name="empty-vault-test", client="test",
+            name="empty-vault-test",
+            client="test",
             scope=[ScopeEntry(cidr="10.0.0.0/8")],
             noise_profile=NoiseProfile.NORMAL,
         )
@@ -771,6 +793,7 @@ class TestCredentialVaultPersistence:
             saved = await engine._persist_vault_credentials(campaign)
             assert saved == 0
             db.save_credential_preencrypted.assert_not_called()
+
         _run(_run_test())
 
     def test_no_vault_on_campaign_is_safe(self):
@@ -778,10 +801,11 @@ class TestCredentialVaultPersistence:
         from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
         from ares.core.engine import AresEngine
 
-        db    = MagicMock()
+        db = MagicMock()
         db.save_credential_preencrypted = AsyncMock()
         campaign = Campaign(
-            name="no-vault", client="test",
+            name="no-vault",
+            client="test",
             scope=[ScopeEntry(cidr="10.0.0.0/8")],
             noise_profile=NoiseProfile.NORMAL,
         )
@@ -791,12 +815,14 @@ class TestCredentialVaultPersistence:
         async def _run_test():
             saved = await engine._persist_vault_credentials(campaign)
             assert saved == 0
+
         _run(_run_test())
 
 
 # ══════════════════════════════════════════════════════════════════════
 # TEST CLASS 6 — validate() ENFORCEMENT
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestValidateEnforcement:
     """Engine must call validate() before execute() on every module run."""
@@ -807,19 +833,20 @@ class TestValidateEnforcement:
         from ares.core.errors import ModuleValidationError
         from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
         from ares.core.engine import AresEngine
+        from ares.core.execution_admission import _mint_test_dispatch_context
 
         validate_calls: list[bool] = []
-        execute_calls:  list[bool] = []
+        execute_calls: list[bool] = []
 
         class _StrictModule(BaseModule):
-            MODULE_ID          = "test.strict_validate"
-            MODULE_NAME        = "Strict Test"
-            MODULE_CATEGORY    = "test"
+            MODULE_ID = "test.strict_validate"
+            MODULE_NAME = "Strict Test"
+            MODULE_CATEGORY = "test"
             MODULE_DESCRIPTION = "Validation test module"
-            OPSEC_LEVEL        = OpsecLevel.SILENT
-            MITRE_TECHNIQUES   = []
-            REQUIRES           = ["target"]
-            OUTPUTS            = []
+            OPSEC_LEVEL = OpsecLevel.SILENT
+            MITRE_TECHNIQUES = []
+            REQUIRES = ["target"]
+            OUTPUTS = []
 
             async def validate(self, ctx):
                 validate_calls.append(True)
@@ -832,16 +859,17 @@ class TestValidateEnforcement:
 
             async def execute(self, ctx):
                 execute_calls.append(True)
-                return ModuleResult(status="success", findings=[], raw={},
-                                    module_id=self.MODULE_ID)
+                return ModuleResult(status="success", findings=[], raw={}, module_id=self.MODULE_ID)
 
         campaign = Campaign(
-            name="validate-test", client="test",
+            name="validate-test",
+            client="test",
             scope=[ScopeEntry(cidr="10.0.0.0/8")],
             noise_profile=NoiseProfile.NORMAL,
         )
 
         from ares.core.engine import ModuleRegistry as _Reg
+
         registry = _Reg()
         registry._registry = {"test.strict_validate": _StrictModule}
 
@@ -850,21 +878,25 @@ class TestValidateEnforcement:
 
         async def _run_test():
             from ares.core.config import get_settings
+
             get_settings.cache_clear()
             result = await engine.run_module(
                 "test.strict_validate",
                 campaign,
                 params={"target": "10.0.0.1"},
                 actor_role="team_lead",
+                dispatch_context=_mint_test_dispatch_context(
+                    engine, campaign.id, "test.strict_validate"
+                ),
                 # No required_param — validate() must fail
             )
             assert len(validate_calls) == 1, "validate() must be called exactly once"
-            assert len(execute_calls)  == 0, (
-                "execute() must NOT run when validate() raises"
-            )
+            assert len(execute_calls) == 0, "execute() must NOT run when validate() raises"
             from ares.core.engine import ModuleStatus
+
             assert result.status == ModuleStatus.FAILED
             assert "required_param" in (result.error or "")
+
         _run(_run_test())
 
     def test_skip_validation_bypasses_validate(self):
@@ -873,38 +905,38 @@ class TestValidateEnforcement:
         from ares.core.errors import ModuleValidationError
         from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
         from ares.core.engine import AresEngine
+        from ares.core.execution_admission import _mint_test_dispatch_context
 
         validate_calls: list[bool] = []
-        execute_calls:  list[bool] = []
+        execute_calls: list[bool] = []
 
         class _AlwaysFailValidate(BaseModule):
-            MODULE_ID          = "test.always_fail_validate"
-            MODULE_NAME        = "Always Fail Validate"
-            MODULE_CATEGORY    = "test"
+            MODULE_ID = "test.always_fail_validate"
+            MODULE_NAME = "Always Fail Validate"
+            MODULE_CATEGORY = "test"
             MODULE_DESCRIPTION = "Skip validation test"
-            OPSEC_LEVEL        = OpsecLevel.SILENT
-            MITRE_TECHNIQUES   = []
-            REQUIRES           = []
-            OUTPUTS            = []
+            OPSEC_LEVEL = OpsecLevel.SILENT
+            MITRE_TECHNIQUES = []
+            REQUIRES = []
+            OUTPUTS = []
 
             async def validate(self, ctx):
                 validate_calls.append(True)
-                raise ModuleValidationError(
-                    "always fails", module_id=self.MODULE_ID
-                )
+                raise ModuleValidationError("always fails", module_id=self.MODULE_ID)
 
             async def execute(self, ctx):
                 execute_calls.append(True)
-                return ModuleResult(status="success", findings=[], raw={},
-                                    module_id=self.MODULE_ID)
+                return ModuleResult(status="success", findings=[], raw={}, module_id=self.MODULE_ID)
 
         campaign = Campaign(
-            name="skip-validate-test", client="test",
+            name="skip-validate-test",
+            client="test",
             scope=[ScopeEntry(cidr="10.0.0.0/8")],
             noise_profile=NoiseProfile.NORMAL,
         )
 
         from ares.core.engine import ModuleRegistry as _Reg
+
         registry = _Reg()
         registry._registry = {"test.always_fail_validate": _AlwaysFailValidate}
 
@@ -913,6 +945,7 @@ class TestValidateEnforcement:
 
         async def _run_test():
             from ares.core.config import get_settings
+
             get_settings.cache_clear()
             result = await engine.run_module(
                 "test.always_fail_validate",
@@ -920,15 +953,18 @@ class TestValidateEnforcement:
                 params={"target": "10.0.0.1"},
                 skip_validation=True,
                 actor_role="team_lead",
+                dispatch_context=_mint_test_dispatch_context(
+                    engine, campaign.id, "test.always_fail_validate"
+                ),
             )
             assert len(validate_calls) == 0, (
                 "validate() must NOT be called when skip_validation=True"
             )
-            assert len(execute_calls) == 1, (
-                "execute() must run when validation is skipped"
-            )
+            assert len(execute_calls) == 1, "execute() must run when validation is skipped"
             from ares.core.engine import ModuleStatus
+
             assert result.status == ModuleStatus.DONE
+
         _run(_run_test())
 
     def test_targets_validation_rejects_path_traversal(self):

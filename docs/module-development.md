@@ -32,9 +32,9 @@ The sidecar is trusted first-party repository data, not metadata inferred from
 class names, categories, defaults, or plugins. External plugin metadata remains
 untrusted catalog data and receives neither a fallback first-party descriptor
 nor future-gateway eligibility. Adding normal SDK class attributes is therefore
-not sufficient to make a plugin eligible for the future gateway. No database
-schema changes or Alembic revision `0010` are part of Phase 5C.1; the migration
-head remains `0009`.
+not sufficient to make a plugin eligible for the future gateway. Phase 5C.1
+made no schema change. The later revision `0010` is additive test-only
+persistence and does not make a module eligible or change any live ingress.
 
 The examples below describe the existing SDK surface. They are not proof that
 all current ingresses apply the same policy, that dry-run is universally

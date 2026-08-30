@@ -1589,12 +1589,12 @@ async def _runtime_bootstrap(path: Path) -> bool:
         await database.close()
 
 
-def test_migration_head_is_real_empty_base_to_0009() -> None:
+def test_migration_head_is_real_empty_base_to_0011() -> None:
     with _temporary_database("empty-head") as path:
         initially_empty = _application_tables(path) == ()
         initial_revision_absent = _version(path) is None
         _upgrade(path, "head")
-        revision_is_current = _version(path) == "0009"
+        revision_is_current = _version(path) == "0011"
         exact_contract = _ticket_contract(path) == _EXPECTED_TICKET_CONTRACT
         enforcement_holds = _exercise_ticket_enforcement(path)
 
@@ -1602,15 +1602,15 @@ def test_migration_head_is_real_empty_base_to_0009() -> None:
             initially_empty and initial_revision_absent,
             "fresh migration database was not empty",
         )
-        _require_fixed(SCHEMA_VERSION == 8, "SQLite schema version is not eight")
-        _require_fixed(revision_is_current, "Alembic head is not revision 0009")
+        _require_fixed(SCHEMA_VERSION == 9, "SQLite schema version is not nine")
+        _require_fixed(revision_is_current, "Alembic head is not revision 0011")
         _require_fixed(
             exact_contract,
-            "fresh revision 0009 ticket fingerprint diverged",
+            "fresh revision 0011 ticket fingerprint diverged",
         )
         _require_fixed(
             enforcement_holds,
-            "fresh revision 0009 enforcement diverged",
+            "fresh revision 0011 enforcement diverged",
         )
 
 
@@ -1724,7 +1724,7 @@ def test_runtime_bootstrap_and_alembic_have_exact_ticket_parity() -> None:
             migration_contract = _ticket_contract(migration_path)
             runtime_contract = _ticket_contract(runtime_path)
             both_exact = (
-                _version(migration_path) == "0009"
+                _version(migration_path) == "0011"
                 and migration_contract == _EXPECTED_TICKET_CONTRACT
                 and runtime_contract == _EXPECTED_TICKET_CONTRACT
                 and migration_contract == runtime_contract

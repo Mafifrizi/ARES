@@ -8,6 +8,7 @@ Parent process reads stdout — stderr is logged separately.
 Exit code 0 = success (even if module found nothing).
 Exit code 1 = crash (parent will log stderr).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +19,7 @@ from typing import Any
 
 try:
     import resource as _resource
+
     _HAS_RESOURCE = True
 except ImportError:
     _resource = None  # type: ignore[assignment]
@@ -46,10 +48,10 @@ def apply_capability_limits(caps: set[str], limits: dict[str, int]) -> None:
     if not _HAS_RESOURCE:
         return  # Windows — resource limits not supported
     try:
-        cpu_s  = limits.get("cpu_time_s", 30)
-        mem_mb = limits.get("memory_mb",  256)
-        nproc  = limits.get("max_procs",  8)
-        nfiles = limits.get("max_files",  64)
+        cpu_s = limits.get("cpu_time_s", 30)
+        mem_mb = limits.get("memory_mb", 256)
+        nproc = limits.get("max_procs", 8)
+        nfiles = limits.get("max_files", 64)
 
         # CPU time (hard+soft)
         _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_s, cpu_s + 5))
@@ -68,7 +70,7 @@ def apply_capability_limits(caps: set[str], limits: dict[str, int]) -> None:
         _resource.setrlimit(_resource.RLIMIT_NOFILE, (nfiles, nfiles))
 
     except (AttributeError, ValueError, OSError):
-        pass   # Platform doesn't support — fail open (log in parent)
+        pass  # Platform doesn't support — fail open (log in parent)
 
 
 def check_capability_boundary(module_id: str, caps: set[str]) -> None:
@@ -82,21 +84,24 @@ def check_capability_boundary(module_id: str, caps: set[str]) -> None:
     di test environment.
     """
     if "cap_unsafe" in caps:
-        return   # builtin modules — no restrictions
+        return  # builtin modules — no restrictions
 
     import os
+
     if os.environ.get("ARES_WORKER_MODE") != "1":
-        return   # skip di luar worker subprocess (contoh: unit test)
+        return  # skip di luar worker subprocess (contoh: unit test)
 
     forbidden_in_env = set()
     if "cap_exec" not in caps:
         import sys
+
         for mod_name in list(sys.modules.keys()):
             if mod_name in ("subprocess", "os.system", "commands"):
                 forbidden_in_env.add(mod_name)
 
     if forbidden_in_env:
         import sys
+
         sys.stderr.write(
             f"[worker] CAPABILITY VIOLATION: module {module_id!r} "
             f"loaded forbidden modules {forbidden_in_env} "
@@ -108,94 +113,99 @@ def check_capability_boundary(module_id: str, caps: set[str]) -> None:
 def serialize_finding(f: Any) -> dict[str, Any]:
     """Convert Finding pydantic model to JSON-serializable dict."""
     return {
-        "id":              str(f.id),
-        "title":           f.title,
-        "description":     f.description,
-        "severity":        f.severity.value if hasattr(f.severity, "value") else str(f.severity),
-        "confidence":      f.confidence,
+        "id": str(f.id),
+        "title": f.title,
+        "description": f.description,
+        "severity": f.severity.value if hasattr(f.severity, "value") else str(f.severity),
+        "confidence": f.confidence,
         "mitre_technique": f.mitre_technique,
-        "mitre_tactic":    f.mitre_tactic,
-        "evidence":        f.evidence,
-        "remediation":     f.remediation,
-        "host":            f.host,
-        "module_id":       f.module_id,
-        "validated":       f.validated,
-        "false_positive":  f.false_positive,
-        "discovered_at":   f.discovered_at.isoformat() if f.discovered_at else None,
+        "mitre_tactic": f.mitre_tactic,
+        "evidence": f.evidence,
+        "remediation": f.remediation,
+        "host": f.host,
+        "module_id": f.module_id,
+        "validated": f.validated,
+        "false_positive": f.false_positive,
+        "discovered_at": f.discovered_at.isoformat() if f.discovered_at else None,
     }
 
 
-async def run_module(payload: dict[str, Any]) -> dict[str, Any]:
-    """Load and execute the requested module with capability enforcement."""
-    module_id   = payload["module_id"]
-    campaign_id = payload["campaign_id"]
-    params      = payload.get("params", {})
+_WORKER_ADMISSION_ERROR = (
+    "subprocess stdin execution requires a non-serializable coordinator capability"
+)
 
-    # ── v1.0.0: Apply capability-derived resource limits ──────────────────
-    caps   = set(payload.get("capabilities", []))
-    limits = payload.get("resource_limits", {})
-    apply_capability_limits(caps, limits if limits else {
-        "cpu_time_s": 30, "memory_mb": 256, "max_procs": 4, "max_files": 64
-    })
 
-    # Legacy memory limit (kept for backwards compat)
-    apply_memory_limit(payload.get("max_memory_mb"))
+class _PrivateWorkerConsumer:
+    """Process-local consumer used only by the sealed in-process test seam."""
 
-    # Dynamically load module from registry
-    from ares.core.plugin.loader import PluginLoader
-    from ares.core.config import get_settings
-    from ares.core.noise import NoiseController
+    def __init__(self) -> None:
+        self.pending: dict[str, tuple[str, ...]] = {}
 
-    settings = get_settings()
-    loader   = PluginLoader()
-    registry = loader.load_all()
+    def _register_admitted_dispatch_context(self, context: Any) -> None:
+        self.pending[context._dispatch_nonce] = (
+            context.campaign_id,
+            context.submission_id,
+            context.logical_execution_id,
+            context.attempt_id,
+            context.module_id,
+            str(context.attempt_revision),
+            str(context._store_id),
+            context._signature,
+        )
 
-    if module_id not in registry:
-        return {"success": False, "error": f"Module '{module_id}' not found", "findings": [], "raw": {}}
+    def _consume_registered_dispatch_context(self, context: Any) -> bool:
+        expected = self.pending.pop(context._dispatch_nonce, None)
+        return expected == (
+            context.campaign_id,
+            context.submission_id,
+            context.logical_execution_id,
+            context.attempt_id,
+            context.module_id,
+            str(context.attempt_revision),
+            str(context._store_id),
+            context._signature,
+        )
 
-    # Load campaign from DB (or create minimal mock if not found)
-    try:
-        from ares.db.database import AresDatabase
-        async with AresDatabase(settings.db_path, settings.encryption_key_value) as db:
-            c_data = await db.get_campaign(campaign_id)
-    except (OSError, ValueError, KeyError):
-        c_data = None
 
-    if c_data:
-        from ares.core.campaign import Campaign
-        campaign = Campaign(**c_data)
-    else:
-        from ares.core.campaign import Campaign, NoiseProfile
-        campaign = Campaign(name="worker", client="worker", noise_profile=NoiseProfile.NORMAL)
+_PRIVATE_WORKER_CONSUMER = _PrivateWorkerConsumer()
 
-    cls      = registry.get(module_id)
-    noise    = NoiseController(campaign)
-    instance = cls(settings=settings, campaign=campaign, noise=noise)  # type: ignore[misc]
 
-    # ── v1.0.0: Check capability boundary AFTER module loads ──────────────
-    check_capability_boundary(module_id, caps)
+async def _run_module_in_process(
+    payload: dict[str, Any],
+    dispatch_context: Any,
+    executor: Any,
+) -> dict[str, Any]:
+    """Private capability consumer; it is unreachable from serialized stdin."""
+    from ares.core.execution_admission import consume_dispatch_context, mark_effect_started
 
-    # Use execute(ctx) — consistent with engine.py (v0.9.0+ interface)
-    from ares.core.context import ExecutionContext as _ExCtx
-    ctx = _ExCtx.build(
-        campaign  = campaign,
-        target    = params.get("target", ""),
-        module_id = module_id,
-        domain    = params.get("domain", ""),
-        params    = params,
-        operator  = params.get("operator", "worker"),
-        settings  = settings,
-        noise     = noise,
+    module_id = payload.get("module_id")
+    campaign_id = payload.get("campaign_id")
+    if type(module_id) is not str or type(campaign_id) is not str:
+        raise PermissionError(_WORKER_ADMISSION_ERROR)
+    context = consume_dispatch_context(
+        dispatch_context,
+        consumer=_PRIVATE_WORKER_CONSUMER,
+        campaign_id=campaign_id,
+        module_id=module_id,
     )
-    module_result = await instance.execute(ctx)
-    findings = module_result.findings
-    raw      = module_result.raw
+    mark_effect_started(context)
+    result = executor(payload)
+    if asyncio.iscoroutine(result):
+        result = await result
+    if type(result) is not dict:
+        raise TypeError("private worker executor must return a dict")
+    return result
 
+
+async def run_module(payload: dict[str, Any]) -> dict[str, Any]:
+    """Reject every serializable payload; sealed capabilities cannot cross stdin."""
+    del payload
     return {
-        "success":  True,
-        "findings": [serialize_finding(f) for f in findings],
-        "raw":      {k: str(v) if not isinstance(v, (int, float, str, bool, list, dict, type(None))) else v
-                     for k, v in raw.items()},
+        "success": False,
+        "error": _WORKER_ADMISSION_ERROR,
+        "code": "EXECUTION_ADMISSION_REQUIRED",
+        "findings": [],
+        "raw": {},
     }
 
 
@@ -203,7 +213,7 @@ def main() -> None:
     """Entry point: read JSON from stdin, write JSON to stdout."""
     try:
         raw_input = sys.stdin.read()
-        payload   = json.loads(raw_input)
+        payload = json.loads(raw_input)
     except Exception as e:
         sys.stderr.write(f"[worker] Failed to parse payload: {e}\n")
         sys.exit(1)
@@ -217,10 +227,10 @@ def main() -> None:
         err = traceback.format_exc()
         sys.stderr.write(f"[worker] Unhandled exception:\n{err}\n")
         error_result = {
-            "success":  False,
-            "error":    err[-500:],  # last 500 chars
+            "success": False,
+            "error": err[-500:],  # last 500 chars
             "findings": [],
-            "raw":      {},
+            "raw": {},
         }
         sys.stdout.write(json.dumps(error_result))
         sys.stdout.flush()

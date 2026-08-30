@@ -434,11 +434,12 @@ SQLite or PostgreSQL database requires adoption, stop all workers and follow
 `alembic stamp`: only audited unversioned generations 6 and 7 are supported, and
 SQLite adoption requires a retained verified backup.
 
-The current managed head is revision `0009`. Upgrading to it installs
-authoritative refresh-token families and deliberately invalidates existing
-browser bearer sessions. Stop every worker, take the required backup, upgrade,
-deploy the matching backend and frontend together, and have operators sign in
-again. Revision `0009` is forward-only; do not run mixed `0008`/`0009` workers.
+The current managed head is revision `0010`. It adds an authoritative
+execution-lifecycle persistence catalog but does not activate a gateway or
+disable legacy execution. Stop every process, take the required backup, run the
+canonical upgrade, and deploy the matching 0010-aware backend. Mixed
+`0009`/`0010` processes are unsupported. Revision `0009` remains the historical
+refresh-family rollout that invalidated existing browser bearer sessions.
 
 The browser transport uses a host-only HttpOnly refresh cookie and a readable
 CSRF cookie/header pair. Access tokens remain in memory, API keys remain the
@@ -446,4 +447,5 @@ automation credential, and refresh tokens are no longer returned in JSON or
 stored in `sessionStorage`. Deploy the matching backend and frontend together,
 drain existing WebSockets, and require existing users to sign in again. A
 rollback replaces both components together and does not downgrade the database;
-there is no revision `0010` for this transport-only change.
+the transport rollout itself remains revision `0009`; revision `0010` is the
+separate additive lifecycle-persistence release.

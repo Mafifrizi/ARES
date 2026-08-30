@@ -1,10 +1,13 @@
 # ARES Worker Architecture
 
-**Version:** 1.0.0 | **Status:** Active
+**Version:** 1.0.0 | **Status:** legacy design; inactive in C-LIVE-v1
 
 ## Overview
 
-ARES executes modules in isolated workers — never in the engine main process. This prevents a buggy or malicious module from crashing the engine.
+The diagrams through “Adding a Worker Node” preserve the legacy worker target
+design only. They are not an active C-LIVE-v1 execution route. C-LIVE-v1 uses a
+nonserializable in-process coordinator seal, and the real subprocess stdin
+entrypoint rejects every payload.
 
 ```
                     ┌─────────────────────────────────────────┐
@@ -104,15 +107,15 @@ else:  # unsigned
 
 ---
 
-## Subprocess Worker Protocol
+## Legacy subprocess worker protocol (inactive and rejected)
 
-When `IsolationTier.SUBPROCESS` is used, ARES spawns:
+The pre-C-LIVE design proposed spawning:
 
 ```
 python -m ares.worker._subprocess_worker
 ```
 
-**Communication protocol (JSON over stdin/stdout):**
+**Rejected historical protocol (JSON over stdin/stdout):**
 
 ```
 Engine → Worker (stdin):
@@ -256,3 +259,18 @@ ARES_REDIS_URL=redis://redis:6379 ares worker start --capabilities cloud
 Workers auto-register and receive tasks matching their capability set.
 For Docker deployment, see `docker/docker-compose.prod.yml`; for local Docker
 development, see `docker/docker-compose.dev.yml`.
+
+---
+
+## C-LIVE-v1 worker boundary
+
+The legacy diagrams and launch examples above do not activate a C-LIVE-v1
+dispatch path. A coordinator seal is deliberately nonserializable and cannot
+cross stdin or a subprocess boundary. Consequently the real
+`python -m ares.worker._subprocess_worker` entrypoint rejects every stdin
+payload and executes no module code.
+
+The valid-capability/single-use contract exists only in a private in-process
+consumer used by the coordinator and its tests. Authenticated IPC, a serialized
+seal, broker dispatch, remote-worker activation, and P1-F recovery all require
+separate approval.

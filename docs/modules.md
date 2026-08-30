@@ -43,8 +43,9 @@ The canonical pre-side-effect gateway is deferred to Phase 5C.2. Until that
 gateway exists, the sidecar does not add role, approval, capability,
 destination, credential, retry, or outcome enforcement. External plugin
 metadata remains untrusted catalog data under the future contract and receives
-no fallback descriptor or gateway eligibility. Phase 5C.1 adds no database
-table, migration, or revision `0010`; the Alembic head remains `0009`.
+no fallback descriptor or gateway eligibility. Phase 5C.1 itself added no
+database table or migration. The later additive revision `0010` stores no
+module readiness override and does not connect descriptors to live execution.
 
 ## Safety Model
 

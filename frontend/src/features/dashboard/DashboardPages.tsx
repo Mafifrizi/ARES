@@ -3261,10 +3261,27 @@ function opsecBadge(level?: string): string {
 
 function serializeError(value: unknown): unknown {
   if (value instanceof ApiError) {
-    return { name: value.name, status: value.status, detail: value.detail };
+    const idempotencyKey = "idempotencyKey" in value
+      && typeof value.idempotencyKey === "string"
+      ? value.idempotencyKey
+      : undefined;
+    return {
+      name: value.name,
+      status: value.status,
+      detail: value.detail,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {})
+    };
   }
   if (value instanceof Error) {
-    return { name: value.name, message: value.message };
+    const idempotencyKey = "idempotencyKey" in value
+      && typeof value.idempotencyKey === "string"
+      ? value.idempotencyKey
+      : undefined;
+    return {
+      name: value.name,
+      message: value.message,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {})
+    };
   }
   return value;
 }

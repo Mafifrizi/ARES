@@ -51,11 +51,7 @@ def _install_fake_ldap3(monkeypatch, *, bind_outcomes=None):
             return True
 
         def search(self, *args, **kwargs):
-            self.result = {
-                "controls": {
-                    "1.2.840.113556.1.4.319": {"value": {"cookie": b""}}
-                }
-            }
+            self.result = {"controls": {"1.2.840.113556.1.4.319": {"value": {"cookie": b""}}}}
             self.entries = []
             return True
 
@@ -196,9 +192,7 @@ def test_asreproast_capture_uses_impacket_no_preauth_api(monkeypatch):
 
     monkeypatch.setattr(kerberosv5, "getKerberosTGT", fake_get_kerberos_tgt)
 
-    raw = asreproast_mod._capture_asrep_raw(
-        "10.0.0.5", "lab.local", "legacy-nonpreauth"
-    )
+    raw = asreproast_mod._capture_asrep_raw("10.0.0.5", "lab.local", "legacy-nonpreauth")
 
     assert raw == b"raw-asrep"
     assert captured["password"] == ""
@@ -238,7 +232,9 @@ async def test_kerberoast_empty_target_fails_fast_before_tgs_worker(monkeypatch)
 def test_ad_kerberos_execution_chain_metadata_is_guided_and_targeted():
     from ares.core.execution_chains import list_execution_chains
 
-    chain = next(item for item in list_execution_chains() if item["id"] == "ad-kerberos-exposure-chain")
+    chain = next(
+        item for item in list_execution_chains() if item["id"] == "ad-kerberos-exposure-chain"
+    )
     stages = chain["stages"]
     targeted = next(stage for stage in stages if stage["module_ids"] == ["ad.kerberoast"])
 
@@ -562,7 +558,9 @@ async def test_kerberoast_tgs_timeout_after_spn_enumeration_is_actionable(monkey
     assert time.monotonic() - started < 1.0
 
     assert exc_info.value.action == "abort"
-    assert "LDAP/SPN enumeration succeeded and found 2 Kerberoastable candidate account(s)" in str(exc_info.value)
+    assert "LDAP/SPN enumeration succeeded and found 2 Kerberoastable candidate account(s)" in str(
+        exc_info.value
+    )
     assert "Kerberos TGS request timed out before a hash was confirmed" in str(exc_info.value)
     assert "Password1!" not in str(exc_info.value)
 
@@ -722,6 +720,7 @@ async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_c
     from unittest.mock import AsyncMock, patch
 
     from ares.core.engine import AresEngine
+    from ares.core.execution_admission import _mint_test_dispatch_context
     from ares.core.config import AresSettings
     from ares.core.noise import JitterEngine
     from ares.modules.ad.enum_computers import ADEnumComputersModule
@@ -739,6 +738,7 @@ async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_c
         return await original_fetch(self, *args, **kwargs)
 
     monkeypatch.setattr(ADEnumComputersModule, "_fetch_computers", counted_fetch)
+
     async def no_noise_sleep(*args, **kwargs):
         return None
 
@@ -751,7 +751,14 @@ async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_c
         "use_ldaps": False,
     }
     with patch("ares.core.engine.asyncio.sleep", new=AsyncMock()) as retry_sleep:
-        result = await engine.run_module("ad.enum_computers", minimal_campaign, params)
+        result = await engine.run_module(
+            "ad.enum_computers",
+            minimal_campaign,
+            params,
+            dispatch_context=_mint_test_dispatch_context(
+                engine, minimal_campaign.id, "ad.enum_computers"
+            ),
+        )
 
     assert calls == 1
     assert retry_sleep.await_count == 0
@@ -769,6 +776,7 @@ async def test_enum_computers_ldaps_network_failure_is_not_module_error(
 
     from ares.core.config import AresSettings
     from ares.core.engine import AresEngine
+    from ares.core.execution_admission import _mint_test_dispatch_context
     from ares.core.noise import JitterEngine
 
     engine = AresEngine(settings=AresSettings())
@@ -794,7 +802,14 @@ async def test_enum_computers_ldaps_network_failure_is_not_module_error(
         "use_ldaps": True,
     }
     with patch("ares.core.engine.asyncio.sleep", new=AsyncMock()):
-        result = await engine.run_module("ad.enum_computers", minimal_campaign, params)
+        result = await engine.run_module(
+            "ad.enum_computers",
+            minimal_campaign,
+            params,
+            dispatch_context=_mint_test_dispatch_context(
+                engine, minimal_campaign.id, "ad.enum_computers"
+            ),
+        )
 
     assert result.outcome == "network_error"
     assert result.findings == []
@@ -818,8 +833,7 @@ async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypa
 
     def skewed_asrep(*args, **kwargs):
         raise RuntimeError(
-            "Kerberos SessionError: KRB_AP_ERR_SKEW(Clock skew too great) "
-            "password=Password1!"
+            "Kerberos SessionError: KRB_AP_ERR_SKEW(Clock skew too great) password=Password1!"
         )
 
     monkeypatch.setattr(module, "_ldap_get_nopreauth", fake_candidates)

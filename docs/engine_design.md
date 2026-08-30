@@ -1,10 +1,15 @@
 # ARES Engine Design
 
-**Version:** 1.0.0 | **Status:** Active
+**Version:** 1.0.0 | **Status:** C-LIVE-v1 safety wiring; descriptors inactive
 
 ## Overview
 
-The ARES engine is a goal-oriented attack orchestration system. Operators define a *goal* (e.g., `domain_admin`). The engine plans a chain, executes modules, tracks state, and adapts when techniques fail.
+The engine retains goal, module, and state-management components, but the
+pre-C-LIVE adaptive execution design documented below is inactive in
+C-LIVE-v1. Reachable effects require the sealed coordinator described in
+[C-LIVE-v1 engine ownership](#c-live-v1-engine-ownership); public engine calls
+and production Goal/Strategy planning fail closed while descriptors are
+ineligible.
 
 ---
 
@@ -26,7 +31,7 @@ AresEngine
 
 ---
 
-## Execution Lifecycle
+## Legacy execution lifecycle (inactive in C-LIVE-v1)
 
 Every module execution follows this exact sequence:
 
@@ -222,7 +227,7 @@ except AresError as e:
 
 ---
 
-## GoalEngine vs AttackPlanner
+## Legacy GoalEngine/AttackPlanner design (production inactive)
 
 **GoalEngine** (`ares/goal/engine.py`) — deterministic backward chaining:
 - Operator sets `Goal.DOMAIN_ADMIN`
@@ -236,7 +241,7 @@ except AresError as e:
 - Returns ranked `Suggestion` list with rationale
 - Re-runs after each execution (adapts to discovered state)
 
-They work together:
+The following sequence is historical and is not a production C-LIVE-v1 path:
 
 ```
 GoalEngine.plan() → initial deterministic chain
@@ -248,7 +253,7 @@ GoalEngine.plan() → initial deterministic chain
 
 ---
 
-## AdaptiveAttackStrategy
+## Legacy AdaptiveAttackStrategy (production inactive)
 
 When a module fails, the engine doesn't stop — it pivots:
 
@@ -314,3 +319,19 @@ Node types: `host`, `dc`, `credential`, `finding`, `pivot`
 Edge types: `lateral`, `compromise`, `credential`, `discovery`, `pivot`
 
 Frontend renders with D3.js or Cytoscape.js.
+
+---
+
+## C-LIVE-v1 engine ownership
+
+The engine no longer owns admission or implicit retries. A coordinator must
+first obtain exact `APPLIED` results for admission, queue, dispatch, and running,
+then pass a sealed single-use context to the engine. The engine prepares a
+sanitized result; persistence/publication is released only after the V3 terminal
+commit succeeds. Exact admission or terminal replay never enters the engine.
+
+Plan occurrences retain stage/module ordinals, including repeated module IDs.
+Retry attempts use deterministic child identities and repeat principal
+revalidation before queueing. Timeout, disconnect, cancellation, or an ordinary
+exception is not by itself settlement proof. Uncertain work is parked without
+automatic redispatch; INDETERMINATE recovery remains P1-F.

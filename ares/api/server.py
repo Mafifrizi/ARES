@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
+from uuid import UUID
 
 from fastapi import (
     Depends,
@@ -53,8 +54,11 @@ from ares.api.rbac import (
     get_current_user,
     rate_limit,
     require_any_auth,
+    require_live_operator,
     require_operator,
     require_team_lead,
+    resolve_execution_actor_authority_revision,
+    revalidate_bearer_principal,
 )
 from ares.core.browser_sessions import (
     BrowserRequestContext,
@@ -69,6 +73,14 @@ from ares.core.browser_sessions import (
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.engine import AresEngine
+from ares.core.execution_admission import (
+    DispatchDispositionV1,
+    DispatchOutcomeV1,
+    DispatchRequestV1,
+    ExecutionAdmissionCoordinatorV1,
+    RevalidatedPrincipalV1,
+    canonical_intent_digest,
+)
 from ares.core.logger import get_logger
 from ares.core.security import create_access_token
 from ares.core.token_sessions import (
@@ -78,8 +90,10 @@ from ares.core.token_sessions import (
 )
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
+from ares.db.execution_lifecycle import FixedResult, TrustedPrincipal
 from ares.db.websocket_tickets import (
     ApiKeyTicketSource,
+    BearerTicketSource,
     ConsumedWebSocketTicket,
     WebSocketTicketPrincipal,
     is_canonical_websocket_ticket,
@@ -324,6 +338,62 @@ async def _get_engagement_lock() -> asyncio.Lock:
     return _engagement_lock
 
 
+class _CLiveRuntime:
+    """One process-local store with request-scoped coordinator callbacks."""
+
+    def __init__(self, db: Any, engine: Any) -> None:
+        self.db = db
+        self.engine = engine
+        self.store = db.execution_lifecycle_store()
+
+    def bind(
+        self,
+        actor: AuthenticatedUser,
+    ) -> tuple[TrustedPrincipal, ExecutionAdmissionCoordinatorV1]:
+        source = actor.websocket_ticket_source
+        if type(source) is not BearerTicketSource:
+            raise HTTPException(
+                status_code=401,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        principal = TrustedPrincipal(source.user_id, source.user_id)
+
+        async def revalidate(
+            candidate: TrustedPrincipal,
+            campaign_id: str,
+            module_id: str,
+        ) -> RevalidatedPrincipalV1 | None:
+            del campaign_id, module_id
+            if candidate is not principal:
+                return None
+            decision = await revalidate_bearer_principal(source, db=self.db)
+            if (
+                decision.status is not PrincipalDecisionStatus.AUTHORIZED
+                or decision.principal is None
+                or decision.principal.user_id != principal.user_id
+                or decision.principal.role not in {"operator", "team_lead"}
+            ):
+                return None
+            revision = await resolve_execution_actor_authority_revision(
+                self.db,
+                principal.user_id,
+            )
+            if revision is None:
+                return None
+            return RevalidatedPrincipalV1(
+                principal=principal,
+                authority_revision=revision,
+                role=decision.principal.role,
+            )
+
+        return principal, ExecutionAdmissionCoordinatorV1(
+            self.store,
+            self.engine,
+            revalidate,
+        )
+
+
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 
@@ -358,6 +428,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _engine = AresEngine(settings=settings, db=_db)
     _engine.load_modules()
     app.state.engine = _engine
+    app.state.c_live_runtime = _CLiveRuntime(_db, _engine)
 
     # ── Redis rate limiter (optional) ────────────────────────────────────
     if settings.ares_redis_url:
@@ -419,6 +490,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Graceful shutdown — cancel background task before closing DB
     _cleanup_task.cancel()
     await asyncio.gather(_cleanup_task, return_exceptions=True)
+    app.state.c_live_runtime = None
     await _db.close()
     logger.info("ARES API shutdown complete")
 
@@ -525,7 +597,18 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-ARES-CSRF"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-API-Key",
+        "X-ARES-CSRF",
+    ],
+    expose_headers=[
+        "X-ARES-Attempt-Id",
+        "X-ARES-Logical-Execution-Id",
+        "X-ARES-Submission-Id",
+    ],
 )
 app.add_middleware(
     TrustedHostMiddleware,
@@ -632,6 +715,184 @@ def get_engine(request: Request) -> AresEngine:
             logger.error("engine_database_binding_mismatch", error=str(exc))
             raise HTTPException(503, "Engine persistence is not ready") from exc
     return engine
+
+
+def get_c_live_runtime(request: Request) -> Any:
+    """Return the lifespan-owned store wrapper; never create one per request."""
+    runtime = getattr(request.app.state, "c_live_runtime", None)
+    if runtime is None or not callable(getattr(runtime, "bind", None)):
+        raise HTTPException(503, "Execution admission is not ready")
+    return runtime
+
+
+_C_LIVE_IDEMPOTENCY_HEADER = "Idempotency-Key"
+_C_LIVE_SECRET_NAMES = frozenset(
+    {
+        "access_key",
+        "api_key",
+        "credential",
+        "krbtgt_hash",
+        "lm_hash",
+        "nt_hash",
+        "password",
+        "private_key",
+        "secret",
+        "secret_key",
+        "ssh_pass",
+        "token",
+    }
+)
+
+
+def _require_c_live_idempotency_key(request: Request) -> str:
+    values = request.headers.getlist(_C_LIVE_IDEMPOTENCY_HEADER)
+    if not values or (len(values) == 1 and values[0] == ""):
+        raise HTTPException(status_code=422, detail="idempotency_key_required")
+    if len(values) != 1:
+        raise HTTPException(status_code=422, detail="idempotency_key_invalid")
+    value = values[0]
+    try:
+        parsed = UUID(value)
+    except (AttributeError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="idempotency_key_invalid") from None
+    if parsed.version != 4 or str(parsed) != value:
+        raise HTTPException(status_code=422, detail="idempotency_key_invalid")
+    return value
+
+
+def _contains_c_live_raw_secret(value: Any, *, field_name: str = "") -> bool:
+    from pydantic import SecretStr
+
+    if isinstance(value, SecretStr):
+        return bool(value.get_secret_value())
+    normalized = field_name.strip().lower().replace("-", "_")
+    if normalized in _C_LIVE_SECRET_NAMES and value not in (None, "", (), [], {}):
+        return True
+    if isinstance(value, Mapping):
+        return any(
+            _contains_c_live_raw_secret(item, field_name=str(key))
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(
+            _contains_c_live_raw_secret(item, field_name=field_name)
+            for item in value
+        )
+    return False
+
+
+def _c_live_descriptor_gate(module_id: str, role: str) -> str | None:
+    """Production-only descriptor gate; tests may replace this private seam."""
+    from ares.modules.descriptors import get_descriptor
+
+    descriptor = get_descriptor(module_id)
+    if descriptor is None or not descriptor.future_gateway_eligible:
+        return "descriptor_unavailable"
+    minimum_role = descriptor.minimum_role.value
+    if minimum_role == "team_lead" and role != "team_lead":
+        return "execution_not_dispatchable"
+    return None
+
+
+def _c_live_identity_payload(outcome: DispatchOutcomeV1) -> dict[str, str]:
+    identity = outcome.identity
+    if identity is None:
+        return {}
+    return {
+        "submission_id": identity.submission_id,
+        "logical_execution_id": identity.logical_execution_id,
+        "attempt_id": identity.attempt_id,
+    }
+
+
+def _c_live_identity_headers(outcome: DispatchOutcomeV1) -> dict[str, str]:
+    identity = outcome.identity
+    if identity is None:
+        return {}
+    return {
+        "X-ARES-Submission-Id": identity.submission_id,
+        "X-ARES-Logical-Execution-Id": identity.logical_execution_id,
+        "X-ARES-Attempt-Id": identity.attempt_id,
+    }
+
+
+def _c_live_fixed_result(outcome: DispatchOutcomeV1) -> FixedResult:
+    value = outcome.lifecycle_result
+    return value if type(value) is FixedResult else FixedResult(str(value))
+
+
+def _c_live_error_response(
+    outcome: DispatchOutcomeV1,
+    *,
+    override: str | None = None,
+) -> JSONResponse:
+    result = _c_live_fixed_result(outcome)
+    if override == "descriptor_unavailable":
+        status_code, error_type = 409, "descriptor_unavailable"
+    elif override == "execution_not_dispatchable":
+        status_code, error_type = 409, "execution_not_dispatchable"
+    elif (
+        outcome.disposition is DispatchDispositionV1.INDETERMINATE
+        or (outcome.effect_started and not outcome.terminal_committed)
+    ):
+        status_code, error_type = 503, "execution_settlement_unconfirmed"
+    elif outcome.disposition is DispatchDispositionV1.REPLAYED or result in {
+        FixedResult.REPLAYED,
+        FixedResult.REPLAYED_BOUND_CHILD,
+        FixedResult.REPLAYED_CLOSED,
+    }:
+        status_code, error_type = 409, "execution_replayed_no_redispatch"
+    elif result is FixedResult.CONFLICT_OPERATION:
+        status_code, error_type = 409, "idempotency_conflict"
+    elif result is FixedResult.INVALID_CONTRACT:
+        status_code, error_type = 422, "invalid_contract"
+    elif result is FixedResult.AUTHORITY_STALE:
+        status_code, error_type = 409, "execution_authority_stale"
+    elif result is FixedResult.CAPACITY_UNAVAILABLE:
+        status_code, error_type = 429, "execution_capacity_unavailable"
+    elif result is FixedResult.INCONSISTENT_BUDGET_SET:
+        status_code, error_type = 503, "execution_budget_set_unavailable"
+    elif result is FixedResult.NOT_FOUND_OR_PURGED:
+        status_code, error_type = 410, "execution_not_found_or_purged"
+    elif result is FixedResult.INVARIANT_FAILURE:
+        status_code, error_type = 500, "execution_invariant_failure"
+    else:
+        status_code, error_type = 409, "execution_not_dispatchable"
+    content: dict[str, Any] = {
+        "code": status_code,
+        "detail": error_type,
+        "type": error_type,
+        "result": result.value,
+        "redispatched": False,
+        "outcome": "unavailable",
+    }
+    identity = _c_live_identity_payload(outcome)
+    if identity:
+        content["execution"] = identity
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers=_c_live_identity_headers(outcome),
+    )
+
+
+def _c_live_unavailable_response(error_type: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "code": 409,
+            "detail": error_type,
+            "type": error_type,
+            "result": FixedResult.CONFLICT_STATE.value,
+            "redispatched": False,
+            "outcome": "unavailable",
+        },
+    )
+
+
+def _apply_c_live_identity_headers(response: Response, outcome: DispatchOutcomeV1) -> None:
+    for name, value in _c_live_identity_headers(outcome).items():
+        response.headers[name] = value
 
 
 async def get_current_user_or_apikey(
@@ -1567,6 +1828,65 @@ def _collect_plan_module_ids_for_authorization(
     return sorted(set(module_ids))
 
 
+def _prepare_c_live_plan_children(
+    plan: Any,
+    global_params: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Validate and freeze the complete ordered fan-out before any effect."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from ares.modules.params import validate_module_params
+
+    children: list[dict[str, Any]] = []
+    occurrences: dict[str, int] = {}
+    absolute_ordinal = 0
+    for stage_ordinal, stage in enumerate(plan.stages):
+        stage_params = stage.get("params", {})
+        if not isinstance(stage_params, Mapping):
+            raise HTTPException(status_code=422, detail="Invalid plan: stage params must be a map")
+        for module_ordinal, module_id in enumerate(stage["modules"]):
+            raw_module_params = stage_params.get(module_id, {})
+            if not isinstance(raw_module_params, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid plan params for module {module_id!r}",
+                )
+            raw_params = {**dict(global_params), **dict(raw_module_params)}
+            if _contains_c_live_raw_secret(raw_params):
+                raise HTTPException(status_code=422, detail="raw_secret_material_forbidden")
+            try:
+                validated_params = validate_module_params(module_id, raw_params)
+            except PydanticValidationError as exc:
+                errors = [
+                    {"field": ".".join(str(item) for item in error["loc"]), "msg": error["msg"]}
+                    for error in exc.errors()
+                ]
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": f"Invalid params for module {module_id!r}",
+                        "errors": errors,
+                    },
+                ) from None
+            if _contains_c_live_raw_secret(validated_params):
+                raise HTTPException(status_code=422, detail="raw_secret_material_forbidden")
+            occurrence = occurrences.get(module_id, 0)
+            occurrences[module_id] = occurrence + 1
+            children.append(
+                {
+                    "module_id": module_id,
+                    "raw_parameters": validated_params,
+                    "occurrence": occurrence,
+                    "stage_ordinal": stage_ordinal,
+                    "decision_ordinal": 0,
+                    "module_ordinal": module_ordinal,
+                    "absolute_ordinal": absolute_ordinal,
+                }
+            )
+            absolute_ordinal += 1
+    return children
+
+
 def _require_high_noise_module_access(
     module_ids: Iterable[Any],
     actor: AuthenticatedUser,
@@ -1610,17 +1930,22 @@ async def run_module(
     module_id: str,
     body: RunRequest,
     request: Request,
-    actor: AuthenticatedUser = Depends(require_operator()),
+    response: Response,
+    actor: AuthenticatedUser = Depends(require_live_operator()),
     _rate: None = Depends(rate_limit("module_run")),
     engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
+    c_live_runtime: Any = Depends(get_c_live_runtime),
 ) -> dict[str, Any]:
-    """Run module. HIGH_NOISE requires team_lead. Rate limited: 20/min."""
+    """Dispatch one live module only through durable v3 admission."""
     if isinstance(engine, AresEngine):
         engine.bind_database(db)
 
-    # Use the engine's already-loaded registry — avoids rescanning disk on every request.
-    _require_high_noise_module_access([module_id], actor, engine)
+    campaign = await db.get_campaign(body.campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+
+    raw_params = dict(body.params)
 
     # Validate params against Pydantic schema
     from pydantic import ValidationError as PydanticValidationError
@@ -1648,54 +1973,60 @@ async def run_module(
                 "message": f"Invalid params for module {module_id!r}",
                 "errors": errors,
             },
-        )
-    # Replace raw params with validated (type-coerced, secret-wrapped) params
-    body = body.model_copy(update={"params": validated_params})
-
-    campaign = await db.get_campaign(body.campaign_id)
-    if not campaign:
-        raise HTTPException(404, "Campaign not found")
-    await _require_campaign_access(campaign, actor)
-
-    # Reconstruct Campaign object from DB row.
-    c_obj = _campaign_from_db_row(campaign)
-
-    # Unwrap SecretStr objects → plain strings before handing to modules.
-    # Pydantic wraps secret fields after validation; libraries like impacket / ldap3
-    # expect plain str — passing SecretStr causes silent auth failures.
-    from pydantic import SecretStr as _SecretStr
-
-    def _unwrap_secrets(params: dict) -> dict:
-        return {
-            k: (v.get_secret_value() if isinstance(v, _SecretStr) else v)
-            for k, v in params.items()
-        }
-
-    safe_params = _unwrap_secrets(body.params)
-
+        ) from None
     # Dry-run: validate + preview without touching target
     if getattr(body, "dry_run", False):
-        return engine.dry_run_module(module_id, safe_params)
+        return engine.dry_run_module(module_id, validated_params)
 
-    # The DB-bound engine owns finding, credential, module-run, audit, and
-    # telemetry persistence.  Keeping this route read/response-only prevents
-    # duplicate rows for API-triggered executions.
-    result = await engine.run_module(
-        module_id, c_obj, safe_params, actor_role=actor.role
+    idempotency_key = _require_c_live_idempotency_key(request)
+    if _contains_c_live_raw_secret(raw_params) or _contains_c_live_raw_secret(
+        validated_params
+    ):
+        raise HTTPException(status_code=422, detail="raw_secret_material_forbidden")
+    descriptor_result = _c_live_descriptor_gate(module_id, actor.role)
+    if descriptor_result is not None:
+        return _c_live_unavailable_response(descriptor_result)
+
+    c_obj = _campaign_from_db_row(campaign)
+    principal, coordinator = c_live_runtime.bind(actor)
+    outcome = await coordinator.execute_module(
+        principal,
+        DispatchRequestV1(
+            campaign_id=body.campaign_id,
+            module_id=module_id,
+            ingress_code="api_module",
+            idempotency_key=idempotency_key,
+            raw_parameters=validated_params,
+            whole_intent_digest=canonical_intent_digest(
+                {
+                    "campaign_id": body.campaign_id,
+                    "module_id": module_id,
+                    "params": raw_params,
+                }
+            ),
+        ),
+        c_obj,
     )
+    if (
+        outcome.disposition is not DispatchDispositionV1.TERMINAL
+        or not outcome.terminal_committed
+        or outcome.module_result is None
+    ):
+        return _c_live_error_response(outcome)
 
-    # Broadcast to WebSocket subscribers
     await _broadcast_event(
         body.campaign_id,
         {
             "type": "module_complete",
             "module_id": module_id,
-            "findings": len(result.findings),
-            "status": result.status,
+            "findings": len(outcome.module_result.findings),
+            "status": outcome.module_result.status,
         },
     )
-
-    return _safe_module_result_payload(result)
+    _apply_c_live_identity_headers(response, outcome)
+    payload = _safe_module_result_payload(outcome.module_result)
+    payload["execution"] = _c_live_identity_payload(outcome)
+    return payload
 
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -1822,153 +2153,131 @@ def _strategy_llm_configuration_error(backend: str) -> str:
     return ""
 
 
-@app.post("/strategy/engage", tags=["strategy"], status_code=202)
+def _strategy_test_plan(body: AutonomousEngagementRequest) -> dict[str, Any] | None:
+    """Private pure-plan seam. Production always returns non-dispatchable."""
+    del body
+    return None
+
+
+@app.post("/strategy/engage", tags=["strategy"], status_code=200)
 async def start_autonomous_engagement(
     body: AutonomousEngagementRequest,
-    actor: AuthenticatedUser = Depends(require_operator()),
+    request: Request,
+    response: Response,
+    actor: AuthenticatedUser = Depends(require_live_operator()),
+    _rate: None = Depends(rate_limit("module_run")),
+    engine: AresEngine = Depends(get_engine),
+    db: AresDatabase = Depends(get_db),
+    c_live_runtime: Any = Depends(get_c_live_runtime),
 ) -> dict:
-    """
-    Start an autonomous multi-round red team engagement via StrategyEngine.
-    Uses AI planning + EDR bypass + coverage prediction in a continuous loop.
-    Returns immediately — monitor via WebSocket /ws/campaigns/{id}/events.
-    ConstitutionEnforcer enforces authorizations list server-side.
-    """
-    if not _db or not _engine:
-        raise HTTPException(status_code=503, detail="Engine or database not available")
-
-    # FIX 3: ALWAYS_REQUIRE_AUTH modules need team_lead role
-    from ares.strategy.enforcer import ALWAYS_REQUIRE_AUTH
-
-    restricted = [m for m in body.authorizations if m in ALWAYS_REQUIRE_AUTH]
-    if restricted and actor.role != "team_lead":
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"Authorizing {restricted} requires team_lead role. "
-                f"Current role: {actor.role!r}. "
-                "Contact your team lead to run this engagement."
-            ),
-        )
-
-    for backend in (body.llm_backend, body.secondary_backend):
-        if backend:
-            config_error = _strategy_llm_configuration_error(backend)
-            if config_error:
-                raise HTTPException(status_code=422, detail=config_error)
-
-    campaign_data = await _db.get_campaign(body.campaign_id)
+    """Synchronously dispatch only a pre-supplied pure deterministic test plan."""
+    campaign_data = await db.get_campaign(body.campaign_id)
     if not campaign_data:
         raise HTTPException(
             status_code=404, detail=f"Campaign {body.campaign_id!r} not found"
         )
-    await _require_campaign_access(campaign_data, actor)
+    idempotency_key = _require_c_live_idempotency_key(request)
+    plan_data = _strategy_test_plan(body)
+    if plan_data is None:
+        return _c_live_unavailable_response("descriptor_unavailable")
+    if not isinstance(plan_data, Mapping):
+        raise HTTPException(status_code=422, detail="invalid_contract")
+    from ares.core.engine import ExecutionPlan
+
+    _collect_plan_module_ids_for_authorization(plan_data)
+    try:
+        plan = ExecutionPlan.from_dict(dict(plan_data))
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid plan: {exc}") from None
+    children = _prepare_c_live_plan_children(plan, {})
+    if not children:
+        return _c_live_error_response(
+            DispatchOutcomeV1(
+                DispatchDispositionV1.NON_DISPATCHABLE,
+                None,
+                FixedResult.INVALID_CONTRACT,
+                None,
+            )
+        )
+    for child in children:
+        child["decision_ordinal"] = child["stage_ordinal"]
+        descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
+        if descriptor_result is not None:
+            return _c_live_unavailable_response(descriptor_result)
+
+    whole_intent_digest = canonical_intent_digest(
+        {
+            "campaign_id": body.campaign_id,
+            "request": body.model_dump(mode="json"),
+            "strategy_plan": plan_data,
+        }
+    )
     campaign = (
         _campaign_from_db_row(campaign_data)
         if isinstance(campaign_data, dict)
         else campaign_data
     )
-
-    # FIX 2: Concurrent engagement limit — atomic via asyncio.Lock (Issue 14)
-    _max = int(os.environ.get("ARES_MAX_ENGAGEMENTS", _MAX_CONCURRENT_ENGAGEMENTS))
-    _lock = await _get_engagement_lock()
-    async with _lock:
-        active_for_campaign = sum(
-            1 for cid in _active_engagements.values() if cid == body.campaign_id
+    principal, coordinator = c_live_runtime.bind(actor)
+    result_rows: list[dict[str, Any]] = []
+    final_outcome: DispatchOutcomeV1 | None = None
+    for child in children:
+        outcome = await coordinator.execute_module(
+            principal,
+            DispatchRequestV1(
+                campaign_id=body.campaign_id,
+                module_id=child["module_id"],
+                ingress_code="strategy",
+                idempotency_key=idempotency_key,
+                raw_parameters=child["raw_parameters"],
+                whole_intent_digest=whole_intent_digest,
+                occurrence=child["occurrence"],
+                stage_ordinal=child["stage_ordinal"],
+                decision_ordinal=child["decision_ordinal"],
+                module_ordinal=child["module_ordinal"],
+            ),
+            campaign,
         )
-        # Per-campaign limit: one active engagement at a time per campaign
-        if active_for_campaign >= 1:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"Campaign {body.campaign_id!r} already has an active engagement. "
-                    "Wait for it to complete before starting a new one."
+        if (
+            outcome.disposition is not DispatchDispositionV1.TERMINAL
+            or not outcome.terminal_committed
+            or outcome.module_result is None
+        ):
+            return _c_live_error_response(outcome)
+        result_rows.append(
+            {
+                "module_id": child["module_id"],
+                "occurrence": child["occurrence"],
+                "stage_ordinal": child["stage_ordinal"],
+                "decision_ordinal": child["decision_ordinal"],
+                "module_ordinal": child["module_ordinal"],
+                "status": (
+                    outcome.module_result.status.value
+                    if hasattr(outcome.module_result.status, "value")
+                    else str(outcome.module_result.status)
                 ),
-            )
-        # Global limit
-        if len(_active_engagements) >= _max:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"Maximum concurrent engagements ({_max}) reached. "
-                    "Wait for an active engagement to complete or increase "
-                    "ARES_MAX_ENGAGEMENTS env var."
-                ),
-            )
-        # Register inside lock — atomically with checks above
-        import time as _time_reg
-
-        engagement_id = f"engage_{body.campaign_id[:8]}_{int(_time_reg.time())}"
-        _active_engagements[engagement_id] = body.campaign_id
-    # Enforce campaign ownership — same as all other campaign endpoints
-    async def _run() -> None:
-        from ares.strategy import OperatorNotifier, StrategyEngine
-
-        async def _notify(msg: dict) -> None:
-            await _broadcast_event(
-                body.campaign_id,
-                {"type": "strategy_event", "data": msg},
-            )
-
-        notifier = OperatorNotifier(notify_fn=_notify)
-        se = StrategyEngine(
-            ares_engine=_engine, settings=get_settings(), notifier=notifier
+                "findings_count": len(outcome.module_result.findings),
+                "error": outcome.module_result.error,
+                "duration_ms": outcome.module_result.duration_ms,
+                "execution": _c_live_identity_payload(outcome),
+            }
         )
-        try:
-            result = await se.run_autonomous_engagement(
-                campaign=campaign,
-                goal=body.goal,
-                max_rounds=body.max_rounds,
-                max_detection_probability=body.max_detection_probability,
-                confidence_threshold=body.confidence_threshold,
-                llm_backend=body.llm_backend,
-                secondary_backend=body.secondary_backend,
-                adversarial_sim=body.adversarial_sim,
-                actor_role=actor.role,
-                authorizations=body.authorizations,
-                forbidden_modules=set(body.forbidden_modules),
-                allow_persistence=body.allow_persistence,
-            )
-            await _notify(
-                {
-                    "event": "engagement_complete",
-                    "engagement_id": engagement_id,
-                    "final_status": result.final_status,
-                    "rounds": result.total_rounds,
-                    "detection_score": result.final_detection_score,
-                    "succeeded": result.modules_succeeded,
-                }
-            )
-        except Exception as exc:
-            logger.error(
-                "autonomous_engagement_failed",
-                error_type=type(exc).__name__,
-            )
-            await _notify(
-                {
-                    "event": "engagement_error",
-                    "engagement_id": engagement_id,
-                    "error": str(exc)[:200],
-                }
-            )
-        finally:
-            async with _lock:
-                _active_engagements.pop(engagement_id, None)
-            _engagement_tasks.pop(engagement_id, None)
-
-    _engagement_tasks[engagement_id] = asyncio.create_task(
-        _run(), name=f"ares-strategy-{engagement_id}"
+        final_outcome = outcome
+    await _broadcast_event(
+        body.campaign_id,
+        {
+            "type": "strategy_complete",
+            "modules_run": len(result_rows),
+            "status": "completed",
+        },
     )
+    if final_outcome is not None:
+        _apply_c_live_identity_headers(response, final_outcome)
     return {
-        "engagement_id": engagement_id,
-        "status": "started",
+        "status": "completed",
         "campaign_id": body.campaign_id,
         "goal": body.goal,
-        "max_rounds": body.max_rounds,
-        "authorizations": body.authorizations,
-        "note": (
-            "Running in background. Monitor via WebSocket "
-            "/ws/campaigns/{campaign_id}/events for strategy_event updates."
-        ),
+        "modules_run": len(result_rows),
+        "children": result_rows,
     }
 
 
@@ -2753,10 +3062,12 @@ async def run_campaign_plan(
     campaign_id: str,
     body: PlanRunRequest,
     request: Request,
-    actor: AuthenticatedUser = Depends(require_operator()),
+    response: Response,
+    actor: AuthenticatedUser = Depends(require_live_operator()),
     _rate: None = Depends(rate_limit("module_run")),
     engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
+    c_live_runtime: Any = Depends(get_c_live_runtime),
 ) -> dict[str, Any]:
     """
     Execute (or dry-run) a full ExecutionPlan against a campaign.
@@ -2770,37 +3081,102 @@ async def run_campaign_plan(
     campaign = await db.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
-    await _require_campaign_access(campaign, actor)
 
     from ares.core.engine import ExecutionPlan
 
-    plan_module_ids = _collect_plan_module_ids_for_authorization(body.plan)
+    _collect_plan_module_ids_for_authorization(body.plan)
     try:
         plan = ExecutionPlan.from_dict(body.plan)
     except Exception as exc:
-        raise HTTPException(422, f"Invalid plan: {exc}")
-
-    _require_high_noise_module_access(plan_module_ids, actor, engine)
+        raise HTTPException(422, f"Invalid plan: {exc}") from None
 
     if body.dry_run:
         return engine.dry_run_plan(plan, body.global_params)
 
+    idempotency_key = _require_c_live_idempotency_key(request)
+    children = _prepare_c_live_plan_children(plan, body.global_params)
+    if not children:
+        return _c_live_error_response(
+            DispatchOutcomeV1(
+                DispatchDispositionV1.NON_DISPATCHABLE,
+                None,
+                FixedResult.INVALID_CONTRACT,
+                None,
+            )
+        )
+    for child in children:
+        descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
+        if descriptor_result is not None:
+            return _c_live_unavailable_response(descriptor_result)
+
+    whole_intent_digest = canonical_intent_digest(
+        {
+            "campaign_id": campaign_id,
+            "global_params": body.global_params,
+            "plan": body.plan,
+        }
+    )
     c_obj = _campaign_from_db_row(campaign)
-    results = await engine.run_plan(plan, c_obj, body.global_params, actor_role=actor.role)
+    principal, coordinator = c_live_runtime.bind(actor)
+    result_rows: list[dict[str, Any]] = []
+    final_outcome: DispatchOutcomeV1 | None = None
+    for child in children:
+        outcome = await coordinator.execute_module(
+            principal,
+            DispatchRequestV1(
+                campaign_id=campaign_id,
+                module_id=child["module_id"],
+                ingress_code="api_campaign_plan",
+                idempotency_key=idempotency_key,
+                raw_parameters=child["raw_parameters"],
+                whole_intent_digest=whole_intent_digest,
+                occurrence=child["occurrence"],
+                stage_ordinal=child["stage_ordinal"],
+                decision_ordinal=child["decision_ordinal"],
+                module_ordinal=child["module_ordinal"],
+            ),
+            c_obj,
+        )
+        if (
+            outcome.disposition is not DispatchDispositionV1.TERMINAL
+            or not outcome.terminal_committed
+            or outcome.module_result is None
+        ):
+            return _c_live_error_response(outcome)
+        await _broadcast_event(
+            campaign_id,
+            {
+                "type": "module_complete",
+                "module_id": child["module_id"],
+                "findings": len(outcome.module_result.findings),
+                "status": outcome.module_result.status,
+            },
+        )
+        result_rows.append(
+            {
+                "module_id": child["module_id"],
+                "occurrence": child["occurrence"],
+                "stage_ordinal": child["stage_ordinal"],
+                "decision_ordinal": child["decision_ordinal"],
+                "module_ordinal": child["module_ordinal"],
+                "status": (
+                    outcome.module_result.status.value
+                    if hasattr(outcome.module_result.status, "value")
+                    else str(outcome.module_result.status)
+                ),
+                "findings_count": len(outcome.module_result.findings),
+                "error": outcome.module_result.error,
+                "duration_ms": outcome.module_result.duration_ms,
+                "execution": _c_live_identity_payload(outcome),
+            }
+        )
+        final_outcome = outcome
+    if final_outcome is not None:
+        _apply_c_live_identity_headers(response, final_outcome)
     return {
         "campaign_id": campaign_id,
-        "modules_run": len(results),
-        "results": {
-            mid: {
-                "status": (
-                    r.status.value if hasattr(r.status, "value") else str(r.status)
-                ),
-                "findings_count": len(r.findings),
-                "error": r.error,
-                "duration_ms": r.duration_ms,
-            }
-            for mid, r in results.items()
-        },
+        "modules_run": len(result_rows),
+        "children": result_rows,
     }
 
 

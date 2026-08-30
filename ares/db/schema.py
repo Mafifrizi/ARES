@@ -16,7 +16,12 @@ Tables (v5 additions marked ★):
 """
 from __future__ import annotations
 
-SCHEMA_VERSION = 8
+from ares.db.execution_lifecycle import (
+    sqlite_admission_authority_runtime_script,
+    sqlite_lifecycle_runtime_script,
+)
+
+SCHEMA_VERSION = 9
 
 CREATE_TABLES = """
 PRAGMA journal_mode = WAL;
@@ -447,7 +452,7 @@ CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
     ON websocket_tickets(api_key_id);
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_bearer_family
     ON websocket_tickets(bearer_family_id);
-"""
+""" + sqlite_lifecycle_runtime_script() + sqlite_admission_authority_runtime_script()
 
 # ── Migration: v4 → v5 ────────────────────────────────────────────────────────
 # Applied automatically by AresDatabase.connect() when SCHEMA_VERSION mismatch.

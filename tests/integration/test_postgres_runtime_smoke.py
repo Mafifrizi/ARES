@@ -1520,14 +1520,14 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
                     """
                     SELECT EXISTS(
                         SELECT 1 FROM alembic_version
-                        WHERE version_num='0009'
+                        WHERE version_num='0011'
                     )
                     """
                 )
             )
             _require_fixed(
                 managed_revision_is_current,
-                "Runtime smoke must use exact managed revision 0009",
+                "Runtime smoke must use exact managed revision 0011",
             )
             relation_metadata = await connection.fetchrow(
                 """

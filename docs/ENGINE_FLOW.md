@@ -1,14 +1,16 @@
 # ARES Engine Flow
 
-**Version:** 1.0.0
+**Version:** 1.0.0 | **Runtime status:** C-LIVE-v1 safety wiring; descriptors inactive
 
 ## Overview
 
-This document traces the complete execution pipeline from user input to findings stored in the database.
+The opening diagrams preserve the pre-C-LIVE target design for historical
+context. They are inactive in C-LIVE-v1. The authoritative reachable effect
+flow is [C-LIVE-v1 durable effect ordering](#c-live-v1-durable-effect-ordering).
 
 ---
 
-## Pipeline Diagram
+## Legacy pipeline diagram (inactive in C-LIVE-v1)
 
 ```
 Operator Input (CLI / API)
@@ -54,21 +56,26 @@ Operator Input (CLI / API)
 
 ### AresEngine (`ares/core/engine.py`)
 
-Orchestrates module execution. Key methods:
+Historical method roles are shown below. Public calls now fail closed without a
+sealed coordinator context:
 
 | Method | Description |
 |--------|-------------|
-| `run_module(id, campaign, params)` | Run single module with timeout + retry |
-| `run_plan(plan, campaign, params)` | Run ExecutionPlan (staged, parallel per stage) |
+| `run_module(id, campaign, params)` | Reject unless given one valid single-use coordinator seal |
+| `run_plan(plan, campaign, params)` | Reject unless every child has an admitted sealed context |
 | `dry_run_plan(plan, params)` | Preview without executing |
 
-**Retry logic:** `asyncio.TimeoutError` → retry up to 2 times with exponential backoff (2s, 4s). Original timeout status preserved even if retries fail with other exceptions.
+**Retry status:** implicit timeout/exception retry is disabled. A retry is a new
+coordinator-admitted deterministic child; uncertain work is never retried by
+C-LIVE-v1.
 
 ---
 
 ### GoalEngine + CapabilityGraph (`ares/goal/engine.py`)
 
-The planner that converts a high-level goal into an ordered execution chain.
+This is retained deterministic planning logic. Production Goal planning is
+fail-closed while descriptors are ineligible; only the private deterministic
+repository-test seam may invoke it.
 
 **Chain resolution priority:**
 1. `preferred_chain` from GoalDefinition (if all modules available)
@@ -147,3 +154,29 @@ path = graph.find_path("svc_sql", "Domain Admins")
 report = graph.path_to_report(path)
 # → {"steps": [{"from": "svc_sql", "to": "TGS:svc_sql", "attack": "ad.kerberoast", ...}], ...}
 ```
+
+---
+
+## C-LIVE-v1 durable effect ordering
+
+Reachable first-party live entrypoints use the sealed coordinator in this fixed
+order:
+
+```text
+authenticate/revalidate
+  -> admission APPLIED (ACCEPTED, revision 0)
+  -> revalidate again
+  -> QUEUED/APPLIED (revision 1)
+  -> DISPATCHING/APPLIED (revision 2)
+  -> RUNNING/APPLIED (revision 3)
+  -> consume one process-local dispatch seal
+  -> execute one module effect
+  -> commit a known terminal outcome
+  -> expose the redacted result
+```
+
+Every gate compares the exact lifecycle result; replay and conflict never own
+dispatch. A retry or plan child has a deterministic child identity and repeats
+the full ordering. A crash before `RUNNING` is stranded without effect. An
+uncertain failure after `RUNNING` enters settlement-pending (or remains running)
+and is never automatically retried; P1-F recovery is outside C-LIVE-v1.

@@ -170,3 +170,101 @@ describe("browser auth API facade", () => {
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).credentials).toBe("same-origin");
   });
 });
+
+describe("C-LIVE-v1 idempotency", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+    installBrowserPrimitives();
+  });
+
+  it("generates one Idempotency-Key for an effectful submission", async () => {
+    const generated = "123e4567-e89b-42d3-a456-426614174000";
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(generated);
+    const fetchMock = vi.fn<(
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => Promise<Response>>(async () => new Response(JSON.stringify({ status: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    const result = await client.api.runModule(
+      "recon.test",
+      client.buildModuleRunPayload("campaign-a", {}, false)
+    );
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Idempotency-Key")).toBe(generated);
+    expect(result.idempotency_key).toBe(generated);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses the same Idempotency-Key for a transport retry", async () => {
+    const generated = "123e4567-e89b-42d3-a456-426614174001";
+    const uuid = vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(generated);
+    const fetchMock = vi.fn<(
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => Promise<Response>>()
+      .mockRejectedValueOnce(new TypeError("network lost"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    const payload = client.buildModuleRunPayload("campaign-a", { target: "host-a" }, false);
+    await expect(client.api.runModule("recon.test", payload)).rejects.toMatchObject({
+      idempotencyKey: generated
+    });
+    await client.api.runModule("recon.test", payload);
+    const keys = fetchMock.mock.calls.map((call) => new Headers(call[1]?.headers).get("Idempotency-Key"));
+    expect(keys).toEqual([generated, generated]);
+    expect(uuid).toHaveBeenCalledTimes(1);
+  });
+
+  it("generates a different key for a distinct logical submission", async () => {
+    const uuid = vi.spyOn(globalThis.crypto, "randomUUID")
+      .mockReturnValueOnce("123e4567-e89b-42d3-a456-426614174002")
+      .mockReturnValueOnce("123e4567-e89b-42d3-a456-426614174003");
+    const fetchMock = vi.fn<(
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => Promise<Response>>(async () => new Response(JSON.stringify({ status: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    const payload = client.buildModuleRunPayload("campaign-a", {}, false);
+    await client.api.runModule("recon.test", payload);
+    await client.api.runModule("recon.test", payload);
+    const keys = fetchMock.mock.calls.map((call) => new Headers(call[1]?.headers).get("Idempotency-Key"));
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(uuid).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves and displays a caller-supplied Idempotency-Key", async () => {
+    const supplied = "123e4567-e89b-42d3-a456-426614174004";
+    const uuid = vi.spyOn(globalThis.crypto, "randomUUID");
+    const fetchMock = vi.fn<(
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) => Promise<Response>>(async () => new Response(JSON.stringify({ status: "ok" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = await import("./client");
+    const result = await client.api.engageStrategy(
+      { campaign_id: "campaign-a", goal: "domain_admin" },
+      { idempotencyKey: supplied }
+    );
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Idempotency-Key")).toBe(supplied);
+    expect(result.idempotency_key).toBe(supplied);
+    expect(JSON.stringify(result)).toContain(supplied);
+    expect(uuid).not.toHaveBeenCalled();
+  });
+});

@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import URL
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -5903,3 +5904,34 @@ def test_revision_0006_exact_column_state_machine(
                 rejected_atomically,
                 "revision 0006 changed an incompatible catalog",
             )
+
+
+def test_revision_0011_is_the_only_linear_head_with_protected_parent() -> None:
+    migration = importlib.import_module(
+        "migrations.versions.0011_execution_admission_authority"
+    )
+    protected_parent = importlib.import_module(
+        "migrations.versions.0010_execution_lifecycle"
+    )
+    config = _config(configured_url="sqlite://")
+    script = ScriptDirectory.from_config(config)
+    revisions = tuple(
+        item.revision
+        for item in reversed(
+            tuple(script.walk_revisions(base="base", head="heads"))
+        )
+    )
+    _require_fixed(script.get_heads() == ["0011"], "revision head changed")
+    _require_fixed(
+        revisions == tuple(f"{value:04d}" for value in range(1, 12)),
+        "revision graph is not linear",
+    )
+    _require_fixed(
+        migration.down_revision == "0010"
+        and protected_parent.down_revision == "0009",
+        "revision 0010 parent changed",
+    )
+    with pytest.raises(
+        RuntimeError, match="revision-0010 downgrade is not supported"
+    ):
+        protected_parent.downgrade()

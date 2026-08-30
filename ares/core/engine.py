@@ -2,6 +2,7 @@
 ARES Async Engine
 Full async orchestration with parallel module execution.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from ares.core.logger import get_logger
 
@@ -17,24 +18,36 @@ from pydantic import BaseModel
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.context import ExecutionContext
-from ares.core.errors import AresError
+from ares.core.errors import AresError, NetworkError
 from ares.core.logger import audit, setup_logger
 from ares.core.noise import NoiseController
 from ares.core.notifier import build_notifier_from_settings
 from ares.core.plugin.loader import ModuleRegistry, PluginLoader
 from ares.core.runtime_state import CampaignRuntimeState, CampaignRuntimeStateStore
 from ares.core.validator import FindingValidator, ValidationResult, build_default_validator
-logger = get_logger("ares.engine")
 
+from ares.core.execution_admission import (
+    AdmittedDispatchContextV1,
+    AdmittedPlanContextV1,
+    consume_dispatch_context,
+    consume_plan_context,
+    consume_terminal_commit_context,
+    mark_effect_started,
+)
+
+if TYPE_CHECKING:
+    pass
+logger = get_logger("ares.engine")
 
 
 class ModuleStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
-    DONE    = "done"
-    FAILED  = "failed"
+    DONE = "done"
+    FAILED = "failed"
     SKIPPED = "skipped"
     TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
 
 
 MODULE_OUTCOMES = (
@@ -97,7 +110,10 @@ def normalize_module_outcome(
 
     if findings:
         return "confirmed_findings", f"{len(findings)} confirmed finding(s) returned."
-    if "krb_ap_err_skew" in str(error or "").lower() or "clock skew too great" in str(error or "").lower():
+    if (
+        "krb_ap_err_skew" in str(error or "").lower()
+        or "clock skew too great" in str(error or "").lower()
+    ):
         return (
             "operator_error",
             "Kerberos clock skew too great; sync the operator host and domain controller time, then rerun.",
@@ -128,7 +144,9 @@ def normalize_module_outcome(
         for marker in ("timed out", "timeout", "unreachable", "connection refused", "network")
     ):
         outcome = "network_error"
-        default_message = "The module could not complete because the target or network was unavailable."
+        default_message = (
+            "The module could not complete because the target or network was unavailable."
+        )
     elif any(
         marker in lowered
         for marker in (
@@ -176,16 +194,23 @@ def redact_module_params(module_id: str, params: dict[str, Any]) -> dict[str, An
         model = MODULE_PARAMS.get(module_id)
         if model:
             secret_fields = {
-                name
-                for name, field in model.schema_for_api().items()
-                if field.get("secret")
+                name for name, field in model.schema_for_api().items() if field.get("secret")
             }
     except (ImportError, AttributeError):
         pass
 
     secret_names = secret_fields | {
-        "password", "secret", "token", "api_key", "private_key",
-        "nt_hash", "lm_hash", "krbtgt_hash", "ssh_pass", "access_key", "secret_key",
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "private_key",
+        "nt_hash",
+        "lm_hash",
+        "krbtgt_hash",
+        "ssh_pass",
+        "access_key",
+        "secret_key",
     }
 
     def _copy(name: str, value: Any) -> Any:
@@ -203,15 +228,15 @@ def redact_module_params(module_id: str, params: dict[str, Any]) -> dict[str, An
 
 
 class EngineModuleResult(BaseModel):
-    module_id:          str
-    status:             ModuleStatus = ModuleStatus.DONE
-    findings:           list[Finding] = []
+    module_id: str
+    status: ModuleStatus = ModuleStatus.DONE
+    findings: list[Finding] = []
     validation_results: list[ValidationResult] = []
-    raw_output:         dict[str, Any] = {}
-    error:              str | None = None
-    duration_ms:        float = 0.0
-    outcome:            str = ""
-    outcome_message:    str = ""
+    raw_output: dict[str, Any] = {}
+    error: str | None = None
+    duration_ms: float = 0.0
+    outcome: str = ""
+    outcome_message: str = ""
     operator_next_steps: list[str] = []
 
     def model_post_init(self, __context: Any) -> None:
@@ -229,7 +254,10 @@ class EngineModuleResult(BaseModel):
             self.operator_next_steps = [
                 "Synchronize the operator host and domain controller clocks, then rerun the module."
             ]
-        elif self.outcome == "network_error" and "before a hash was confirmed" in self.outcome_message.lower():
+        elif (
+            self.outcome == "network_error"
+            and "before a hash was confirmed" in self.outcome_message.lower()
+        ):
             self.operator_next_steps = [
                 "Verify DC/KDC reachability on port 88, clock synchronization, Kerberos service health, and account/SPN validity, then rerun."
             ]
@@ -252,13 +280,14 @@ class ExecutionPlan:
             .add_stage("cloud",  ["cloud.aws", "cloud.azure", "cloud.gcp"])
         )
     """
+
     stages: list[dict[str, Any]] = field(default_factory=list)
 
     def add_stage(
         self,
-        name:       str,
+        name: str,
         module_ids: list[str],
-        params:     dict[str, dict[str, Any]] | None = None,
+        params: dict[str, dict[str, Any]] | None = None,
     ) -> "ExecutionPlan":
         self.stages.append({"name": name, "modules": module_ids, "params": params or {}})
         return self
@@ -276,16 +305,15 @@ class ExecutionPlan:
 
 @dataclass
 class ProgressEvent:
-    stage:         str
-    module_id:     str
-    status:        ModuleStatus
+    stage: str
+    module_id: str
+    status: ModuleStatus
     finding_count: int = 0
-    error:         str | None = None
-    duration_ms:   float = 0.0
+    error: str | None = None
+    duration_ms: float = 0.0
 
 
 ProgressCallback = Callable[[ProgressEvent], Coroutine[Any, Any, None]]
-
 
 
 def _estimate_stage_duration(module_count: int) -> str:
@@ -301,16 +329,18 @@ def _estimate_stage_duration(module_count: int) -> str:
     return f"~{secs // 60}m {secs % 60}s" if secs >= 60 else f"~{secs}s"
 
 
-
 def _fire_and_log(coro, label: str = "background_task") -> None:
     """Schedule a fire-and-forget coroutine that logs exceptions instead of silently dropping them."""
     import asyncio as _aio
+
     async def _wrapper() -> None:
         try:
             await coro
         except Exception as _exc:
             logger.warning("background_task_error", task=label, error=str(_exc)[:120])
+
     _aio.create_task(_wrapper())
+
 
 class AresEngine:
     """
@@ -323,18 +353,20 @@ class AresEngine:
 
     def __init__(
         self,
-        settings:     AresSettings | None = None,
-        validator:    FindingValidator | None = None,
-        db:           Any | None = None,
+        settings: AresSettings | None = None,
+        validator: FindingValidator | None = None,
+        db: Any | None = None,
         max_parallel: int = 5,
     ) -> None:
-        self.settings     = settings  or get_settings()
-        self.validator    = validator or build_default_validator()
-        self.db           = db
+        self.settings = settings or get_settings()
+        self.validator = validator or build_default_validator()
+        self.db = db
         self.max_parallel = max_parallel
-        self._registry:   ModuleRegistry | None = None
-        self._semaphore:  asyncio.Semaphore | None = None
-        self.notifier     = build_notifier_from_settings(self.settings)
+        self._registry: ModuleRegistry | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._admitted_dispatch_contexts: dict[str, tuple[str, ...]] = {}
+        self._admission_store_id: int | None = None
+        self.notifier = build_notifier_from_settings(self.settings)
         from ares.telemetry.collector import get_collector
 
         self.telemetry = get_collector()
@@ -343,6 +375,50 @@ class AresEngine:
             telemetry=self.telemetry,
         )
         setup_logger(self.settings.ares_log_level, self.settings.ares_log_file)
+
+    def _bind_admission_store(self, store: object) -> None:
+        """Bind this engine to exactly one lifecycle store for its process lifetime."""
+        store_id = id(store)
+        if self._admission_store_id is None:
+            self._admission_store_id = store_id
+            return
+        if self._admission_store_id != store_id:
+            raise PermissionError("engine is already bound to a different admission store")
+
+    def _register_admitted_dispatch_context(self, context: AdmittedDispatchContextV1) -> None:
+        """Register one coordinator nonce and all of its sealed work bindings."""
+        self._bind_admission_store_id(context._store_id)
+        self._admitted_dispatch_contexts[context._dispatch_nonce] = (
+            context.campaign_id,
+            context.submission_id,
+            context.logical_execution_id,
+            context.attempt_id,
+            context.module_id,
+            str(context.attempt_revision),
+            str(context._store_id),
+            context._signature,
+        )
+
+    def _bind_admission_store_id(self, store_id: int) -> None:
+        if self._admission_store_id is None:
+            self._admission_store_id = store_id
+            return
+        if self._admission_store_id != store_id:
+            raise PermissionError("dispatch context belongs to a different admission store")
+
+    def _consume_registered_dispatch_context(self, context: AdmittedDispatchContextV1) -> bool:
+        """Atomically consume the coordinator-scoped work registration."""
+        expected = self._admitted_dispatch_contexts.pop(context._dispatch_nonce, None)
+        return expected == (
+            context.campaign_id,
+            context.submission_id,
+            context.logical_execution_id,
+            context.attempt_id,
+            context.module_id,
+            str(context.attempt_revision),
+            str(context._store_id),
+            context._signature,
+        )
 
     # ── Loading ────────────────────────────────────────────────────────────
 
@@ -399,87 +475,113 @@ class AresEngine:
 
     async def run_module(
         self,
-        module_id:       str,
-        campaign:        Campaign,
-        params:          dict[str, Any],
+        module_id: str,
+        campaign: Campaign,
+        params: dict[str, Any],
         skip_validation: bool = False,
-        timeout_seconds: int  = 120,
-        actor_role:      str  = "operator",
+        timeout_seconds: int = 120,
+        actor_role: str = "operator",
+        dispatch_context: AdmittedDispatchContextV1 | None = None,
     ) -> EngineModuleResult:
+        try:
+            admitted_context = consume_dispatch_context(
+                dispatch_context,
+                consumer=self,
+                campaign_id=campaign.id,
+                module_id=module_id,
+            )
+        except PermissionError as exc:
+            return EngineModuleResult(
+                module_id=module_id,
+                status=ModuleStatus.FAILED,
+                error=str(exc),
+            )
         runtime_state = await self.ensure_campaign_runtime(campaign)
 
         if module_id not in self.registry:
-            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
+            return EngineModuleResult(
                 module_id=module_id,
                 status=ModuleStatus.FAILED,
                 error=f"Module '{module_id}' not found. Run: ares module list",
-            ))
+            )
 
         # ── RBAC check — role must be allowed to run this module ──────────
         from ares.collab.manager import can_role_run_module
+
         if not can_role_run_module(actor_role, module_id, self.registry):
-            audit("module_rbac_denied", actor=campaign.operator,
-                  detail=f"role={actor_role} module={module_id}")
-            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
+            audit(
+                "module_rbac_denied",
+                actor=campaign.operator,
+                detail=f"role={actor_role} module={module_id}",
+            )
+            return EngineModuleResult(
                 module_id=module_id,
                 status=ModuleStatus.FAILED,
-                error=(f"Role '{actor_role}' is not permitted to run "
-                       f"'{module_id}'. Check ROLE_PERMISSIONS in collab/manager.py."),
-            ))
+                error=(
+                    f"Role '{actor_role}' is not permitted to run "
+                    f"'{module_id}'. Check ROLE_PERMISSIONS in collab/manager.py."
+                ),
+            )
 
         # ── Scope pre-check — enforce before any module code runs ────────
         # Cloud/reporting modules use API credentials, not host IPs — skip scope check
         _NO_SCOPE_CATEGORIES = {"cloud", "reporting", "recon"}
         _target = params.get("target", "") or params.get("dc", "") or params.get("host", "")
-        _module_category = (self.registry.get(module_id) or type("", (), {"MODULE_CATEGORY": ""})).MODULE_CATEGORY
+        _module_category = (
+            self.registry.get(module_id) or type("", (), {"MODULE_CATEGORY": ""})
+        ).MODULE_CATEGORY
         if _target and _module_category not in _NO_SCOPE_CATEGORIES:
             if not campaign.is_in_scope(_target):
                 from ares.core.errors import ScopeError
-                audit("module_scope_violation", actor=campaign.operator,
-                      detail=f"module={module_id} target={_target!r} not in scope")
-                return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
+
+                audit(
+                    "module_scope_violation",
+                    actor=campaign.operator,
+                    detail=f"module={module_id} target={_target!r} not in scope",
+                )
+                return EngineModuleResult(
                     module_id=module_id,
                     status=ModuleStatus.FAILED,
                     error=f"Target {_target!r} is not in campaign scope {[s.cidr for s in campaign.scope]}. "
-                          "Add the target CIDR to scope or use a different target.",
-                ))
+                    "Add the target CIDR to scope or use a different target.",
+                )
 
-        cls      = self.registry.get(module_id)
-        noise    = NoiseController(campaign)
+        cls = self.registry.get(module_id)
+        noise = NoiseController(campaign)
         instance = cls(settings=self.settings, campaign=campaign, noise=noise)  # type: ignore[misc]
         # Respect per-module timeout if declared (MODULE_TIMEOUT_SECONDS)
         module_timeout = getattr(instance.__class__, "MODULE_TIMEOUT_SECONDS", None)
-        effective_timeout = (
-            module_timeout if module_timeout is not None else timeout_seconds
-        )
+        effective_timeout = module_timeout if module_timeout is not None else timeout_seconds
         if effective_timeout != timeout_seconds:
-            logger.debug("engine_using_module_timeout",
-                         module_id=module_id,
-                         timeout=effective_timeout)
+            logger.debug(
+                "engine_using_module_timeout", module_id=module_id, timeout=effective_timeout
+            )
 
-        audit("module_run_start", actor=campaign.operator,
-              detail=f"module={module_id} campaign={campaign.id[:8]}")
+        audit(
+            "module_run_start",
+            actor=campaign.operator,
+            detail=f"module={module_id} campaign={campaign.id[:8]}",
+        )
         t0 = time.monotonic()
 
         try:
             # Build ExecutionContext — new v0.9.0+ interface
             ctx = ExecutionContext.build(
-                campaign   = campaign,
-                target     = params.get("dc") or params.get("host") or params.get("target", ""),
-                module_id  = module_id,
-                domain     = params.get("domain", ""),
-                params     = params,
-                operator   = campaign.operator,
+                campaign=campaign,
+                target=params.get("dc") or params.get("host") or params.get("target", ""),
+                module_id=module_id,
+                domain=params.get("domain", ""),
+                params=params,
+                operator=campaign.operator,
                 credentials=runtime_state.safe_credentials(),
-                session    = runtime_state.session,
-                vault      = runtime_state.vault,
+                session=runtime_state.session,
+                vault=runtime_state.vault,
                 artifact_store=runtime_state.artifact_store,
                 runtime_state=runtime_state,
-                settings   = self.settings,
-                noise      = noise,
-                telemetry  = runtime_state.telemetry,
+                settings=self.settings,
+                noise=noise,
+                telemetry=runtime_state.telemetry,
             )
-
 
             # ── validate() before execute() ───────────────────────────
             # Always call validate() first — lets modules fail fast with
@@ -493,47 +595,51 @@ class AresEngine:
                     )
                 except asyncio.TimeoutError:
                     duration_ms = round((time.monotonic() - t0) * 1000, 2)
-                    audit("module_validation_failed", actor=campaign.operator,
-                          detail=f"module={module_id} reason=timeout")
-                    return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
-                        module_id   = module_id,
-                        status      = ModuleStatus.FAILED,
-                        error       = f"Module '{module_id}' validate() timed out (>10s)",
-                        duration_ms = duration_ms,
-                    ))
+                    audit(
+                        "module_validation_failed",
+                        actor=campaign.operator,
+                        detail=f"module={module_id} reason=timeout",
+                    )
+                    return EngineModuleResult(
+                        module_id=module_id,
+                        status=ModuleStatus.FAILED,
+                        error=f"Module '{module_id}' validate() timed out (>10s)",
+                        duration_ms=duration_ms,
+                    )
                 except Exception as val_exc:
                     duration_ms = round((time.monotonic() - t0) * 1000, 2)
                     err_msg = str(val_exc)
-                    logger.warning("engine_module_validation_failed",
-                                   module_id=module_id, error=err_msg[:200])
-                    audit("module_validation_failed", actor=campaign.operator,
-                          detail=f"module={module_id} error={err_msg[:100]}")
-                    return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
-                        module_id   = module_id,
-                        status      = ModuleStatus.FAILED,
-                        error       = f"Validation failed: {err_msg[:300]}",
-                        duration_ms = duration_ms,
-                    ))
+                    logger.warning(
+                        "engine_module_validation_failed", module_id=module_id, error=err_msg[:200]
+                    )
+                    audit(
+                        "module_validation_failed",
+                        actor=campaign.operator,
+                        detail=f"module={module_id} error={err_msg[:100]}",
+                    )
+                    return EngineModuleResult(
+                        module_id=module_id,
+                        status=ModuleStatus.FAILED,
+                        error=f"Validation failed: {err_msg[:300]}",
+                        duration_ms=duration_ms,
+                    )
             # ── end validate ───────────────────────────────────────────
 
             # Call execute(ctx) — preferred interface.
             # Falls back to run(**ctx.params) via BaseModule.execute() default
             # for modules that haven't migrated yet.
+            mark_effect_started(admitted_context)
             execute_coro = instance.execute(ctx)
-            module_result = await asyncio.wait_for(
-                execute_coro, timeout=effective_timeout
-            )
+            module_result = await asyncio.wait_for(execute_coro, timeout=effective_timeout)
             findings = module_result.findings
-            raw      = module_result.raw
+            raw = module_result.raw
         except asyncio.TimeoutError:
             logger.error(
                 "engine_timed_out_s",
                 module_id=module_id,
                 timeout_seconds=effective_timeout,
             )
-            _last_exc: Exception = asyncio.TimeoutError(
-                f"Timed out after {effective_timeout}s"
-            )
+            _last_exc: Exception = asyncio.TimeoutError(f"Timed out after {effective_timeout}s")
             _action = AresError.RETRY
         except AresError as exc:
             logger.warning("engine_areserror", module_id=module_id, action=exc.action, exc=exc)
@@ -547,75 +653,24 @@ class AresEngine:
             _last_exc = None
             _action = None
 
-        # ── Retry logic ───────────────────────────────────────────────────
-        # Track whether the *original* failure was a timeout — if retries also
-        # fail (possibly with a different exception), we still report TIMEOUT
-        # so callers can distinguish "module timed out repeatedly" from "module crashed".
+        # Automatic engine retries are forbidden.  A retry is a fresh durable
+        # child attempt and is owned exclusively by the admission coordinator.
         _was_timeout = isinstance(_last_exc, asyncio.TimeoutError)
-        if _last_exc is not None and _action == AresError.RETRY:
-            MAX_RETRIES = 2
-            for attempt in range(1, MAX_RETRIES + 1):
-                wait = 2 ** attempt   # 2s, 4s
-                logger.info("engine_retry_in_s", module_id=module_id, attempt=attempt, MAX_RETRIES=MAX_RETRIES, wait=wait)
-                await asyncio.sleep(wait)
-                try:
-                    # Re-instantiate module fresh — previous coroutine is exhausted/timed-out
-                    module2 = cls(
-                        settings=self.settings,
-                        campaign=campaign,
-                        noise=noise,
-                    )
-                    # Rebuild ctx — same as initial attempt, use execute() not run()
-                    ctx2 = ExecutionContext.build(
-                        campaign   = campaign,
-                        target     = params.get("dc") or params.get("host") or params.get("target", ""),
-                        module_id  = module_id,
-                        domain     = params.get("domain", ""),
-                        params     = params,
-                        operator   = campaign.operator,
-                        credentials=runtime_state.safe_credentials(),
-                        session    = runtime_state.session,
-                        vault      = runtime_state.vault,
-                        artifact_store=runtime_state.artifact_store,
-                        runtime_state=runtime_state,
-                        settings   = self.settings,
-                        noise      = noise,
-                        telemetry  = runtime_state.telemetry,
-                    )
-                    module_result2 = await asyncio.wait_for(
-                        module2.execute(ctx2), timeout=effective_timeout
-                    )
-                    findings = module_result2.findings
-                    raw      = module_result2.raw
-                    _last_exc = None
-                    break
-                except asyncio.TimeoutError as te:
-                    _last_exc = te
-                    _was_timeout = True
-                    logger.warning(
-                        "engine_retry_timed_out",
-                        module_id=module_id,
-                        attempt=attempt,
-                        timeout_seconds=effective_timeout,
-                    )
-                except AresError as re:
-                    _last_exc = re
-                    _action = re.action
-                    logger.warning("engine_retry_failed", module_id=module_id, attempt=attempt, re=re)
-                    if _action != AresError.RETRY:
-                        break
-                except Exception as re:
-                    _last_exc = re
-                    logger.warning("engine_retry_failed", module_id=module_id, attempt=attempt, re=re)
 
         if _last_exc is not None:
-            status = (ModuleStatus.TIMEOUT if _was_timeout
-                      else ModuleStatus.FAILED)
-            return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
-                module_id=module_id, status=status,
+            status = ModuleStatus.TIMEOUT if _was_timeout else ModuleStatus.FAILED
+            typed_outcome = "network_error" if isinstance(_last_exc, NetworkError) else ""
+            typed_message = (
+                redact_error_message(str(_last_exc)[:300]) or "" if typed_outcome else ""
+            )
+            return EngineModuleResult(
+                module_id=module_id,
+                status=status,
                 error=str(_last_exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
-            ))
+                outcome=typed_outcome,
+                outcome_message=typed_message,
+            )
 
         duration_ms = round((time.monotonic() - t0) * 1000, 2)
 
@@ -623,11 +678,13 @@ class AresEngine:
         validation_results: list[ValidationResult] = []
         if not skip_validation:
             # Run all validations in parallel too
-            validation_results = list(await asyncio.gather(
-                *[self.validator.validate(f, raw) for f in findings]
-            ))
+            validation_results = list(
+                await asyncio.gather(*[self.validator.validate(f, raw) for f in findings])
+            )
 
-        # Persist confirmed findings
+        # Prepare confirmed findings without persistence, publication, campaign
+        # mutation, or artifact normalization.  Those effects are released only
+        # after the coordinator durably commits the terminal attempt.
         confirmed: list[Finding] = []
         from ares.core.cvss import enrich_finding_with_cvss
         from ares.core.tracing import get_current_trace_id
@@ -640,101 +697,62 @@ class AresEngine:
                 enrich_finding_with_cvss(f)
                 if trace_id:
                     f.trace_id = trace_id
-                campaign.add_finding(f)
                 confirmed.append(f)
-                if self.db:
-                    try:
-                        await self.db.save_finding(campaign.id, f, module_id)
-                    except Exception as e:
-                        logger.warning("engine_db_save_failed_for_finding", e=e)
-                # Webhook alert for qualifying findings
-                if self.notifier and self.notifier.should_notify(f.severity):
-                    asyncio.create_task(
-                        self.notifier.notify_finding(f, campaign)
-                    )
-                # Dashboard live feed — non-blocking broadcast
-                try:
-                    from ares.api.dashboard.app import broadcast_finding as _dash_broadcast
-                    _fire_and_log(_dash_broadcast({
-                        "event":      "finding_discovered",
-                        "campaign_id": campaign.id,
-                        "title":      f.title,
-                        "severity":   f.severity.value,
-                        "confidence": f.confidence,
-                        "mitre_technique": f.mitre_technique,
-                        "host":       f.host,
-                        "module_id":  f.module_id,
-                        "timestamp":  f.discovered_at.isoformat()
-                                      if hasattr(f, "discovered_at") and f.discovered_at
-                                      else None,
-                    }))
-                except Exception:
-                    pass   # dashboard not loaded — silently skip
 
         fp_count = len(findings) - len(confirmed)
-        audit("module_run_complete", actor=campaign.operator,
-              detail=(f"module={module_id} ms={duration_ms} "
-                      f"confirmed={len(confirmed)} fp={fp_count}"))
+        audit(
+            "module_run_complete",
+            actor=campaign.operator,
+            detail=(
+                f"module={module_id} ms={duration_ms} confirmed={len(confirmed)} fp={fp_count}"
+            ),
+        )
 
-        # ── Persist vault credentials to DB ───────────────────────────────
-        if self.db and runtime_state.vault is not None:
-            try:
-                await self._persist_vault_credentials(campaign)
-            except Exception as _ve:
-                logger.warning("engine_vault_persist_failed",
-                               module_id=module_id, error=str(_ve)[:100])
-
-        # ── Auto-normalize raw output into ArtifactStore ──────────────────
-        artifact_count = 0
-        try:
-            from ares.normalize.artifacts import ArtifactNormalizer
-            cls_ref = self.registry.get(module_id)
-            outputs = getattr(cls_ref, "OUTPUTS", []) if cls_ref else []
-            if outputs and raw:
-                normalizer = ArtifactNormalizer()
-                artifact_count = normalizer.normalize(
-                    module_id=module_id,
-                    outputs=outputs,
-                    raw=raw,
-                    store=runtime_state.artifact_store,
-                )
-                if artifact_count > 0:
-                    logger.debug(
-                        "artifacts_normalized",
-                        module=module_id,
-                        count=artifact_count,
-                    )
-        except Exception as _norm_exc:
-            logger.debug("artifact_normalization_skipped", error=str(_norm_exc)[:80])
-
-        if self.db:
-            await self._persist_runtime_hosts(campaign, runtime_state)
-            await self._persist_runtime_graph(campaign, runtime_state)
-
-        return await self._finalize_module_result(campaign, module_id, EngineModuleResult(
-            module_id=module_id, status=ModuleStatus.DONE,
+        return EngineModuleResult(
+            module_id=module_id,
+            status=ModuleStatus.DONE,
             findings=confirmed,
             validation_results=validation_results,
-            raw_output=raw, duration_ms=duration_ms,
-        ))
+            raw_output=raw,
+            duration_ms=duration_ms,
+        )
 
     # ── Parallel plan ──────────────────────────────────────────────────────
 
     async def run_plan(
         self,
-        plan:               ExecutionPlan,
-        campaign:           Campaign,
-        global_params:      dict[str, Any] | None = None,
-        skip_validation:    bool = False,
-        timeout_per_module: int  = 120,
-        on_progress:        ProgressCallback | None = None,
-        actor_role:         str = "operator",
+        plan: ExecutionPlan,
+        campaign: Campaign,
+        global_params: dict[str, Any] | None = None,
+        skip_validation: bool = False,
+        timeout_per_module: int = 120,
+        on_progress: ProgressCallback | None = None,
+        actor_role: str = "operator",
+        dispatch_context: AdmittedPlanContextV1 | None = None,
     ) -> dict[str, EngineModuleResult]:
         """
         Run all stages.
         Within each stage: modules execute CONCURRENTLY (bounded by max_parallel semaphore).
         Between stages: sequential (later stages can depend on earlier recon).
         """
+        module_ids_in_order = tuple(plan.all_module_ids())
+        try:
+            admitted_children = consume_plan_context(
+                dispatch_context,
+                consumer=self,
+                campaign_id=campaign.id,
+                module_ids=module_ids_in_order,
+            )
+        except PermissionError as exc:
+            return {
+                module_id: EngineModuleResult(
+                    module_id=module_id,
+                    status=ModuleStatus.FAILED,
+                    error=str(exc),
+                )
+                for module_id in module_ids_in_order
+            }
+        child_iterator = iter(admitted_children)
         self._semaphore = asyncio.Semaphore(self.max_parallel)
         results: dict[str, EngineModuleResult] = {}
         gp = global_params or {}
@@ -743,9 +761,9 @@ class AresEngine:
         logger.info("engine_plan_start_stages_modules", total_mods=total_mods)
 
         for stage in plan.stages:
-            name       = stage["name"]
+            name = stage["name"]
             module_ids = stage["modules"]
-            sp         = stage.get("params", {})
+            sp = stage.get("params", {})
 
             logger.info("engine_stage_modules_parallel", name=name)
 
@@ -759,6 +777,7 @@ class AresEngine:
                     stage_name=name,
                     on_progress=on_progress,
                     actor_role=actor_role,
+                    dispatch_context=next(child_iterator),
                 )
                 for mid in module_ids
             ]
@@ -767,11 +786,16 @@ class AresEngine:
             stage_results: list[EngineModuleResult] = []
             for mid, res in zip(module_ids, raw_results):
                 if isinstance(res, Exception):
-                    logger.error("engine_raised_unhandled_exception", mid=mid, res=res, exc_info=res)
-                    stage_results.append(EngineModuleResult(
-                        module_id=mid, status=ModuleStatus.FAILED,
-                        error=f"Unhandled: {res!s}"[:200],
-                    ))
+                    logger.error(
+                        "engine_raised_unhandled_exception", mid=mid, res=res, exc_info=res
+                    )
+                    stage_results.append(
+                        EngineModuleResult(
+                            module_id=mid,
+                            status=ModuleStatus.FAILED,
+                            error=f"Unhandled: {res!s}"[:200],
+                        )
+                    )
                 else:
                     stage_results.append(res)
             for mid, res in zip(module_ids, stage_results):
@@ -784,6 +808,7 @@ class AresEngine:
         if "network.pivot" in results and results["network.pivot"].status == ModuleStatus.DONE:
             try:
                 from ares.modules.network.pivot import _PIVOT_MANAGERS
+
                 campaign_id = campaign.id
                 if campaign_id in _PIVOT_MANAGERS:
                     pm = _PIVOT_MANAGERS[campaign_id]
@@ -802,19 +827,22 @@ class AresEngine:
                     _PIVOT_MANAGERS.pop(campaign_id, None)
                     logger.info("engine_pivot_teardown", campaign_id=campaign_id[:8])
             except Exception as teardown_exc:
-                logger.warning("engine_pivot_teardown_failed",
-                               error=str(teardown_exc)[:80])
+                logger.warning("engine_pivot_teardown_failed", error=str(teardown_exc)[:80])
 
         # ALWAYS clean up credential artifacts — regardless of which modules ran.
         # This runs unconditionally to prevent accumulation in 24/7 operation.
         try:
             from ares.core.security import cleanup_credential_artifacts
+
             cleaned = cleanup_credential_artifacts(campaign.id)
             # Also clean global-scope artifacts (created outside campaign context)
             cleaned += cleanup_credential_artifacts()
             if cleaned:
-                logger.info("engine_credential_artifacts_cleaned",
-                            count=cleaned, campaign_id=campaign.id[:8])
+                logger.info(
+                    "engine_credential_artifacts_cleaned",
+                    count=cleaned,
+                    campaign_id=campaign.id[:8],
+                )
         except Exception:
             pass
 
@@ -843,15 +871,17 @@ class AresEngine:
                 for req in getattr(cls, "REQUIRES", []):
                     if req not in available_outputs:
                         suggested = provider_map.get(req, "unknown")
-                        warnings_out.append({
-                            "module_id":           mid,
-                            "missing_requirement": req,
-                            "suggested_provider":  suggested,
-                            "message": (
-                                f"'{mid}' requires '{req}' — "
-                                f"add '{suggested}' to an earlier stage first"
-                            ),
-                        })
+                        warnings_out.append(
+                            {
+                                "module_id": mid,
+                                "missing_requirement": req,
+                                "suggested_provider": suggested,
+                                "message": (
+                                    f"'{mid}' requires '{req}' — "
+                                    f"add '{suggested}' to an earlier stage first"
+                                ),
+                            }
+                        )
             for mid in stage.get("modules", []):
                 cls = self.registry.get(mid)
                 if cls:
@@ -861,7 +891,7 @@ class AresEngine:
 
     def dry_run_plan(
         self,
-        plan:          "ExecutionPlan",
+        plan: "ExecutionPlan",
         global_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
@@ -878,102 +908,120 @@ class AresEngine:
             POST /campaigns/{id}/run  {"dry_run": true}
             ares module run-plan --plan plan.json --dry-run
         """
-        gp           = global_params or {}
+        gp = global_params or {}
         dep_warnings = self.check_plan_dependencies(plan)
-        stages_out:  list[dict[str, Any]] = []
+        stages_out: list[dict[str, Any]] = []
         param_errors: list[dict[str, str]] = []
 
         for stage in plan.stages:
-            name  = stage.get("name", "unnamed")
-            mids  = stage.get("modules", [])
-            sp    = stage.get("params", {})
+            name = stage.get("name", "unnamed")
+            mids = stage.get("modules", [])
+            sp = stage.get("params", {})
 
             stage_info: dict[str, Any] = {
-                "stage":              name,
-                "modules":            [],
+                "stage": name,
+                "modules": [],
                 "estimated_duration": _estimate_stage_duration(len(mids)),
             }
 
             for mid in mids:
                 cls = self.registry.get(mid)
                 if not cls:
-                    param_errors.append({"module_id": mid, "field": "(module)",
-                                         "error": f"Module '{mid}' not found in registry"})
-                    stage_info["modules"].append({
-                        "module_id": mid,
-                        "status": "not_found",
-                        "dry_run_status": "dry_run_unsupported",
-                        "validated_params_summary": redact_module_params(mid, {**gp, **sp.get(mid, {})}),
-                        "missing_params": [],
-                        "missing_dependencies": [],
-                        "would_execute": False,
-                        "warnings": ["The module is not present in the loaded registry."],
-                        "operator_next_steps": ["Refresh the module catalog or check module installation."],
-                    })
+                    param_errors.append(
+                        {
+                            "module_id": mid,
+                            "field": "(module)",
+                            "error": f"Module '{mid}' not found in registry",
+                        }
+                    )
+                    stage_info["modules"].append(
+                        {
+                            "module_id": mid,
+                            "status": "not_found",
+                            "dry_run_status": "dry_run_unsupported",
+                            "validated_params_summary": redact_module_params(
+                                mid, {**gp, **sp.get(mid, {})}
+                            ),
+                            "missing_params": [],
+                            "missing_dependencies": [],
+                            "would_execute": False,
+                            "warnings": ["The module is not present in the loaded registry."],
+                            "operator_next_steps": [
+                                "Refresh the module catalog or check module installation."
+                            ],
+                        }
+                    )
                     continue
 
                 merged = {**gp, **sp.get(mid, {})}
                 mod_errors: list[str] = []
                 try:
                     from ares.modules.params import MODULE_PARAMS
+
                     model_cls = MODULE_PARAMS.get(mid)
                     if model_cls:
                         for fname, field_info in model_cls.model_fields.items():
                             if field_info.is_required() and fname not in merged:
                                 mod_errors.append(fname)
-                                param_errors.append({
-                                    "module_id": mid,
-                                    "field":     fname,
-                                    "error":     f"Required param '{fname}' not provided",
-                                })
+                                param_errors.append(
+                                    {
+                                        "module_id": mid,
+                                        "field": fname,
+                                        "error": f"Required param '{fname}' not provided",
+                                    }
+                                )
                 except ImportError:
                     pass
 
                 opsec = getattr(cls, "OPSEC_LEVEL", "?")
                 dry_run_supported = bool(getattr(cls, "DRY_RUN_SUPPORTED", True))
                 module_dry_status = (
-                    "dry_run_blocked" if mod_errors
-                    else "dry_run_ok" if dry_run_supported
+                    "dry_run_blocked"
+                    if mod_errors
+                    else "dry_run_ok"
+                    if dry_run_supported
                     else "dry_run_unsupported"
                 )
-                stage_info["modules"].append({
-                    "module_id":      mid,
-                    "opsec_level":    opsec.value if hasattr(opsec, "value") else str(opsec),
-                    "requires":       getattr(cls, "REQUIRES", []),
-                    "outputs":        getattr(cls, "OUTPUTS",  []),
-                    "mitre":          getattr(cls, "MITRE_TECHNIQUES", []),
-                    "missing_params": mod_errors,
-                    "status":         "error" if mod_errors else "ready",
-                    "dry_run_status": module_dry_status,
-                    "validated_params_summary": redact_module_params(mid, merged),
-                    "missing_dependencies": [],
-                    "would_execute": module_dry_status == "dry_run_ok",
-                    "warnings": [
-                        "Dry-run validates the plan only; no module code contacts a target."
-                    ],
-                    "operator_next_steps": [
-                        "Review parameters and campaign scope before live execution."
-                    ],
-                })
+                stage_info["modules"].append(
+                    {
+                        "module_id": mid,
+                        "opsec_level": opsec.value if hasattr(opsec, "value") else str(opsec),
+                        "requires": getattr(cls, "REQUIRES", []),
+                        "outputs": getattr(cls, "OUTPUTS", []),
+                        "mitre": getattr(cls, "MITRE_TECHNIQUES", []),
+                        "missing_params": mod_errors,
+                        "status": "error" if mod_errors else "ready",
+                        "dry_run_status": module_dry_status,
+                        "validated_params_summary": redact_module_params(mid, merged),
+                        "missing_dependencies": [],
+                        "would_execute": module_dry_status == "dry_run_ok",
+                        "warnings": [
+                            "Dry-run validates the plan only; no module code contacts a target."
+                        ],
+                        "operator_next_steps": [
+                            "Review parameters and campaign scope before live execution."
+                        ],
+                    }
+                )
 
             stages_out.append(stage_info)
 
         return {
             "dry_run": True,
             "status": "dry_run_blocked" if param_errors else "dry_run_ok",
-            "plan":    stages_out,
+            "plan": stages_out,
             "param_validation": {
-                "ok":     len(param_errors) == 0,
+                "ok": len(param_errors) == 0,
                 "errors": param_errors,
             },
             "dependency_check": {
-                "ok":       len(dep_warnings) == 0,
+                "ok": len(dep_warnings) == 0,
                 "warnings": dep_warnings,
             },
             "summary": {
-                "total_stages":  len(plan.stages),
+                "total_stages": len(plan.stages),
                 "total_modules": len(plan.all_module_ids()),
-                "ready_to_run":  len(param_errors) == 0,
+                "ready_to_run": len(param_errors) == 0,
             },
         }
 
@@ -1011,7 +1059,9 @@ class AresEngine:
                 "missing_dependencies": [],
                 "would_execute": False,
                 "warnings": ["This module does not advertise a safe dry-run path."],
-                "operator_next_steps": ["Review the module documentation before an authorized live run."],
+                "operator_next_steps": [
+                    "Review the module documentation before an authorized live run."
+                ],
             }
 
         missing = list(missing_params or [])
@@ -1045,6 +1095,89 @@ class AresEngine:
                 "Disable dry-run only after confirming authorization.",
             ],
         }
+
+    async def _finalize_committed_module_result(
+        self,
+        campaign: Campaign,
+        module_id: str,
+        result: EngineModuleResult,
+        dispatch_context: AdmittedDispatchContextV1,
+    ) -> EngineModuleResult:
+        """Release persistence and broadcasts only after durable terminal commit."""
+        consume_terminal_commit_context(
+            dispatch_context,
+            consumer=self,
+            campaign_id=campaign.id,
+            module_id=module_id,
+        )
+        runtime_state = await self.ensure_campaign_runtime(campaign)
+
+        for finding in result.findings:
+            campaign.add_finding(finding)
+            if self.db:
+                try:
+                    await self.db.save_finding(campaign.id, finding, module_id)
+                except Exception as exc:
+                    logger.warning("engine_db_save_failed_for_finding", error=str(exc)[:120])
+            if self.notifier and self.notifier.should_notify(finding.severity):
+                asyncio.create_task(self.notifier.notify_finding(finding, campaign))
+            try:
+                from ares.api.dashboard.app import broadcast_finding as dashboard_broadcast
+
+                _fire_and_log(
+                    dashboard_broadcast(
+                        {
+                            "event": "finding_discovered",
+                            "campaign_id": campaign.id,
+                            "title": finding.title,
+                            "severity": finding.severity.value,
+                            "confidence": finding.confidence,
+                            "mitre_technique": finding.mitre_technique,
+                            "host": finding.host,
+                            "module_id": finding.module_id,
+                            "timestamp": (
+                                finding.discovered_at.isoformat()
+                                if getattr(finding, "discovered_at", None)
+                                else None
+                            ),
+                        }
+                    ),
+                    "committed_finding_broadcast",
+                )
+            except Exception:
+                pass
+
+        if self.db and runtime_state.vault is not None:
+            try:
+                await self._persist_vault_credentials(campaign)
+            except Exception as exc:
+                logger.warning(
+                    "engine_vault_persist_failed",
+                    module_id=module_id,
+                    error=str(exc)[:100],
+                )
+
+        try:
+            from ares.normalize.artifacts import ArtifactNormalizer
+
+            module_class = self.registry.get(module_id)
+            outputs = getattr(module_class, "OUTPUTS", []) if module_class else []
+            if outputs and result.raw_output:
+                normalized = ArtifactNormalizer().normalize(
+                    module_id=module_id,
+                    outputs=outputs,
+                    raw=result.raw_output,
+                    store=runtime_state.artifact_store,
+                )
+                if normalized:
+                    logger.debug("artifacts_normalized", module=module_id, count=normalized)
+        except Exception as exc:
+            logger.debug("artifact_normalization_skipped", error=str(exc)[:80])
+
+        if self.db:
+            await self._persist_runtime_hosts(campaign, runtime_state)
+            await self._persist_runtime_graph(campaign, runtime_state)
+        return await self._finalize_module_result(campaign, module_id, result)
 
     async def _finalize_module_result(
         self,
@@ -1100,7 +1233,9 @@ class AresEngine:
             if result.findings:
                 self.telemetry.record_finding(len(result.findings))
         except Exception as exc:
-            logger.debug("engine_telemetry_record_failed", module_id=module_id, error=str(exc)[:120])
+            logger.debug(
+                "engine_telemetry_record_failed", module_id=module_id, error=str(exc)[:120]
+            )
         return result
 
     async def _persist_runtime_hosts(
@@ -1131,18 +1266,20 @@ class AresEngine:
             if not host.ip_address:
                 continue
             try:
-                await self.db.upsert_host(Host(
-                    campaign_id=campaign.id,
-                    ip_address=host.ip_address,
-                    hostname=host.hostname or None,
-                    fqdn=host.fqdn or None,
-                    os=host.os or None,
-                    os_version=host.os_version or None,
-                    domain=host.domain or None,
-                    is_dc=host.is_dc,
-                    open_ports=list(host.open_ports),
-                    tags=list(host.tags),
-                ))
+                await self.db.upsert_host(
+                    Host(
+                        campaign_id=campaign.id,
+                        ip_address=host.ip_address,
+                        hostname=host.hostname or None,
+                        fqdn=host.fqdn or None,
+                        os=host.os or None,
+                        os_version=host.os_version or None,
+                        domain=host.domain or None,
+                        is_dc=host.is_dc,
+                        open_ports=list(host.open_ports),
+                        tags=list(host.tags),
+                    )
+                )
             except Exception as exc:
                 logger.debug(
                     "engine_host_persist_failed",
@@ -1190,6 +1327,7 @@ class AresEngine:
             return 0
 
         from ares.db.database import DBCredential
+
         saved = 0
         for cred_id, cred in vault._store.items():
             try:
@@ -1201,40 +1339,39 @@ class AresEngine:
                         else str(cred.secret_enc)
                     )
                 db_cred = DBCredential(
-                    id            = cred.id,
-                    campaign_id   = campaign.id,
-                    host_id       = getattr(cred, "source_host", None) or None,
-                    username      = cred.username,
-                    cred_type     = (
+                    id=cred.id,
+                    campaign_id=campaign.id,
+                    host_id=getattr(cred, "source_host", None) or None,
+                    username=cred.username,
+                    cred_type=(
                         cred.cred_type.value
                         if hasattr(cred.cred_type, "value")
                         else str(cred.cred_type)
                     ),
-                    secret        = secret_enc,
-                    domain        = getattr(cred, "domain", ""),
-                    source_module = getattr(cred, "source_module", ""),
-                    notes         = getattr(cred, "notes", ""),
+                    secret=secret_enc,
+                    domain=getattr(cred, "domain", ""),
+                    source_module=getattr(cred, "source_module", ""),
+                    notes=getattr(cred, "notes", ""),
                 )
                 await self.db.save_credential_preencrypted(db_cred)
                 saved += 1
             except Exception as exc:
-                logger.debug("vault_persist_cred_failed",
-                             cred_id=cred_id[:8], error=str(exc)[:80])
+                logger.debug("vault_persist_cred_failed", cred_id=cred_id[:8], error=str(exc)[:80])
         if saved:
-            logger.debug("vault_persisted",
-                         campaign=campaign.id[:8], count=saved)
+            logger.debug("vault_persisted", campaign=campaign.id[:8], count=saved)
         return saved
 
     async def _guarded_run(
         self,
-        module_id:       str,
-        campaign:        Campaign,
-        params:          dict[str, Any],
+        module_id: str,
+        campaign: Campaign,
+        params: dict[str, Any],
         skip_validation: bool,
         timeout_seconds: int,
-        stage_name:      str,
-        on_progress:     ProgressCallback | None,
-        actor_role:      str,
+        stage_name: str,
+        on_progress: ProgressCallback | None,
+        actor_role: str,
+        dispatch_context: AdmittedDispatchContextV1,
     ) -> EngineModuleResult:
         if self._semaphore is None:
             raise RuntimeError(
@@ -1242,10 +1379,13 @@ class AresEngine:
             )
         async with self._semaphore:
             if on_progress:
-                await on_progress(ProgressEvent(
-                    stage=stage_name, module_id=module_id,
-                    status=ModuleStatus.RUNNING,
-                ))
+                await on_progress(
+                    ProgressEvent(
+                        stage=stage_name,
+                        module_id=module_id,
+                        status=ModuleStatus.RUNNING,
+                    )
+                )
             result = await self.run_module(
                 module_id,
                 campaign,
@@ -1253,16 +1393,21 @@ class AresEngine:
                 skip_validation,
                 timeout_seconds,
                 actor_role=actor_role,
+                dispatch_context=dispatch_context,
             )
             if on_progress:
-                await on_progress(ProgressEvent(
-                    stage=stage_name, module_id=module_id,
-                    status=result.status,
-                    finding_count=len(result.confirmed_findings),
-                    error=result.error,
-                    duration_ms=result.duration_ms,
-                ))
+                await on_progress(
+                    ProgressEvent(
+                        stage=stage_name,
+                        module_id=module_id,
+                        status=result.status,
+                        finding_count=len(result.confirmed_findings),
+                        error=result.error,
+                        duration_ms=result.duration_ms,
+                    )
+                )
             return result
+
 
 # Backward-compat alias
 ModuleResult = EngineModuleResult  # noqa
@@ -1274,99 +1419,189 @@ CAMPAIGN_TEMPLATES: dict[str, dict] = {
     "internal_pentest": {
         "description": "Standard internal network penetration test",
         "stages": [
-            {"name": "recon", "modules": [
-                "network.port_scan", "network.service_detect",
-                "recon.fingerprint", "network.dns_enum",
-            ]},
-            {"name": "ad_enum", "modules": [
-                "ad.enum_users", "ad.enum_spn", "ad.enum_computers",
-                "ad.enum_acl",
-            ]},
-            {"name": "credential_attack", "modules": [
-                "ad.kerberoast", "ad.asreproast",
-            ]},
-            {"name": "credential_crack", "modules": [
-                "credential.crack",
-            ]},
-            {"name": "lateral_movement", "modules": [
-                "credential.reuse", "lateral.smb_relay",
-                "lateral.ntlm_relay",
-            ]},
+            {
+                "name": "recon",
+                "modules": [
+                    "network.port_scan",
+                    "network.service_detect",
+                    "recon.fingerprint",
+                    "network.dns_enum",
+                ],
+            },
+            {
+                "name": "ad_enum",
+                "modules": [
+                    "ad.enum_users",
+                    "ad.enum_spn",
+                    "ad.enum_computers",
+                    "ad.enum_acl",
+                ],
+            },
+            {
+                "name": "credential_attack",
+                "modules": [
+                    "ad.kerberoast",
+                    "ad.asreproast",
+                ],
+            },
+            {
+                "name": "credential_crack",
+                "modules": [
+                    "credential.crack",
+                ],
+            },
+            {
+                "name": "lateral_movement",
+                "modules": [
+                    "credential.reuse",
+                    "lateral.smb_relay",
+                    "lateral.ntlm_relay",
+                ],
+            },
         ],
     },
     "ad_full_compromise": {
         "description": "Full Active Directory compromise — recon to domain admin",
         "stages": [
-            {"name": "recon", "modules": [
-                "recon.fingerprint", "ad.enum_users", "ad.enum_spn",
-                "ad.enum_computers", "ad.enum_acl",
-            ]},
-            {"name": "credential_harvest", "modules": [
-                "ad.kerberoast", "ad.asreproast", "ad.laps_enum",
-            ]},
-            {"name": "crack_and_reuse", "modules": [
-                "credential.crack", "credential.reuse",
-                "credential.pass_the_hash",
-            ]},
-            {"name": "escalation", "modules": [
-                "ad.delegation_abuse", "ad.adcs", "ad.sccm",
-            ]},
-            {"name": "domain_admin", "modules": [
-                "ad.dcsync", "credential.golden_ticket",
-            ]},
+            {
+                "name": "recon",
+                "modules": [
+                    "recon.fingerprint",
+                    "ad.enum_users",
+                    "ad.enum_spn",
+                    "ad.enum_computers",
+                    "ad.enum_acl",
+                ],
+            },
+            {
+                "name": "credential_harvest",
+                "modules": [
+                    "ad.kerberoast",
+                    "ad.asreproast",
+                    "ad.laps_enum",
+                ],
+            },
+            {
+                "name": "crack_and_reuse",
+                "modules": [
+                    "credential.crack",
+                    "credential.reuse",
+                    "credential.pass_the_hash",
+                ],
+            },
+            {
+                "name": "escalation",
+                "modules": [
+                    "ad.delegation_abuse",
+                    "ad.adcs",
+                    "ad.sccm",
+                ],
+            },
+            {
+                "name": "domain_admin",
+                "modules": [
+                    "ad.dcsync",
+                    "credential.golden_ticket",
+                ],
+            },
         ],
     },
     "cloud_assessment": {
         "description": "Multi-cloud security assessment — AWS, Azure, GCP",
         "stages": [
-            {"name": "cloud_enum", "modules": [
-                "cloud.aws", "cloud.azure", "cloud.gcp", "cloud.azure_ad",
-            ]},
-            {"name": "cloud_privesc", "modules": [
-                "cloud.aws_privesc",
-            ]},
-            {"name": "federation", "modules": [
-                "cloud.identity_federation_abuse",
-            ]},
+            {
+                "name": "cloud_enum",
+                "modules": [
+                    "cloud.aws",
+                    "cloud.azure",
+                    "cloud.gcp",
+                    "cloud.azure_ad",
+                ],
+            },
+            {
+                "name": "cloud_privesc",
+                "modules": [
+                    "cloud.aws_privesc",
+                ],
+            },
+            {
+                "name": "federation",
+                "modules": [
+                    "cloud.identity_federation_abuse",
+                ],
+            },
         ],
     },
     "assumed_breach": {
         "description": "Assumed breach — start with valid creds, test lateral + escalation",
         "stages": [
-            {"name": "situational_awareness", "modules": [
-                "recon.fingerprint", "ad.enum_users", "ad.enum_computers",
-                "ad.enum_acl",
-            ]},
-            {"name": "escalation", "modules": [
-                "ad.kerberoast", "ad.adcs", "ad.delegation_abuse",
-                "ad.sccm",
-            ]},
-            {"name": "lateral", "modules": [
-                "lateral.smb_relay", "lateral.ntlm_relay",
-                "credential.reuse",
-                "lateral.wmiexec", "lateral.dcom",
-            ]},
-            {"name": "post_exploit", "modules": [
-                "windows.lsass_dump", "windows.dpapi",
-                "exfil.smb_shares", "exfil.secrets_scan",
-            ]},
+            {
+                "name": "situational_awareness",
+                "modules": [
+                    "recon.fingerprint",
+                    "ad.enum_users",
+                    "ad.enum_computers",
+                    "ad.enum_acl",
+                ],
+            },
+            {
+                "name": "escalation",
+                "modules": [
+                    "ad.kerberoast",
+                    "ad.adcs",
+                    "ad.delegation_abuse",
+                    "ad.sccm",
+                ],
+            },
+            {
+                "name": "lateral",
+                "modules": [
+                    "lateral.smb_relay",
+                    "lateral.ntlm_relay",
+                    "credential.reuse",
+                    "lateral.wmiexec",
+                    "lateral.dcom",
+                ],
+            },
+            {
+                "name": "post_exploit",
+                "modules": [
+                    "windows.lsass_dump",
+                    "windows.dpapi",
+                    "exfil.smb_shares",
+                    "exfil.secrets_scan",
+                ],
+            },
         ],
     },
     "linux_pentest": {
         "description": "Linux infrastructure penetration test",
         "stages": [
-            {"name": "recon", "modules": [
-                "network.port_scan", "network.service_detect",
-                "recon.fingerprint",
-            ]},
-            {"name": "privesc", "modules": [
-                "linux.privesc", "linux.kernel_suggester",
-                "linux.service_hijack", "linux.ld_preload",
-            ]},
-            {"name": "post_exploit", "modules": [
-                "linux.container", "linux.nfs_escape",
-                "exfil.secrets_scan",
-            ]},
+            {
+                "name": "recon",
+                "modules": [
+                    "network.port_scan",
+                    "network.service_detect",
+                    "recon.fingerprint",
+                ],
+            },
+            {
+                "name": "privesc",
+                "modules": [
+                    "linux.privesc",
+                    "linux.kernel_suggester",
+                    "linux.service_hijack",
+                    "linux.ld_preload",
+                ],
+            },
+            {
+                "name": "post_exploit",
+                "modules": [
+                    "linux.container",
+                    "linux.nfs_escape",
+                    "exfil.secrets_scan",
+                ],
+            },
         ],
     },
 }
@@ -1380,9 +1615,12 @@ def get_campaign_template(name: str) -> dict | None:
 def list_campaign_templates() -> list[dict]:
     """Return list of available campaign templates with descriptions."""
     return [
-        {"name": k, "description": v["description"],
-         "stages": len(v["stages"]),
-         "modules": sum(len(s["modules"]) for s in v["stages"])}
+        {
+            "name": k,
+            "description": v["description"],
+            "stages": len(v["stages"]),
+            "modules": sum(len(s["modules"]) for s in v["stages"]),
+        }
         for k, v in CAMPAIGN_TEMPLATES.items()
     ]
 
@@ -1397,9 +1635,7 @@ def plan_from_template(name: str, custom_params: dict | None = None) -> "Executi
     """
     template = CAMPAIGN_TEMPLATES.get(name)
     if not template:
-        raise ValueError(
-            f"Unknown template '{name}'. Available: {list(CAMPAIGN_TEMPLATES.keys())}"
-        )
+        raise ValueError(f"Unknown template '{name}'. Available: {list(CAMPAIGN_TEMPLATES.keys())}")
     plan = ExecutionPlan()
     for stage in template["stages"]:
         plan.add_stage(

@@ -63,10 +63,12 @@ SUPPORTED_GENERATIONS: Final[tuple[RuntimeGeneration, ...]] = (
     RuntimeGeneration("sqlite", 7, "0007", True),
     RuntimeGeneration("postgresql", 6, "0006", False),
     RuntimeGeneration("postgresql", 7, "0007", True),
+    RuntimeGeneration("sqlite", 10, "runtime-0010", True),
+    RuntimeGeneration("sqlite", 11, "runtime-0011", True),
 )
 
 _KNOWN_REVISIONS: Final[frozenset[str]] = frozenset(
-    f"{value:04d}" for value in range(1, 10)
+    f"{value:04d}" for value in range(1, 12)
 )
 _REVISION_FILES: Final[tuple[str, ...]] = (
     "0001_initial_schema.py",
@@ -78,6 +80,8 @@ _REVISION_FILES: Final[tuple[str, ...]] = (
     "0007_add_websocket_tickets.py",
     "0008_reconcile_schema_parity.py",
     "0009_refresh_token_families.py",
+    "0010_execution_lifecycle.py",
+    "0011_execution_admission_authority.py",
 )
 _LOCK_KEY: Final[int] = int.from_bytes(
     hashlib.sha256(b"ARES-M2B-ADOPTION-LOCK-V1").digest()[:8],
@@ -87,10 +91,10 @@ _LOCK_KEY: Final[int] = int.from_bytes(
 _FIXED_DIAGNOSTICS: Final[frozenset[str]] = frozenset(
     {
         "ARES-M2B-EMPTY-DATABASE",
-        "ARES-M2B-ALREADY-MANAGED:0009",
+        "ARES-M2B-ALREADY-MANAGED:0011",
         "ARES-M2B-MIGRATION-REQUIRED",
-        "ARES-M2B-ADOPTED:SQLITE:0009",
-        "ARES-M2B-ADOPTED:POSTGRESQL:0009",
+        "ARES-M2B-ADOPTED:SQLITE:0011",
+        "ARES-M2B-ADOPTED:POSTGRESQL:0011",
         "ARES-M2B-RESTORED:SQLITE",
         "ARES-M2B-E02:USAGE",
         "ARES-M2B-E03:CONFIGURATION",
@@ -124,7 +128,7 @@ def _failure(exit_code: AdoptionExit, diagnostic: str) -> AdoptionFailure:
 
 
 def _revision_module() -> Any:
-    return import_module("migrations.versions.0009_refresh_token_families")
+    return import_module("migrations.versions.0011_execution_admission_authority")
 
 
 @contextlib.contextmanager
@@ -156,14 +160,14 @@ def migration_config(connection: Connection | None = None) -> Iterator[Config]:
         if connection is not None:
             cfg.attributes["connection"] = connection
         script = ScriptDirectory.from_config(cfg)
-        if script.get_heads() != ["0009"]:
+        if script.get_heads() != ["0011"]:
             raise _failure(
                 AdoptionExit.CONFIGURATION,
                 "ARES-M2B-E03:CONFIGURATION",
             )
         revisions = tuple(script.walk_revisions(base="base", head="heads"))
         if tuple(item.revision for item in reversed(revisions)) != tuple(
-            f"{value:04d}" for value in range(1, 10)
+            f"{value:04d}" for value in range(1, 12)
         ):
             raise _failure(
                 AdoptionExit.CONFIGURATION,
@@ -254,10 +258,62 @@ def _is_empty(connection: Connection) -> bool:
     ).first() is None
 
 
+def _sqlite_catalog_signature(connection: Connection) -> tuple[tuple[str, ...], ...]:
+    rows = connection.exec_driver_sql(
+        "SELECT type,name,tbl_name,coalesce(sql,'') FROM sqlite_schema "
+        "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name,tbl_name"
+    ).fetchall()
+    return tuple(tuple(str(value) for value in row) for row in rows)
+
+
+def _sqlite_reference_catalog_signature(script: str) -> tuple[tuple[str, ...], ...]:
+    reference = sqlite3.connect(":memory:")
+    try:
+        reference.execute("PRAGMA foreign_keys=ON")
+        reference.executescript(script)
+        expected_rows = reference.execute(
+            "SELECT type,name,tbl_name,coalesce(sql,'') FROM sqlite_schema "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name,tbl_name"
+        ).fetchall()
+        expected = tuple(
+            tuple(str(value) for value in row) for row in expected_rows
+        )
+    finally:
+        reference.close()
+    return expected
+
+
+def _is_sqlite_runtime_generation_10(connection: Connection) -> bool:
+    """Recognize the exact unstamped predecessor runtime catalog."""
+    if connection.dialect.name != "sqlite":
+        return False
+    from ares.db.execution_lifecycle import sqlite_admission_authority_runtime_script
+    from ares.db.schema import CREATE_TABLES
+
+    generation_11_script = sqlite_admission_authority_runtime_script()
+    if not generation_11_script or not CREATE_TABLES.endswith(generation_11_script):
+        return False
+    generation_10_script = CREATE_TABLES[: -len(generation_11_script)]
+    return _sqlite_catalog_signature(connection) == _sqlite_reference_catalog_signature(
+        generation_10_script
+    )
+
+
+def _is_sqlite_runtime_generation_11(connection: Connection) -> bool:
+    """Recognize the exact unstamped current runtime catalog."""
+    if connection.dialect.name != "sqlite":
+        return False
+    from ares.db.schema import CREATE_TABLES
+
+    return _sqlite_catalog_signature(connection) == _sqlite_reference_catalog_signature(
+        CREATE_TABLES
+    )
+
+
 def inspect_connection(connection: Connection) -> AdoptionResult:
     """Classify one catalog without mutation or external dynamic diagnostics."""
     revision = _version_revision(connection)
-    if revision == "0009":
+    if revision == "0011":
         try:
             _revision_module().verify_managed_catalog(connection)
         except (RuntimeError, sa.exc.SQLAlchemyError):
@@ -267,7 +323,7 @@ def inspect_connection(connection: Connection) -> AdoptionResult:
             ) from None
         return AdoptionResult(
             AdoptionExit.OK,
-            "ARES-M2B-ALREADY-MANAGED:0009",
+            "ARES-M2B-ALREADY-MANAGED:0011",
         )
     if revision is not None:
         return AdoptionResult(
@@ -277,6 +333,18 @@ def inspect_connection(connection: Connection) -> AdoptionResult:
         )
     if _is_empty(connection):
         return AdoptionResult(AdoptionExit.OK, "ARES-M2B-EMPTY-DATABASE")
+    if _is_sqlite_runtime_generation_11(connection):
+        return AdoptionResult(
+            AdoptionExit.OK,
+            "ARES-M2B-ADOPTION-READY:SQLITE:runtime-0011",
+            "runtime-0011",
+        )
+    if _is_sqlite_runtime_generation_10(connection):
+        return AdoptionResult(
+            AdoptionExit.OK,
+            "ARES-M2B-ADOPTION-READY:SQLITE:runtime-0010",
+            "runtime-0010",
+        )
     try:
         predecessor = _revision_module().classify_unversioned_catalog(connection)
     except (RuntimeError, sa.exc.SQLAlchemyError):
@@ -294,7 +362,7 @@ def inspect_connection(connection: Connection) -> AdoptionResult:
 
 def verify_managed_connection(connection: Connection) -> AdoptionResult:
     result = inspect_connection(connection)
-    if result.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009":
+    if result.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011":
         return result
     if result.exit_code == AdoptionExit.MIGRATION_REQUIRED:
         raise _failure(
@@ -313,7 +381,7 @@ def _adoption_predecessor(result: AdoptionResult) -> str:
             AdoptionExit.MIGRATION_REQUIRED,
             "ARES-M2B-E04:MIGRATION-REQUIRED",
         )
-    if result.predecessor not in {"0006", "0007"}:
+    if result.predecessor not in {"0006", "0007", "runtime-0010", "runtime-0011"}:
         raise _failure(
             AdoptionExit.UNRECOGNIZED,
             "ARES-M2B-E06:UNRECOGNIZED-CATALOG",
@@ -325,7 +393,7 @@ def _run_canonical_adoption(
     connection: Connection,
     predecessor: str,
 ) -> None:
-    if predecessor not in {"0006", "0007"}:
+    if predecessor not in {"0006", "0007", "runtime-0010", "runtime-0011"}:
         raise _failure(
             AdoptionExit.UNRECOGNIZED,
             "ARES-M2B-E06:UNRECOGNIZED-CATALOG",
@@ -336,8 +404,16 @@ def _run_canonical_adoption(
         connection.info[adoption_marker] = True
     try:
         with migration_config(connection) as cfg:
-            command.stamp(cfg, predecessor)
-            command.upgrade(cfg, "0009")
+            if predecessor == "runtime-0011":
+                connection.exec_driver_sql("DROP TABLE schema_version")
+                command.stamp(cfg, "0011")
+            elif predecessor == "runtime-0010":
+                connection.exec_driver_sql("DROP TABLE schema_version")
+                command.stamp(cfg, "0010")
+                command.upgrade(cfg, "0011")
+            else:
+                command.stamp(cfg, predecessor)
+                command.upgrade(cfg, "0011")
     finally:
         if marked_sqlite:
             connection.info.pop(adoption_marker, None)
@@ -623,7 +699,7 @@ def inspect_sqlite_database(path: str | Path) -> AdoptionResult:
 
 def adopt_sqlite(path: Path, backup: Path) -> AdoptionResult:
     initial = inspect_sqlite_database(path)
-    if initial.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009":
+    if initial.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011":
         return initial
     _adoption_predecessor(initial)
     backup_digest = _create_sqlite_backup(path, backup)
@@ -666,7 +742,7 @@ def adopt_sqlite(path: Path, backup: Path) -> AdoptionResult:
                     rollback_proven = False
                 raise
         _durable(path)
-        return AdoptionResult(AdoptionExit.OK, "ARES-M2B-ADOPTED:SQLITE:0009")
+        return AdoptionResult(AdoptionExit.OK, "ARES-M2B-ADOPTED:SQLITE:0011")
     except (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit):
         raise
     except AdoptionFailure:
@@ -774,7 +850,7 @@ async def _postgres_operation(url: URL, operation: str) -> AdoptionResult:
                         "ARES-M2B-E07:OWNERSHIP-BUSY",
                     )
                 classified = await connection.run_sync(_sync_inspect)
-                if classified.diagnostic == "ARES-M2B-ALREADY-MANAGED:0009":
+                if classified.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011":
                     already_managed = True
                 else:
                     predecessor = _adoption_predecessor(classified)
@@ -792,9 +868,9 @@ async def _postgres_operation(url: URL, operation: str) -> AdoptionResult:
         if already_managed:
             return AdoptionResult(
                 AdoptionExit.OK,
-                "ARES-M2B-ALREADY-MANAGED:0009",
+                "ARES-M2B-ALREADY-MANAGED:0011",
             )
-        return AdoptionResult(AdoptionExit.OK, "ARES-M2B-ADOPTED:POSTGRESQL:0009")
+        return AdoptionResult(AdoptionExit.OK, "ARES-M2B-ADOPTED:POSTGRESQL:0011")
     finally:
         await engine.dispose()
 

@@ -7,6 +7,7 @@ import pytest
 import ares.sdk as sdk
 from ares.core.context import ExecutionContext
 from ares.core.engine import AresEngine
+from ares.core.execution_admission import _mint_test_dispatch_context
 from ares.modules.base import BaseModule, ModuleResult, OpsecLevel, validate_module_class
 
 
@@ -158,6 +159,7 @@ async def test_runtime_uses_module_timeout_contract(monkeypatch) -> None:
         params={"target": "127.0.0.1"},
         timeout_seconds=120,
         actor_role="team_lead",
+        dispatch_context=_mint_test_dispatch_context(engine, helper.campaign.id, "demo.timeout"),
     )
 
     assert result.status.value == "done"
@@ -216,11 +218,14 @@ async def test_runtime_retries_use_module_timeout_contract(monkeypatch) -> None:
         params={"target": "127.0.0.1"},
         timeout_seconds=120,
         actor_role="team_lead",
+        dispatch_context=_mint_test_dispatch_context(
+            engine, helper.campaign.id, "demo.retry_timeout"
+        ),
     )
 
-    assert result.status.value == "done"
-    assert result.error is None
-    assert observed_timeouts == [10, 7, 7]
+    assert result.status.value == "timeout"
+    assert DemoModule.execute_calls == 1
+    assert observed_timeouts == [10, 7]
 
 
 @pytest.mark.asyncio
@@ -232,7 +237,10 @@ async def test_module_test_helper_available_from_public_sdk() -> None:
         description="SDK helper smoke test",
     )
     class DemoModule(sdk.BaseModule):
+        execute_calls = 0
+
         async def execute(self, ctx: sdk.ExecutionContext) -> sdk.ModuleResult:
+            type(self).execute_calls += 1
             return sdk.ModuleResult(
                 status="dry_run" if ctx.dry_run else "success",
                 module_id=self.MODULE_ID,
@@ -245,6 +253,36 @@ async def test_module_test_helper_available_from_public_sdk() -> None:
     helper = sdk.ModuleTestHelper(DemoModule, scope_cidrs=["127.0.0.1/32"])
     result = await helper.run_full(target="127.0.0.1", dry_run=True)
 
-    assert result.status == "dry_run"
+    assert result.status == "preview_only"
     assert result.module_id == "demo.helper"
-    assert result.raw == {"target": "127.0.0.1"}
+    assert result.raw["target"] == "127.0.0.1"
+    assert result.raw["would_execute"] is False
+    assert DemoModule.execute_calls == 0
+
+
+@pytest.mark.parametrize("entrypoint", ["run", "run-full"])
+@pytest.mark.asyncio
+async def test_module_test_helper_is_preview_only(entrypoint: str) -> None:
+    class PreviewProbe(sdk.BaseModule):
+        MODULE_ID = "test.sdk_preview"
+        MODULE_NAME = "SDK preview probe"
+        MODULE_CATEGORY = "test"
+        MODULE_DESCRIPTION = "Proves the public SDK cannot dispatch"
+        execute_calls = 0
+
+        async def execute(self, ctx: sdk.ExecutionContext) -> sdk.ModuleResult:
+            type(self).execute_calls += 1
+            return sdk.ModuleResult(status="success", module_id=self.MODULE_ID)
+
+        async def run(self, **kwargs):
+            type(self).execute_calls += 1
+            return [], {}
+
+    helper = sdk.ModuleTestHelper(PreviewProbe)
+    if entrypoint == "run":
+        result = await helper.run(helper.make_context())
+    else:
+        result = await helper.run_full()
+    assert result.status == "preview_only"
+    assert result.raw["would_execute"] is False
+    assert PreviewProbe.execute_calls == 0

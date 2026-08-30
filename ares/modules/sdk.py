@@ -55,6 +55,7 @@ Quick start:
             result = await self.execute(ctx)
             return result.findings, result.raw
 """
+
 from __future__ import annotations
 
 # ── Core base ──────────────────────────────────────────────────────────────────
@@ -119,16 +120,17 @@ import math
 
 # ── Decorators / helpers ──────────────────────────────────────────────────────
 
+
 def module_metadata(
-    module_id:   str,
-    name:        str,
-    category:    str,
+    module_id: str,
+    name: str,
+    category: str,
     description: str,
-    author:      str = "Community",
-    opsec:       OpsecLevel = OpsecLevel.LOW,
-    requires:    list[str] | None = None,
-    outputs:     list[str] | None = None,
-    mitre:       list[str] | None = None,
+    author: str = "Community",
+    opsec: OpsecLevel = OpsecLevel.LOW,
+    requires: list[str] | None = None,
+    outputs: list[str] | None = None,
+    mitre: list[str] | None = None,
 ) -> Any:
     """
     Class decorator to set all module metadata cleanly.
@@ -150,7 +152,9 @@ def module_metadata(
     """
     if not isinstance(category, str) or not category.strip():
         raise ValueError("module_metadata category must be a non-empty string")
-    if not isinstance(opsec, OpsecLevel) and str(opsec) not in {level.value for level in OpsecLevel}:
+    if not isinstance(opsec, OpsecLevel) and str(opsec) not in {
+        level.value for level in OpsecLevel
+    }:
         raise ValueError("module_metadata opsec must be an OpsecLevel or valid opsec level string")
     for field_name, value in (
         ("requires", requires),
@@ -163,22 +167,21 @@ def module_metadata(
             raise ValueError(f"module_metadata {field_name} must be a list of strings")
 
     def decorator(cls: type) -> type:
-        cls.MODULE_ID          = module_id
-        cls.MODULE_NAME        = name
-        cls.MODULE_CATEGORY    = category
+        cls.MODULE_ID = module_id
+        cls.MODULE_NAME = name
+        cls.MODULE_CATEGORY = category
         cls.MODULE_DESCRIPTION = description
-        cls.MODULE_AUTHOR      = author
-        cls.OPSEC_LEVEL        = opsec
-        cls.REQUIRES           = requires or []
-        cls.OUTPUTS            = outputs or []
-        cls.MITRE_TECHNIQUES   = mitre or []
+        cls.MODULE_AUTHOR = author
+        cls.OPSEC_LEVEL = opsec
+        cls.REQUIRES = requires or []
+        cls.OUTPUTS = outputs or []
+        cls.MITRE_TECHNIQUES = mitre or []
 
         errors = validate_module_class(cls)
         if errors:
-            raise ValueError(
-                f"Module class {cls.__name__!r} has validation errors: {errors}"
-            )
+            raise ValueError(f"Module class {cls.__name__!r} has validation errors: {errors}")
         return cls
+
     return decorator
 
 
@@ -198,6 +201,7 @@ def requires_privilege(level: str) -> Any:
     def decorator(cls: type) -> type:
         cls.REQUIRED_PRIVILEGE = level.strip()
         return cls
+
     return decorator
 
 
@@ -222,14 +226,19 @@ def timeout(seconds: int | float) -> Any:
         cls.MODULE_TIMEOUT_SECONDS = seconds
         cls.DEFAULT_TIMEOUT_S = seconds
         return cls
+
     return decorator
 
 
 # ── TestHelper — makes unit testing modules trivial ───────────────────────────
 
+
 class ModuleTestHelper:
     """
-    Helper for unit-testing modules without a full engine.
+    Static preview helper for module metadata and request-shape tests.
+
+    C-LIVE-v1 intentionally does not execute module code through the public
+    SDK.  Effectful tests use the sealed coordinator's private test seam.
 
     Usage:
         helper  = ModuleTestHelper(KerberoastModule)
@@ -244,18 +253,19 @@ class ModuleTestHelper:
         from ares.core.noise import NoiseController
 
         self.module_class = module_class
-        self.settings     = AresSettings()
+        self.settings = AresSettings()
         # NOTE: scope defaults to 0.0.0.0/0 for test harness.
         # Override via ModuleTestHelper(scope_cidrs=[...]) in integration tests.
         _scope = [ScopeEntry(cidr=s) for s in (scope_cidrs or ["0.0.0.0/0"])]
-        self.campaign     = Campaign(
-            name="test-campaign", client="test",
+        self.campaign = Campaign(
+            name="test-campaign",
+            client="test",
             scope=_scope,
             noise_profile=NoiseProfile.NORMAL,
             operator="test",
         )
-        self.noise        = NoiseController(self.campaign)
-        self.module       = module_class(
+        self.noise = NoiseController(self.campaign)
+        self.module = module_class(
             settings=self.settings,
             campaign=self.campaign,
             noise=self.noise,
@@ -263,9 +273,9 @@ class ModuleTestHelper:
 
     def make_context(
         self,
-        target:  str = "10.0.0.1",
-        domain:  str = "",
-        params:  dict[str, Any] | None = None,
+        target: str = "10.0.0.1",
+        domain: str = "",
+        params: dict[str, Any] | None = None,
         dry_run: bool = True,
         **kwargs: Any,
     ) -> ExecutionContext:
@@ -277,33 +287,45 @@ class ModuleTestHelper:
                     context_params.setdefault(requirement, True)
 
         return ExecutionContext.build(
-            campaign   = self.campaign,
-            target     = target,
-            module_id  = self.module_class.MODULE_ID,
-            domain     = domain,
-            params     = context_params,
-            dry_run    = dry_run,
+            campaign=self.campaign,
+            target=target,
+            module_id=self.module_class.MODULE_ID,
+            domain=domain,
+            params=context_params,
+            dry_run=dry_run,
         )
 
     async def validate(self, ctx: ExecutionContext) -> None:
-        """Run validate() and surface errors clearly."""
-        await self.module.validate(ctx)
+        """Validate the preview envelope without invoking module code."""
+        if not isinstance(ctx, ExecutionContext):
+            raise TypeError("SDK preview requires an ExecutionContext")
 
     async def run(self, ctx: ExecutionContext) -> ModuleResult:
-        """Run execute() and return the structured result."""
-        return await self.module.execute(ctx)
+        """Return a static preview; never call validate(), execute(), or run()."""
+        if not isinstance(ctx, ExecutionContext):
+            raise TypeError("SDK preview requires an ExecutionContext")
+        return ModuleResult(
+            status="preview_only",
+            module_id=self.module_class.MODULE_ID,
+            raw={
+                "preview": True,
+                "would_execute": False,
+                "target": ctx.target,
+                "module_id": self.module_class.MODULE_ID,
+            },
+        )
 
     async def run_full(
         self,
-        target:  str = "10.0.0.1",
-        domain:  str = "",
-        params:  dict[str, Any] | None = None,
+        target: str = "10.0.0.1",
+        domain: str = "",
+        params: dict[str, Any] | None = None,
         dry_run: bool = True,
     ) -> ModuleResult:
-        """One-liner: build context, validate, execute, return result."""
-        ctx = self.make_context(target=target, domain=domain,
-                                params=params, dry_run=dry_run)
-        await self.validate(ctx)
+        """One-liner static preview; ``dry_run=False`` is rejected."""
+        if dry_run is not True:
+            raise PermissionError("public SDK helpers are preview-only")
+        ctx = self.make_context(target=target, domain=domain, params=params, dry_run=dry_run)
         return await self.run(ctx)
 
     def report(self, result: ModuleResult) -> dict[str, Any]:
@@ -322,27 +344,53 @@ class ModuleTestHelper:
 # ── Public API surface ────────────────────────────────────────────────────────
 __all__ = [
     # Base
-    "BaseModule", "ModuleResult", "OpsecLevel", "validate_module_class",
+    "BaseModule",
+    "ModuleResult",
+    "OpsecLevel",
+    "validate_module_class",
     # Context
     "ExecutionContext",
     # Errors
-    "AresError", "ModuleError", "ModuleValidationError", "ModuleTimeoutError",
-    "NetworkError", "ConnectionRefused", "ConnectionTimeout", "HostUnreachable",
-    "CredentialError", "AuthenticationFailed", "AccountLocked", "CredentialExpired",
-    "NoCredentialsAvailable", "ExecutionError", "SandboxError",
-    "ScopeError", "OpsecError", "DetectionSignal", "HoneypotDetected",
-    "InsufficientPrivilege", "InvalidContext",
+    "AresError",
+    "ModuleError",
+    "ModuleValidationError",
+    "ModuleTimeoutError",
+    "NetworkError",
+    "ConnectionRefused",
+    "ConnectionTimeout",
+    "HostUnreachable",
+    "CredentialError",
+    "AuthenticationFailed",
+    "AccountLocked",
+    "CredentialExpired",
+    "NoCredentialsAvailable",
+    "ExecutionError",
+    "SandboxError",
+    "ScopeError",
+    "OpsecError",
+    "DetectionSignal",
+    "HoneypotDetected",
+    "InsufficientPrivilege",
+    "InvalidContext",
     # Campaign types
-    "Finding", "Severity",
+    "Finding",
+    "Severity",
     # Logging
     "get_logger",
     # MITRE
-    "TechniqueLibrary", "TechniqueMapper",
+    "TechniqueLibrary",
+    "TechniqueMapper",
     # Normalize
-    "ArtifactStore", "HostArtifact", "UserArtifact", "CredentialArtifact",
-    "HashArtifact", "PermissionArtifact",
+    "ArtifactStore",
+    "HostArtifact",
+    "UserArtifact",
+    "CredentialArtifact",
+    "HashArtifact",
+    "PermissionArtifact",
     # Decorators
-    "module_metadata", "requires_privilege", "timeout",
+    "module_metadata",
+    "requires_privilege",
+    "timeout",
     # Testing
     "ModuleTestHelper",
 ]

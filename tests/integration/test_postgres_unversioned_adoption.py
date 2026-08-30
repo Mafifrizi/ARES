@@ -209,8 +209,8 @@ async def test_real_postgres_generation_adopts_atomically(
         predecessor,
         None,
         AdoptionExit.OK,
-        "0009",
-        "ARES-M2B-ALREADY-MANAGED:0009",
+        "0011",
+        "ARES-M2B-ALREADY-MANAGED:0011",
     )
 
 
@@ -358,6 +358,6 @@ async def test_real_postgres_adoption_rerun_is_verified_noop(
         revision = await _revision(url)
     assert (first.exit_code, second.diagnostic, revision) == (
         AdoptionExit.OK,
-        "ARES-M2B-ALREADY-MANAGED:0009",
-        "0009",
+        "ARES-M2B-ALREADY-MANAGED:0011",
+        "0011",
     )

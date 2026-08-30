@@ -1,16 +1,20 @@
 # ARES Architecture
 
-**Version:** 6.0.0 | **Status:** Active Development
+**Version:** 6.0.0 | **Status:** C-LIVE-v1 safety wiring; descriptors inactive
 
 ## Overview
 
-ARES (Automated Red team Engagement System) is an open-source red team automation framework. It automates attack chains, tracks campaign state, and generates professional reports — covering AD/Windows, Linux/Container, and Cloud (AWS/Azure/GCP) environments.
+ARES (Automated Red team Engagement System) contains orchestration, campaign
+state, reporting, and module infrastructure for AD/Windows,
+Linux/Container, and Cloud environments. C-LIVE-v1 does not activate production
+module descriptors. The legacy topology and data-flow diagrams below describe a
+target architecture, not a currently reachable execution path.
 
 ARES is **not** a C2 framework. It does not include implants, beacons, or persistent agents. It is an orchestration layer for red team techniques executed from the operator's machine.
 
 ---
 
-## High-Level Architecture
+## Legacy target architecture (inactive for C-LIVE-v1 effects)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -178,7 +182,7 @@ module = container.build_module("ad.kerberoast", campaign)
 
 ---
 
-## Data Flow
+## Legacy data flow (inactive for C-LIVE-v1 effects)
 
 ### Single Module Execution
 
@@ -304,3 +308,21 @@ ARES/
 │   └── integration/    End-to-end campaign tests
 └── docker/             Dockerfiles, docker/docker-compose.dev.yml, docker/docker-compose.prod.yml
 ```
+
+---
+
+## C-LIVE-v1 coordinator boundary
+
+`ares.core.execution_admission` is the sole first-party bridge from HTTP
+authority and lifecycle admission to an in-process engine effect. It derives
+submission, logical-execution, attempt, operation, fan-out, and retry-child UUIDs
+with the lifecycle typed-length binding. The resulting dispatch capability is
+process-local, nonserializable, bound to its coordinator/engine/store and work
+identity, and single-use.
+
+Public engine module/plan calls, SDK helpers, and the real subprocess stdin
+entrypoint fail closed without that seal. Production Strategy and Goal planning
+also fail closed while all production descriptors remain ineligible. The
+certified surface covers reachable first-party product entrypoints; dormant
+classes that can only be reached through arbitrary Python imports are not an
+activated worker path.

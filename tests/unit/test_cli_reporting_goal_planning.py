@@ -14,10 +14,11 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
-import pytest
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────
 # HELPERS
@@ -784,7 +785,9 @@ class TestGoalEngine:
 
         registry = _make_mock_registry(module_ids or ["ad.enum_users", "ad.kerberoast"])
         session  = OperatorSession(campaign_id="test-001")
-        return GoalEngine(registry=registry, session=session)
+        engine = GoalEngine(registry=registry, session=session)
+        engine._configure_c_live_test_planning()
+        return engine
 
     def test_plan_domain_admin(self):
         from ares.goal.engine import Goal
@@ -853,6 +856,77 @@ class TestGoalEngine:
             if step.params:
                 # Steps derived from context should reference the domain
                 assert isinstance(step.params, dict)
+
+    @pytest.mark.asyncio
+    async def test_c_live_goal_execute_uses_admitted_plan_dispatch(self):
+        from ares.core.execution_admission import DispatchDispositionV1
+        from ares.db.execution_lifecycle import FixedResult, TrustedPrincipal
+        from ares.goal.engine import (
+            GOAL_DEFINITIONS,
+            Goal,
+            GoalAttackPlan,
+            GoalAttackStep,
+            GoalEngine,
+        )
+
+        engine = self._make_engine(["ad.enum_users", "ad.enum_spn"])
+        production_engine = GoalEngine(registry=engine.registry, session=engine.session)
+        with pytest.raises(PermissionError, match="non-dispatchable"):
+            production_engine.plan(Goal.DOMAIN_ADMIN)
+
+        nested_params = {"hosts": ["dc01.corp.test"]}
+        plan = GoalAttackPlan(
+            goal=Goal.DOMAIN_ADMIN,
+            definition=GOAL_DEFINITIONS[Goal.DOMAIN_ADMIN],
+            steps=[
+                GoalAttackStep(1, "ad.enum_users", "frozen", {"nested": nested_params}),
+                GoalAttackStep(2, "ad.enum_spn", "frozen", {"nested": nested_params}),
+            ],
+        )
+        production_result = await production_engine.execute(
+            plan,
+            SimpleNamespace(id="00000000-0000-4000-8000-000000000024"),
+        )
+        assert production_result["status"] == "non_dispatchable"
+        assert production_result["steps_run"] == 0
+
+        requests = []
+
+        async def execute_module(principal, request, campaign):
+            del principal, campaign
+            requests.append(request)
+            if len(requests) == 1:
+                nested_params["hosts"][0] = "caller-mutated-after-first-effect"
+                request.raw_parameters["nested"]["hosts"].append("first-child-mutation")
+            return SimpleNamespace(
+                disposition=DispatchDispositionV1.TERMINAL,
+                identity=None,
+                lifecycle_result=FixedResult.APPLIED,
+                terminal_committed=True,
+            )
+
+        coordinator = SimpleNamespace(execute_module=AsyncMock(side_effect=execute_module))
+        engine._configure_c_live_test_dispatch(
+            coordinator=coordinator,
+            principal=TrustedPrincipal(
+                "00000000-0000-4000-8000-000000000022",
+                "00000000-0000-4000-8000-000000000022",
+            ),
+            idempotency_key="00000000-0000-4000-8000-000000000023",
+        )
+
+        result = await engine.execute(
+            plan,
+            SimpleNamespace(id="00000000-0000-4000-8000-000000000024"),
+        )
+
+        assert result["status"] == "terminal"
+        assert coordinator.execute_module.await_count == 2
+        assert requests[0].ingress_code == "goal_api"
+        assert requests[0].module_id == "ad.enum_users"
+        assert requests[1].module_id == "ad.enum_spn"
+        assert requests[0].whole_intent_digest == requests[1].whole_intent_digest
+        assert requests[1].raw_parameters == {"nested": {"hosts": ["dc01.corp.test"]}}
 
 
 class TestAttackPlanner:
@@ -1221,3 +1295,126 @@ class TestReportCampaignRoundTrip:
         spn_stage   = next(i for i, s in enumerate(stages) if "ad.enum_spn" in s)
         krbst_stage = next(i for i, s in enumerate(stages) if "ad.kerberoast" in s)
         assert krbst_stage > spn_stage
+
+
+def test_c_live_cli_dispatch_is_bearer_http_only(monkeypatch):
+    import ares.cli.typer_main as cli
+
+    key = "00000000-0000-4000-8000-000000000047"
+    captured: dict[str, Any] = {}
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = b'{"status":"accepted"}'
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+    opener = MagicMock()
+    opener.open.return_value = response
+    monkeypatch.setenv("ARES_API_URL", "https://ares.example.test:8443")
+    monkeypatch.setenv("ARES_ACCESS_TOKEN", "opaque-test-bearer")
+
+    def build_opener(*handlers):
+        captured["handlers"] = handlers
+        return opener
+
+    monkeypatch.setattr(cli.urllib_request, "build_opener", build_opener)
+    monkeypatch.setattr(cli.ssl, "create_default_context", MagicMock(return_value=MagicMock()))
+
+    result = cli._c_live_http_post(
+        "/modules/ad.test/run",
+        {"campaign_id": "campaign-47", "params": {}, "dry_run": False},
+        key,
+    )
+
+    assert result["status"] == 200
+    opener.open.assert_called_once()
+    outgoing = opener.open.call_args.args[0]
+    assert outgoing.full_url == "https://ares.example.test:8443/modules/ad.test/run"
+    assert outgoing.get_method() == "POST"
+    assert outgoing.get_header("Authorization") == "Bearer opaque-test-bearer"
+    assert outgoing.get_header("Idempotency-key") == key
+    assert json.loads(outgoing.data) == {
+        "campaign_id": "campaign-47",
+        "dry_run": False,
+        "params": {},
+    }
+    assert any(
+        isinstance(handler, cli.urllib_request.HTTPSHandler)
+        for handler in captured["handlers"]
+    )
+
+
+def test_c_live_cli_preview_executes_no_module_code(monkeypatch):
+    import ares.cli.typer_main as cli
+
+    dispatch = MagicMock(side_effect=AssertionError("preview crossed HTTP boundary"))
+    monkeypatch.setattr(cli, "_c_live_http_post", dispatch)
+
+    asyncio.run(
+        cli._run_chain(
+            "domain_admin",
+            "10.0.0.1",
+            "campaign-47",
+            "CORP.LOCAL",
+            "normal",
+            False,
+            True,
+            "00000000-0000-4000-8000-000000000047",
+        )
+    )
+    cli.goal_run(
+        "domain_admin",
+        "campaign-47",
+        "10.0.0.1",
+        "CORP.LOCAL",
+        True,
+        "00000000-0000-4000-8000-000000000047",
+    )
+
+    dispatch.assert_not_called()
+
+
+def test_c_live_cli_transport_contract_covers_url_token_campaign_key_tls_and_errors(
+    monkeypatch,
+):
+    import ares.cli.typer_main as cli
+
+    key = "00000000-0000-4000-8000-000000000096"
+    monkeypatch.delenv("ARES_API_URL", raising=False)
+    with pytest.raises(cli._CLiveCliError, match="api-url"):
+        cli._c_live_api_url()
+
+    monkeypatch.setenv("ARES_API_URL", "http://ares.example.test")
+    with pytest.raises(cli._CLiveCliError, match="tls-required"):
+        cli._c_live_api_url()
+
+    monkeypatch.setenv("ARES_API_URL", "http://127.0.0.1:8000")
+    assert cli._c_live_api_url() == ("http://127.0.0.1:8000", False)
+    monkeypatch.setenv("ARES_API_URL", "https://ares.example.test")
+    assert cli._c_live_api_url() == ("https://ares.example.test", True)
+
+    monkeypatch.delenv("ARES_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(cli.getpass, "getpass", MagicMock(return_value="prompted-bearer"))
+    assert cli._c_live_bearer() == "prompted-bearer"
+    with pytest.raises(cli._CLiveCliError, match="idempotency-key"):
+        cli._c_live_idempotency_key("not-a-uuid")
+    assert cli._c_live_idempotency_key(key) == key
+
+    post = MagicMock(return_value={"status": 200, "body": {}, "idempotency_key": key})
+    monkeypatch.setattr(cli, "_c_live_http_post", post)
+    asyncio.run(
+        cli._run_chain(
+            "domain_admin",
+            "10.0.0.1",
+            "campaign with spaces",
+            "CORP.LOCAL",
+            "normal",
+            False,
+            False,
+            key,
+        )
+    )
+    post.assert_called_once()
+    path, body, supplied_key = post.call_args.args
+    assert path == "/campaigns/campaign%20with%20spaces/run"
+    assert body["dry_run"] is False
+    assert supplied_key == key

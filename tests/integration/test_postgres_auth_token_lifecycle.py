@@ -16,6 +16,7 @@ from unittest.mock import Mock
 from urllib.parse import quote
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from ares.db import postgres as postgres_module
@@ -255,6 +256,107 @@ async def _active_refresh_count(
 def _require_fixed(condition: bool, message: str) -> None:
     if not condition:
         pytest.fail(message, pytrace=False)
+
+
+class _RejectingCLiveRuntime:
+    """Prove an authentication rejection never reaches lifecycle admission."""
+
+    def __init__(self) -> None:
+        self.bind_calls = 0
+
+    def bind(self, actor: object) -> None:
+        del actor
+        self.bind_calls += 1
+        raise AssertionError("authentication rejection reached C-live admission")
+
+
+class _PostgresCLiveStoreBindingProbe:
+    def __init__(self) -> None:
+        self.store_ids: list[int] = []
+
+    def _bind_admission_store(self, store: object) -> None:
+        store_id = id(store)
+        if self.store_ids and self.store_ids[-1] != store_id:
+            raise PermissionError("cross-store binding")
+        self.store_ids.append(store_id)
+
+
+class _PostgresCLiveEffectEngine(_PostgresCLiveStoreBindingProbe):
+    """Deterministic module-effect boundary backed by the real PostgreSQL store."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._registrations: set[str] = set()
+        self.effects: list[str] = []
+        self.finalizations: list[str] = []
+
+    def _register_admitted_dispatch_context(self, context: Any) -> None:
+        self._bind_admission_store_id(context._store_id)
+        self._registrations.add(context._dispatch_nonce)
+
+    def _bind_admission_store_id(self, store_id: int) -> None:
+        if not self.store_ids:
+            self.store_ids.append(store_id)
+        elif self.store_ids[-1] != store_id:
+            raise PermissionError("cross-store dispatch context")
+
+    def _consume_registered_dispatch_context(self, context: Any) -> bool:
+        if context._dispatch_nonce not in self._registrations:
+            return False
+        self._registrations.remove(context._dispatch_nonce)
+        return True
+
+    async def run_module(
+        self,
+        module_id: str,
+        campaign: Any,
+        params: dict[str, Any],
+        *,
+        skip_validation: bool,
+        timeout_seconds: int,
+        actor_role: str,
+        dispatch_context: Any,
+    ) -> Any:
+        del params, skip_validation, timeout_seconds
+        from ares.core.engine import EngineModuleResult, ModuleStatus
+        from ares.core.execution_admission import (
+            consume_dispatch_context,
+            mark_effect_started,
+        )
+
+        context = consume_dispatch_context(
+            dispatch_context,
+            consumer=self,
+            campaign_id=campaign.id,
+            module_id=module_id,
+        )
+        assert actor_role == "operator"
+        mark_effect_started(context)
+        self.effects.append(module_id)
+        return EngineModuleResult(
+            module_id=module_id,
+            status=ModuleStatus.DONE,
+            raw_output={"effect_count": len(self.effects)},
+            duration_ms=1.0,
+        )
+
+    async def _finalize_committed_module_result(
+        self,
+        campaign: Any,
+        module_id: str,
+        result: Any,
+        dispatch_context: Any,
+    ) -> Any:
+        from ares.core.execution_admission import consume_terminal_commit_context
+
+        consume_terminal_commit_context(
+            dispatch_context,
+            consumer=self,
+            campaign_id=campaign.id,
+            module_id=module_id,
+        )
+        self.finalizations.append(module_id)
+        return result
 
 
 class _TransactionExitBarrier:
@@ -1701,3 +1803,348 @@ async def test_create_and_logout_follow_lock_order(
         later_token = await database.create_refresh_token(logout_first_user)
         assert later_token
         assert await _active_refresh_count(database, logout_first_user) == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("revoked-bearer", "deleted-user", "inactive-user", "demoted-role"),
+    ids=("revoked-bearer", "deleted-user", "inactive-user", "demoted-role"),
+)
+@pytest.mark.asyncio
+async def test_postgres_c_live_authentication_precedes_submission_lookup(
+    case: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.server import app
+    from ares.core.config import get_settings
+    from ares.core.security import create_access_token, decode_access_token
+
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        async with database._pool.acquire() as connection:
+            subject = await connection.fetchval(
+                "SELECT username FROM users WHERE id=$1",
+                user_id,
+            )
+            async with connection.transaction():
+                family_id, _refresh_token = await database._insert_initial_family_token(
+                    connection,
+                    user_id=user_id,
+                    auth_epoch=1,
+                )
+
+        settings = get_settings()
+        token = create_access_token(
+            {"sub": subject, "sid": family_id, "ver": 1},
+            settings.secret_key_value,
+            settings.ares_jwt_algorithm,
+        )
+        claims = decode_access_token(
+            token,
+            settings.secret_key_value,
+            settings.ares_jwt_algorithm,
+        )
+        assert claims is not None
+        jti = claims["jti"]
+
+        async with database._pool.acquire() as connection:
+            if case == "revoked-bearer":
+                await connection.execute(
+                    "INSERT INTO revoked_access_tokens(jti,user_id,expires_at) "
+                    "VALUES($1,$2,now() + interval '1 hour')",
+                    jti,
+                    user_id,
+                )
+            elif case == "deleted-user":
+                await connection.execute("DELETE FROM users WHERE id=$1", user_id)
+            elif case == "inactive-user":
+                await connection.execute(
+                    "UPDATE users SET is_active=0 WHERE id=$1",
+                    user_id,
+                )
+            else:
+                await connection.execute(
+                    "UPDATE users SET role='reporter' WHERE id=$1",
+                    user_id,
+                )
+
+        campaign_reads = 0
+        original_get_campaign = database.get_campaign
+
+        async def tracked_get_campaign(campaign_id: str) -> dict[str, Any] | None:
+            nonlocal campaign_reads
+            campaign_reads += 1
+            return await original_get_campaign(campaign_id)
+
+        monkeypatch.setattr(database, "get_campaign", tracked_get_campaign)
+        runtime = _RejectingCLiveRuntime()
+        state = app.state
+        missing = object()
+        previous = {
+            name: getattr(state, name, missing)
+            for name in ("db", "engine", "c_live_runtime")
+        }
+        state.db = database
+        state.engine = object()
+        state.c_live_runtime = runtime
+        try:
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://localhost",
+            ) as client:
+                response = await client.post(
+                    "/modules/opsec.coverage_predictor/run",
+                    json={
+                        "campaign_id": "10000000-0000-4000-8000-000000000001",
+                        "params": {"noise_profile": "stealth"},
+                        "dry_run": False,
+                    },
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Idempotency-Key": "10000000-0000-4000-8000-000000000002",
+                    },
+                )
+        finally:
+            for name, value in previous.items():
+                if value is missing:
+                    delattr(state, name)
+                else:
+                    setattr(state, name, value)
+
+        expected_status = 403 if case == "demoted-role" else 401
+        assert response.status_code == expected_status
+        assert response.json()["detail"] == (
+            "live_execution_role_denied"
+            if case == "demoted-role"
+            else "Not authenticated"
+        )
+        assert campaign_reads == 0
+        assert runtime.bind_calls == 0
+        async with database._pool.acquire() as connection:
+            assert await connection.fetchval("SELECT count(*) FROM logical_executions") == 0
+
+
+@pytest.mark.asyncio
+async def test_postgres_c_live_trusted_store_factory_is_coordinator_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.api.rbac import AuthenticatedUser
+    from ares.api.server import _CLiveRuntime
+    from ares.db.websocket_tickets import BearerTicketSource
+
+    async with _postgres_harness() as harness:
+        database = harness.database
+        user_id = await _insert_user(database)
+        async with database._pool.acquire() as connection:
+            subject = await connection.fetchval(
+                "SELECT username FROM users WHERE id=$1",
+                user_id,
+            )
+            async with connection.transaction():
+                family_id, _refresh_token = await database._insert_initial_family_token(
+                    connection,
+                    user_id=user_id,
+                    auth_epoch=1,
+                )
+
+        original_factory = database.execution_lifecycle_store
+        stores: list[object] = []
+
+        def tracked_factory() -> object:
+            store = original_factory()
+            stores.append(store)
+            return store
+
+        monkeypatch.setattr(database, "execution_lifecycle_store", tracked_factory)
+        engine = _PostgresCLiveStoreBindingProbe()
+        runtime = _CLiveRuntime(database, engine)
+        actor = AuthenticatedUser(
+            username=subject,
+            role="operator",
+            websocket_ticket_source=BearerTicketSource(
+                user_id=user_id,
+                subject=subject,
+                jti="10000000-0000-4000-8000-000000000003",
+                expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+                family_id=family_id,
+                auth_epoch=1,
+            ),
+        )
+
+        first_principal, first = runtime.bind(actor)
+        second_principal, second = runtime.bind(actor)
+
+        assert len(stores) == 1
+        assert runtime.store is stores[0]
+        assert first is not second
+        assert first_principal is not second_principal
+        assert engine.store_ids == [id(stores[0]), id(stores[0])]
+
+
+@pytest.mark.parametrize("route", ("module", "plan", "strategy"), ids=("module", "plan", "strategy"))
+@pytest.mark.asyncio
+async def test_postgres_c_live_effectful_dispatch_and_replay(
+    route: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ares.core.campaign import Campaign
+    from ares.core.execution_admission import (
+        DispatchDispositionV1,
+        DispatchRequestV1,
+        ExecutionAdmissionCoordinatorV1,
+        RevalidatedPrincipalV1,
+        canonical_intent_digest,
+    )
+    from ares.db.execution_lifecycle import (
+        BudgetConfiguration,
+        CampaignActorGrantMutation,
+        FixedResult,
+        GatewayAuthorityMutation,
+        TrustedPrincipal,
+    )
+    from tests.integration.test_postgres_execution_lifecycle import (
+        _postgres_p1c_authority_store,
+        _postgres_p1c_eligible_descriptor,
+    )
+    from tests.unit.test_execution_lifecycle_persistence import _uuid
+
+    async with _postgres_harness() as harness:
+        database = harness.database
+        _postgres_p1c_eligible_descriptor(monkeypatch)
+        store, administrator, actor_id, campaign_id, _credential_id = (
+            await _postgres_p1c_authority_store(database)
+        )
+        actor = TrustedPrincipal(actor_id, actor_id)
+        assert (
+            await store.put_campaign_actor_grant(
+                administrator,
+                CampaignActorGrantMutation(
+                    _uuid(13_010),
+                    campaign_id,
+                    actor_id,
+                    None,
+                ),
+            )
+        ).result is FixedResult.APPLIED
+        assert (
+            await store.update_gateway_authority(
+                administrator,
+                GatewayAuthorityMutation(_uuid(13_011), 0, "enforced"),
+            )
+        ).result is FixedResult.APPLIED
+        assert (
+            await store.configure_campaign_budgets(
+                BudgetConfiguration(
+                    campaign_id,
+                    _uuid(13_012),
+                    20,
+                    _uuid(13_013),
+                    20,
+                    _uuid(13_014),
+                    4,
+                    _uuid(13_015),
+                    "actor",
+                    actor.subject_ref,
+                    actor.user_id,
+                    0,
+                )
+            )
+        ).result is FixedResult.APPLIED
+
+        engine = _PostgresCLiveEffectEngine()
+
+        async def revalidate(
+            candidate: TrustedPrincipal,
+            requested_campaign_id: str,
+            module_id: str,
+        ) -> RevalidatedPrincipalV1 | None:
+            if (
+                candidate != actor
+                or requested_campaign_id != campaign_id
+                or module_id != "opsec.coverage_predictor"
+            ):
+                return None
+            return RevalidatedPrincipalV1(actor, 0, "operator")
+
+        coordinator = ExecutionAdmissionCoordinatorV1(store, engine, revalidate)
+        campaign = Campaign(
+            id=campaign_id,
+            name="PostgreSQL C-live",
+            operator="legacy-username-is-not-authority",
+            targets=["host.example"],
+        )
+        coordinates = {
+            "module": ((0, 0, 0, 0),),
+            "plan": ((0, 0, 0, 0), (1, 0, 0, 1)),
+            "strategy": ((0, 0, 0, 0), (1, 1, 1, 0)),
+        }[route]
+        ingress_code = {
+            "module": "api_module",
+            "plan": "api_campaign_plan",
+            "strategy": "strategy",
+        }[route]
+        whole_intent_digest = canonical_intent_digest(
+            {
+                "campaign_id": campaign_id,
+                "route": route,
+                "children": coordinates,
+            }
+        )
+        requests = tuple(
+            DispatchRequestV1(
+                campaign_id=campaign_id,
+                module_id="opsec.coverage_predictor",
+                ingress_code=ingress_code,
+                idempotency_key=_uuid(13_016),
+                raw_parameters={"noise_profile": "stealth"},
+                whole_intent_digest=whole_intent_digest,
+                occurrence=occurrence,
+                stage_ordinal=stage_ordinal,
+                decision_ordinal=decision_ordinal,
+                module_ordinal=module_ordinal,
+            )
+            for occurrence, stage_ordinal, decision_ordinal, module_ordinal in coordinates
+        )
+
+        applied = tuple(
+            [await coordinator.execute_module(actor, request, campaign) for request in requests]
+        )
+        effect_count = len(engine.effects)
+        replayed = tuple(
+            [await coordinator.execute_module(actor, request, campaign) for request in requests]
+        )
+
+        assert all(
+            outcome.disposition is DispatchDispositionV1.TERMINAL
+            and outcome.lifecycle_result is FixedResult.APPLIED
+            and outcome.effect_started
+            and outcome.terminal_committed
+            for outcome in applied
+        )
+        assert all(
+            outcome.disposition is DispatchDispositionV1.REPLAYED
+            and outcome.lifecycle_result is FixedResult.REPLAYED
+            and not outcome.effect_started
+            and not outcome.terminal_committed
+            for outcome in replayed
+        )
+        assert [outcome.identity for outcome in replayed] == [
+            outcome.identity for outcome in applied
+        ]
+        assert effect_count == len(requests)
+        assert len(engine.effects) == effect_count
+        assert len(engine.finalizations) == len(requests)
+        assert len({outcome.identity.attempt_id for outcome in applied}) == len(requests)
+        async with database._pool.acquire() as connection:
+            terminal_count = await connection.fetchval(
+                "SELECT count(*) FROM execution_attempts "
+                "WHERE campaign_id=$1 AND state='succeeded'",
+                campaign_id,
+            )
+            logical_count = await connection.fetchval(
+                "SELECT count(*) FROM logical_executions WHERE campaign_id=$1",
+                campaign_id,
+            )
+        assert terminal_count == logical_count == len(requests)
