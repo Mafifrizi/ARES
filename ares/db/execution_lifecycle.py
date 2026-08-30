@@ -144,6 +144,94 @@ class PolicyReasonBit(IntEnum):
     FUTURE_GATEWAY_INELIGIBLE = 17_179_869_184
 
 
+def _lifecycle_policy_decision(
+    *,
+    mode: str,
+    role: str,
+    minimum_role: str,
+    noise_class: str,
+    approval_policy: str,
+    required_capabilities: int,
+    granted_capabilities: int,
+    blocker_bits: int,
+    descriptor_complete: bool,
+    lifecycle_ready: bool,
+    future_gateway_eligible: bool,
+    campaign_active: bool,
+    grant_active: bool,
+    approval_present: bool,
+    approval_current: bool,
+    destinations_in_scope: bool,
+    credentials_current: bool,
+    credential_policy_current: bool,
+    ambient_dependencies: bool,
+) -> tuple[str, tuple[str, ...]]:
+    """Evaluate the reduced lifecycle policy facts without importing the kernel."""
+    role_rank = {"reporter": 1, "operator": 1, "team_lead": 2, "admin": 3}
+    minimum_rank = {"operator": 1, "team_lead": 2, "admin": 3}
+
+    if future_gateway_eligible and (not descriptor_complete or not lifecycle_ready):
+        return "rejected", ("INCONSISTENT_CONTRACT",)
+    if future_gateway_eligible and blocker_bits:
+        return "rejected", ("INCONSISTENT_CONTRACT",)
+    if approval_current and not approval_present:
+        return "rejected", ("INCONSISTENT_CONTRACT",)
+    if grant_active and not campaign_active:
+        return "rejected", ("INCONSISTENT_CONTRACT",)
+    if ambient_dependencies:
+        return "rejected", ("INCONSISTENT_CONTRACT",)
+
+    if not descriptor_complete:
+        return "rejected", ("DESCRIPTOR_INCOMPLETE",)
+    if not campaign_active or not grant_active:
+        reasons = tuple(
+            name
+            for name, condition in (
+                ("CAMPAIGN_INACTIVE", not campaign_active),
+                ("CAMPAIGN_UNAUTHORIZED", not grant_active),
+            )
+            if condition
+        )
+        return "blocked", reasons
+    access_reasons: list[str] = []
+    if role_rank[role] < minimum_rank[minimum_role]:
+        access_reasons.append("INSUFFICIENT_ROLE")
+    if noise_class == "high_noise" and role_rank[role] < 2:
+        access_reasons.append("HIGH_NOISE_ROLE_REQUIRED")
+    if approval_policy == "attempt_bound":
+        if not approval_present:
+            access_reasons.append("APPROVAL_REQUIRED")
+        elif not approval_current:
+            access_reasons.append("APPROVAL_STALE")
+    if access_reasons:
+        return "blocked", tuple(access_reasons)
+    if granted_capabilities & required_capabilities != required_capabilities:
+        return "blocked", ("CAPABILITY_REQUIRED",)
+    if not destinations_in_scope:
+        return "blocked", ("DESTINATION_OUT_OF_SCOPE",)
+    credential_reasons: list[str] = []
+    if not credentials_current:
+        credential_reasons.append("CREDENTIAL_AUTHORITY_STALE")
+    if ambient_dependencies:
+        credential_reasons.append("AMBIENT_CREDENTIAL_FORBIDDEN")
+    if not credential_policy_current:
+        credential_reasons.append("CREDENTIAL_HANDLE_POLICY_VIOLATION")
+    if credential_reasons:
+        return "blocked", tuple(credential_reasons)
+    if blocker_bits:
+        return "blocked", ("DESCRIPTOR_BLOCKED",)
+    if mode == "preview":
+        return "preview_ready", ()
+    live_reasons: list[str] = []
+    if not lifecycle_ready:
+        live_reasons.append("LIFECYCLE_NOT_READY")
+    if not future_gateway_eligible:
+        live_reasons.append("FUTURE_GATEWAY_INELIGIBLE")
+    if live_reasons:
+        return "blocked", tuple(live_reasons)
+    return "live_candidate", ()
+
+
 CAPABILITY_BITS_V1: Final[dict[str, int]] = {
     "network": 1,
     "execution": 2,
@@ -3907,103 +3995,35 @@ class ExecutionLifecycleStore:
             evaluation_state = "not_evaluated"
             gateway_decision = "emergency_disabled"
         else:
-            from ares.core.execution_policy import (
-                ApprovalPolicy,
-                AuthorityFactsV1,
-                BlockerBits,
-                CapabilityBits,
-                DescriptorFactsV1,
-                EvaluationMode,
-                NoiseClass,
-                PolicyInputV1,
-                PolicyReason,
-                PolicyVerdict,
-                RequestFactsV1,
-                RoleRank,
-                evaluate_policy,
-            )
-
             if resolved.role not in {"reporter", "operator", "team_lead", "admin"}:
                 raise _AbortOperationError(OperationResult(FixedResult.AUTHORITY_STALE, None))
-            # ``reporter`` is a persisted lifecycle role outside the pure
-            # policy kernel's RoleRank domain.  Evaluate it with the least
-            # privileged representable rank so descriptor/request rejection
-            # keeps precedence, then apply the exact lifecycle role ceiling.
-            role = {
-                "reporter": RoleRank.OPERATOR,
-                "operator": RoleRank.OPERATOR,
-                "team_lead": RoleRank.TEAM_LEAD,
-                "admin": RoleRank.ADMIN,
-            }[resolved.role]
-            minimum = {
-                "operator": RoleRank.OPERATOR,
-                "team_lead": RoleRank.TEAM_LEAD,
-                "admin": RoleRank.ADMIN,
-            }[minimum_role]
-            decision = evaluate_policy(
-                PolicyInputV1(
-                    RequestFactsV1(
-                        1,
-                        EvaluationMode(intent.evaluation_mode),
-                        True,
-                        True,
-                        True,
-                        True,
-                        True,
-                        len(prepared.canonical_parameters),
-                    ),
-                    DescriptorFactsV1(
-                        1,
-                        True,
-                        True,
-                        descriptor.descriptor_complete,
-                        True,
-                        minimum,
-                        NoiseClass(noise_class),
-                        ApprovalPolicy(approval_policy),
-                        CapabilityBits(capability_mask),
-                        BlockerBits(blocker_mask),
-                        descriptor.descriptor_complete,
-                        descriptor.idempotency.value != "unproven_current_contract",
-                        True,
-                        True,
-                        descriptor.future_gateway_eligible,
-                    ),
-                    AuthorityFactsV1(
-                        1,
-                        True,
-                        True,
-                        True,
-                        True,
-                        role,
-                        campaign_active,
-                        grant_active,
-                        approval_row is not None,
-                        approval_current,
-                        approval_current,
-                        CapabilityBits(granted_mask),
-                        True,
-                        destinations_in_scope,
-                        True,
-                        credentials_current,
-                        True,
-                        credential_policy_current,
-                        True,
-                        not descriptor.credential_policy.ambient_dependencies,
-                        True,
-                        True,
-                        True,
-                    ),
-                )
+            initial_verdict, reasons = _lifecycle_policy_decision(
+                mode=intent.evaluation_mode,
+                role=resolved.role,
+                minimum_role=minimum_role,
+                noise_class=noise_class,
+                approval_policy=approval_policy,
+                required_capabilities=capability_mask,
+                granted_capabilities=granted_mask,
+                blocker_bits=blocker_mask,
+                descriptor_complete=descriptor.descriptor_complete,
+                lifecycle_ready=descriptor.idempotency.value != "unproven_current_contract",
+                future_gateway_eligible=descriptor.future_gateway_eligible,
+                campaign_active=campaign_active,
+                grant_active=grant_active,
+                approval_present=approval_row is not None,
+                approval_current=approval_current,
+                destinations_in_scope=destinations_in_scope,
+                credentials_current=credentials_current,
+                credential_policy_current=credential_policy_current,
+                ambient_dependencies=descriptor.credential_policy.ambient_dependencies,
             )
-            initial_verdict = decision.verdict.value
-            reasons = decision.reasons
             if resolved.role == "reporter" and initial_verdict != "rejected":
-                initial_verdict = PolicyVerdict.BLOCKED.value
-                reasons = (PolicyReason.INSUFFICIENT_ROLE,)
-            # The policy enum values and lifecycle mask names are intentionally
-            # one-to-one.  Sum is equivalent to OR because every bit is unique.
-            reason_mask = sum(int(PolicyReasonBit[reason.name]) for reason in reasons)
+                initial_verdict = "blocked"
+                reasons = ("INSUFFICIENT_ROLE",)
+            # The policy reason names and lifecycle mask names are intentionally
+            # one-to-one. Sum is equivalent to OR because every bit is unique.
+            reason_mask = sum(int(PolicyReasonBit[reason]) for reason in reasons)
             if gateway_mode in {"disabled", "shadow_candidate"} and (
                 initial_verdict in {"preview_ready", "live_candidate"}
             ):
