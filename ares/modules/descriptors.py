@@ -9072,6 +9072,20 @@ def extract_destinations(
     return tuple(extracted)
 
 
+def prepare_admission_parameters(
+    module_id: str,
+    raw_parameters: Mapping[str, Any],
+) -> tuple[CanonicalParameters, tuple[ExtractedDestination, ...]]:
+    """Prepare strict descriptor-bound values for lifecycle admission.
+
+    Keeping parameter parsing and destination extraction inside the descriptor
+    boundary prevents lifecycle persistence code from depending on the
+    audit-parser entry point directly.
+    """
+    canonical = canonicalize_parameters(module_id, raw_parameters)
+    return canonical, extract_destinations(module_id, canonical)
+
+
 def readiness_summary() -> Mapping[str, object]:
     blockers: dict[str, list[str]] = {}
     for descriptor in FIRST_PARTY_DESCRIPTORS.values():
@@ -9202,6 +9216,7 @@ __all__ = [
     "descriptor_semantic_digest",
     "extract_destinations",
     "get_descriptor",
+    "prepare_admission_parameters",
     "readiness_summary",
     "require_descriptor",
     "validate_parameter_model_bindings",

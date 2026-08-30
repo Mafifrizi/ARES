@@ -3583,8 +3583,7 @@ class ExecutionLifecycleStore:
             return None
         try:
             from ares.modules.descriptors import (
-                canonicalize_parameters,
-                extract_destinations,
+                prepare_admission_parameters,
                 require_descriptor,
             )
 
@@ -3594,9 +3593,10 @@ class ExecutionLifecycleStore:
                 descriptor.parameter_fields,
             ):
                 return None
-            canonical = canonicalize_parameters(intent.module_id, intent.raw_parameters)
+            canonical, extracted = prepare_admission_parameters(
+                intent.module_id, intent.raw_parameters
+            )
             values = {key: canonical.values[key] for key in sorted(canonical.values)}
-            extracted = extract_destinations(intent.module_id, canonical)
             destination_refs = tuple(
                 sorted(
                     {
