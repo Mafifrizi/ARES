@@ -61,6 +61,7 @@ from ares.db.execution_lifecycle import (
     OperationResult,
     valid_uuid,
     validate_postgresql_admission_authority_catalog,
+    validate_postgresql_lifecycle_catalog,
 )
 from ares.db.websocket_tickets import (
     WEBSOCKET_TICKET_TTL_SECONDS,
