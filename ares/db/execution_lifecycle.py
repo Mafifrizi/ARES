@@ -12820,6 +12820,34 @@ async def validate_sqlite_lifecycle_catalog_async(connection: Any) -> None:
 async def validate_postgresql_lifecycle_catalog(connection: Any) -> None:
     if not _POSTGRES_CATALOG_FINGERPRINT_V1:
         raise RuntimeError("Incompatible execution lifecycle schema")
+    v11_rows = await connection.fetch(
+        "SELECT c.relname FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname=current_schema() AND c.relname=ANY($1::text[])",
+        list(V11_AUTHORITY_TABLES),
+    )
+    v11_tables = {str(row["relname"]) for row in v11_rows}
+    if v11_tables:
+        if v11_tables != set(V11_AUTHORITY_TABLES):
+            raise RuntimeError("Incompatible execution lifecycle schema")
+        try:
+            await validate_postgresql_admission_authority_catalog(connection)
+        except RuntimeError as error:
+            raise RuntimeError("Incompatible execution lifecycle schema") from error
+        return
+
+    facts_sql = _POSTGRES_CATALOG_FACTS_SQL.replace(
+        "__NAMES__", "CAST($1 AS text[])"
+    ).replace("__BASE_NAMES__", "CAST($2 AS text[])")
+    fact_rows = await connection.fetch(
+        facts_sql,
+        list(LIFECYCLE_TABLES),
+        list(_POSTGRES_BASE_CANDIDATE_INDEX_NAMES),
+    )
+    if postgresql_catalog_fingerprint(tuple(str(row["fact"]) for row in fact_rows)) != (
+        _POSTGRES_CATALOG_FINGERPRINT_V1
+    ):
+        raise RuntimeError("Incompatible execution lifecycle schema")
 
 
 _V11_EXISTING_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
