@@ -939,6 +939,7 @@ def _run_full_validation_lab(monkeypatch: pytest.MonkeyPatch, module_case: str) 
                     base_url="http://127.0.0.1:5173",
                     browser_origin="http://127.0.0.1:5173",
                     username="canary-user",
+                    idempotency_key="00000000-0000-4000-8000-000000000001",
                     allow_remote=False,
                 )
             )
