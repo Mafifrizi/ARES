@@ -7246,6 +7246,7 @@ class ExecutionLifecycleStore:
                     revision_column="revision",
                     checks=(("revision", (expected_revision,), FixedResult.CONFLICT_REVISION),),
                     missing_result=FixedResult.CONFLICT_STATE,
+                    matched_result=FixedResult.CONFLICT_REVISION,
                 ),
             )
             if updated is None:
