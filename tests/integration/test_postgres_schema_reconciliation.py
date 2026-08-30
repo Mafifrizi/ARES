@@ -49,6 +49,12 @@ _EXPECTED_INDEXES = (
     ("credentials", "idx_creds_campaign", ("campaign_id",), "text_ops"),
     ("credentials", "idx_creds_type", ("cred_type",), "text_ops"),
     ("credentials", "idx_creds_username", ("username",), "text_ops"),
+    (
+        "credentials",
+        "ix_credentials_execution_authority",
+        ("campaign_id", "execution_authority_state", "id"),
+        ("text_ops", "text_ops", "text_ops"),
+    ),
     ("findings", "idx_findings_campaign", ("campaign_id",), "text_ops"),
     ("findings", "idx_findings_cvss", ("cvss_score",), "float8_ops"),
     (
@@ -822,6 +828,27 @@ def _managed_constraint_rows() -> list[dict[str, object]]:
             }
         )
         rows.append(token_check)
+
+    for col in [
+        "execution_authority_state",
+        "execution_authority_revision",
+        "execution_authority_binding_digest",
+        "execution_authority_latest_operation_id",
+        "execution_authority_latest_operation_base_revision",
+        "execution_authority_latest_operation_code",
+    ]:
+        v11_check = deepcopy(blocked)
+        v11_check.update(
+            {
+                "table_name": "credentials",
+                "conname": f"ck_credentials_{col}",
+                "contype": "c",
+                "definition": "CHECK (1=1)",
+                "local_columns": [col],
+            }
+        )
+        rows.append(v11_check)
+
     return rows
 
 
