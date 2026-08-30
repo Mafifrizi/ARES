@@ -12626,6 +12626,88 @@ def _validate_sqlite_v11_base_catalog_sql(rows: Sequence[Any]) -> None:
         raise RuntimeError("Incompatible execution lifecycle schema")
 
 
+def _sqlite_create_table_items(create_sql: object) -> tuple[str, ...]:
+    """Split a SQLite CREATE TABLE body without treating nested commas as separators."""
+    if type(create_sql) is not str:
+        return ()
+    source = _normalized_sql(create_sql)
+    opening = source.find("(")
+    if opening < 0:
+        return ()
+    items: list[str] = []
+    start = opening + 1
+    depth = 0
+    quoted = False
+    index = start
+    while index < len(source):
+        character = source[index]
+        if character == "'":
+            if quoted and index + 1 < len(source) and source[index + 1] == "'":
+                index += 1
+            else:
+                quoted = not quoted
+        elif not quoted:
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                if depth == 0:
+                    items.append(source[start:index].strip())
+                    return tuple(items)
+                depth -= 1
+            elif character == "," and depth == 0:
+                items.append(source[start:index].strip())
+                start = index + 1
+        index += 1
+    return ()
+
+
+def _validate_sqlite_v11_altered_table_catalog_sql(rows: Sequence[Any]) -> None:
+    """Validate v10 portions of ALTERed tables and the rebuilt v11 receipt table."""
+    observed = {
+        str(row[1]): row[2]
+        for row in rows
+        if str(row[0]) == "table" and str(row[1]) in _V11_ALTERED_LIFECYCLE_TABLES
+    }
+    if set(observed) != _V11_ALTERED_LIFECYCLE_TABLES:
+        raise RuntimeError("Incompatible execution lifecycle schema")
+    expected = {
+        str(name): sql
+        for kind, name, sql in _EXPECTED_SQLITE_CATALOG_SQL
+        if kind == "table" and name in _V11_ALTERED_LIFECYCLE_TABLES
+    }
+    if set(expected) != _V11_ALTERED_LIFECYCLE_TABLES:
+        raise RuntimeError("Incompatible execution lifecycle schema")
+
+    for table in _V11_ALTERED_LIFECYCLE_TABLES - {"execution_operation_receipts"}:
+        expected_items = _sqlite_create_table_items(expected[table])
+        observed_items = _sqlite_create_table_items(observed[table])
+        expected_columns = tuple(
+            item for item in expected_items if not item.startswith("CONSTRAINT ")
+        )
+        observed_columns = tuple(
+            item for item in observed_items if not item.startswith("CONSTRAINT ")
+        )
+        if observed_columns[: len(expected_columns)] != expected_columns:
+            raise RuntimeError("Incompatible execution lifecycle schema")
+        expected_constraints = {
+            match.group(1): item
+            for item in expected_items
+            if (match := re.match(r"CONSTRAINT ([a-z0-9_]+) ", item)) is not None
+        }
+        observed_constraints = {
+            match.group(1): item
+            for item in observed_items
+            if (match := re.match(r"CONSTRAINT ([a-z0-9_]+) ", item)) is not None
+        }
+        if any(observed_constraints.get(name) != item for name, item in expected_constraints.items()):
+            raise RuntimeError("Incompatible execution lifecycle schema")
+
+    if _normalized_sql(observed["execution_operation_receipts"]) != _normalized_sql(
+        _v11_receipt_create_statement("sqlite")
+    ):
+        raise RuntimeError("Incompatible execution lifecycle schema")
+
+
 def validate_sqlite_lifecycle_catalog_rows(rows: Sequence[Any]) -> None:
     """Validate pre-fetched SQLite catalog rows against the exact generation-10 DDL."""
     _validate_sqlite_catalog_sql(rows)
@@ -12673,6 +12755,7 @@ def validate_sqlite_lifecycle_catalog(connection: Any) -> None:
         if v11_tables != set(V11_AUTHORITY_TABLES):
             raise RuntimeError("Incompatible execution lifecycle schema")
         _validate_sqlite_v11_base_catalog_sql(rows)
+        _validate_sqlite_v11_altered_table_catalog_sql(rows)
     else:
         _validate_sqlite_catalog_sql(rows)
 
@@ -12729,6 +12812,7 @@ async def validate_sqlite_lifecycle_catalog_async(connection: Any) -> None:
         if v11_tables != set(V11_AUTHORITY_TABLES):
             raise RuntimeError("Incompatible execution lifecycle schema")
         _validate_sqlite_v11_base_catalog_sql(catalog_rows)
+        _validate_sqlite_v11_altered_table_catalog_sql(catalog_rows)
     else:
         _validate_sqlite_catalog_sql(catalog_rows)
 
