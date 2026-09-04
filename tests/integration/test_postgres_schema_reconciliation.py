@@ -2843,6 +2843,9 @@ async def test_real_postgres_runtime_origin_converges_without_data_loss(
 
     async with harness._postgres_harness() as target:
         await _stamp_runtime_origin_0007(target)
+        operator_user_id = "00000000-0000-4000-8000-000000002850"
+        campaign_id = "00000000-0000-4000-8000-000000002860"
+        run_id = "00000000-0000-4000-8000-000000002870"
         connection = await harness._connect(target)
         try:
             await connection.execute(
@@ -2857,22 +2860,37 @@ async def test_real_postgres_runtime_origin_converges_without_data_loss(
             )
             await connection.execute(
                 """
-                INSERT INTO campaigns(id, name)
-                VALUES('runtime-campaign', 'synthetic')
+                INSERT INTO users(id, username, hashed_password, role, created_by)
+                VALUES($1, $2, $3, $4, $5)
+                """,
+                operator_user_id,
+                "runtime-operator",
+                "synthetic-hash",
+                "admin",
+                "synthetic",
+            )
+            await connection.execute(
                 """
+                INSERT INTO campaigns(id, name, operator, scope_json, targets_json)
+                VALUES($1, $2, $3, $4, $5)
+                """,
+                campaign_id,
+                "synthetic",
+                "runtime-operator",
+                "[]",
+                "[]",
             )
             await connection.execute(
                 """
                 INSERT INTO module_runs(
                     id, campaign_id, module_id, outcome
                 )
-                VALUES(
-                    'runtime-run',
-                    'runtime-campaign',
-                    'synthetic-module',
-                    'synthetic'
-                )
-                """
+                VALUES($1, $2, $3, $4)
+                """,
+                run_id,
+                campaign_id,
+                "synthetic-module",
+                "synthetic",
             )
         finally:
             await connection.close()
@@ -2903,12 +2921,12 @@ async def test_real_postgres_runtime_origin_converges_without_data_loss(
                     (
                         SELECT count(*)=1
                         FROM campaigns
-                        WHERE id='runtime-campaign'
+                        WHERE id='00000000-0000-4000-8000-000000002860'
                     ) AS campaign_preserved,
                     (
                         SELECT count(*)=1
                         FROM module_runs
-                        WHERE id='runtime-run'
+                        WHERE id='00000000-0000-4000-8000-000000002870'
                     ) AS run_preserved,
                     (
                         SELECT bool_and(attribute.attnotnull)
