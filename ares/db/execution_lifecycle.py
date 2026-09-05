@@ -11830,11 +11830,12 @@ class ExecutionLifecycleStore:
         require_unexpired_lease: bool = False,
         retry_eligible: bool = False,
     ) -> OperationResult:
-        now = (
-            "floor(extract(epoch FROM clock_timestamp())*1000)::bigint"
+        clock_cte = (
+            "WITH clock AS (SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS db_now) "
             if self._dialect == "postgresql"
-            else "CAST((julianday('now')-2440587.5)*86400000 AS INTEGER)"
+            else "WITH clock AS (SELECT CAST((julianday('now')-2440587.5)*86400000 AS INTEGER) AS db_now) "
         )
+        now = "(SELECT db_now FROM clock)"
         target = request.target_state
         fields: list[str] = ["state=?", "revision=revision+1"]
         params: list[Any] = [target.value]
@@ -11965,7 +11966,8 @@ class ExecutionLifecycleStore:
             params.append(self._value(row, "lease_expires_at", 9))
         updated = await self.cas_update_one(
             connection,
-            "UPDATE execution_attempts SET "
+            clock_cte
+            + "UPDATE execution_attempts SET "
             + ",".join(fields)
             + where
             + " RETURNING id,revision,state,dispatch_owner_ref,lease_generation",
