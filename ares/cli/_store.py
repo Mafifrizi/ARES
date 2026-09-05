@@ -17,7 +17,7 @@ def campaigns_dir() -> Path:
 
 def save_campaign(campaign: Any) -> None:
     path = campaigns_dir() / f"{campaign.id}.json"
-    path.write_text(campaign.model_dump_json(indent=2, mode="json"), encoding="utf-8")
+    path.write_text(campaign.model_dump_json(indent=2), encoding="utf-8")
 
 
 def load_campaign(partial_id: str) -> dict[str, Any] | None:
