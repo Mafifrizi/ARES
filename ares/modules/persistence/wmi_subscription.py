@@ -105,7 +105,7 @@ class WMISubscriptionModule(BaseModule):
         logger.info("wmi_subscription_install", target=target, name=sub_name)
         audit("wmi_subscription", actor=username, technique="T1546.003",
               source="operator", target=target, detail=f"name={sub_name}")
-        await self.noise.rate_limiter.acquire("cloud_api")
+        await self.noise.rate_limiter.acquire("wmi")
         await self.noise.jitter.sleep()
 
         success = False

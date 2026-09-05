@@ -116,7 +116,7 @@ class LSASecretsModule(BaseModule):
         logger.info("lsa_secrets_start", target=target, username=username)
         audit("lsa_secrets", actor=username, source="operator",
               target=target, technique="T1003.002")
-        await self.noise.rate_limiter.acquire("cloud_api")
+        await self.noise.rate_limiter.acquire("smb")
         await self.noise.jitter.sleep()
 
         sam_hashes:  list[str] = []

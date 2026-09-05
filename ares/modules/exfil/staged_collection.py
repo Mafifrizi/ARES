@@ -119,7 +119,7 @@ class StagedCollectionModule(BaseModule):
         logger.info("staged_collection_start", target=target, paths=search_paths)
         audit("staged_collection", actor=username, technique="T1119",
               source="operator", target=target)
-        await self.noise.rate_limiter.acquire("cloud_api")
+        await self.noise.rate_limiter.acquire("ssh")
         await self.noise.jitter.sleep()
 
         loop = asyncio.get_running_loop()

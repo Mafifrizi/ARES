@@ -195,3 +195,45 @@ def test_aws_privesc_accepts_both_access_key_variants():
 
     ctx2 = ExecutionContext(target="aws", campaign_id="c", params={"aws_access_key": "AKIA123"})
     asyncio.run(mod.validate(ctx2))
+
+
+# ── 6. On-Prem Module Rate Limiter Bucket Verification ──────────────────────
+
+@pytest.mark.parametrize("mod_path,cls_name,expected_bucket,run_kwargs", [
+    ("ares.modules.windows.token_impersonation", "TokenImpersonationModule", "smb", {"target": "10.0.0.1", "username": "admin", "password": "pwd"}),
+    ("ares.modules.windows.lsa_secrets", "LSASecretsModule", "smb", {"target": "10.0.0.1", "username": "admin", "password": "pwd"}),
+    ("ares.modules.persistence.wmi_subscription", "WMISubscriptionModule", "wmi", {"target": "10.0.0.1", "username": "admin", "password": "pwd", "command": "whoami"}),
+    ("ares.modules.exfil.staged_collection", "StagedCollectionModule", "ssh", {"target": "10.0.0.1", "username": "admin", "key_path": "/tmp/k"}),
+    ("ares.modules.credential.pass_the_hash", "PassTheHashModule", "smb", {"target": "10.0.0.1", "username": "admin", "nt_hash": "a"*32}),
+])
+def test_onprem_modules_rate_limiter_never_calls_cloud_api(mod_path, cls_name, expected_bucket, run_kwargs):
+    """On-prem modules must use their semantic bucket (smb/wmi/ssh) and never touch cloud_api."""
+    mod = __import__(mod_path, fromlist=[cls_name])
+    module_cls = getattr(mod, cls_name)
+    instance = make_module(module_cls)
+    instance.before_request = AsyncMock()
+    instance.noise.jitter.sleep = AsyncMock()
+    acquire_mock = AsyncMock()
+    instance.noise.rate_limiter.acquire = acquire_mock
+
+    with patch.dict("sys.modules", {
+        "impacket": MagicMock(),
+        "impacket.smbconnection": MagicMock(),
+        "impacket.examples.secretsdump": MagicMock(),
+        "impacket.dcerpc.v5": MagicMock(),
+        "impacket.dcerpc.v5.transport": MagicMock(),
+        "impacket.dcerpc.v5.dcom": MagicMock(),
+        "impacket.dcerpc.v5.dcomrt": MagicMock(),
+        "paramiko": MagicMock(),
+    }):
+        # Mock inner execution loop or functions
+        try:
+            asyncio.run(instance.run(**run_kwargs))
+        except Exception:
+            pass
+
+    assert acquire_mock.called, f"{cls_name} did not call rate_limiter.acquire"
+    called_bucket = acquire_mock.call_args[0][0]
+    assert called_bucket == expected_bucket, f"{cls_name} expected bucket {expected_bucket}, got {called_bucket}"
+    assert called_bucket != "cloud_api", f"{cls_name} improperly used cloud_api rate limiter bucket!"
+

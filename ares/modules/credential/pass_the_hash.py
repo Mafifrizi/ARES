@@ -112,7 +112,7 @@ class PassTheHashModule(BaseModule):
         logger.info("pass_the_hash_attempt", target=target, username=username)
         audit("pass_the_hash", actor="operator", technique="T1550.002",
               source="operator", target=target)
-        await self.noise.rate_limiter.acquire("cloud_api")
+        await self.noise.rate_limiter.acquire("smb")
         await self.noise.jitter.sleep()
 
         success   = False

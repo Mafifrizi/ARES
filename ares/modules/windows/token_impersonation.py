@@ -104,7 +104,7 @@ class TokenImpersonationModule(BaseModule):
         from ares.core.logger import audit as _audit
         _audit("token_impersonation", actor=username, source="operator",
                target=target, technique="T1134.001")
-        await self.noise.rate_limiter.acquire("cloud_api")
+        await self.noise.rate_limiter.acquire("smb")
         await self.noise.jitter.sleep()
 
         # Run whoami /priv via WMI to check SeImpersonatePrivilege
