@@ -3005,7 +3005,106 @@ async def test_real_postgres_supported_legacy_objects_converge(
         await harness._alembic(target, "upgrade", "0007")
         connection = await harness._connect(target)
         try:
-            await harness._seed_postgres_contract(connection)
+            operator_user_id = "00000000-0000-4000-8000-000000003001"
+            campaign_id = "00000000-0000-4000-8000-000000003002"
+            operator_username = "synthetic-account"
+            await connection.execute(
+                """
+                INSERT INTO users(
+                    id, username, hashed_password, role, created_by
+                ) VALUES($1, $2, $3, $4, $5)
+                """,
+                operator_user_id,
+                operator_username,
+                "synthetic-hash",
+                "admin",
+                "synthetic",
+            )
+            await connection.execute(
+                """
+                INSERT INTO campaigns(
+                    id, name, operator, scope_json, targets_json
+                ) VALUES($1, $2, $3, $4, $5)
+                """,
+                campaign_id,
+                "Synthetic campaign",
+                operator_username,
+                "[]",
+                "[]",
+            )
+            await connection.execute(
+                """
+                INSERT INTO module_runs(id, campaign_id, module_id, outcome)
+                VALUES($1, $2, $3, $4)
+                """,
+                "run-contract",
+                campaign_id,
+                "module",
+                "complete",
+            )
+            await connection.execute(
+                """
+                INSERT INTO findings(
+                    id, campaign_id, module_id, title, description, severity
+                ) VALUES($1, $2, $3, $4, $5, $6)
+                """,
+                "finding-contract",
+                campaign_id,
+                "module",
+                "Synthetic finding",
+                "Synthetic description",
+                "low",
+            )
+            await connection.execute(
+                """
+                INSERT INTO hosts(id, campaign_id, ip_address)
+                VALUES($1, $2, $3)
+                """,
+                "host-contract",
+                campaign_id,
+                "192.0.2.10",
+            )
+            await connection.execute(
+                """
+                INSERT INTO credentials(
+                    id, campaign_id, host_id, username, cred_type
+                ) VALUES($1, $2, $3, $4, $5)
+                """,
+                "credential-contract",
+                campaign_id,
+                "host-contract",
+                "synthetic-user",
+                "password",
+            )
+            await connection.execute(
+                """
+                INSERT INTO loot(
+                    id, campaign_id, host_id, loot_type, name
+                ) VALUES($1, $2, $3, $4, $5)
+                """,
+                "loot-contract",
+                campaign_id,
+                "host-contract",
+                "metadata",
+                "Synthetic loot",
+            )
+            await connection.execute(
+                "INSERT INTO audit_log(campaign_id, action) VALUES($1, $2)",
+                campaign_id,
+                "synthetic-action",
+            )
+            await connection.execute(
+                """
+                INSERT INTO api_keys(
+                    id, user_id, name, key_hash, key_prefix
+                ) VALUES($1, $2, $3, $4, $5)
+                """,
+                "api-key-contract",
+                operator_user_id,
+                "Synthetic key",
+                "synthetic-hash",
+                "synthetic",
+            )
             await connection.execute(
                 "UPDATE refresh_tokens SET id=repeat('a', 64)"
             )
