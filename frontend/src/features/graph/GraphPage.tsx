@@ -98,20 +98,20 @@ function graphLayout(graph: SafeGraph, highlightedNodeIds: Set<string>, highligh
     animated: highlightedEdgeIds.has(edge.id),
     markerEnd: { type: MarkerType.ArrowClosed },
     style: {
-      stroke: edge.color || "#94a3b8",
+      stroke: edge.color || "#52525b",
       strokeWidth: highlightedEdgeIds.has(edge.id) ? 3 : 1.5,
       opacity: highlightedEdgeIds.size > 0 && !highlightedEdgeIds.has(edge.id) ? 0.18 : 1,
       strokeDasharray: edge.dashed ? "5 4" : undefined
     },
-    labelStyle: { fill: "#475569", fontSize: 11, fontWeight: 600 },
-    labelBgStyle: { fill: "#ffffff", fillOpacity: 0.9 },
+    labelStyle: { fill: "#d4d4d8", fontSize: 11, fontWeight: 600 },
+    labelBgStyle: { fill: "#18181b", fillOpacity: 0.95 },
     labelBgPadding: [4, 3]
   }));
   return { nodes, edges };
 }
 
 function safeValueText(value: SafeGraphValue): string {
-  if (value === null) return "—";
+  if (value === null) return "-";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   if (Array.isArray(value)) return value.map(safeValueText).join(", ");
   return Object.entries(value).map(([key, item]) => `${key}: ${safeValueText(item)}`).join(" · ");
@@ -253,7 +253,7 @@ function AttackPathList({ paths, selectedIndex, onSelect }: {
         >
           <span>Path {index + 1}</span>
           <strong>{attackPathSummary(path)}</strong>
-          <small>{path.path_length ?? path.steps.length + 1} nodes · score {path.total_score ?? "—"}</small>
+          <small>{path.path_length ?? path.steps.length + 1} nodes · score {path.total_score ?? "-"}</small>
         </button>
       ))}
     </div>
@@ -291,7 +291,7 @@ function GraphCanvas({ graph, highlightedNodeIds, highlightedEdgeIds, onSelect }
         }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#dbe5f0" gap={18} />
+        <Background color="#27272a" gap={18} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
       </ReactFlow>

@@ -19,10 +19,10 @@ import { AuthContext, type AuthState } from "./authContext";
 
 function LoadingSession() {
   return (
-    <div className="grid min-h-screen place-items-center bg-slate-100 p-4">
-      <div className="panel p-5 text-center">
-        <h1 className="text-xl font-bold">ARES</h1>
-        <p className="mt-1 text-sm text-slate-600">Loading session</p>
+    <div className="grid min-h-screen place-items-center bg-zinc-950 p-4 text-zinc-100">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold tracking-tight text-zinc-100">ARES</h1>
+        <p className="mt-1 text-xs text-zinc-400">Loading session</p>
       </div>
     </div>
   );
