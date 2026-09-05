@@ -56,14 +56,18 @@ class LinuxPrivescModule(BaseModule):
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
         from ares.modules.base import ModuleResult
-        host     = ctx.params.get("host") or ctx.params.get("target") or getattr(ctx, "target", "localhost")
-        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
-        ssh_key  = ctx.params.get("key_path") or ctx.params.get("ssh_key")
-        ssh_pass = ctx.params.get("password") or ctx.params.get("secret") or ctx.params.get("ssh_pass")
+        host     = ctx.params.get("host") or getattr(ctx, "target", "localhost")
+        ssh_user = ctx.params.get("ssh_user")
+        ssh_key  = ctx.params.get("ssh_key")
+        ssh_pass = ctx.params.get("ssh_pass")
         ssh_port = ctx.params.get("ssh_port", 22)
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True, "host": host})
+        host = ctx.params.get("host") or ctx.params.get("target") or getattr(ctx, "target", "localhost")
+        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+        ssh_key = ctx.params.get("key_path") or ctx.params.get("ssh_key")
+        ssh_pass = ctx.params.get("password") or ctx.params.get("secret") or ctx.params.get("ssh_pass")
         findings, raw = await self.run(
             host=host, ssh_user=ssh_user, ssh_key=ssh_key,
             ssh_pass=ssh_pass, ssh_port=ssh_port,
