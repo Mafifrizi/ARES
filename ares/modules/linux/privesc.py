@@ -45,14 +45,21 @@ class LinuxPrivescModule(BaseModule):
                 "linux.privesc requires 'target' — IP or hostname of Linux host.",
                 module_id=self.MODULE_ID, field="target",
             )
+        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+        if target != "localhost" and not ssh_user:
+            raise ModuleValidationError(
+                f"{self.MODULE_ID} targeting remote host '{target}' requires 'username' or 'ssh_user'. "
+                "Local controller fallback is prohibited.",
+                module_id=self.MODULE_ID, field="username",
+            )
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
         from ares.modules.base import ModuleResult
-        host     = ctx.params.get("host") or getattr(ctx, "target", "localhost")
-        ssh_user = ctx.params.get("ssh_user")
-        ssh_key  = ctx.params.get("ssh_key")
-        ssh_pass = ctx.params.get("ssh_pass")
+        host     = ctx.params.get("host") or ctx.params.get("target") or getattr(ctx, "target", "localhost")
+        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+        ssh_key  = ctx.params.get("key_path") or ctx.params.get("ssh_key")
+        ssh_pass = ctx.params.get("password") or ctx.params.get("secret") or ctx.params.get("ssh_pass")
         ssh_port = ctx.params.get("ssh_port", 22)
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
@@ -75,9 +82,12 @@ class LinuxPrivescModule(BaseModule):
             await self.before_request(host, "ssh")
             logger.info("linux_privesc_start", host=host, mode="remote", user=ssh_user)
             run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
-        else:
+        elif host == "localhost":
             logger.info("linux_privesc_start", host="localhost", mode="local")
             run_cmd = self._run_local
+        else:
+            logger.error("linux_privesc_rejected_remote_without_credentials", host=host)
+            return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
 
         checks = [("suid",self._check_suid(run_cmd)),("sudo",self._check_sudo(run_cmd)),
                   ("cron",self._check_cron(run_cmd)),("capabilities",self._check_capabilities(run_cmd)),

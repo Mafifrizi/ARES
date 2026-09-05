@@ -85,6 +85,13 @@ class LDPreloadModule(BaseModule):
                 f"{self.MODULE_ID} requires 'target' — IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+        if target != "localhost" and not ssh_user:
+            raise ModuleValidationError(
+                f"{self.MODULE_ID} targeting remote host '{target}' requires 'username' or 'ssh_user'. "
+                "Local controller fallback is prohibited.",
+                module_id=self.MODULE_ID, field="username",
+            )
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -129,9 +136,12 @@ class LDPreloadModule(BaseModule):
             await self.before_request(host, "ssh")
             logger.info("ld_preload_start", host=host, mode="remote", user=ssh_user)
             run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
-        else:
+        elif host == "localhost":
             logger.info("ld_preload_start", host="localhost", mode="local")
             run_cmd = self._run_local
+        else:
+            logger.error("ld_preload_rejected_remote_without_credentials", host=host)
+            return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
 
         # Run checks in parallel
         (

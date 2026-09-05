@@ -71,10 +71,11 @@ class AWSPrivescModule(BaseModule):
         if not isinstance(ctx, ExecutionContext):
             return
         has_key = bool(ctx.params.get("access_key") or
+                       ctx.params.get("aws_access_key") or
                        __import__("os").environ.get("AWS_ACCESS_KEY_ID"))
         if not has_key:
             raise ModuleValidationError(
-                "cloud.aws_privesc requires AWS credentials — set access_key param "
+                "cloud.aws_privesc requires AWS credentials — set access_key/aws_access_key param "
                 "or AWS_ACCESS_KEY_ID environment variable.",
                 module_id=self.MODULE_ID, field="access_key",
             )
@@ -96,10 +97,10 @@ class AWSPrivescModule(BaseModule):
         # Note: before_request() intentionally not called — cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
-        access_key    = kwargs.get("aws_access_key", "")
-        secret_key    = kwargs.get("aws_secret_key", "")
-        session_token = kwargs.get("aws_session_token", "")
-        region        = kwargs.get("aws_region", "us-east-1")
+        access_key    = kwargs.get("aws_access_key") or kwargs.get("access_key", "")
+        secret_key    = kwargs.get("aws_secret_key") or kwargs.get("secret_key", "")
+        session_token = kwargs.get("aws_session_token") or kwargs.get("session_token", "")
+        region        = kwargs.get("aws_region") or kwargs.get("region", "us-east-1")
         dry_run       = kwargs.get("dry_run", False)
 
         if dry_run:

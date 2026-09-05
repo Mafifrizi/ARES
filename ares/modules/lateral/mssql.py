@@ -340,7 +340,8 @@ class MSSQLModule(BaseModule):
 
     def _xp_cmdshell_sync(self, target: str, username: str, password: str,
                            port: int, command: str) -> str:
-        """Enable xp_cmdshell and execute command. Returns output."""
+        """Enable xp_cmdshell, execute command, and safely teardown in finally."""
+        conn = None
         try:
             import pymssql  # type: ignore[import]
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
@@ -349,14 +350,27 @@ class MSSQLModule(BaseModule):
             cur.execute("EXEC sp_configure 'show advanced options', 1; RECONFIGURE")
             cur.execute("EXEC sp_configure 'xp_cmdshell', 1; RECONFIGURE")
             safe_cmd = command.replace("'", "''")  # SQL-escape single quotes
-            cur.execute(f"EXEC xp_cmdshell '{safe_cmd}'")
-            rows = cur.fetchall()
-            output = "\n".join(str(r[0]) for r in rows if r[0] is not None)
-            conn.close()
-            return output
+            try:
+                cur.execute(f"EXEC xp_cmdshell '{safe_cmd}'")
+                rows = cur.fetchall()
+                output = "\n".join(str(r[0]) for r in rows if r[0] is not None)
+                return output
+            finally:
+                # Always teardown: disable xp_cmdshell to leave target secure
+                try:
+                    cur.execute("EXEC sp_configure 'xp_cmdshell', 0; RECONFIGURE")
+                    cur.execute("EXEC sp_configure 'show advanced options', 0; RECONFIGURE")
+                except Exception as cleanup_exc:
+                    logger.warning("xp_cmdshell_teardown_failed", error=str(cleanup_exc)[:80])
         except Exception as exc:
             logger.debug("xp_cmdshell_failed", error=str(exc)[:80])
             return ""
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _linked_server_sync(self, target: str, username: str, password: str,
                              port: int, linked: str, command: str) -> str:

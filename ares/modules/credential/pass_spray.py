@@ -323,8 +323,7 @@ class PassSprayModule(BaseModule):
               source="operator", target=target,
               detail=f"users={len(users)} passwords={len(passwords)} proto={protocol}")
 
-        await self.noise.rate_limiter.acquire("cloud_api")
-
+        rate_bucket = "ldap" if use_ldap else "default"
         valid_creds: list[dict[str, str]] = []
         locked_accounts: list[str] = []
         attempts = 0
@@ -337,6 +336,8 @@ class PassSprayModule(BaseModule):
                 if lockout_detected or user in locked_accounts:
                     continue
 
+                # Rate limiting per attempt to strictly respect LDAP/SMB noise profile & avoid lockout
+                await self.noise.rate_limiter.acquire(rate_bucket)
                 # Jitter — random timing variation prevents regular spray pattern detection
                 await self.noise.jitter.sleep()
                 if delay_s > 0:
