@@ -453,6 +453,7 @@ _EXPECTED_INDEXES = tuple(
         "idx_refresh_family_user_state_exp",
         "idx_refresh_family_generation",
         "uq_refresh_token_one_active",
+        "ix_credentials_execution_authority",
     }
 )
 _EXPECTED_PRIMARY_KEYS = tuple(
