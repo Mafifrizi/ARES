@@ -99,13 +99,14 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
 
-*ARES Operator Enclave — Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas and system environment specifications on the right panel.*
+*ARES Operator Enclave — Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas, system environment specifications, and ARES Cyber Dragon mascot on the right panel.*
 
 </div>
 
 - **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
 - **Key Capabilities**:
   - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) — physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
+  - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
   - **HMAC Double-Submit CSRF Protection**: Constant-time verification on all state-mutating requests (`X-ARES-CSRF`).

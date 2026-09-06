@@ -6,6 +6,7 @@ import { BackgroundAnimationCanvas } from "./BackgroundAnimationCanvas";
 import { useAuth } from "./authContext";
 
 const brandMarkPath = "/dashboard/brand/ares-mark.png";
+const brandMascotPath = "/dashboard/brand/ares-mascot.png";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -132,6 +133,15 @@ export function LoginPage() {
 
         {/* Ambient Warmth Glow behind content */}
         <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[32rem] w-[32rem] rounded-full bg-red-950/15 blur-[140px]" />
+
+        {/* ARES Cyber Dragon Mascot with Tastefully Lowered Opacity */}
+        <div className="pointer-events-none absolute -right-6 -bottom-8 w-[520px] xl:w-[600px] select-none opacity-35 transition-opacity duration-700">
+          <img
+            src={brandMascotPath}
+            alt="ARES Dragon Mascot"
+            className="w-full h-auto object-contain drop-shadow-[0_0_60px_rgba(220,38,38,0.3)]"
+          />
+        </div>
 
         {/* Centerpiece Content */}
         <div className="relative z-10 w-full max-w-md space-y-8">
