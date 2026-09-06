@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, GitGraph, Loader2, RotateCcw, Route, X } from "lucide-react";
+import { AlertTriangle, Loader2, X } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api/client";
 import type { AttackPath, Campaign, SafeGraphValue } from "../../api/types";
@@ -318,7 +318,6 @@ function GraphWorkspace({ graph, paths, view, filters, onFiltersChange, selected
       <GraphFiltersPanel graph={graph} filters={filters} onChange={onFiltersChange} />
       {selectedPath && (
         <div className="graph-active-path">
-          <Route size={16} />
           <span>Highlighting {attackPathSummary(selectedPath)}</span>
           <button className="btn btn-compact" onClick={() => onSelectPath(-1)} type="button">
             <X size={14} /> Clear selection
@@ -335,7 +334,6 @@ function GraphWorkspace({ graph, paths, view, filters, onFiltersChange, selected
           />
           <aside className="panel graph-side-panel">
             <div className="graph-side-heading">
-              <GitGraph size={16} />
               <strong>{view === "paths" ? "Top attack paths" : "Safe detail"}</strong>
             </div>
             {view === "paths"
@@ -396,7 +394,6 @@ export default function GraphPage({ campaignId, onCampaignIdChange }: {
     <section className="page">
       <header className="page-header">
         <div className="page-heading">
-          <span className="page-icon"><GitGraph size={19} /></span>
           <div>
             <p className="page-eyebrow">Intelligence</p>
             <h1>Graph</h1>
@@ -405,7 +402,7 @@ export default function GraphPage({ campaignId, onCampaignIdChange }: {
         </div>
         <div className="page-actions">
           <span className="status-pill">{safeGraph.nodes.length} nodes / {safeGraph.edges.length} edges</span>
-          {campaignId && <button className="btn btn-compact" onClick={() => void graphQuery.refetch()} type="button"><RotateCcw size={14} /> Retry</button>}
+          {campaignId && <button className="btn btn-compact" onClick={() => void graphQuery.refetch()} type="button">Retry</button>}
         </div>
       </header>
       <div className="page-tabs" role="tablist" aria-label="Graph sections">
@@ -439,7 +436,7 @@ export default function GraphPage({ campaignId, onCampaignIdChange }: {
               <input className="field" onChange={(event) => setJsonPath(event.target.value)} placeholder="C:\\labs\\bloodhound\\results.json" required value={jsonPath} />
             </label>
             <button className="btn btn-primary" disabled={ingest.isPending} type="submit">
-              {ingest.isPending ? <><Loader2 className="spin" size={16} /> Importing…</> : <><GitGraph size={16} /> Request import</>}
+              {ingest.isPending ? <><Loader2 className="spin" size={16} /> Importing…</> : "Request import"}
             </button>
             {ingestNotice && <p className="notice">{ingestNotice}</p>}
             {ingest.isError && <p className="notice notice-danger">The import request could not be completed. Confirm the allowed server-local path and retry.</p>}

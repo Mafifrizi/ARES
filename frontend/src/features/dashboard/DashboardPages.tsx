@@ -1,35 +1,15 @@
 import {
-  Activity,
   AlertTriangle,
   Bell,
-  Boxes,
   CheckCircle2,
   ChevronDown,
   Copy,
-  Database,
-  Download,
-  Eye,
-  FileText,
-  GitGraph,
-  KeyRound,
-  Layers,
-  LayoutDashboard,
-  ListChecks,
   Loader2,
-  LogOut,
   Menu,
-  Play,
-  Radio,
   Search,
   ShieldAlert,
   ShieldCheck,
-  Target,
-  ArrowRight,
   Trash2,
-  TrendingUp,
-  UserCog,
-  type LucideIcon,
-  Workflow,
   X
 } from "lucide-react";
 import {
@@ -142,16 +122,16 @@ function clearValidationMessage<T extends ValidatableElement>(event: ChangeEvent
 }
 
 const navItems = [
-  { to: "/", label: "Overview", icon: LayoutDashboard },
-  { to: "/campaigns", label: "Campaigns", icon: ListChecks },
-  { to: "/modules", label: "Modules", icon: Boxes },
-  { to: "/reports", label: "Reports", icon: FileText },
-  { to: "/graph", label: "Graph", icon: GitGraph },
-  { to: "/templates", label: "Templates", icon: Workflow },
-  { to: "/strategy", label: "Strategy", icon: ShieldCheck },
-  { to: "/security", label: "Security", icon: UserCog },
-  { to: "/edr", label: "EDR/OPSEC", icon: ShieldAlert },
-  { to: "/live", label: "Live", icon: Radio }
+  { to: "/", label: "Overview", code: "OVR" },
+  { to: "/campaigns", label: "Campaigns", code: "CMP" },
+  { to: "/modules", label: "Modules", code: "MOD" },
+  { to: "/reports", label: "Reports", code: "REP" },
+  { to: "/graph", label: "Graph", code: "GRP" },
+  { to: "/templates", label: "Templates", code: "TPL" },
+  { to: "/strategy", label: "Strategy", code: "STR" },
+  { to: "/security", label: "Security", code: "SEC" },
+  { to: "/edr", label: "EDR/OPSEC", code: "EDR" },
+  { to: "/live", label: "Live", code: "LIV" }
 ];
 
 const navGroups = [
@@ -161,54 +141,44 @@ const navGroups = [
   { label: "Control", items: navItems.slice(7) }
 ];
 
-const pageMeta: Record<string, { icon: LucideIcon; eyebrow: string; description: string }> = {
+const pageMeta: Record<string, { eyebrow: string; description: string }> = {
   Overview: {
-    icon: LayoutDashboard,
     eyebrow: "Dashboard",
     description: "Health, telemetry, campaigns, and activity."
   },
   Campaigns: {
-    icon: ListChecks,
     eyebrow: "Operations",
     description: "Scopes, status, findings, and comparisons."
   },
   Modules: {
-    icon: Boxes,
     eyebrow: "Operations",
     description: "Catalog, OPSEC, and authorized runs."
   },
   Reports: {
-    icon: FileText,
     eyebrow: "Operations",
     description: "Evidence packages and artifacts."
   },
   Graph: {
-    icon: GitGraph,
     eyebrow: "Intelligence",
     description: "Entities, relationships, and attack paths."
   },
   Templates: {
-    icon: Workflow,
     eyebrow: "Intelligence",
     description: "Reusable campaign plans."
   },
   Strategy: {
-    icon: ShieldCheck,
     eyebrow: "Intelligence",
     description: "Authorized objective planning."
   },
   Security: {
-    icon: UserCog,
     eyebrow: "Control",
     description: "Account, API keys, audit, and users."
   },
   "EDR/OPSEC": {
-    icon: ShieldAlert,
     eyebrow: "Control",
     description: "Detection outcomes and OPSEC feedback."
   },
   "Live Events": {
-    icon: Radio,
     eyebrow: "Control",
     description: "Campaign events as they arrive."
   }
@@ -600,12 +570,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <div className="nav-group-label">{group.label}</div>
                 <div className="grid gap-1">
                   {group.items.map((item) => {
-                    const Icon = item.icon;
                     const count = item.to === "/campaigns" ? (campaigns.data ?? []).length : item.to === "/modules" ? (modules.data ?? []).length : null;
                     return (
                       <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link" title={sidebarCollapsed ? item.label : undefined}>
-                        <Icon size={16} />
-                        <span>{item.label}</span>
+                        <span className="nav-code font-mono">{item.code}</span>
+                        <span className="nav-label">{item.label}</span>
                         {count !== null && count > 0 && !sidebarCollapsed ? (
                           <span className="nav-count-badge font-mono">{count}</span>
                         ) : null}
@@ -718,7 +687,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   <aside className="telemetry-popover" aria-label="Enclave telemetry quick view">
                     <div className="telemetry-popover-header">
                       <div className="flex items-center gap-2">
-                        <Activity size={15} className="text-emerald-400" />
+                        <span className="status-dot online" />
                         <strong>Enclave Subsystem Health</strong>
                       </div>
                       <button className="icon-button icon-button-small" onClick={() => setTelemetryOpen(false)} aria-label="Close telemetry view" type="button">
@@ -825,7 +794,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                         }}
                         type="button"
                       >
-                        <LogOut size={14} />
                         <span>Logout</span>
                       </button>
                       <button
@@ -837,7 +805,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                         }}
                         type="button"
                       >
-                        <ShieldAlert size={14} />
                         <span>Logout all devices</span>
                       </button>
                     </div>
@@ -1139,7 +1106,7 @@ function ExecutionChainsPanel({
                         title={moduleIds.has(moduleId) ? `Open ${moduleId} in the run panel` : "Module is not available in the current catalog"}
                         type="button"
                       >
-                        <Play size={13} /> {moduleId}
+                        {moduleId}
                       </button>
                     ))}
                   </div>
@@ -1475,8 +1442,7 @@ export function ModulesPage() {
                             }}
                             title={`Switch module to ${altId}`}
                           >
-                            <span>Switch to <strong>{altId}</strong></span>
-                            <ArrowRight size={13} className="text-amber-400 shrink-0" />
+                            <span>Switch to <strong>{altId}</strong> →</span>
                           </button>
                         ))}
                       </div>
@@ -1512,9 +1478,7 @@ export function ModulesPage() {
                     <Loader2 className="spin" size={16} /> Running...
                   </>
                 ) : (
-                  <>
-                    <Play size={16} /> Run
-                  </>
+                  "Execute Module"
                 )}
               </button>
               {run.isPending && (
@@ -1682,9 +1646,7 @@ export function ReportsPage() {
                 <Loader2 className="spin" size={16} /> Generating...
               </>
             ) : (
-              <>
-                <FileText size={16} /> Generate
-              </>
+              "Generate Report"
             )}
           </button>
         </div>
@@ -1723,9 +1685,7 @@ export function ReportsPage() {
             >
               {clearReports.isPending ? (
                 <Loader2 className="spin" size={15} />
-              ) : (
-                <Trash2 size={15} />
-              )}
+              ) : null}
               Delete all
             </button>
           ) : null}
@@ -1742,7 +1702,7 @@ export function ReportsPage() {
                   <td>{formatReportDate(item.modified_at)}</td>
                   <td>
                     <button className="btn" disabled={download.isPending || deleteDisabled} onClick={() => download.mutate(item)}>
-                      <Download size={15} /> Download
+                      Download
                     </button>
                     <button
                       className="btn btn-danger"
@@ -1755,7 +1715,7 @@ export function ReportsPage() {
                         deleteReport.mutate(item);
                       }}
                     >
-                      <Trash2 size={15} /> Delete
+                      Delete
                     </button>
                   </td>
                 </tr>
@@ -1899,9 +1859,7 @@ export function TemplatesPage() {
                 <Loader2 className="spin" size={16} /> Generating...
               </>
             ) : (
-              <>
-                <Workflow size={16} /> Generate Plan
-              </>
+              "Generate Plan"
             )}
           </button>
           <TemplatePlanSummary plan={generated} />
@@ -1991,9 +1949,7 @@ export function StrategyPage() {
                 <Loader2 className="spin" size={16} /> Engaging...
               </>
             ) : (
-              <>
-                <ShieldCheck size={16} /> Engage
-              </>
+              "Engage Scope"
             )}
           </button>
         </section>
@@ -2167,7 +2123,7 @@ export function SecurityPage() {
             <input className="field" required type="password" placeholder="Current password" value={currentPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCurrentPassword(e.target.value); }} />
             <input className="field" required minLength={12} type="password" placeholder="New password" value={newPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setNewPassword(e.target.value); }} />
             <button className="btn" disabled={change.isPending} type="submit">
-              {change.isPending ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
+              {change.isPending && <Loader2 className="spin" size={16} />}
               Change Password
             </button>
           </form>
@@ -2189,7 +2145,7 @@ export function SecurityPage() {
               <option value="admin">admin</option>
             </select>
             <button className="btn" disabled={creatingApiKey} type="submit">
-              {creatingApiKey ? <Loader2 className="spin" size={16} /> : <KeyRound size={16} />}
+              {creatingApiKey && <Loader2 className="spin" size={16} />}
               Create
             </button>
           </form>
@@ -2375,9 +2331,7 @@ export function EdrPage() {
                 <Loader2 className="spin" size={16} /> Saving...
               </>
             ) : (
-              <>
-                <ShieldAlert size={16} /> Report Outcome
-              </>
+              "Report Outcome"
             )}
           </button>
         </form>
@@ -2439,7 +2393,7 @@ export function LivePage() {
             }
             setLiveConnected(true);
           }}>
-            <Radio size={16} /> {liveConnected ? "Connected" : "Connect"}
+            {liveConnected ? "Connected" : "Connect Stream"}
           </button>
           {liveConnected && (
             <button className="btn" onClick={() => setLiveConnected(false)}>
@@ -2501,11 +2455,9 @@ function Page({
 }) {
   const [fallbackTab, setFallbackTab] = useState(tabs?.[0] ?? "");
   const meta = pageMeta[title] ?? {
-    icon: LayoutDashboard,
     eyebrow: "ARES",
     description: "Security dashboard workspace."
   };
-  const Icon = meta.icon;
   const selectedTab = activeTab ?? fallbackTab;
   const setTab = onTabChange ?? setFallbackTab;
 
@@ -2532,9 +2484,6 @@ function Page({
     <div className="page">
       <section className="page-header">
         <div className="page-heading">
-          <span className="page-icon">
-            <Icon size={19} />
-          </span>
           <div>
             <p className="page-eyebrow">{meta.eyebrow}</p>
             <h1>{title}</h1>
@@ -2898,10 +2847,7 @@ function DataPanel({
   return (
     <section className="panel detail-panel mb-3">
       <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Database size={14} className="text-zinc-400" />
-          <strong className="text-xs font-semibold text-zinc-200">{title}</strong>
-        </div>
+        <strong className="text-xs font-semibold text-zinc-200">{title}</strong>
         <div className="flex items-center gap-2">
           {onClear && (
             <button

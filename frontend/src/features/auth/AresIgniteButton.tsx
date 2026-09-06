@@ -1,4 +1,4 @@
-﻿import { Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { ButtonHTMLAttributes, ReactNode, useEffect, useRef, useState } from "react";
 
 interface FireParticle {
@@ -72,9 +72,10 @@ function spawnEdgeParticles(
 }
 
 export function AresIgniteButton({
-  isLoading,
+  isLoading = false,
   children,
   disabled,
+  className = "",
   ...props
 }: AresIgniteButtonProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -87,7 +88,12 @@ export function AresIgniteButton({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    let ctx: CanvasRenderingContext2D | null = null;
+    try {
+      ctx = canvas.getContext("2d");
+    } catch {
+      return;
+    }
     if (!ctx) return;
 
     function tick() {
@@ -119,11 +125,9 @@ export function AresIgniteButton({
 
         p.x += p.vx;
         p.y += p.vy;
-        // Very gentle buoyancy — keep fire hugging button, not flying away
+        // Gentle buoyancy — fire hugs button
         p.vy -= 0.06;
-        // Slight turbulence
         p.vx += (Math.random() - 0.5) * 0.18;
-        // Damp horizontal so fire doesn't drift too far sideways
         p.vx *= 0.97;
         p.size *= 0.965;
         p.life -= 1 / p.maxLife;
@@ -136,7 +140,7 @@ export function AresIgniteButton({
         const alpha = Math.pow(p.life, 0.7);
         const r = Math.max(0.1, p.size);
 
-        // Outer glow — soft halo hugging edge
+        // Outer flame glow
         const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 2.8);
         glow.addColorStop(0, `hsla(${p.hue}, 100%, 65%, ${alpha * 0.45})`);
         glow.addColorStop(0.5, `hsla(${p.hue}, 100%, 45%, ${alpha * 0.2})`);
@@ -146,7 +150,7 @@ export function AresIgniteButton({
         ctx.fillStyle = glow;
         ctx.fill();
 
-        // Inner bright core — white-yellow at center, red at edge
+        // Inner bright flame core
         const core = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
         core.addColorStop(0, `hsla(${p.hue + 25}, 100%, 92%, ${alpha})`);
         core.addColorStop(0.35, `hsla(${p.hue + 10}, 100%, 65%, ${alpha * 0.85})`);
@@ -165,7 +169,7 @@ export function AresIgniteButton({
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // Burst fire on Enter key (even without hover)
+  // Burst fire on Enter key
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Enter" && !disabled && !isLoading) {
@@ -189,7 +193,7 @@ export function AresIgniteButton({
     setIsHovering(false);
   }
 
-  // Also burst on click for instant impact
+  // Burst fire on click
   function handleMouseDown() {
     if (disabled || isLoading) return;
     const wrap = wrapRef.current;
@@ -214,24 +218,25 @@ export function AresIgniteButton({
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleMouseDown}
         className={[
-          "relative z-10 w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold",
-          "transition-all duration-300",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
-          "disabled:cursor-not-allowed",
+          "relative z-10 w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-white select-none",
+          "transition-all duration-200 ease-out",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950",
+          "disabled:opacity-50 disabled:cursor-not-allowed",
           isLoading
-            ? "bg-zinc-950 text-red-400 border border-red-800/60 disabled:opacity-100 focus-visible:ring-red-800/60"
+            ? "bg-zinc-900 border border-zinc-800 text-zinc-400"
             : [
-                "bg-zinc-100 text-zinc-950 shadow-sm",
-                "active:scale-[0.98] focus-visible:ring-zinc-400 disabled:opacity-50",
+                "bg-[#A32D2D] border border-[#C43D3D] shadow-sm",
+                "active:bg-[#8E2525] active:scale-[0.98]",
                 isHovering
-                  ? "bg-white shadow-[0_0_22px_4px_rgba(220,38,38,0.45)]"
-                  : "hover:bg-white",
+                  ? "bg-[#B83535] border-[#D94545] shadow-[0_0_20px_3px_rgba(196,61,61,0.45)]"
+                  : "hover:bg-[#B83535]",
               ].join(" "),
-        ].join(" ")}
+          className,
+        ].filter(Boolean).join(" ")}
       >
         {isLoading ? (
           <>
-            <Loader2 size={15} className="animate-spin text-red-500 shrink-0" />
+            <Loader2 size={15} className="animate-spin text-red-400 shrink-0" />
             <span>Authenticating...</span>
           </>
         ) : (

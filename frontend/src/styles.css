@@ -65,7 +65,7 @@ button:disabled {
 .sidebar-collapsed .nav-group-label,
 .sidebar-collapsed .sidebar-footer,
 .sidebar-collapsed .nav-count-badge,
-.sidebar-collapsed .nav-link span {
+.sidebar-collapsed .nav-link .nav-label {
   display: none;
 }
 
@@ -190,6 +190,42 @@ button:disabled {
   color: #a1a1aa;
   font-size: 0.68rem;
   font-weight: 600;
+}
+
+.nav-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #71717a;
+  letter-spacing: 0.05em;
+  padding: 1px 4px;
+  min-width: 28px;
+  height: 18px;
+  border-radius: 3px;
+  background: #141416;
+  border: 1px solid #27272a;
+  flex-shrink: 0;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.nav-link:hover .nav-code {
+  color: #d4d4d8;
+  border-color: #3f3f46;
+}
+
+.nav-link.active .nav-code {
+  color: #f43f5e;
+  border-color: rgba(244, 63, 94, 0.4);
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.sidebar-collapsed .nav-link .nav-code {
+  min-width: 32px;
+  height: 22px;
+  font-size: 0.7rem;
 }
 
 .sidebar-footer {
@@ -2378,6 +2414,25 @@ textarea.field {
 @media (prefers-reduced-motion: reduce) {
   .ares-ignite-idle::after { display: none; }
   .ares-ignite-loading { animation: none; }
+}
+
+/* Chrome / Edge / Safari Autofill Dark Theme Enforcement */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #09090b inset !important;
+  box-shadow: 0 0 0 1000px #09090b inset !important;
+  -webkit-text-fill-color: #f4f4f5 !important;
+  caret-color: #f4f4f5 !important;
+  border-color: #27272a !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+input:-webkit-autofill:focus {
+  border-color: #dc2626 !important;
+  -webkit-box-shadow: 0 0 0 1000px #09090b inset, 0 0 0 1px #dc2626 !important;
+  box-shadow: 0 0 0 1000px #09090b inset, 0 0 0 1px #dc2626 !important;
 }
 
 

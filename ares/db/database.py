@@ -775,6 +775,7 @@ class AresDatabase:
             if ownership.diagnostic.startswith("ARES-M2B-ADOPTION-READY:"):
                 raise RuntimeError("SQLite database adoption is required")
             if ownership.diagnostic == "ARES-M2B-ALREADY-MANAGED:0011":
+                await self._reconcile_sqlite_schema()
                 await validate_sqlite_admission_authority_catalog_async(self._conn)
                 return
             if ownership.exit_code == AdoptionExit.MIGRATION_REQUIRED:
@@ -792,6 +793,7 @@ class AresDatabase:
                     raise RuntimeError("SQLite managed initialization failed") from None
                 if managed.diagnostic != "ARES-M2B-ALREADY-MANAGED:0011":
                     raise RuntimeError("SQLite managed initialization failed")
+                await self._reconcile_sqlite_schema()
                 await validate_sqlite_admission_authority_catalog_async(self._conn)
                 return
 
@@ -871,6 +873,86 @@ class AresDatabase:
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_module_runs_completed ON module_runs(completed_at)"
         )
+
+        # ── Reconcile Organizations & SSO Tables ──────────────────────────────
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS organizations (
+                id          TEXT PRIMARY KEY,
+                slug        TEXT NOT NULL UNIQUE,
+                name        TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)"
+        )
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sso_configurations (
+                id                  TEXT PRIMARY KEY,
+                org_id              TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                protocol            TEXT NOT NULL CONSTRAINT ck_sso_protocol CHECK (protocol IN ('saml', 'oidc')),
+                is_enabled          INTEGER NOT NULL DEFAULT 1,
+                issuer_or_entity_id TEXT NOT NULL DEFAULT '',
+                sso_url             TEXT NOT NULL DEFAULT '',
+                idp_certificate_enc TEXT DEFAULT '',
+                sp_entity_id        TEXT DEFAULT '',
+                acs_url             TEXT DEFAULT '',
+                client_id           TEXT DEFAULT '',
+                client_secret_enc   TEXT DEFAULT '',
+                jwks_uri            TEXT DEFAULT '',
+                default_role        TEXT NOT NULL DEFAULT 'reporter',
+                role_mapping_json   TEXT NOT NULL DEFAULT '{}',
+                created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+                CONSTRAINT uq_sso_org_protocol UNIQUE (org_id, protocol)
+            )
+            """
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sso_org ON sso_configurations(org_id)"
+        )
+        await self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sso_flow_states (
+                id          TEXT PRIMARY KEY,
+                org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                flow_type   TEXT NOT NULL CONSTRAINT ck_flow_type CHECK (flow_type IN ('saml', 'oidc')),
+                flow_id     TEXT NOT NULL UNIQUE,
+                nonce       TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                expires_at  TEXT NOT NULL,
+                is_consumed INTEGER NOT NULL DEFAULT 0,
+                consumed_at TEXT
+            )
+            """
+        )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sso_flow_lookup ON sso_flow_states(flow_id, is_consumed, expires_at)"
+        )
+
+        # ── Reconcile users columns for SSO ──────────────────────────────────
+        users_columns = await _columns("users")
+        missing_users_columns = [
+            ("org_id", "org_id TEXT REFERENCES organizations(id) ON DELETE SET NULL"),
+            ("auth_provider", "auth_provider TEXT NOT NULL DEFAULT 'local'"),
+            ("external_subject_id", "external_subject_id TEXT DEFAULT NULL"),
+        ]
+        for name, ddl in missing_users_columns:
+            if name not in users_columns:
+                await self._conn.execute(f"ALTER TABLE users ADD COLUMN {ddl}")
+                users_columns.add(name)
+
+        # Seed default organization if none exists
+        async with self._conn.execute("SELECT id FROM organizations WHERE slug='default'") as cur:
+            if await cur.fetchone() is None:
+                await self._conn.execute(
+                    "INSERT INTO organizations(id, slug, name) VALUES('default-org-id', 'default', 'Default Organization')"
+                )
+
         await self._conn.commit()
 
     async def _validate_websocket_ticket_schema(self) -> None:
@@ -2129,6 +2211,8 @@ class AresDatabase:
 
     async def verify_user(self, username: str, password: str) -> dict[str, Any] | None:
         user = await self.get_user(username)
+        if user and user.get("auth_provider") in ("sso", "saml", "oidc"):
+            return None
         # Always run bcrypt comparison to prevent username enumeration via timing attack.
         # If user not found, compare against a dummy hash so response time is constant.
         _DUMMY_HASH = "$2b$12$notarealthashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
@@ -2141,6 +2225,166 @@ class AresDatabase:
         )
         await self._conn.commit()
         return user
+
+    # ── SSO & Organizations ───────────────────────────────────────────────────
+
+    async def get_organization(self, slug_or_id: str) -> dict[str, Any] | None:
+        """Fetch organization by slug or UUID id."""
+        async with self._conn.execute(
+            "SELECT * FROM organizations WHERE slug=? OR id=?", (slug_or_id, slug_or_id)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def get_sso_config(self, org_id: str, protocol: str | None = None) -> dict[str, Any] | None:
+        """Fetch active SSO config for an organization."""
+        if protocol:
+            query = "SELECT * FROM sso_configurations WHERE org_id=? AND protocol=? AND is_enabled=1"
+            params = (org_id, protocol)
+        else:
+            query = "SELECT * FROM sso_configurations WHERE org_id=? AND is_enabled=1 LIMIT 1"
+            params = (org_id,)
+        async with self._conn.execute(query, params) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def save_sso_config(
+        self,
+        org_id: str,
+        protocol: str,
+        issuer_or_entity_id: str = "",
+        sso_url: str = "",
+        idp_certificate_enc: str = "",
+        sp_entity_id: str = "",
+        acs_url: str = "",
+        client_id: str = "",
+        client_secret_enc: str = "",
+        jwks_uri: str = "",
+        default_role: str = "reporter",
+        role_mapping_json: str = "{}",
+        is_enabled: int = 1,
+    ) -> str:
+        """Create or update an SSO configuration for an organization."""
+        sso_id = str(uuid.uuid4())
+        await self._conn.execute(
+            """INSERT INTO sso_configurations(
+                   id, org_id, protocol, is_enabled, issuer_or_entity_id, sso_url,
+                   idp_certificate_enc, sp_entity_id, acs_url, client_id,
+                   client_secret_enc, jwks_uri, default_role, role_mapping_json, updated_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(org_id, protocol) DO UPDATE SET
+                   is_enabled=excluded.is_enabled,
+                   issuer_or_entity_id=excluded.issuer_or_entity_id,
+                   sso_url=excluded.sso_url,
+                   idp_certificate_enc=excluded.idp_certificate_enc,
+                   sp_entity_id=excluded.sp_entity_id,
+                   acs_url=excluded.acs_url,
+                   client_id=excluded.client_id,
+                   client_secret_enc=excluded.client_secret_enc,
+                   jwks_uri=excluded.jwks_uri,
+                   default_role=excluded.default_role,
+                   role_mapping_json=excluded.role_mapping_json,
+                   updated_at=datetime('now')""",
+            (
+                sso_id, org_id, protocol, is_enabled, issuer_or_entity_id, sso_url,
+                idp_certificate_enc, sp_entity_id, acs_url, client_id,
+                client_secret_enc, jwks_uri, default_role, role_mapping_json,
+            ),
+        )
+        await self._conn.commit()
+        return sso_id
+
+    async def create_sso_flow_state(
+        self,
+        org_id: str,
+        flow_type: str,
+        flow_id: str,
+        nonce: str = "",
+        ttl_minutes: int = 10,
+    ) -> str:
+        """Record an ephemeral one-time SSO flow state (AuthnRequest ID or OIDC state)."""
+        state_id = str(uuid.uuid4())
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat()
+        await self._conn.execute(
+            """INSERT INTO sso_flow_states(id, org_id, flow_type, flow_id, nonce, expires_at)
+               VALUES(?, ?, ?, ?, ?, ?)""",
+            (state_id, org_id, flow_type, flow_id, nonce, expires_at),
+        )
+        await self._conn.commit()
+        return state_id
+
+    async def consume_sso_flow_state(
+        self,
+        flow_id: str,
+        flow_type: str,
+    ) -> dict[str, Any] | None:
+        """Atomically validate and consume an SSO flow state, preventing replay attacks."""
+        now_str = datetime.now(timezone.utc).isoformat()
+        async with self._conn.execute(
+            """SELECT * FROM sso_flow_states
+               WHERE flow_id=? AND flow_type=? AND is_consumed=0 AND expires_at > ?""",
+            (flow_id, flow_type, now_str),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return None
+        record = dict(row)
+        await self._conn.execute(
+            "UPDATE sso_flow_states SET is_consumed=1, consumed_at=? WHERE id=?",
+            (now_str, record["id"]),
+        )
+        await self._conn.commit()
+        return record
+
+    async def provision_or_get_sso_user(
+        self,
+        org_id: str,
+        username: str,
+        role: str = "reporter",
+        external_id: str = "",
+        auth_provider: str = "sso",
+    ) -> dict[str, Any]:
+        """JIT provision or look up an SSO user adhering to the canonical schema."""
+        async with self._conn.execute(
+            """SELECT * FROM users
+               WHERE (external_subject_id=? AND external_subject_id IS NOT NULL AND external_subject_id != '')
+                  OR username=?""",
+            (external_id, username),
+        ) as cur:
+            row = await cur.fetchone()
+
+        if row:
+            user = dict(row)
+            updates = []
+            params = []
+            if external_id and not user.get("external_subject_id"):
+                updates.append("external_subject_id=?")
+                params.append(external_id)
+            if role and role != user.get("role"):
+                updates.append("role=?")
+                params.append(role)
+            if updates:
+                params.append(user["id"])
+                await self._conn.execute(
+                    f"UPDATE users SET {', '.join(updates)} WHERE id=?",
+                    tuple(params),
+                )
+                await self._conn.commit()
+                async with self._conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
+                    user = dict(await cur.fetchone())
+            return user
+
+        user_id = str(uuid.uuid4())
+        dummy_hash = hash_password(secrets.token_urlsafe(32))
+        await self._conn.execute(
+            """INSERT INTO users(id, username, hashed_password, role, is_active, created_by, org_id, auth_provider, external_subject_id)
+               VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+            (user_id, username, dummy_hash, role, f"sso:{auth_provider}", org_id, auth_provider, external_id),
+        )
+        await self._conn.commit()
+        logger.info("sso_user_provisioned", username=username, role=role, org_id=org_id, provider=auth_provider)
+        async with self._conn.execute("SELECT * FROM users WHERE id=?", (user_id,)) as cur:
+            return dict(await cur.fetchone())
 
     async def user_exists(self, username: str) -> bool:
         async with self._conn.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
@@ -2930,7 +3174,7 @@ class AresDatabase:
     ) -> SessionIssueResult:
         async def _login(tx: aiosqlite.Connection) -> SessionIssueResult:
             async with tx.execute(
-                "SELECT id,username,hashed_password,role,is_active,auth_epoch "
+                "SELECT id,username,hashed_password,role,is_active,auth_epoch,auth_provider "
                 "FROM users WHERE username=?",
                 (username,),
             ) as cursor:
@@ -2938,6 +3182,7 @@ class AresDatabase:
             if (
                 row is None
                 or int(row["is_active"]) != 1
+                or dict(row).get("auth_provider") in ("sso", "saml", "oidc")
                 or not verify_password(password, row["hashed_password"])
             ):
                 return SessionIssueResult(SessionIssueStatus.INVALID)
@@ -2981,6 +3226,63 @@ class AresDatabase:
             )
 
         return await self._run_refresh_family_transaction(_login)
+
+    async def create_sso_session(
+        self,
+        user_id: str,
+        token_factory: AccessTokenFactory,
+    ) -> SessionIssueResult:
+        """Create authenticated session for an SSO-authenticated user."""
+        async def _sso_login(tx: aiosqlite.Connection) -> SessionIssueResult:
+            async with tx.execute(
+                "SELECT id,username,role,is_active,auth_epoch "
+                "FROM users WHERE id=?",
+                (user_id,),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row is None or int(row["is_active"]) != 1:
+                return SessionIssueResult(SessionIssueStatus.INVALID)
+            (
+                family_id,
+                raw_token,
+                absolute_expiry,
+            ) = await self._insert_initial_family_token_with_expiry(
+                tx,
+                user_id=row["id"],
+                auth_epoch=int(row["auth_epoch"]),
+            )
+            access_token = token_factory(
+                {
+                    "sub": row["username"],
+                    "sid": family_id,
+                    "ver": int(row["auth_epoch"]),
+                }
+            )
+            await tx.execute(
+                "UPDATE users SET last_login=? WHERE id=?",
+                (format_sqlite_utc(datetime.now(timezone.utc)), row["id"]),
+            )
+            await tx.execute(
+                "INSERT INTO audit_log(actor,action,detail) VALUES("
+                "'auth-sso','sso_session_created',?)",
+                (f"user_id={row['id']} username={row['username']}",),
+            )
+            return SessionIssueResult(
+                SessionIssueStatus.ISSUED,
+                IssuedTokenSession(
+                    access_token=access_token,
+                    refresh_token=raw_token,
+                    user_id=row["id"],
+                    subject=row["username"],
+                    family_id=family_id,
+                    auth_epoch=int(row["auth_epoch"]),
+                    absolute_expires_at=absolute_expiry,
+                    refresh_generation=0,
+                    role=row["role"],
+                ),
+            )
+
+        return await self._run_refresh_family_transaction(_sso_login)
 
     async def _legacy_create_refresh_token(self, user_id: str, expires_days: int = 30) -> str:
         import hashlib

@@ -136,6 +136,20 @@ export async function login(username: string, password: string): Promise<TokenRe
   return token;
 }
 
+export interface SsoInitiationResponse {
+  configured: boolean;
+  protocol: "saml" | "oidc";
+  redirect_url: string;
+  flow_id: string;
+}
+
+export async function initiateSso(orgSlug: string = "default"): Promise<SsoInitiationResponse> {
+  const query = new URLSearchParams({ org: orgSlug });
+  return apiRequest<SsoInitiationResponse>(`/auth/sso/init?${query.toString()}`, {
+    method: "GET"
+  });
+}
+
 export async function logout(): Promise<void> {
   clearPendingLiveSubmissions();
   await withRefreshCookieLock(async () => {

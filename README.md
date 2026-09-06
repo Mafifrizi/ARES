@@ -109,6 +109,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
   - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
+  - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level Fernet credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
   - **HMAC Double-Submit CSRF Protection**: Constant-time verification on all state-mutating requests (`X-ARES-CSRF`).
   - **Cryptographic Brute-Force Shield**: Enforces exponential backoff and IP-based rate limiting on authentication attempts.
 
@@ -438,6 +439,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
 - [**Adversary Module Catalog & Schemas**](docs/modules.md)
 - [**API Endpoint Reference & Payloads**](docs/api-reference.md)
+- [**Enterprise SSO Integration Guide (SAML 2.0 / OIDC)**](docs/sso-setup.md)
 - [**Enterprise Security & Threat Model**](docs/security-model.md)
 - [**Validation Lab & Test Harness**](docs/validation-lab.md)
 - [**Module Authoring SDK Guide**](docs/module-development.md)

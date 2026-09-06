@@ -28,6 +28,7 @@ from uuid import UUID
 from fastapi import (
     Depends,
     FastAPI,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -37,7 +38,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -87,6 +88,14 @@ from ares.core.token_sessions import (
     RefreshRotationStatus,
     SessionIssueStatus,
     SessionRevocationStatus,
+)
+from ares.core.sso import (
+    build_oidc_auth_request,
+    build_saml_auth_request,
+    decrypt_sso_secret,
+    encrypt_sso_secret,
+    process_oidc_callback,
+    process_saml_response,
 )
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
@@ -1020,9 +1029,17 @@ def _browser_context(request: Request) -> BrowserRequestContext:
 
 def _browser_policy(request: Request) -> BrowserSessionPolicy:
     policy = getattr(request.state, "browser_policy", None)
-    if not isinstance(policy, BrowserSessionPolicy):
+    if isinstance(policy, BrowserSessionPolicy):
+        return policy
+    app_policy = getattr(request.app.state, "browser_policy", None)
+    if isinstance(app_policy, BrowserSessionPolicy):
+        return app_policy
+    try:
+        from ares.core.browser_sessions import build_browser_session_policy
+        from ares.core.config import get_settings
+        return build_browser_session_policy(get_settings())
+    except Exception:
         raise HTTPException(503, "Browser authentication unavailable")
-    return policy
 
 
 def _token_response_content(session: Any, settings: AresSettings) -> dict[str, Any]:
@@ -1087,6 +1104,10 @@ async def login(
             algorithm=settings.ares_jwt_algorithm,
             expires_minutes=settings.ares_jwt_expire_minutes,
         )
+
+    user = await db.get_user(form.username)
+    if user and user.get("auth_provider") in ("sso", "saml", "oidc"):
+        raise HTTPException(401, "Invalid credentials")
 
     try:
         result = await db.create_login_session(
@@ -1376,6 +1397,354 @@ async def revoke_api_key(
     await db.revoke_api_key(key_id, user["id"])
     await db.audit(actor.username, "api_key_revoked", f"key_id={key_id}")
     return {"status": "revoked"}
+
+
+# ── Single Sign-On (SAML 2.0 / OIDC) ──────────────────────────────────────────
+
+class SsoConfigRequest(BaseModel):
+    protocol: str = Field(..., pattern=r"^(saml|oidc)$")
+    issuer_or_entity_id: str = Field("", max_length=512)
+    sso_url: str = Field("", max_length=1024)
+    idp_certificate: str = Field("", max_length=10000)
+    sp_entity_id: str = Field("", max_length=512)
+    acs_url: str = Field("", max_length=1024)
+    client_id: str = Field("", max_length=256)
+    client_secret: str = Field("", max_length=1024)
+    jwks_uri: str = Field("", max_length=1024)
+    default_role: str = Field("reporter", pattern=r"^(team_lead|operator|recon|reporter)$")
+    role_mapping: dict[str, str] = Field(default_factory=dict)
+    is_enabled: bool = True
+
+
+@app.get("/auth/sso/init", tags=["auth"])
+async def sso_initiate(
+    request: Request,
+    org: str = Query("default"),
+    settings: AresSettings = Depends(get_settings),
+    db: AresDatabase = Depends(get_db),
+) -> dict[str, Any]:
+    """Initiate SSO authentication flow for an organization."""
+    organization = await db.get_organization(org)
+    if not organization or not organization.get("is_active"):
+        raise HTTPException(
+            400,
+            detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.",
+        )
+
+    sso_config = await db.get_sso_config(organization["id"])
+    if not sso_config or not sso_config.get("is_enabled"):
+        raise HTTPException(
+            400,
+            detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.",
+        )
+
+    base_url = str(request.base_url).rstrip("/")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_proto and forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+
+    protocol = sso_config["protocol"]
+    if protocol == "saml":
+        try:
+            redirect_url, request_id = build_saml_auth_request(sso_config, base_url, settings)
+        except Exception as exc:
+            logger.warning("sso_saml_init_failed", error=str(exc))
+            raise HTTPException(400, detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.") from None
+
+        await db.create_sso_flow_state(organization["id"], "saml", request_id, ttl_minutes=10)
+        return {
+            "configured": True,
+            "protocol": "saml",
+            "redirect_url": redirect_url,
+            "flow_id": request_id,
+        }
+
+    elif protocol == "oidc":
+        redirect_uri = f"{base_url}/auth/sso/oidc/callback"
+        try:
+            redirect_url, state, nonce = build_oidc_auth_request(sso_config, redirect_uri)
+        except Exception as exc:
+            logger.warning("sso_oidc_init_failed", error=str(exc))
+            raise HTTPException(400, detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.") from None
+
+        await db.create_sso_flow_state(organization["id"], "oidc", state, nonce=nonce, ttl_minutes=10)
+        return {
+            "configured": True,
+            "protocol": "oidc",
+            "redirect_url": redirect_url,
+            "flow_id": state,
+        }
+
+    raise HTTPException(400, detail="Unsupported SSO protocol")
+
+
+@app.post("/auth/sso/saml/acs", tags=["auth"])
+async def sso_saml_acs(
+    request: Request,
+    SAMLResponse: str = Form(...),
+    RelayState: str = Form(None),
+    settings: AresSettings = Depends(get_settings),
+    db: AresDatabase = Depends(get_db),
+) -> Response:
+    """Assertion Consumer Service endpoint for SAML 2.0 (HTTP-POST binding)."""
+    import base64
+    from urllib.parse import quote
+    from lxml import etree
+
+    try:
+        xml_bytes = base64.b64decode(SAMLResponse)
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        root = etree.fromstring(xml_bytes, parser=parser)
+        in_response_to = root.get("InResponseTo") or ""
+        if not in_response_to:
+            scd = root.xpath("//*[local-name()='SubjectConfirmationData']")
+            if scd and scd[0].get("InResponseTo"):
+                in_response_to = scd[0].get("InResponseTo")
+    except Exception as exc:
+        logger.warning("saml_xml_parse_error", error=str(exc))
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Invalid SAML XML format')}",
+            status_code=303,
+        )
+
+    if not in_response_to:
+        logger.warning("saml_missing_in_response_to")
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('SAML assertion missing InResponseTo (replay protection)')}",
+            status_code=303,
+        )
+
+    flow_record = await db.consume_sso_flow_state(in_response_to, "saml")
+    if not flow_record:
+        logger.warning("saml_replay_or_invalid_flow", request_id=in_response_to)
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Invalid or expired SAML request ID (replay rejected)')}",
+            status_code=303,
+        )
+
+    sso_config = await db.get_sso_config(flow_record["org_id"], protocol="saml")
+    if not sso_config:
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('SSO configuration not found for organization')}",
+            status_code=303,
+        )
+
+    base_url = str(request.base_url).rstrip("/")
+    try:
+        profile = process_saml_response(
+            sso_config,
+            {"SAMLResponse": SAMLResponse, "RelayState": RelayState},
+            in_response_to,
+            base_url,
+            settings,
+        )
+    except Exception as exc:
+        logger.warning("saml_verification_failed", error=str(exc))
+        return RedirectResponse(
+            f"/dashboard/login?error={quote(str(exc))}",
+            status_code=303,
+        )
+
+    user = await db.provision_or_get_sso_user(
+        org_id=flow_record["org_id"],
+        username=profile["username"],
+        role=profile["role"],
+        external_id=profile["external_id"],
+        auth_provider="saml",
+    )
+
+    def _token_factory(claims: Mapping[str, Any]) -> str:
+        return create_access_token(
+            data=dict(claims),
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=settings.ares_jwt_expire_minutes,
+        )
+
+    result = await db.create_sso_session(user["id"], _token_factory)
+    if result.status is not SessionIssueStatus.ISSUED or result.session is None:
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Authentication service unavailable')}",
+            status_code=303,
+        )
+
+    session = result.session
+    target_path = RelayState if (RelayState and RelayState.startswith("/")) else "/dashboard/"
+    response = RedirectResponse(target_path, status_code=303)
+    publish_session_cookies(
+        response,
+        _browser_policy(request),
+        refresh_token=session.refresh_token,
+        absolute_expiry=session.absolute_expires_at,
+    )
+    return response
+
+
+@app.get("/auth/sso/oidc/callback", tags=["auth"])
+async def sso_oidc_callback(
+    request: Request,
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None),
+    error_description: str = Query(None),
+    settings: AresSettings = Depends(get_settings),
+    db: AresDatabase = Depends(get_db),
+) -> Response:
+    """Authorization Code callback for OpenID Connect."""
+    from urllib.parse import quote
+
+    if error:
+        msg = error_description or error
+        logger.warning("oidc_callback_error", error=msg)
+        return RedirectResponse(f"/dashboard/login?error={quote(msg)}", status_code=303)
+
+    if not code or not state:
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Missing code or state in OIDC response')}",
+            status_code=303,
+        )
+
+    flow_record = await db.consume_sso_flow_state(state, "oidc")
+    if not flow_record:
+        logger.warning("oidc_replay_or_invalid_state", state=state)
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Invalid or expired OIDC state (replay rejected)')}",
+            status_code=303,
+        )
+
+    sso_config = await db.get_sso_config(flow_record["org_id"], protocol="oidc")
+    if not sso_config:
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('SSO configuration not found for organization')}",
+            status_code=303,
+        )
+
+    base_url = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/auth/sso/oidc/callback"
+
+    try:
+        profile = await process_oidc_callback(
+            sso_config,
+            code,
+            redirect_uri,
+            expected_nonce=flow_record.get("nonce") or "",
+            settings=settings,
+        )
+    except Exception as exc:
+        logger.warning("oidc_verification_failed", error=str(exc))
+        return RedirectResponse(
+            f"/dashboard/login?error={quote(str(exc))}",
+            status_code=303,
+        )
+
+    user = await db.provision_or_get_sso_user(
+        org_id=flow_record["org_id"],
+        username=profile["username"],
+        role=profile["role"],
+        external_id=profile["external_id"],
+        auth_provider="oidc",
+    )
+
+    def _token_factory(claims: Mapping[str, Any]) -> str:
+        return create_access_token(
+            data=dict(claims),
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+            expires_minutes=settings.ares_jwt_expire_minutes,
+        )
+
+    result = await db.create_sso_session(user["id"], _token_factory)
+    if result.status is not SessionIssueStatus.ISSUED or result.session is None:
+        return RedirectResponse(
+            f"/dashboard/login?error={quote('Authentication service unavailable')}",
+            status_code=303,
+        )
+
+    session = result.session
+    response = RedirectResponse("/dashboard/", status_code=303)
+    publish_session_cookies(
+        response,
+        _browser_policy(request),
+        refresh_token=session.refresh_token,
+        absolute_expiry=session.absolute_expires_at,
+    )
+    return response
+
+
+@app.get("/auth/sso/config/{org_slug}", tags=["auth"])
+async def get_sso_configuration(
+    org_slug: str,
+    actor: AuthenticatedUser = Depends(require_team_lead()),
+    db: AresDatabase = Depends(get_db),
+) -> dict[str, Any]:
+    """Retrieve SSO configuration for an organization (admin only)."""
+    org = await db.get_organization(org_slug)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+
+    cfg = await db.get_sso_config(org["id"])
+    if not cfg:
+        return {"configured": False, "organization": org}
+
+    return {
+        "configured": True,
+        "organization": org,
+        "protocol": cfg["protocol"],
+        "is_enabled": bool(cfg["is_enabled"]),
+        "issuer_or_entity_id": cfg["issuer_or_entity_id"],
+        "sso_url": cfg["sso_url"],
+        "sp_entity_id": cfg["sp_entity_id"],
+        "acs_url": cfg["acs_url"],
+        "client_id": cfg["client_id"],
+        "jwks_uri": cfg["jwks_uri"],
+        "default_role": cfg["default_role"],
+        "role_mapping_json": cfg["role_mapping_json"],
+        "has_certificate": bool(cfg["idp_certificate_enc"]),
+        "has_client_secret": bool(cfg["client_secret_enc"]),
+    }
+
+
+@app.post("/auth/sso/config/{org_slug}", tags=["auth"])
+async def save_sso_configuration(
+    org_slug: str,
+    body: SsoConfigRequest,
+    actor: AuthenticatedUser = Depends(require_team_lead()),
+    settings: AresSettings = Depends(get_settings),
+    db: AresDatabase = Depends(get_db),
+) -> dict[str, Any]:
+    """Save or update SSO configuration for an organization (admin only)."""
+    org = await db.get_organization(org_slug)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+
+    idp_cert_enc = encrypt_sso_secret(body.idp_certificate, settings) if body.idp_certificate else ""
+    client_sec_enc = encrypt_sso_secret(body.client_secret, settings) if body.client_secret else ""
+
+    existing = await db.get_sso_config(org["id"], protocol=body.protocol)
+    if existing:
+        if not idp_cert_enc and existing.get("idp_certificate_enc"):
+            idp_cert_enc = existing["idp_certificate_enc"]
+        if not client_sec_enc and existing.get("client_secret_enc"):
+            client_sec_enc = existing["client_secret_enc"]
+
+    sso_id = await db.save_sso_config(
+        org_id=org["id"],
+        protocol=body.protocol,
+        issuer_or_entity_id=body.issuer_or_entity_id,
+        sso_url=body.sso_url,
+        idp_certificate_enc=idp_cert_enc,
+        sp_entity_id=body.sp_entity_id,
+        acs_url=body.acs_url,
+        client_id=body.client_id,
+        client_secret_enc=client_sec_enc,
+        jwks_uri=body.jwks_uri,
+        default_role=body.default_role,
+        role_mapping_json=json.dumps(body.role_mapping),
+        is_enabled=1 if body.is_enabled else 0,
+    )
+    await db.audit(actor.username, "sso_config_saved", f"org={org_slug} protocol={body.protocol} id={sso_id}")
+    return {"status": "saved", "sso_id": sso_id}
 
 
 # ── Campaigns ─────────────────────────────────────────────────────────────────

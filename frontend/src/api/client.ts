@@ -8,7 +8,7 @@ export {
   refreshAccessToken,
   withRefreshCookieLock
 } from "./http";
-export { api, buildModuleRunPayload, campaignEventsPath, login, logout, logoutAll } from "./endpoints";
+export { api, buildModuleRunPayload, campaignEventsPath, initiateSso, login, logout, logoutAll } from "./endpoints";
 export {
   beginIdentityTransition,
   browserCoordinationAvailable,

@@ -452,6 +452,52 @@ CREATE INDEX IF NOT EXISTS idx_ws_tickets_api_key
     ON websocket_tickets(api_key_id);
 CREATE INDEX IF NOT EXISTS idx_ws_tickets_bearer_family
     ON websocket_tickets(bearer_family_id);
+
+-- ── Organizations (★ Multi-tenant SSO) ───────────────────────────────────────
+CREATE TABLE IF NOT EXISTS organizations (
+    id          TEXT PRIMARY KEY,
+    slug        TEXT NOT NULL UNIQUE,
+    name        TEXT NOT NULL,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug);
+
+-- ── SSO Configurations ────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sso_configurations (
+    id                  TEXT PRIMARY KEY,
+    org_id              TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    protocol            TEXT NOT NULL CONSTRAINT ck_sso_protocol CHECK (protocol IN ('saml', 'oidc')),
+    is_enabled          INTEGER NOT NULL DEFAULT 1,
+    issuer_or_entity_id TEXT NOT NULL DEFAULT '',
+    sso_url             TEXT NOT NULL DEFAULT '',
+    idp_certificate_enc TEXT DEFAULT '',
+    sp_entity_id        TEXT DEFAULT '',
+    acs_url             TEXT DEFAULT '',
+    client_id           TEXT DEFAULT '',
+    client_secret_enc   TEXT DEFAULT '',
+    jwks_uri            TEXT DEFAULT '',
+    default_role        TEXT NOT NULL DEFAULT 'reporter',
+    role_mapping_json   TEXT NOT NULL DEFAULT '{}',
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    CONSTRAINT uq_sso_org_protocol UNIQUE (org_id, protocol)
+);
+CREATE INDEX IF NOT EXISTS idx_sso_org ON sso_configurations(org_id);
+
+-- ── Ephemeral One-Time SSO Flow States (Anti-Replay / CSRF) ─────────────────
+CREATE TABLE IF NOT EXISTS sso_flow_states (
+    id          TEXT PRIMARY KEY,
+    org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    flow_type   TEXT NOT NULL CONSTRAINT ck_flow_type CHECK (flow_type IN ('saml', 'oidc')),
+    flow_id     TEXT NOT NULL UNIQUE,
+    nonce       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at  TEXT NOT NULL,
+    is_consumed INTEGER NOT NULL DEFAULT 0,
+    consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sso_flow_lookup ON sso_flow_states(flow_id, is_consumed, expires_at);
 """ + sqlite_lifecycle_runtime_script() + sqlite_admission_authority_runtime_script()
 
 # ── Migration: v4 → v5 ────────────────────────────────────────────────────────

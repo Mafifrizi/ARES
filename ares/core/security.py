@@ -198,6 +198,9 @@ class DataEncryptor:
     def __init__(self, key: str) -> None:
         import os as _os
 
+        if not key or len(key) < 32:
+            raise ValueError("ARES_ENCRYPTION_KEY must be provided and at least 32 characters long")
+
         self._raw_key = key.encode()
         self._salt = _os.urandom(16)  # fresh random salt per instance
         self._salt_hex = self._salt.hex()  # 32 hex chars, used as ciphertext prefix

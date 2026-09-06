@@ -1,6 +1,7 @@
 import { AlertCircle, Eye, EyeOff } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { initiateSso } from "../../api/client";
 import { AresIgniteButton } from "./AresIgniteButton";
 import { BackgroundAnimationCanvas } from "./BackgroundAnimationCanvas";
 import { useAuth } from "./authContext";
@@ -13,9 +14,19 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSsoLoading, setIsSsoLoading] = useState(false);
   const [error, setError] = useState("");
+  const [ssoError, setSsoError] = useState("");
   const { login, user } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlErr = searchParams.get("error");
+    if (urlErr) {
+      setError(urlErr);
+    }
+  }, []);
 
   if (user) {
     return <Navigate to="/" replace />;
@@ -23,8 +34,9 @@ export function LoginPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || isSsoLoading) return;
     setError("");
+    setSsoError("");
     setIsSubmitting(true);
     try {
       await login(username, password);
@@ -32,6 +44,25 @@ export function LoginPage() {
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Authentication failed");
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleSso() {
+    if (isSubmitting || isSsoLoading) return;
+    setError("");
+    setSsoError("");
+    setIsSsoLoading(true);
+    try {
+      const res = await initiateSso("default");
+      if (res?.redirect_url) {
+        window.location.href = res.redirect_url;
+      } else {
+        setSsoError("SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.");
+      }
+    } catch (exc) {
+      setSsoError("SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.");
+    } finally {
+      setIsSsoLoading(false);
     }
   }
 
@@ -74,7 +105,7 @@ export function LoginPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isSsoLoading}
                 required
               />
             </div>
@@ -92,14 +123,14 @@ export function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   placeholder="••••••••••••"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isSsoLoading}
                   required
                 />
                 <button
                   type="button"
                   className="absolute inset-y-0 right-0 flex items-center pr-3 text-zinc-500 hover:text-zinc-300 transition-colors disabled:pointer-events-none"
                   onClick={() => setShowPassword((v) => !v)}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isSsoLoading}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -114,9 +145,28 @@ export function LoginPage() {
               </div>
             )}
 
-            <AresIgniteButton isLoading={isSubmitting} disabled={isSubmitting}>
+            <AresIgniteButton isLoading={isSubmitting} disabled={isSubmitting || isSsoLoading}>
               Sign in
             </AresIgniteButton>
+
+            <div className="pt-2">
+              <button
+                id="ares-sso-btn"
+                type="button"
+                onClick={() => void handleSso()}
+                disabled={isSubmitting || isSsoLoading}
+                className="w-full flex items-center justify-center gap-2 rounded-md border border-zinc-800/80 bg-transparent hover:bg-zinc-900/60 hover:border-zinc-700 py-2 px-3 text-xs text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
+              >
+                <span>{isSsoLoading ? "Connecting..." : "Or continue with SSO"}</span>
+              </button>
+
+              {ssoError && (
+                <div className="mt-2 rounded-md border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-400 flex items-start gap-2 animate-login-enter">
+                  <AlertCircle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+                  <span>{ssoError}</span>
+                </div>
+              )}
+            </div>
           </form>
         </div>
 
@@ -150,9 +200,9 @@ export function LoginPage() {
             <h2 className="text-3xl xl:text-4xl font-semibold text-white tracking-tight leading-tight">
               Offensive security,
               <br />
-              <span className="text-zinc-500 font-normal">engineered for precision.</span>
+              <span className="text-zinc-300 font-normal">engineered for precision.</span>
             </h2>
-            <p className="text-sm text-zinc-400 leading-relaxed mt-3 max-w-sm">
+            <p className="text-sm text-zinc-300/80 leading-relaxed mt-3 max-w-sm">
               Automate multi-stage attack chains with deterministic execution and full audit fidelity.
             </p>
           </div>
@@ -165,24 +215,24 @@ export function LoginPage() {
 
             <div className="divide-y divide-zinc-800/60 text-xs font-mono">
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-500">Architecture</span>
+                <span className="text-zinc-400">Architecture</span>
                 <span className="text-zinc-200">Distributed Core</span>
               </div>
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-500">Policy Engine</span>
+                <span className="text-zinc-400">Policy Engine</span>
                 <span className="text-zinc-200">Deterministic Fail-Closed</span>
               </div>
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-500">Isolation Layer</span>
+                <span className="text-zinc-400">Isolation Layer</span>
                 <span className="text-zinc-200">Hermetic Enclave</span>
               </div>
               <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-500">Audit Protocol</span>
+                <span className="text-zinc-400">Audit Protocol</span>
                 <span className="text-zinc-200">Cryptographic Verification</span>
               </div>
             </div>
 
-            <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-mono text-zinc-500">
+            <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-mono text-zinc-400">
               <span>Host: 127.0.0.1</span>
               <span>API Gateway: 8080</span>
             </div>
