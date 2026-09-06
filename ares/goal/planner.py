@@ -305,14 +305,59 @@ class AttackPlanner:
         total = sum(
             _SCORE_WEIGHTS[k] * v
             for k, v in breakdown.items()
+            if k in _SCORE_WEIGHTS
         )
 
-        # Filter out very low scores (likely no prerequisites met)
+        # ── Target Defense Feasibility Evaluation ─────────────────────────
+        defense_multiplier = 1.0
+        defense_note = ""
+        session = ctx.session or self.session
+        if session is not None and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state is not None and hasattr(host_state, "has_defense"):
+                # 1. Credential Guard (VBS)
+                if host_state.has_defense("credential_guard") or host_state.has_defense("vbs"):
+                    if module_id == "windows.lsass_dump":
+                        defense_multiplier *= 0.05
+                        defense_note = "Target enforces Credential Guard: LSASS memory dump penalized"
+                    elif module_id == "windows.dpapi":
+                        defense_multiplier *= 1.35
+                        defense_note = "Target enforces Credential Guard: DPAPI boosted as primary bypass"
+                # 2. LSA Protection (PPL)
+                if host_state.has_defense("lsa_protection") or host_state.has_defense("ppl"):
+                    if module_id == "windows.lsass_dump":
+                        defense_multiplier *= 0.15
+                        defense_note = "Target enforces LSA Protection: LSASS dump penalized"
+                    elif module_id in ("windows.dpapi", "windows.token_impersonation"):
+                        defense_multiplier *= 1.25
+                # 3. Microsoft Defender for Identity / DRSUAPI monitoring
+                if host_state.has_defense("mde_identity") or host_state.has_defense("drsuapi_monitoring"):
+                    if module_id == "ad.dcsync":
+                        defense_multiplier *= 0.1
+                        defense_note = "Target DC has MDI / DRSUAPI monitoring: DCSync penalized"
+                    elif module_id in ("ad.adcs", "ad.shadow_credentials"):
+                        defense_multiplier *= 1.3
+                        defense_note = "Target DC has MDI: ADCS / Shadow Credentials boosted as evasion route"
+                # 4. Service Creation Monitoring / EDR on lateral movement
+                if host_state.has_defense("service_creation_monitoring") or host_state.has_defense("edr"):
+                    if module_id == "lateral.psexec":
+                        defense_multiplier *= 0.1
+                        defense_note = "Target EDR monitors SCM Event ID 7045: PsExec penalized"
+                    elif module_id in ("lateral.dcom", "lateral.winrm"):
+                        defense_multiplier *= 1.25
+                        defense_note = "Target EDR active: stealthier lateral transport boosted"
+
+        total = max(0.0, min(1.0, total * defense_multiplier))
+        breakdown["defense_feasibility"] = round(defense_multiplier, 3)
+
+        # Filter out very low scores (likely no prerequisites met or blocked by defenses)
         if total < 0.05:
             return None
 
         # Build rationale
         rationale = self._build_rationale(module_id, breakdown, ctx.goal, requires)
+        if defense_note:
+            rationale = f"[{defense_note}] {rationale}"
 
         return PlanSuggestion(
             module_id        = module_id,

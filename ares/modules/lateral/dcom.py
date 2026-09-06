@@ -60,6 +60,50 @@ class DCOMLateral(BaseLateralModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth — creates remote process
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        DCOM (MMC20.Application / ShellWindows) is significantly stealthier than PsExec
+        because it requires no service creation.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        base = await super().assess_feasibility(ctx)
+        blockers = list(base.blockers)
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {"object_preference": "MMC20.Application"}
+        score = base.score
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            score -= 0.2
+            opsec_tuning["note"] = "DCOM executes remote process via MMC20; stealthier than PsExec but triggers remote process logging."
+            recommendations.append("lateral.winrm")
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("dcom_restricted") or host_state.has_defense("firewall_rpc"):
+                    blockers.append("DCOM / RPC port 135 restricted or filtered")
+                    score -= 0.4
+                    recommendations.append("lateral.winrm")
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         await super().validate(ctx)

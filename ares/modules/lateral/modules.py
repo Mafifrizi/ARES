@@ -89,6 +89,51 @@ class BaseLateralModule(BaseModule):
             f"{self.__class__.__name__} must implement move()"
         )
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Default lateral movement feasibility evaluation:
+        Checks target reachability, credentials, and noise profile compatibility.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        score = 1.0
+        risk = getattr(self.OPSEC_LEVEL, "value", str(self.OPSEC_LEVEL or "medium"))
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        if not target:
+            blockers.append(f"{self.MODULE_ID} requires 'target'")
+            score -= 0.5
+
+        has_password = bool(getattr(ctx, "params", {}).get("password") or getattr(ctx, "params", {}).get("secret"))
+        has_hash = bool(getattr(ctx, "params", {}).get("nt_hash") or getattr(ctx, "params", {}).get("hash"))
+        has_vault = bool(getattr(ctx, "vault", None) and getattr(getattr(ctx, "vault", None), "_store", None))
+        has_cred = bool(getattr(ctx, "best_credential", lambda: None)())
+
+        if not (has_password or has_hash or has_vault or has_cred):
+            blockers.append("No credentials (password, NTLM hash, or vault entry) available for lateral authentication")
+            score -= 0.4
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH and risk == "high_noise":
+            blockers.append(f"Module {self.MODULE_ID} is high_noise and blocked under STEALTH profile")
+            score = 0.1
+            risk = "critical_alarm"
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning={},
+            details={"target": target, "module_id": self.MODULE_ID},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """
         Enforce target and credentials before any network connection.
@@ -241,6 +286,56 @@ class PsExecLateral(BaseLateralModule):
     REQUIRES           = ["smb_access", "local_admin_creds"]
     OUTPUTS            = ["lateral_session", "command_output"]
     MITRE_TECHNIQUES   = ["T1569.002", "T1021.002"]
+
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        PsExec installs a service (Event ID 7045) which is actively monitored by every
+        modern enterprise EDR and blocked under STEALTH.
+        Recommends stealthier alternatives: lateral.dcom, lateral.winrm, or lateral.wmiexec.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        base = await super().assess_feasibility(ctx)
+        blockers = list(base.blockers)
+        recommendations = ["lateral.dcom", "lateral.winrm", "lateral.wmiexec"]
+        opsec_tuning: dict[str, Any] = {}
+        score = base.score
+        risk = "high_noise"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            blockers.append("PsExec SCM service installation generates Event ID 7045 — strictly blocked under STEALTH profile")
+            score = 0.05
+            risk = "critical_alarm"
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                edr_detected = host_state.defense_profile.get("edr") or host_state.has_defense("service_creation_monitoring") or host_state.has_defense("edr")
+                if edr_detected:
+                    blockers.append(f"Target EDR / monitoring ({edr_detected}) detects Service Control Manager execution (Event ID 7045)")
+                    score = min(score, 0.15)
+                    risk = "critical_alarm"
+                    opsec_tuning["edr_warning"] = (
+                        f"Target host has active EDR ({edr_detected}). PsExec binary/service will trigger high-severity alert. "
+                        "Switch to lateral.dcom or lateral.winrm."
+                    )
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
 
     async def move(self, target, username, domain, secret, command="whoami /all", **kwargs) -> LateralResult:
         import time
@@ -425,6 +520,55 @@ class WmiExecLateral(BaseLateralModule):
     OUTPUTS            = ["lateral_session", "command_output"]
     MITRE_TECHNIQUES   = ["T1047", "T1021.002"]
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates WMI / Win32_Process.Create feasibility and RPC port 135 filtering.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        base = await super().assess_feasibility(ctx)
+        blockers = list(base.blockers)
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = base.score
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            score -= 0.3
+            risk = "medium"
+            opsec_tuning["note"] = "WMI process creation generates Event ID 4688 with wmiprvse.exe parent. Consider lateral.winrm for stealth."
+            recommendations.append("lateral.winrm")
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("wmi_filtering") or host_state.has_defense("firewall_rpc"):
+                    blockers.append("WMI / RPC port 135 blocked or filtered by firewall")
+                    score -= 0.4
+                    recommendations.extend(["lateral.winrm", "lateral.ssh_pivot"])
+
+        unique_recs = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
+
     async def move(self, target, username, domain, secret, command="whoami /all", **kwargs) -> LateralResult:
         import time
         t0     = time.monotonic()
@@ -576,6 +720,41 @@ class WinRMLateral(BaseLateralModule):
     REQUIRES           = ["winrm_access", "domain_creds"]
     OUTPUTS            = ["lateral_session", "command_output", "powershell_session"]
     MITRE_TECHNIQUES   = ["T1021.006", "T1059.001"]
+
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        WinRM is the standard enterprise management protocol; blends into normal admin traffic.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.security import sanitize_hostname
+
+        base = await super().assess_feasibility(ctx)
+        blockers = list(base.blockers)
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {"preferred_protocol": "WinRM / WS-Man (port 5985/5986)"}
+        score = base.score
+        risk = "low"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state and host_state.has_defense("winrm_disabled"):
+                blockers.append("WinRM service is disabled or blocked on target")
+                score -= 0.5
+                recommendations.extend(["lateral.dcom", "lateral.wmiexec"])
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
 
     async def move(self, target, username, domain, secret, command="whoami", **kwargs) -> LateralResult:
         import time
@@ -823,6 +1002,39 @@ class RDPLateral(BaseLateralModule):
     OUTPUTS            = ["lateral_session"]
     MITRE_TECHNIQUES   = ["T1021.001"]
     MIN_NOISE_PROFILE  = "normal"
+
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        RDP creates interactive logons (Event ID 4624 type 10); high noise and blocked under STEALTH.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        base = await super().assess_feasibility(ctx)
+        blockers = list(base.blockers)
+        recommendations = ["lateral.winrm", "lateral.dcom"]
+        score = base.score
+        risk = "high_noise"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            blockers.append("Blocked in STEALTH profile: RDP connection triggers immediate Event ID 4624/4625")
+            score = 0.05
+            risk = "critical_alarm"
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning={"suggested_alternatives": ["lateral.winrm", "lateral.dcom"]},
+            details={"target": target},
+        )
 
     async def validate(self, ctx: "Any") -> None:
         """RDP lateral blocked in STEALTH — triggers EventID 4624/4625 immediately."""

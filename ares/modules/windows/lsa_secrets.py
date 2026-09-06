@@ -48,6 +48,75 @@ class LSASecretsModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates registry auditing, local admin access, noise constraints,
+        and recommends ad.dcsync if target is a DC, or windows.dpapi if in stealth.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "high_noise"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        if not target:
+            blockers.append("No target host specified")
+            score -= 0.5
+
+        username = getattr(ctx, "params", {}).get("username", "")
+        if not username:
+            cred = getattr(ctx, "best_credential", lambda: None)()
+            if cred:
+                username = cred.username
+        if not username:
+            blockers.append("No administrator credentials provided")
+            score -= 0.4
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            blockers.append("Blocked in STEALTH profile: remote registry SAM/LSA hive dumping generates Sysmon Event 12/13 alerts")
+            score = 0.1
+            risk = "critical_alarm"
+            recommendations.extend(["windows.dpapi", "ad.dcsync"])
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("registry_auditing") or host_state.has_defense("sysmon_id12"):
+                    risk = "critical_alarm"
+                    score -= 0.3
+                    recommendations.append("windows.dpapi")
+                is_dc = (
+                    getattr(host_state, "is_dc", False)
+                    or getattr(host_state, "domain_role", "") == "domain_controller"
+                    or (hasattr(host_state, "roles") and "dc" in getattr(host_state, "roles", []))
+                )
+                if is_dc:
+                    recommendations.insert(0, "ad.dcsync")
+                    opsec_tuning["dc_recommendation"] = "Target is a Domain Controller: ad.dcsync or NTDS extraction is more comprehensive than local LSA secrets."
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target, "username": username},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """LSA secrets dump blocked in STEALTH — registry access triggers Sysmon."""
         await super().validate(ctx)

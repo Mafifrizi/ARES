@@ -42,6 +42,45 @@ class TokenImpersonationModule(BaseModule):
     OUTPUTS            = ["privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1134.001", "T1134.002"]
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates SeImpersonatePrivilege conditions and Potato-family attack feasibility.
+        """
+        from ares.modules.base import FeasibilityReport
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        if not target:
+            blockers.append("No target host specified")
+            score -= 0.5
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("edr"):
+                    risk = "high_noise"
+                    score -= 0.2
+                    opsec_tuning["suggested_variant"] = "GodPotato / PrintSpoofer"
+                    opsec_tuning["note"] = "EDR detected on host; classic JuicyPotato DCOM reflection is signatured. Use PrintSpoofer or GodPotato."
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         await super().validate(ctx)

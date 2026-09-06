@@ -111,10 +111,14 @@ class HostState:
         elif self.ip_address and not self.ip:
             self.ip = self.ip_address
 
-    def update_defense_profile(self, controls: dict[str, Any]) -> None:
+    def update_defense_profile(self, controls: dict[str, Any] | None = None, **kwargs: Any) -> None:
         """Update or merge detected defense controls and security posture."""
-        self.defense_profile.update(controls)
-        self.security_controls.update(controls)
+        if controls:
+            self.defense_profile.update(controls)
+            self.security_controls.update(controls)
+        if kwargs:
+            self.defense_profile.update(kwargs)
+            self.security_controls.update(kwargs)
         self.last_updated = time.time()
 
     def has_defense(self, control_name: str) -> bool:

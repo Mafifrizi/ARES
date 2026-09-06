@@ -1096,6 +1096,50 @@ class AresEngine:
             ],
         }
 
+    async def assess_module_feasibility(
+        self,
+        module_id: str,
+        campaign: Campaign,
+        params: dict[str, Any],
+    ) -> Any:
+        """
+        Evaluate pre-flight defense feasibility for a module against target defenses,
+        session state, and noise profile without executing active operations.
+        """
+        from ares.modules.base import FeasibilityReport
+
+        if module_id not in self.registry:
+            return FeasibilityReport(
+                feasible=False,
+                score=0.0,
+                risk_level="high_noise",
+                blockers=[f"Module '{module_id}' not found in registry"],
+            )
+
+        cls = self.registry.get(module_id)
+        noise = NoiseController(campaign)
+        instance = cls(settings=self.settings, campaign=campaign, noise=noise)
+        runtime_state = await self.ensure_campaign_runtime(campaign)
+
+        ctx = ExecutionContext.build(
+            campaign=campaign,
+            target=params.get("dc") or params.get("host") or params.get("target", ""),
+            module_id=module_id,
+            domain=params.get("domain", ""),
+            params=params,
+            operator=campaign.operator,
+            credentials=runtime_state.safe_credentials(),
+            session=runtime_state.session,
+            vault=runtime_state.vault,
+            artifact_store=runtime_state.artifact_store,
+            runtime_state=runtime_state,
+            settings=self.settings,
+            noise=noise,
+            telemetry=runtime_state.telemetry,
+        )
+
+        return await instance.assess_feasibility(ctx)
+
     async def _finalize_committed_module_result(
         self,
         campaign: Campaign,

@@ -60,6 +60,96 @@ class LsassDumpModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1003.001"]
     MODULE_TIMEOUT_SECONDS: int | None = 300  # seconds
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates Credential Guard (VBS/LsaIso), LSA Protection (RunAsPPL),
+        Sysmon Event ID 10 / EDR process access hooks, and noise profile constraints.
+        Recommends stealthier alternatives (windows.dpapi, windows.token_impersonation, ad.kerberoast).
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "high_noise"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        if not target:
+            blockers.append("No target host IP or hostname specified")
+            score -= 0.5
+
+        username = getattr(ctx, "params", {}).get("username", "")
+        if not username:
+            cred = getattr(ctx, "best_credential", lambda: None)()
+            if cred:
+                username = cred.username
+        if not username:
+            blockers.append("No local administrator credentials provided or found in vault")
+            score -= 0.4
+            recommendations.extend(["windows.token_impersonation", "ad.kerberoast"])
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            blockers.append("Blocked in STEALTH profile: LSASS process access triggers Sysmon Event ID 10 and EDR process handles")
+            score = 0.05
+            risk = "critical_alarm"
+            recommendations.extend(["windows.dpapi", "ad.kerberoast"])
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                # 1. Check Credential Guard (VBS/LsaIso.exe)
+                if host_state.has_defense("credential_guard") or host_state.has_defense("vbs"):
+                    blockers.append(
+                        "Credential Guard (LsaIso.exe) active: LSASS memory isolated via VBS — "
+                        "NTLM hashes and Kerberos keys cannot be extracted from userland memory"
+                    )
+                    score = min(score, 0.05)
+                    risk = "critical_alarm"
+                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast"])
+
+                # 2. Check LSA Protection (RunAsPPL)
+                if host_state.has_defense("lsa_protection") or host_state.has_defense("ppl"):
+                    blockers.append(
+                        "LSA Protection (RunAsPPL) enabled: OpenProcess with PROCESS_VM_READ is blocked by the Windows kernel"
+                    )
+                    score = min(score, 0.15)
+                    risk = "critical_alarm"
+                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast"])
+
+                # 3. Check EDR / Sysmon ID 10
+                edr_detected = host_state.defense_profile.get("edr") or host_state.has_defense("sysmon_id10") or host_state.has_defense("edr")
+                if edr_detected:
+                    risk = "critical_alarm"
+                    score -= 0.3
+                    opsec_tuning["recommended_technique"] = "comsvcs"
+                    opsec_tuning["note"] = (
+                        f"Active endpoint defense ({edr_detected}) detected; standard procdump or direct inject will trigger alert. "
+                        "Use comsvcs MiniDump or pivot to DPAPI."
+                    )
+                    if "windows.dpapi" not in recommendations:
+                        recommendations.append("windows.dpapi")
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target, "username": username},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         await super().validate(ctx)
         from ares.core.context import ExecutionContext
