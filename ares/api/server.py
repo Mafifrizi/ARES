@@ -1428,14 +1428,14 @@ async def sso_initiate(
     if not organization or not organization.get("is_active"):
         raise HTTPException(
             400,
-            detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.",
+            detail="SSO is not configured for this organization. Contact your administrator.",
         )
 
     sso_config = await db.get_sso_config(organization["id"])
     if not sso_config or not sso_config.get("is_enabled"):
         raise HTTPException(
             400,
-            detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.",
+            detail="SSO is not configured for this organization. Contact your administrator.",
         )
 
     base_url = str(request.base_url).rstrip("/")
@@ -1450,7 +1450,7 @@ async def sso_initiate(
             redirect_url, request_id = build_saml_auth_request(sso_config, base_url, settings)
         except Exception as exc:
             logger.warning("sso_saml_init_failed", error=str(exc))
-            raise HTTPException(400, detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.") from None
+            raise HTTPException(400, detail="SSO is not configured for this organization. Contact your administrator.") from None
 
         await db.create_sso_flow_state(organization["id"], "saml", request_id, ttl_minutes=10)
         return {
@@ -1466,7 +1466,7 @@ async def sso_initiate(
             redirect_url, state, nonce = build_oidc_auth_request(sso_config, redirect_uri)
         except Exception as exc:
             logger.warning("sso_oidc_init_failed", error=str(exc))
-            raise HTTPException(400, detail="SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.") from None
+            raise HTTPException(400, detail="SSO is not configured for this organization. Contact your administrator.") from None
 
         await db.create_sso_flow_state(organization["id"], "oidc", state, nonce=nonce, ttl_minutes=10)
         return {

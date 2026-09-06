@@ -83,7 +83,7 @@ def _build_round_narrative(completed_rounds: list) -> str:
     if not completed_rounds:
         return "Round 1 — no prior history."
 
-    lines = ["=== HISTORY ROUNDS SEBELUMNYA ==="]
+    lines = ["=== PREVIOUS ROUNDS HISTORY ==="]
     for r in completed_rounds[-3:]:   # max 3 rounds back
         lines.append(
             f"Round {r.round_num} "

@@ -16,11 +16,10 @@ This document provides a comprehensive guide for configuring and utilizing **Ent
 > [!NOTE]
 > **Federated Account Lockdown**: If your account has been provisioned or migrated to SSO (`auth_provider = 'saml'` or `'oidc'`), your account is **strictly prohibited** from authenticating with a local password. You must authenticate using the **"Or continue with SSO"** workflow.
 
-### Understanding: *"SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin."*
+### Understanding: *"SSO is not configured for this organization. Contact your administrator."*
 
 If you click **"Or continue with SSO"** and an inline warning appears:
-> ⚠️ **SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.**  
-> *(English translation: "SSO is not configured for this organization. Contact admin.")*
+> ⚠️ **SSO is not configured for this organization. Contact your administrator.**
 
 **What this means:**
 1. SSO federation (SAML 2.0 or OIDC) has not yet been registered for the target organization, or the configuration is currently disabled (`is_enabled = 0`).

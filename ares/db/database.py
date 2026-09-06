@@ -1939,7 +1939,7 @@ class AresDatabase:
         return str(row["id"])
 
     async def get_hosts(self, campaign_id: str) -> list[dict]:
-        """FIX: method getter yang sebelumnya tidak ada."""
+        """Retrieve all hosts recorded for a campaign."""
         async with self._conn.execute(
             "SELECT * FROM hosts WHERE campaign_id=? ORDER BY first_seen", (campaign_id,)
         ) as cur:
@@ -2018,7 +2018,7 @@ class AresDatabase:
             return [dict(r) for r in await cur.fetchall()]
 
     async def get_credentials(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
-        """FIX: method getter yang sebelumnya tidak ada."""
+        """Retrieve all credentials captured for a campaign."""
         async with self._conn.execute(
             "SELECT * FROM credentials WHERE campaign_id=? ORDER BY captured_at", (campaign_id,)
         ) as cur:
@@ -2069,7 +2069,7 @@ class AresDatabase:
         return ExecutionLifecycleStore(self._conn, "sqlite")
 
     async def get_loot(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
-        """FIX: method getter yang sebelumnya tidak ada."""
+        """Retrieve all loot items captured for a campaign."""
         async with self._conn.execute(
             "SELECT * FROM loot WHERE campaign_id=? ORDER BY captured_at", (campaign_id,)
         ) as cur:

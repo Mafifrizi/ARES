@@ -19,6 +19,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+# ── env bootstrap (before any ares import) ────────────────────────────────────
+os.environ.setdefault("ARES_SECRET_KEY", "test-sso-secret-key-min32-chars!!")
+os.environ.setdefault("ARES_ENCRYPTION_KEY", "test-enc-key-min32-chars-xxxxxxx")
+os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestSsoPass1!")
+os.environ.setdefault("ARES_DEBUG", "true")
+os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://127.0.0.1:5173")
+
 from ares.core.config import AresSettings, get_settings
 from ares.core.security import DataEncryptor, hash_password
 from ares.core.sso import (
@@ -188,7 +195,7 @@ async def test_sso_init_unconfigured_error(tmp_path):
             resp = await client.get("/auth/sso/init?org=default")
             assert resp.status_code == 400
             data = resp.json()
-            assert "SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin." in data.get("detail", "")
+            assert "SSO is not configured for this organization. Contact your administrator." in data.get("detail", "")
     finally:
         app.dependency_overrides.pop(get_db, None)
         await db.close()
@@ -240,7 +247,7 @@ async def test_sso_init_configured_success(tmp_path, test_settings):
 @pytest.mark.asyncio
 async def test_sso_user_blocked_at_auth_token_endpoint(tmp_path):
     """Verify /auth/token explicitly rejects login attempts for SSO users, even with bcrypt match."""
-    from ares.api.server import app, get_db
+    from ares.api.server import app, get_db, get_settings
 
     db_file = tmp_path / "test_auth_token_block.db"
     db = AresDatabase(str(db_file))
@@ -257,6 +264,13 @@ async def test_sso_user_blocked_at_auth_token_endpoint(tmp_path):
     )
 
     app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_settings] = lambda: AresSettings(
+        ares_secret_key="test-sso-secret-key-min32-chars!!",
+        ares_encryption_key="test-enc-key-min32-chars-xxxxxxx",
+        ares_default_admin_password="TestSsoPass1!",
+        ares_debug=True,
+        ares_browser_origin="http://127.0.0.1:5173",
+    )
 
     try:
         transport = ASGITransport(app=app)
@@ -280,6 +294,7 @@ async def test_sso_user_blocked_at_auth_token_endpoint(tmp_path):
             assert resp.json().get("detail") == "Invalid credentials"
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_settings, None)
         await db.close()
 
 

@@ -57,10 +57,10 @@ export function LoginPage() {
       if (res?.redirect_url) {
         window.location.href = res.redirect_url;
       } else {
-        setSsoError("SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.");
+        setSsoError("SSO is not configured for this organization. Contact your administrator.");
       }
     } catch (exc) {
-      setSsoError("SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.");
+      setSsoError("SSO is not configured for this organization. Contact your administrator.");
     } finally {
       setIsSsoLoading(false);
     }
