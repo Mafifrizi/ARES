@@ -113,7 +113,7 @@ export function LoginPage() {
               </div>
             )}
 
-            <AresIgniteButton type="submit" isLoading={isSubmitting} disabled={isSubmitting}>
+            <AresIgniteButton isLoading={isSubmitting} disabled={isSubmitting}>
               Sign in
             </AresIgniteButton>
           </form>
