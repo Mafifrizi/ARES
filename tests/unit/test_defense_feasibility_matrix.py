@@ -24,6 +24,11 @@ from ares.modules.windows.lsa_secrets import LSASecretsModule
 from ares.modules.windows.token_impersonation import TokenImpersonationModule
 from ares.modules.lateral.modules import PsExecLateral, WmiExecLateral, WinRMLateral, RDPLateral
 from ares.modules.lateral.dcom import DCOMLateral
+from ares.modules.credential.golden_ticket import GoldenTicketModule
+from ares.modules.credential.pass_spray import PassSprayModule
+from ares.modules.credential.pass_the_hash import PassTheHashModule
+from ares.modules.persistence.scheduled_task import ScheduledTaskPersistence
+from ares.modules.persistence.wmi_subscription import WMISubscriptionModule
 
 
 @pytest.fixture
@@ -418,3 +423,247 @@ class TestEngineFeasibilityAPI:
         )
         assert report.feasible is False
         assert any("not found" in b for b in report.blockers)
+
+
+class TestGoldenTicketFeasibility:
+    @pytest.mark.asyncio
+    async def test_missing_credentials_blockers(self, dummy_settings, test_campaign, test_noise):
+        mod = GoldenTicketModule(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.1",
+            module_id="credential.golden_ticket",
+            params={},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("domain_sid" in b.lower() for b in report.blockers)
+        assert any("krbtgt" in b.lower() for b in report.blockers)
+
+    @pytest.mark.asyncio
+    async def test_baseline_feasible(self, dummy_settings, test_campaign, test_noise):
+        mod = GoldenTicketModule(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.1",
+            module_id="credential.golden_ticket",
+            params={
+                "domain": "corp.local",
+                "domain_sid": "S-1-5-21-123456789-123456789-123456789",
+                "krbtgt_key": "aad3b435b51404eeaad3b435b51404ee",
+            },
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is True
+        assert report.score >= 0.8
+
+    @pytest.mark.asyncio
+    async def test_mdi_pac_validation_risk(self, dummy_settings, test_campaign, test_noise):
+        mod = GoldenTicketModule(dummy_settings, test_campaign, test_noise)
+        session = OperatorSession(campaign_id="test-camp")
+        host = session.add_host("10.10.10.1", is_dc=True)
+        host.update_defense_profile(controls={"mdi": True, "pac_validation": True})
+
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.1",
+            module_id="credential.golden_ticket",
+            params={"domain": "corp.local", "domain_sid": "S-1-5-21-123", "krbtgt_key": "abcdef"},
+            session=session,
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.risk_level == "critical_alarm"
+        assert report.score <= 0.1
+        assert "ad.dcsync" in report.recommended_alternatives
+
+
+class TestPassSprayFeasibility:
+    @pytest.mark.asyncio
+    async def test_missing_user_list(self, dummy_settings, test_campaign, test_noise):
+        mod = PassSprayModule(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.1",
+            module_id="credential.pass_spray",
+            params={},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("user_list" in b.lower() for b in report.blockers)
+
+    @pytest.mark.asyncio
+    async def test_stealth_noise_blocked(self, dummy_settings, stealth_campaign, stealth_noise):
+        mod = PassSprayModule(dummy_settings, stealth_campaign, stealth_noise)
+        ctx = ExecutionContext.build(
+            campaign=stealth_campaign,
+            target="10.10.10.1",
+            module_id="credential.pass_spray",
+            params={"user_list": ["user1", "user2"], "password": "Password1!"},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("4625" in b for b in report.blockers)
+        assert "ad.asreproast" in report.recommended_alternatives
+        assert "ad.kerberoast" in report.recommended_alternatives
+
+    @pytest.mark.asyncio
+    async def test_strict_lockout_blocked(self, dummy_settings, test_campaign, test_noise):
+        mod = PassSprayModule(dummy_settings, test_campaign, test_noise)
+        session = OperatorSession(campaign_id="test-camp")
+        host = session.add_host("10.10.10.1", is_dc=True)
+        host.update_defense_profile(controls={"lockout_threshold": 3})
+
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.1",
+            module_id="credential.pass_spray",
+            params={"user_list": ["user1", "user2"], "password": "Password1!"},
+            session=session,
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("lockout" in b.lower() for b in report.blockers)
+
+
+class TestPassTheHashFeasibility:
+    @pytest.mark.asyncio
+    async def test_missing_hash(self, dummy_settings, test_campaign, test_noise):
+        mod = PassTheHashModule(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.50",
+            module_id="credential.pass_the_hash",
+            params={"username": "Administrator"},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("ntlm hash is required" in b.lower() for b in report.blockers)
+
+    @pytest.mark.asyncio
+    async def test_ntlm_disabled_blocked(self, dummy_settings, test_campaign, test_noise):
+        mod = PassTheHashModule(dummy_settings, test_campaign, test_noise)
+        session = OperatorSession(campaign_id="test-camp")
+        host = session.add_host("10.10.10.50")
+        host.update_defense_profile(controls={"ntlm_disabled": True})
+
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.50",
+            module_id="credential.pass_the_hash",
+            params={"username": "Administrator", "nthash": "31d6cfe0d16ae931b73c59d7e0c089c0"},
+            session=session,
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("kerberos-only" in b.lower() or "ntlm disabled" in b.lower() for b in report.blockers)
+        assert "credential.golden_ticket" in report.recommended_alternatives
+
+
+class TestScheduledTaskFeasibility:
+    @pytest.mark.asyncio
+    async def test_missing_target(self, dummy_settings, test_campaign, test_noise):
+        mod = ScheduledTaskPersistence(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="",
+            module_id="persistence.scheduled_task",
+            params={},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("No target host specified" in b for b in report.blockers)
+
+    @pytest.mark.asyncio
+    async def test_stealth_noise_blocked(self, dummy_settings, stealth_campaign, stealth_noise):
+        mod = ScheduledTaskPersistence(dummy_settings, stealth_campaign, stealth_noise)
+        ctx = ExecutionContext.build(
+            campaign=stealth_campaign,
+            target="10.10.10.50",
+            module_id="persistence.scheduled_task",
+            params={"username": "admin"},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is False
+        assert any("4698" in b for b in report.blockers)
+        assert "persistence.wmi_subscription" in report.recommended_alternatives
+
+
+class TestWMISubscriptionFeasibility:
+    @pytest.mark.asyncio
+    async def test_baseline_feasible(self, dummy_settings, test_campaign, test_noise):
+        mod = WMISubscriptionModule(dummy_settings, test_campaign, test_noise)
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.50",
+            module_id="persistence.wmi_subscription",
+            params={"username": "admin"},
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert report.feasible is True
+        assert report.score >= 0.8
+
+    @pytest.mark.asyncio
+    async def test_sysmon_telemetry_detected(self, dummy_settings, test_campaign, test_noise):
+        mod = WMISubscriptionModule(dummy_settings, test_campaign, test_noise)
+        session = OperatorSession(campaign_id="test-camp")
+        host = session.add_host("10.10.10.50")
+        host.update_defense_profile(controls={"sysmon_id19": True})
+
+        ctx = ExecutionContext.build(
+            campaign=test_campaign,
+            target="10.10.10.50",
+            module_id="persistence.wmi_subscription",
+            params={"username": "admin"},
+            session=session,
+        )
+        report = await mod.assess_feasibility(ctx)
+        assert "Sysmon 19/20/21" in report.opsec_tuning.get("note", "")
+
+
+class TestModuleFeasibilityEndpoint:
+    def test_feasibility_endpoint_success(self, test_campaign):
+        from unittest.mock import AsyncMock, MagicMock
+        from fastapi.testclient import TestClient
+        from ares.api.server import app, get_engine, get_db, get_current_user
+        from ares.core.engine import AresEngine
+        from ares.api.rbac import AuthenticatedUser
+        from ares.modules.base import FeasibilityReport
+
+        mock_user = AuthenticatedUser(username="operator1", role="operator")
+        mock_db = MagicMock()
+        mock_db.get_campaign = AsyncMock(return_value=test_campaign)
+        mock_engine = MagicMock(spec=AresEngine)
+        mock_report = FeasibilityReport(
+            feasible=True,
+            score=0.85,
+            risk_level="low",
+            blockers=[],
+            recommended_alternatives=[],
+            opsec_tuning={"test": "tuning"},
+        )
+        mock_engine.assess_module_feasibility = AsyncMock(return_value=mock_report)
+        mock_engine.bind_database = MagicMock()
+
+        app.dependency_overrides[get_current_user] = lambda: mock_user
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.dependency_overrides[get_engine] = lambda: mock_engine
+
+        try:
+            client = TestClient(app, base_url="http://localhost:8000")
+            resp = client.post(
+                "/modules/credential.pass_the_hash/feasibility",
+                json={
+                    "campaign_id": test_campaign.id,
+                    "target": "10.10.10.50",
+                    "params": {"nthash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0"},
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["module_id"] == "credential.pass_the_hash"
+            assert data["campaign_id"] == test_campaign.id
+            assert data["report"]["feasible"] is True
+            assert data["report"]["score"] == 0.85
+        finally:
+            app.dependency_overrides.clear()
+

@@ -109,6 +109,69 @@ class ScheduledTaskPersistence(BaseModule):
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates task creation risks, Event ID 4698 logging, and noise profile.
+        Recommends persistence.wmi_subscription under STEALTH for cleaner footprint.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        username = getattr(ctx, "params", {}).get("username", "")
+
+        if not target:
+            blockers.append("No target host specified")
+            score -= 0.5
+        if not username:
+            cred = getattr(ctx, "best_credential", lambda: None)()
+            if cred:
+                username = cred.username
+        if not username:
+            blockers.append("No local administrator credentials provided")
+            score -= 0.4
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            score = 0.3
+            risk = "high_noise"
+            blockers.append("Scheduled task registration generates Windows Security Event ID 4698 — blocked in STEALTH")
+            recommendations.append("persistence.wmi_subscription")
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("edr") or host_state.has_defense("task_scheduler_auditing"):
+                    risk = "high_noise"
+                    score -= 0.2
+                    opsec_tuning["masquerade"] = "Task name should mimic standard Microsoft Update tasks (e.g. OneDrive Standalone Update Task)"
+                    recommendations.append("persistence.wmi_subscription")
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target, "username": username},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         await super().validate(ctx)

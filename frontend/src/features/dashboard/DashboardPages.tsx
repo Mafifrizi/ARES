@@ -24,6 +24,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Target,
+  ArrowRight,
   Trash2,
   TrendingUp,
   UserCog,
@@ -51,7 +52,7 @@ import {
   captureSession,
   isSessionCurrent
 } from "../../api/client";
-import type { ApiKeyMeta, Campaign, ExecutionChain, Finding, ModuleMeta, MonthlyFindingStats, ParamField, ReportItem } from "../../api/types";
+import type { ApiKeyMeta, Campaign, ExecutionChain, FeasibilityReportData, FeasibilityResponse, Finding, ModuleMeta, MonthlyFindingStats, ParamField, ReportItem } from "../../api/types";
 import { useAuth } from "../auth/authContext";
 import { DashboardUiProvider } from "./dashboardUi";
 import {
@@ -1227,9 +1228,23 @@ export function ModulesPage() {
     );
   });
   const sensitive = isSensitiveModule(selected);
+  const feasibility = useQuery({
+    queryKey: ["moduleFeasibility", selectedId, campaignId, params],
+    queryFn: () =>
+      api.moduleFeasibility(selectedId, {
+        campaign_id: campaignId,
+        params,
+        target: typeof params.target === "string" ? params.target : undefined
+      }),
+    enabled: Boolean(selectedId && campaignId),
+    staleTime: 10_000
+  });
+  const feasibilityReport = feasibility.data?.report;
+  const isFeasibilityBlocked = Boolean(feasibilityReport && !feasibilityReport.feasible);
+  const requiresConfirmation = sensitive || isFeasibilityBlocked;
   const dryRunSupported = selected?.dry_run_supported !== false;
   const kerberoastTargetMissing = selected?.id === "ad.kerberoast" && !String(params.target_user ?? "").trim();
-  const canRun = Boolean(campaignId && selectedId) && (!sensitive || confirmed) && !run.isPending && (!dryRun || dryRunSupported);
+  const canRun = Boolean(campaignId && selectedId) && (!requiresConfirmation || confirmed) && !run.isPending && (!dryRun || dryRunSupported);
   const runBlocked = !canRun || Boolean(scopeWarning) || kerberoastTargetMissing;
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
   const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
@@ -1364,6 +1379,111 @@ export function ModulesPage() {
                 onChange={setParams}
                 requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
               />
+              {feasibility.isFetching && !feasibilityReport && (
+                <div className="notice text-xs">
+                  <Loader2 className="spin shrink-0" size={14} /> Assessing target defensive posture...
+                </div>
+              )}
+              {feasibilityReport && (
+                <div
+                  className={`defense-feasibility-card ${
+                    !feasibilityReport.feasible || feasibilityReport.risk_level === "critical_alarm"
+                      ? "danger"
+                      : feasibilityReport.score >= 0.8
+                      ? "optimal"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      {!feasibilityReport.feasible || feasibilityReport.risk_level === "critical_alarm" ? (
+                        <ShieldAlert size={18} className="text-rose-400 shrink-0" />
+                      ) : feasibilityReport.risk_level === "high_noise" ? (
+                        <AlertTriangle size={18} className="text-amber-400 shrink-0" />
+                      ) : (
+                        <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
+                      )}
+                      <div>
+                        <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
+                          <span>Pre-Flight Defense Feasibility</span>
+                          <span
+                            className={
+                              !feasibilityReport.feasible
+                                ? "badge badge-high"
+                                : feasibilityReport.score >= 0.8
+                                ? "badge badge-low"
+                                : "badge badge-medium"
+                            }
+                          >
+                            {Math.round(feasibilityReport.score * 100)}% Feasible
+                          </span>
+                          <span
+                            className={
+                              feasibilityReport.risk_level === "critical_alarm" || feasibilityReport.risk_level === "high_noise"
+                                ? "badge badge-high"
+                                : feasibilityReport.risk_level === "medium"
+                                ? "badge badge-medium"
+                                : "badge badge-low"
+                            }
+                          >
+                            Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {feasibilityReport.blockers.length > 0 && (
+                    <div className="mt-2.5 p-2 rounded bg-rose-950/40 border border-rose-800/40 text-rose-300 text-xs space-y-1">
+                      <div className="font-medium text-rose-200 flex items-center gap-1.5">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        <span>Defensive Telemetry & Policy Blockers:</span>
+                      </div>
+                      <ul className="list-disc list-inside space-y-0.5 text-zinc-300">
+                        {feasibilityReport.blockers.map((blocker, idx) => (
+                          <li key={idx}>{blocker}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {Object.keys(feasibilityReport.opsec_tuning || {}).length > 0 && (
+                    <div className="mt-2 text-xs text-zinc-400 space-y-1 bg-zinc-900/60 p-2 rounded border border-zinc-800">
+                      <span className="font-medium text-zinc-300">OPSEC Tuning Guidance:</span>
+                      {Object.entries(feasibilityReport.opsec_tuning).map(([k, v]) => (
+                        <div key={k} className="text-zinc-400">
+                          <span className="text-amber-400 font-mono text-[11px]">{k}:</span> {String(v)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {feasibilityReport.recommended_alternatives.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-zinc-800">
+                      <div className="text-xs font-semibold text-zinc-200 mb-1.5 flex items-center gap-1.5">
+                        <ShieldCheck size={14} className="text-amber-400" />
+                        <span>Recommended Defense Evasion Alternatives:</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {feasibilityReport.recommended_alternatives.map((altId) => (
+                          <button
+                            key={altId}
+                            type="button"
+                            className="btn btn-secondary flex items-center gap-1.5 text-xs py-1 px-2.5 border border-amber-500/40 hover:border-amber-400 text-amber-200 hover:bg-amber-950/30 transition-colors"
+                            onClick={() => {
+                              setSelectedId(altId);
+                            }}
+                            title={`Switch module to ${altId}`}
+                          >
+                            <span>Switch to <strong>{altId}</strong></span>
+                            <ArrowRight size={13} className="text-amber-400 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               {runHint && (
                 <p className="notice">
                   {runHint}
@@ -1378,10 +1498,12 @@ export function ModulesPage() {
                 <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
                 {dryRunSupported ? "Dry run" : "Dry run unavailable"}
               </label>
-              {sensitive && (
+              {requiresConfirmation && (
                 <label className="notice notice-danger">
                   <input className="mr-2" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                  Confirm authorized high-noise or sensitive execution
+                  {isFeasibilityBlocked
+                    ? "Override pre-flight defense blocker and confirm authorized execution"
+                    : "Confirm authorized high-noise or sensitive execution"}
                 </label>
               )}
               <button className="btn btn-primary" type="submit" disabled={runBlocked}>

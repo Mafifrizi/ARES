@@ -2029,6 +2029,44 @@ async def run_module(
     return payload
 
 
+class FeasibilityRequest(BaseModel):
+    campaign_id: str
+    target: str = ""
+    params: dict[str, Any] = {}
+
+
+@app.post("/modules/{module_id}/feasibility", tags=["modules"])
+async def assess_module_feasibility_endpoint(
+    module_id: str,
+    body: FeasibilityRequest,
+    actor: AuthenticatedUser = Depends(require_operator()),
+    engine: AresEngine = Depends(get_engine),
+    db: AresDatabase = Depends(get_db),
+) -> dict[str, Any]:
+    """
+    Pre-flight defense feasibility assessment before module execution.
+    Evaluates target defense posture (EDR, Credential Guard, PPL, MDI, Sysmon),
+    calculates risk score, and recommends stealthy alternatives.
+    """
+    if isinstance(engine, AresEngine):
+        engine.bind_database(db)
+
+    campaign = await db.get_campaign(body.campaign_id)
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+
+    params = dict(body.params)
+    if body.target and not params.get("target"):
+        params["target"] = body.target
+
+    report = await engine.assess_module_feasibility(module_id, campaign, params)
+    return {
+        "module_id": module_id,
+        "campaign_id": body.campaign_id,
+        "report": report.to_dict(),
+    }
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 

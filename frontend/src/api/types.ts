@@ -211,3 +211,20 @@ export interface AttackPathsResponse {
   message?: string;
   stats?: Record<string, SafeGraphValue>;
 }
+
+export interface FeasibilityReportData {
+  feasible: boolean;
+  score: number;
+  risk_level: string;
+  blockers: string[];
+  recommended_alternatives: string[];
+  opsec_tuning: Record<string, unknown>;
+  details: Record<string, unknown>;
+}
+
+export interface FeasibilityResponse {
+  module_id: string;
+  campaign_id: string;
+  report: FeasibilityReportData;
+}
+

@@ -230,6 +230,79 @@ class PassSprayModule(BaseModule):
     OUTPUTS            = ["valid_credentials"]
     MITRE_TECHNIQUES   = ["T1110.003"]
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates domain target, user list, and lockout threshold risks.
+        Recommends ad.asreproast or ad.kerberoast under STEALTH to completely prevent
+        account lockout risks and Event ID 4625 failed logon spikes.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        users = getattr(ctx, "params", {}).get("users", []) or getattr(ctx, "params", {}).get("user_list", [])
+
+        if not target:
+            blockers.append("No Domain Controller or target IP specified")
+            score -= 0.5
+        if not users:
+            blockers.append("No target user list provided for password spraying (user_list required)")
+            score -= 0.4
+            recommendations.append("ad.enum_users")
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            score = 0.35
+            risk = "high_noise"
+            blockers.append("Password spraying generates rapid Event ID 4625 failed logins — strictly blocked in STEALTH mode")
+            opsec_tuning["note"] = (
+                "Password spraying in STEALTH profile creates Event ID 4625 failed logons. "
+                "Recommend offline cracking techniques that never touch target authenticators."
+            )
+            recommendations.extend(["ad.asreproast", "ad.kerberoast"])
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                threshold = host_state.defense_profile.get("lockout_threshold")
+                is_strict = (
+                    host_state.has_defense("smart_lockout")
+                    or host_state.has_defense("strict_lockout")
+                    or (isinstance(threshold, (int, float)) and threshold <= 5)
+                )
+                if is_strict:
+                    blockers.append("Strict lockout policy detected (threshold <= 5) — password spraying blocked to avoid account lockouts")
+                    score = 0.1
+                    risk = "critical_alarm"
+                    opsec_tuning["safe_spray_rate"] = "1 attempt per 45 minutes"
+                    opsec_tuning["lockout_warning"] = "Strict lockout policy detected. Spraying rate capped to 1 attempt per observation window."
+                    recommendations.extend(["ad.asreproast", "ad.kerberoast"])
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target, "user_count": len(users)},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Enforce target, user list, and password list before spray."""
         await super().validate(ctx)

@@ -42,6 +42,66 @@ class PassTheHashModule(BaseModule):
     OUTPUTS            = ["valid_credentials", "owned_hosts"]
     MITRE_TECHNIQUES   = ["T1550.002"]
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates NTLM hash presence, target host, and Kerberos-only/NTLM-disabled policies.
+        Recommends Overpass-the-Hash (ad.kerberoast / credential.golden_ticket) if NTLM is blocked.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.security import sanitize_hostname
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "medium"
+
+        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
+        nt_hash = (
+            getattr(ctx, "params", {}).get("nt_hash", "")
+            or getattr(ctx, "params", {}).get("hash", "")
+            or getattr(ctx, "params", {}).get("nthash", "")
+            or getattr(ctx, "params", {}).get("ntlm_hash", "")
+        )
+
+        if not target:
+            blockers.append("No target host specified")
+            score -= 0.5
+        if not nt_hash:
+            blockers.append("NTLM hash is required (nt_hash required)")
+            score -= 0.5
+            recommendations.extend(["windows.lsass_dump", "ad.dcsync"])
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target:
+            host_state = session.get_host(target)
+            if host_state:
+                if host_state.has_defense("ntlm_disabled") or host_state.has_defense("kerberos_only"):
+                    blockers.append("Target host enforces Kerberos-only authentication (NTLM disabled by security policy)")
+                    score = 0.1
+                    risk = "critical_alarm"
+                    recommendations.extend(["credential.golden_ticket", "ad.kerberoast"])
+                    opsec_tuning["evasion_alternative"] = "Use Overpass-the-Hash (Pass-the-Key) to request Kerberos TGT using the NT hash."
+                if host_state.has_defense("restricted_admin"):
+                    opsec_tuning["note"] = "Restricted Admin mode active: Pass-the-Hash will not deposit plaintext credentials into target LSASS."
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"target": target},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Enforce target and NTLM hash before any SMB connection."""
         await super().validate(ctx)

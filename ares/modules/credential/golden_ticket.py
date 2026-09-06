@@ -45,6 +45,80 @@ class GoldenTicketModule(BaseModule):
     OUTPUTS            = ["golden_ticket", "kerberos_ticket"]
     MITRE_TECHNIQUES   = ["T1558.001"]
 
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+        """
+        Pre-flight Defense Feasibility Assessment:
+        Evaluates domain SID, krbtgt credentials (AES256 vs RC4), and DC PAC validation.
+        Recommends Diamond Ticket or AES256 encryption if MDI (Defender for Identity) is active.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        from ares.core.security import sanitize_hostname
+
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        opsec_tuning: dict[str, Any] = {}
+        score = 1.0
+        risk = "medium"
+
+        domain = getattr(ctx, "domain", "") or getattr(ctx, "params", {}).get("domain", "")
+        krbtgt_hash = (
+            getattr(ctx, "params", {}).get("krbtgt_hash", "")
+            or getattr(ctx, "params", {}).get("krbtgt_aes256", "")
+            or getattr(ctx, "params", {}).get("krbtgt_key", "")
+        )
+        domain_sid = getattr(ctx, "params", {}).get("domain_sid", "")
+
+        if not domain:
+            blockers.append("No domain specified")
+            score -= 0.4
+        if not krbtgt_hash:
+            blockers.append("krbtgt hash or AES key required for ticket forgery (run ad.dcsync first)")
+            score -= 0.5
+            recommendations.append("ad.dcsync")
+        if not domain_sid:
+            blockers.append("domain_sid required for Kerberos PAC construction")
+            score -= 0.3
+            recommendations.append("ad.dcsync")
+
+        target_dc = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("dc", ""))
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target_dc:
+            host_state = session.get_host(target_dc)
+            if host_state:
+                if host_state.has_defense("mdi") or host_state.has_defense("mde_identity") or host_state.has_defense("pac_validation"):
+                    # Classic RC4 golden tickets trigger MDI anomaly alert
+                    opsec_tuning["recommended_variant"] = "Diamond Ticket / AES256"
+                    opsec_tuning["warning"] = (
+                        "Domain Controller has Microsoft Defender for Identity / PAC validation active. "
+                        "Do NOT use classic RC4 tickets without Event ID 4768 pre-authentication. "
+                        "Forge using AES256 keys or use Diamond Ticket method."
+                    )
+                    score = 0.1
+                    risk = "critical_alarm"
+                    recommendations.append("ad.dcsync")
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            opsec_tuning["lifetime_hours"] = 10
+            opsec_tuning["note"] = "Stealth profile: restrict ticket lifetime to 10h to match standard enterprise Kerberos policies"
+
+        unique_recs: list[str] = []
+        for r in recommendations:
+            if r not in unique_recs:
+                unique_recs.append(r)
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=unique_recs,
+            opsec_tuning=opsec_tuning,
+            details={"domain": domain, "domain_sid": domain_sid},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Enforce domain, krbtgt hash, and domain SID before ticket forge."""
         await super().validate(ctx)

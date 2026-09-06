@@ -5,6 +5,7 @@ import type {
   Campaign,
   CampaignGraph,
   ExecutionChain,
+  FeasibilityResponse,
   Finding,
   LiveExecutionResponse,
   LiveSubmissionOptions,
@@ -219,6 +220,15 @@ export const api = {
         })
       : liveExecutionRequest(path, payload, options);
   },
+  moduleFeasibility: (
+    moduleId: string,
+    body: { campaign_id: string; params?: Record<string, unknown>; target?: string }
+  ) =>
+    apiRequest<FeasibilityResponse>(`/modules/${encodeURIComponent(moduleId)}/feasibility`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }),
   generateReport: (campaignId: string, format: string) =>
     apiRequest<Record<string, string>>(
       `/reports/${encodeURIComponent(campaignId)}?fmt=${encodeURIComponent(format)}`,
