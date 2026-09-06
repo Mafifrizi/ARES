@@ -1,85 +1,86 @@
-# Panduan & Setup Single Sign-On (SSO) Enterprise — ARES Dashboard
+# Enterprise Single Sign-On (SSO) Integration & Setup Guide
 
-Dokumen ini menjelaskan penggunaan dan konfigurasi **Enterprise Multi-Tenant SSO (SAML 2.0 & OpenID Connect)** di ARES Dashboard, baik untuk pengguna akhir (operator/pentester) maupun administrator sistem.
+This document provides a comprehensive guide for configuring and utilizing **Enterprise Multi-Tenant SSO (SAML 2.0 & OpenID Connect)** in the ARES Platform, covering both end-user workflows and administrative setup.
 
 ---
 
-## BAGIAN 1 — Panduan Untuk Pengguna (End-User)
+## PART 1 — End-User Authentication Guide
 
-### Kapan Menggunakan "Sign in" Biasa vs "Or continue with SSO"?
+### When to Use Standard "Sign in" vs. "Or continue with SSO"
 
-| Metode Login | Kapan Digunakan? | Kredensial yang Digunakan |
+| Login Method | When to Use | Credentials |
 | :--- | :--- | :--- |
-| **"Sign in" Biasa** | Digunakan untuk akun lokal/internal (misalnya akun superadmin awal `admin` atau operator lab yang dibuat langsung di database lokal ARES). | Username dan password lokal yang tersimpan di database ARES (dienkripsi dengan bcrypt). |
-| **"Or continue with SSO"** | Digunakan jika organisasi/perusahaan Anda mengelola identitas terpusat melalui Identity Provider (IdP) seperti Okta, Google Workspace, Microsoft Entra ID (Azure AD), Ping Identity, atau Keycloak. | Kredensial akun kantor/organisasi Anda di halaman login resmi IdP Anda. |
+| **Standard "Sign in"** | For local operator accounts and development/lab environments (e.g., the bootstrap superuser `admin` or dedicated local accounts created via `POST /auth/register`). | Local username and password stored in the ARES database (hashed via bcrypt). |
+| **"Or continue with SSO"** | When your organization manages identities centrally via an Identity Provider (IdP) such as Okta, Microsoft Entra ID (Azure AD), Google Workspace, Ping Identity, or Keycloak. | Your corporate/organization credentials entered on your IdP's official sign-in page. |
 
 > [!NOTE]
-> **Proteksi Keamanan Akun SSO**: Jika akun Anda telah terdaftar sebagai pengguna SSO (`auth_provider = 'saml'` atau `'oidc'`), akun Anda **secara otomatis ditolak** jika mencoba login melalui form password lokal. Anda wajib masuk menggunakan tombol **"Or continue with SSO"**.
+> **Federated Account Lockdown**: If your account has been provisioned or migrated to SSO (`auth_provider = 'saml'` or `'oidc'`), your account is **strictly prohibited** from authenticating with a local password. You must authenticate using the **"Or continue with SSO"** workflow.
 
-### Pesan: *"SSO belum dikonfaktorasi untuk organisasi ini. Hubungi admin."*
+### Understanding: *"SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin."*
 
-Jika Anda mengklik tombol **"Or continue with SSO"** dan muncul pesan peringatan warna amber:
-> ⚠️ **SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.**
+If you click **"Or continue with SSO"** and an inline warning appears:
+> ⚠️ **SSO belum dikonfigurasi untuk organisasi ini. Hubungi admin.**  
+> *(English translation: "SSO is not configured for this organization. Contact admin.")*
 
-**Artinya:**
-1. Profil SSO (SAML 2.0 atau OIDC) untuk organisasi Anda belum didaftarkan di database ARES atau statusnya sedang dinonaktifkan (`is_enabled = 0`).
-2. Backend ARES menolak memulai alur federasi karena tidak memiliki endpoint IdP, sertifikat x.509, atau client ID yang valid.
+**What this means:**
+1. SSO federation (SAML 2.0 or OIDC) has not yet been registered for the target organization, or the configuration is currently disabled (`is_enabled = 0`).
+2. The ARES backend fail-closed policy rejected the request because no valid IdP endpoints, x.509 certificate, or client credentials were found.
 
-**Langkah yang Harus Diambil:**
-- Jangan mencoba menebak password di form lokal.
-- Hubungi Administrator ARES atau tim Security Operations (SecOps) organisasi Anda dan minta mereka mengonfigurasi federasi identitas organisasi Anda mengikuti panduan Bagian 2 di bawah.
+**Action Required:**
+- Do not attempt to guess local passwords.
+- Contact your ARES Administrator or Security Operations (SecOps) team to complete the identity federation setup outlined in Part 2.
 
 ---
 
-## BAGIAN 2 — Panduan Untuk Administrator: Setup SSO Organisasi Baru
+## PART 2 — Administrator Guide: Organization SSO Setup
 
-### 1. Prasyarat: Environment Variable `ARES_ENCRYPTION_KEY`
+### 1. Prerequisite: `ARES_ENCRYPTION_KEY` Environment Variable
 
-ARES menerapkan enkripsi tingkat aplikasi (*app-level encryption*) menggunakan modul `DataEncryptor` (berbasis Fernet: `PBKDF2-HMAC-SHA256` 100.000 iterasi + `AES-128-CBC` + `HMAC-SHA256` dengan *salt* acak unik per *record*). Semua sertifikat SAML dan secret OIDC disimpan dalam bentuk terenkripsi di database.
+ARES enforces application-level encryption for sensitive secrets at rest using the `DataEncryptor` module (Fernet-based: `PBKDF2-HMAC-SHA256` with 100,000 iterations + `AES-128-CBC` + `HMAC-SHA256` with a per-record cryptographically secure random salt). All SAML certificates and OIDC client secrets are encrypted before database persistence.
 
-Aplikasi mewajibkan `ARES_ENCRYPTION_KEY` memiliki panjang **minimal 32 karakter**. Jika tidak diset atau kurang dari 32 karakter, ARES akan menolak *startup*.
+The application strictly requires `ARES_ENCRYPTION_KEY` to be **at least 32 characters long**. If unset or shorter than 32 characters, ARES will fail fast at startup with an explicit error.
 
-#### Cara Generate Kunci:
-Jalankan perintah Python berikut:
+#### Generate an Encryption Key:
+Run the official Fernet generation command:
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
-*Contoh output: `16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w=`*
+*Example output: `16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w=`*
 
-#### Cara Set Environment Variable:
-- **Di file `.env` (disarankan):**
+#### Set the Environment Variable:
+- **In `.env` file (Recommended):**
   ```env
   ARES_ENCRYPTION_KEY=16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w=
   ```
-- **Di Linux / macOS (Terminal):**
+- **In Linux / macOS (Terminal):**
   ```bash
   export ARES_ENCRYPTION_KEY="16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w="
   ```
-- **Di Windows (PowerShell):**
+- **In Windows (PowerShell):**
   ```powershell
   $env:ARES_ENCRYPTION_KEY="16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w="
   ```
 
 ---
 
-### 2. Mendaftarkan Konfigurasi SSO ke ARES
+### 2. Registering an SSO Configuration in ARES
 
-Pendaftaran konfigurasi SSO dapat dilakukan melalui **REST API Endpoint Admin** (memerlukan role `team_lead`, yaitu tingkatan role tertinggi dalam hierarki ARES: `team_lead > operator > recon > reporter`; akun bootstrap `admin` secara default memiliki role `team_lead`) atau langsung ke database jika API gateway belum diakses.
+SSO federation can be configured via the **REST API Admin Endpoints** (requires the `team_lead` role, the highest tier in ARES's role hierarchy: `team_lead > operator > recon > reporter`; the bootstrap user `admin` holds the `team_lead` role) or directly in the database.
 
 > [!IMPORTANT]
-> **Kebijakan Arsitektur: SP-Initiated SSO Only**  
-> ARES saat ini **hanya mendukung SP-initiated SSO**. User harus selalu memulai login dari halaman ARES (klik tombol *"Or continue with SSO"*), bukan dari portal aplikasi IdP mereka (seperti dashboard Okta atau My Apps Azure AD / Entra ID).  
-> **Sampaikan hal ini ke tim IT organisasi saat onboarding SSO mereka**, karena ini berbeda dari flow yang biasa mereka pakai untuk aplikasi SaaS lain. ARES secara ketat menolak SAML response tanpa parameter `InResponseTo` yang valid serta callback OIDC tanpa token `state` yang terdaftar demi mencegah serangan pemalsuan sesi dan token replay.
+> **Architecture Policy: SP-Initiated SSO Only**  
+> ARES strictly supports **SP-initiated SSO**. Users must always begin their sign-in flow from the ARES login interface (by clicking *"Or continue with SSO"*), rather than launching the application from an IdP app portal (such as Okta Dashboard or Microsoft Entra ID / Azure AD My Apps).  
+> **Communicate this requirement explicitly to your organization's IT/IAM team during onboarding**, as this differs from common SaaS defaults. ARES purposefully rejects unsolicited SAML assertions without an active `InResponseTo` record and OIDC callbacks without a registered `state` parameter to eliminate replay attacks and session-fixation risks.
 
-#### Opsi A: Melalui REST API Admin (Direkomendasikan)
-ARES menyediakan endpoint manajemen SSO (khusus role `team_lead`):
-- **`GET /auth/sso/config/{org_slug}`**: Melihat status konfigurasi SSO organisasi.
-- **`POST /auth/sso/config/{org_slug}`**: Menyimpan atau memperbarui konfigurasi SSO organisasi.
+#### Option A: Via REST API (Recommended)
+ARES provides dedicated configuration management endpoints for `team_lead` users:
+- **`GET /auth/sso/config/{org_slug}`**: Retrieve existing SSO status and metadata.
+- **`POST /auth/sso/config/{org_slug}`**: Create or update organization SSO settings.
 
-Format request payload `POST /auth/sso/config/{org_slug}`:
+Request payload for `POST /auth/sso/config/{org_slug}`:
 ```json
 {
-  "protocol": "saml", // atau "oidc"
+  "protocol": "saml", // or "oidc"
   "issuer_or_entity_id": "https://idp.example.com/entityid",
   "sso_url": "https://idp.example.com/sso/endpoint",
   "idp_certificate": "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----",
@@ -95,20 +96,20 @@ Format request payload `POST /auth/sso/config/{org_slug}`:
   "is_enabled": true
 }
 ```
-*Catatan: Backend ARES akan secara otomatis mengenkripsi `idp_certificate` dan `client_secret` menggunakan Fernet `DataEncryptor` sebelum menyimpannya ke tabel `sso_configurations`.*
+*Note: The backend automatically encrypts `idp_certificate` and `client_secret` via `DataEncryptor` before persisting to `sso_configurations`.*
 
-#### Opsi B: Melalui Database SQL Langsung
-Jika mendaftarkan langsung melalui SQLite (`ares.db`) atau PostgreSQL:
-1. Pastikan organisasi terdaftar di tabel `organizations`:
+#### Option B: Direct SQL Database Insertion
+If provisioning directly via SQLite (`ares.db`) or PostgreSQL:
+1. Ensure the organization exists in the `organizations` table:
    ```sql
    INSERT INTO organizations (id, slug, name, is_active)
    VALUES ('org-corp-01', 'corp', 'ACME Corp', 1);
    ```
-2. Nilai kolom `idp_certificate_enc` atau `client_secret_enc` harus dienkripsi terlebih dahulu menggunakan helper ARES:
+2. Encrypt certificates or client secrets using the ARES CLI helper:
    ```bash
    python -c "from ares.core.config import get_settings; from ares.core.sso import encrypt_sso_secret; print(encrypt_sso_secret('YOUR_SECRET_HERE', get_settings()))"
    ```
-3. Masukkan ke tabel `sso_configurations`:
+3. Insert into `sso_configurations`:
    ```sql
    INSERT INTO sso_configurations (
        id, org_id, protocol, is_enabled,
@@ -116,89 +117,89 @@ Jika mendaftarkan langsung melalui SQLite (`ares.db`) atau PostgreSQL:
        default_role, role_mapping_json
    ) VALUES (
        'sso-cfg-01', 'org-corp-01', 'saml', 1,
-       'https://idp.example.com/entityid', 'https://idp.example.com/sso', 'HASIL_ENKRIPSI',
+       'https://idp.example.com/entityid', 'https://idp.example.com/sso', '<ENCRYPTED_VALUE>',
        'reporter', '{"SecAdmins": "team_lead"}'
    );
    ```
 
 ---
 
-### 3. Detail Integrasi Protokol SAML 2.0
+### 3. SAML 2.0 Integration Specifications
 
-#### A. Data yang Harus Disiapkan Organisasi dari IdP Mereka:
-1. **IdP Entity ID**: URI pengenal unik IdP (misal: `https://sts.windows.net/tenant-uuid/` atau `http://www.okta.com/exk123`).
-2. **SSO URL (Single Sign-On Service URL)**: Endpoint HTTP-Redirect atau HTTP-POST milik IdP tempat user diarahkan untuk autentikasi.
-3. **IdP x.509 Certificate**: Sertifikat publik IdP dalam format PEM untuk memvalidasi tanda tangan digital (*signature*) XML assertion.
+#### A. Required Parameters from the Organization's IdP:
+1. **IdP Entity ID**: Unique URI identifying the IdP (e.g. `https://sts.windows.net/<tenant-uuid>/` or `http://www.okta.com/exk123`).
+2. **Single Sign-On Service URL (SSO URL)**: IdP HTTP-Redirect or HTTP-POST endpoint where user AuthnRequests are sent.
+3. **IdP x.509 Certificate**: IdP public signing certificate in PEM format to verify digital signatures on SAML assertions.
 
-#### B. Data yang Diberikan ARES ke IdP Organisasi:
+#### B. SP Parameters Provided by ARES to the IdP:
 - **Assertion Consumer Service (ACS) URL**:
   ```
-  POST https://<domain-ares>/auth/sso/saml/acs
+  POST https://<ares-domain>/auth/sso/saml/acs
   ```
   *(Binding: HTTP-POST)*
 - **Service Provider (SP) Entity ID / Audience**:
   ```
-  https://<domain-ares>/auth/sso/saml/metadata
+  https://<ares-domain>/auth/sso/saml/metadata
   ```
-- **NameID Format**: Email Address (`urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`) atau Persistent (`urn:oasis:names:tc:SAML:2.0:nameid-format:persistent`).
+- **NameID Format**: Email Address (`urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`) or Persistent (`urn:oasis:names:tc:SAML:2.0:nameid-format:persistent`).
 
 ---
 
-### 4. Detail Integrasi Protokol OpenID Connect (OIDC)
+### 4. OpenID Connect (OIDC) Integration Specifications
 
-#### A. Data yang Harus Disiapkan Organisasi dari IdP Mereka:
-1. **Issuer URL**: Base URL penyedia identitas (misal: `https://accounts.google.com` atau `https://login.microsoftonline.com/{tenant}/v2.0`).
-2. **Client ID & Client Secret**: Kredensial client yang digenerate oleh IdP saat membuat aplikasi ARES.
-3. **JWKS URI (Opsional/Direkomendasikan)**: Endpoint kunci publik IdP (misal: `https://idp.example.com/.well-known/jwks.json`) untuk verifikasi tanda tangan ID Token JWT.
-4. **Authorization & Token Endpoint**: Endpoint otorisasi OAuth2/OIDC dari IdP.
+#### A. Required Parameters from the Organization's IdP:
+1. **Issuer URL**: Base URL of the provider (e.g. `https://accounts.google.com` or `https://login.microsoftonline.com/{tenant}/v2.0`).
+2. **Client ID & Client Secret**: OAuth2 client credentials generated in the IdP app console.
+3. **JWKS URI (Optional / Recommended)**: Public key set endpoint (e.g. `https://idp.example.com/.well-known/jwks.json`) for cryptographic ID Token verification.
+4. **Authorization & Token Endpoints**: IdP OAuth2 authorization and token URLs.
 
-#### B. Data yang Diberikan ARES ke IdP Organisasi:
-- **Redirect URI / Callback URL**:
+#### B. Parameters Provided by ARES to the IdP:
+- **Callback / Redirect URI**:
   ```
-  GET https://<domain-ares>/auth/sso/oidc/callback
+  GET https://<ares-domain>/auth/sso/oidc/callback
   ```
-- **Response Type**: `code` (Authorization Code Flow).
-- **Scope**: `openid email profile`.
+- **Grant Type**: Authorization Code (`response_type=code`).
+- **Scopes**: `openid email profile`.
 
 ---
 
-### 5. Cara Pengujian & Verifikasi (Tanpa Buka Database)
+### 5. Verification & Testing Workflow
 
-Setelah konfigurasi disimpan, lakukan verifikasi melalui browser:
+After saving the configuration, verify the setup without opening database tables:
 
-1. **Cek Respons Endpoint Inisialisasi**:
-   Akses di browser atau `curl`:
+1. **Verify Initiation Endpoint**:
+   Query the initialization endpoint via cURL:
    ```bash
    curl -i "http://127.0.0.1:8080/auth/sso/init?org=default"
    ```
-   **Indikator Sukses**: Mengembalikan status HTTP `200 OK` dengan payload:
+   **Expected Result**: HTTP `200 OK` with JSON response:
    ```json
    {
      "configured": true,
-     "protocol": "saml", // atau "oidc"
+     "protocol": "saml", // or "oidc"
      "redirect_url": "https://idp.example.com/...",
      "flow_id": "..."
    }
    ```
 
-2. **Uji Melalui UI ARES Dashboard**:
-   - Buka `http://127.0.0.1:5173/dashboard/login`.
-   - Klik tombol **"Or continue with SSO"**.
-   - Browser akan langsung mengarahkan Anda ke halaman login IdP Anda (Okta, Azure AD, atau Google).
-   - Masukkan kredensial IdP Anda hingga selesai.
-   - IdP akan me-redirect kembali ke ARES, dan Anda akan langsung masuk ke halaman utama Dashboard (`/dashboard/`) dengan sesi login aktif (cookie `ares-dev-refresh` dan `ares-dev-csrf` terpasang).
-   - Akun Anda akan otomatis dibuat secara *Just-In-Time* (JIT) di ARES dengan role sesuai mapping atau default (`reporter`).
+2. **Verify End-to-End via ARES Dashboard UI**:
+   - Navigate to `http://127.0.0.1:5173/dashboard/login`.
+   - Click **"Or continue with SSO"**.
+   - Your browser will seamlessly redirect to your corporate IdP login screen.
+   - Enter your corporate credentials.
+   - Upon successful IdP verification, you will be redirected back to the ARES Dashboard (`/dashboard/`) with active session cookies (`ares-dev-refresh` and `ares-dev-csrf`).
+   - Your account is automatically provisioned Just-In-Time (JIT) with the appropriate role according to your claim mappings, defaulting safely to `reporter`.
 
 ---
 
-## BAGIAN 3 — Troubleshooting Singkat untuk Admin
+## PART 3 — Troubleshooting Guide for Administrators
 
-Berikut adalah daftar pesan error umum yang dapat muncul pada URL login (`/dashboard/login?error=...`) dan penjelasan solusinya:
+Common error messages returned in the login redirect URL (`/dashboard/login?error=...`) and their resolutions:
 
-| Pesan Error di Login Page | Penyebab Utama | Solusi Tindakan Admin |
+| Error Message | Root Cause | Administrative Resolution |
 | :--- | :--- | :--- |
-| **`Invalid or expired OIDC state (replay rejected)`** atau<br>**`Invalid or expired SAML request ID (replay rejected)`** | User membutuhkan waktu lebih dari 10 menit untuk menyelesaikan login di halaman IdP, atau user menekan tombol **Back**, me-refresh halaman callback, atau mencoba memakai link callback yang sama dua kali. | Minta user untuk kembali ke halaman `/dashboard/login` dan mengklik kembali tombol **"Or continue with SSO"** untuk menghasilkan sesi autentikasi baru yang aman. |
-| **`SAML assertion missing InResponseTo (replay protection)`** | IdP mengirimkan SAML Assertion tanpa menyertakan ID AuthnRequest asal (*InResponseTo*), yang umumnya terjadi jika login dimulai dari portal IdP (*IdP-initiated SSO*). | ARES secara ketat hanya mengizinkan alur *SP-initiated SSO* demi mencegah serangan replay token SAML. Pastikan user selalu memulai login dari halaman login ARES Dashboard. |
-| **`Invalid SAML signature`** atau<br>**`Signature validation failed`** | Sertifikat x.509 IdP yang tersimpan di ARES tidak cocok dengan sertifikat private key yang dipakai IdP saat menandatangani respons SAML (misalnya sertifikat IdP baru saja di-renew atau expired). | Dapatkan sertifikat x.509 publik terbaru dari IdP dan perbarui melalui endpoint `POST /auth/sso/config/{org_slug}` atau update kolom `idp_certificate_enc`. |
-| **`Invalid token issuer or audience`** (OIDC) | Klaim `iss` (issuer) atau `aud` (audience) pada ID Token OIDC yang dikirim IdP tidak sesuai dengan `issuer_or_entity_id` atau `client_id` yang terdaftar di konfigurasi ARES. | Periksa kembali apakah nilai `client_id` dan `issuer_or_entity_id` di konfigurasi SSO ARES sudah sama persis dengan yang tertera di konsol IdP Anda. |
-| **`SSO configuration not found for organization`** | Organisasi yang diminta tidak memiliki konfigurasi SSO aktif, atau organisasi tersebut berstatus dinonaktifkan (`is_active = 0`). | Pastikan organisasi aktif di tabel `organizations` dan memiliki konfigurasi di tabel `sso_configurations` dengan `is_enabled = 1`. |
+| **`Invalid or expired OIDC state (replay rejected)`** or<br>**`Invalid or expired SAML request ID (replay rejected)`** | The user took longer than 10 minutes to complete sign-in at the IdP, or the user navigated **Back**, refreshed the callback page, or replayed an expired authorization URL. | Instruct the user to return to `/dashboard/login` and click **"Or continue with SSO"** to generate a fresh, single-use authentication state. |
+| **`SAML assertion missing InResponseTo (replay protection)`** | The IdP sent an assertion lacking the `InResponseTo` attribute, typically caused by initiating the login from an external IdP portal (*IdP-initiated SSO*). | ARES strictly enforces SP-initiated SSO to prevent token replay. Ensure operators initiate sign-in directly from the ARES login page. |
+| **`Invalid SAML signature`** or<br>**`Signature validation failed`** | The stored IdP x.509 certificate does not match the private key used by the IdP to sign the assertion (e.g., following an IdP cert rotation or expiration). | Obtain the current x.509 public signing certificate from the IdP and update the configuration via `POST /auth/sso/config/{org_slug}`. |
+| **`Invalid token issuer or audience`** (OIDC) | The `iss` (issuer) or `aud` (audience) claim in the IdP's JWT token does not match the configured `issuer_or_entity_id` or `client_id`. | Verify that the `client_id` and `issuer_or_entity_id` values in ARES match the exact client registration in your IdP console. |
+| **`SSO configuration not found for organization`** | The requested organization has no active SSO profile, or `is_active = 0` / `is_enabled = 0`. | Verify that the organization is active in the `organizations` table and that its `sso_configurations` entry has `is_enabled = 1`. |
