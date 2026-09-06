@@ -14,8 +14,6 @@ env:
   ARES_SECRET_KEY: "ci-secret-key-placeholder-min32chars!!"
   ARES_ENCRYPTION_KEY: "ci-encryption-key-placeholder-32chars"
   ARES_DEFAULT_ADMIN_PASSWORD: "CiAdmin1!-placeholder-secret99"
-  ARES_DEBUG: "true"
-  ARES_BROWSER_ORIGIN: "http://127.0.0.1:5173"
 
 jobs:
   backend:

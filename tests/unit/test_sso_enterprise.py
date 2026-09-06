@@ -24,7 +24,7 @@ os.environ.setdefault("ARES_SECRET_KEY", "test-sso-secret-key-min32-chars!!")
 os.environ.setdefault("ARES_ENCRYPTION_KEY", "test-enc-key-min32-chars-xxxxxxx")
 os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestSsoPass1!")
 os.environ.setdefault("ARES_DEBUG", "true")
-os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://127.0.0.1:5173")
+os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
 
 from ares.core.config import AresSettings, get_settings
 from ares.core.security import DataEncryptor, hash_password
@@ -269,13 +269,13 @@ async def test_sso_user_blocked_at_auth_token_endpoint(tmp_path):
         ares_encryption_key="test-enc-key-min32-chars-xxxxxxx",
         ares_default_admin_password="TestSsoPass1!",
         ares_debug=True,
-        ares_browser_origin="http://127.0.0.1:5173",
+        ares_browser_origin="http://localhost:5173",
     )
 
     try:
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5173") as client:
-            csrf_res = await client.get("/auth/csrf", headers={"Origin": "http://127.0.0.1:5173"})
+        async with AsyncClient(transport=transport, base_url="http://localhost:5173") as client:
+            csrf_res = await client.get("/auth/csrf", headers={"Origin": "http://localhost:5173"})
             assert csrf_res.status_code == 204
             csrf_token = client.cookies.get("ares-dev-csrf")
             assert csrf_token is not None
@@ -285,7 +285,7 @@ async def test_sso_user_blocked_at_auth_token_endpoint(tmp_path):
                 data={"username": "enterprise_sso_user", "password": "AnyPasswordTry!"},
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": "http://127.0.0.1:5173",
+                    "Origin": "http://localhost:5173",
                     "Sec-Fetch-Site": "same-origin",
                     "X-ARES-CSRF": csrf_token,
                 },
