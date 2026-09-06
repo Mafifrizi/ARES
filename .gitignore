@@ -59,3 +59,4 @@ evidence/
 logs/
 frontend/*.tsbuildinfo
 file
+scratch/

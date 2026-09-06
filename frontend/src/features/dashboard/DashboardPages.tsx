@@ -1,8 +1,10 @@
 import {
+  Activity,
   AlertTriangle,
   Bell,
   Boxes,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Database,
   Download,
@@ -26,7 +28,8 @@ import {
   TrendingUp,
   UserCog,
   type LucideIcon,
-  Workflow
+  Workflow,
+  X
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -341,6 +344,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [operatorMenuOpen, setOperatorMenuOpen] = useState(false);
+  const [telemetryOpen, setTelemetryOpen] = useState(false);
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
   const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>([]);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
@@ -353,6 +358,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     queryFn: () => api.reports(selectedCampaignId),
     enabled: Boolean(selectedCampaignId)
   });
+  const telemetrySnapshot = telemetry.data as TelemetrySnapshot | undefined;
 
   useCampaignEventSocket({
     campaignId: liveCampaignId,
@@ -583,8 +589,11 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div className="sidebar-brand">
             <img className="sidebar-mark" src={brandMarkPath} alt="" aria-hidden="true" />
             <div className="min-w-0">
-              <div className="sidebar-title">ARES</div>
-              <div className="sidebar-subtitle">Security dashboard</div>
+              <div className="sidebar-title flex items-center gap-1.5">
+                <span>ARES</span>
+                <span className="text-[9px] uppercase font-mono px-1 py-0.5 rounded border border-red-800/40 bg-red-950/40 text-red-400 font-semibold tracking-wider">v6.0</span>
+              </div>
+              <div className="sidebar-subtitle">Adversary Emulation Suite</div>
             </div>
           </div>
           <nav className="sidebar-nav" aria-label="Dashboard navigation">
@@ -594,10 +603,14 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <div className="grid gap-1">
                   {group.items.map((item) => {
                     const Icon = item.icon;
+                    const count = item.to === "/campaigns" ? (campaigns.data ?? []).length : item.to === "/modules" ? (modules.data ?? []).length : null;
                     return (
                       <NavLink key={item.to} to={item.to} end={item.to === "/"} className="nav-link" title={sidebarCollapsed ? item.label : undefined}>
                         <Icon size={16} />
                         <span>{item.label}</span>
+                        {count !== null && count > 0 && !sidebarCollapsed ? (
+                          <span className="nav-count-badge font-mono">{count}</span>
+                        ) : null}
                       </NavLink>
                     );
                   })}
@@ -616,14 +629,36 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 onClick={() => setSidebarCollapsed((value) => !value)}
                 type="button"
               >
-                <Menu size={17} />
+                <Menu size={16} />
               </button>
+
+              <div className="topbar-scope-wrap" title="Active campaign engagement scope">
+                <select
+                  className="topbar-scope-select"
+                  aria-label="Active campaign scope"
+                  value={selectedCampaignId}
+                  onChange={(e) => {
+                    setSelectedCampaignId(e.target.value);
+                    if (e.target.value) {
+                      writeDashboardSession("ares.dashboard.campaigns.tab", "Scope");
+                    }
+                  }}
+                >
+                  <option value="">Scope: Global / All</option>
+                  {(campaigns.data ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name || c.id.slice(0, 12)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="topbar-search-wrap">
                 <label className="topbar-search" aria-label="Dashboard search">
-                  <Search size={16} />
+                  <Search size={15} />
                   <input
                     aria-label="Search dashboard"
-                    onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
+                    onBlur={() => window.setTimeout(() => setSearchOpen(false), 140)}
                     onChange={(event) => {
                       setSearchTerm(event.target.value);
                       setSearchOpen(true);
@@ -641,6 +676,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                     placeholder="Search campaigns, modules, reports"
                     value={searchTerm}
                   />
+                  <span className="search-kbd-badge">/</span>
                 </label>
                 {searchOpen && (
                   <div className="search-results" role="listbox">
@@ -653,7 +689,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                           </button>
                         ))
                       ) : (
-                        <div className="search-empty">No matches</div>
+                        <div className="search-empty">No matches found</div>
                       )
                     ) : (
                       <div className="search-empty">Type to search dashboard</div>
@@ -663,6 +699,60 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               </div>
             </div>
             <div className="topbar-right">
+              {/* Telemetry Operational Status */}
+              <div className="relative">
+                <button
+                  className="topbar-status-btn"
+                  type="button"
+                  aria-label="System operational status"
+                  aria-expanded={telemetryOpen}
+                  onClick={() => setTelemetryOpen((v) => !v)}
+                  title="System operational health and telemetry status"
+                >
+                  <span className={`status-dot ${health.isSuccess && !telemetry.isError ? "online" : "warning"}`} />
+                  <span className="status-title">{health.isSuccess ? "Operational" : "Connecting"}</span>
+                  <span className="status-pill-count font-mono">
+                    {telemetrySnapshot ? `${metricNumber(telemetrySnapshot.modules, "total")} runs` : "v6.0"}
+                  </span>
+                </button>
+
+                {telemetryOpen && (
+                  <aside className="telemetry-popover" aria-label="Enclave telemetry quick view">
+                    <div className="telemetry-popover-header">
+                      <div className="flex items-center gap-2">
+                        <Activity size={15} className="text-emerald-400" />
+                        <strong>Enclave Subsystem Health</strong>
+                      </div>
+                      <button className="icon-button icon-button-small" onClick={() => setTelemetryOpen(false)} aria-label="Close telemetry view" type="button">
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <div className="telemetry-popover-grid">
+                      <div className="popover-stat">
+                        <span>Worker Pool</span>
+                        <strong>{metricNumber(telemetrySnapshot?.workers, "active")} active</strong>
+                      </div>
+                      <div className="popover-stat">
+                        <span>Task Queue</span>
+                        <strong>{metricNumber(telemetrySnapshot?.queue, "depth")} queued</strong>
+                      </div>
+                      <div className="popover-stat">
+                        <span>Module Error Rate</span>
+                        <strong>{telemetrySnapshot ? `${formatRate(metricNumber(telemetrySnapshot.modules, "error_rate"))}` : "0%"}</strong>
+                      </div>
+                      <div className="popover-stat">
+                        <span>Live Ingest</span>
+                        <div className="mt-0.5 flex items-center gap-1.5">
+                          <span className={`h-1.5 w-1.5 rounded-full ${liveConnected ? "bg-emerald-400" : "bg-zinc-500"}`} />
+                          <strong className="!mt-0 text-zinc-100">{liveConnected ? "Connected" : "Standby"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </aside>
+                )}
+              </div>
+
+              {/* Notifications */}
               <button
                 className="icon-button has-badge"
                 aria-expanded={notificationsOpen}
@@ -670,7 +760,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 onClick={toggleNotifications}
                 type="button"
               >
-                <Bell size={16} />
+                <Bell size={15} />
                 {unreadNotificationCount > 0 ? <span>{unreadNotificationCount}</span> : null}
               </button>
               {notificationsOpen && (
@@ -690,7 +780,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                           <div className="notification-item-header">
                             <strong>{item.title}</strong>
                             <button className="icon-button icon-button-small" aria-label={`Dismiss ${item.title}`} onClick={() => deleteNotification(item.id)} type="button">
-                              <Trash2 size={14} />
+                              <Trash2 size={13} />
                             </button>
                           </div>
                           <p>{item.detail}</p>
@@ -702,19 +792,60 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   )}
                 </aside>
               )}
-              <span className="user-chip">
-                <span className="user-chip-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
-                <span className="user-chip-copy">
-                  <strong>{user.username}</strong>
-                  <small>{formatRole(user.role)}</small>
-                </span>
-              </span>
-              <button className="btn btn-topbar" onClick={() => void logout()}>
-                <LogOut size={16} /> Logout
-              </button>
-              <button className="btn btn-topbar" onClick={() => void logoutAll()}>
-                <LogOut size={16} /> Logout all devices
-              </button>
+
+              {/* Consolidated Operator Menu */}
+              <div className="operator-menu-wrap">
+                <button
+                  className="operator-trigger"
+                  type="button"
+                  aria-expanded={operatorMenuOpen}
+                  onClick={() => setOperatorMenuOpen((v) => !v)}
+                  aria-label="Operator clearance menu"
+                >
+                  <span className="operator-avatar">{user.username.slice(0, 1).toUpperCase()}</span>
+                  <div className="operator-info">
+                    <strong>{user.username}</strong>
+                    <small>{formatRole(user.role)}</small>
+                  </div>
+                  <ChevronDown size={13} className={`chevron-indicator ${operatorMenuOpen ? "open" : ""}`} />
+                </button>
+
+                {operatorMenuOpen && (
+                  <div className="operator-dropdown" role="menu">
+                    <div className="operator-dropdown-header">
+                      <div className="operator-dropdown-title">Operator Clearance</div>
+                      <div className="operator-dropdown-badge">{formatRole(user.role)}</div>
+                      <div className="operator-dropdown-sub">Signed in as {user.username}</div>
+                    </div>
+                    <div className="operator-dropdown-actions">
+                      <button
+                        className="operator-action-item"
+                        role="menuitem"
+                        onClick={() => {
+                          setOperatorMenuOpen(false);
+                          void logout();
+                        }}
+                        type="button"
+                      >
+                        <LogOut size={14} />
+                        <span>Logout</span>
+                      </button>
+                      <button
+                        className="operator-action-item danger"
+                        role="menuitem"
+                        onClick={() => {
+                          setOperatorMenuOpen(false);
+                          void logoutAll();
+                        }}
+                        type="button"
+                      >
+                        <ShieldAlert size={14} />
+                        <span>Logout all devices</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
           <div className="content-shell">{children}</div>
@@ -747,7 +878,7 @@ export function OverviewPage() {
             <div className="highlight-list">
               <HighlightRow label="Active campaigns" value={String(activeCampaigns)} tone="low" detail="available engagements" />
               <HighlightRow label="Findings" value={String(findings)} tone={findings > 0 ? "medium" : "low"} detail="confirmed observations" />
-              <HighlightRow label="Runtime" value={telemetry.isSuccess ? "Online" : "Pending"} tone={telemetry.isSuccess ? "low" : "medium"} detail="telemetry feed" />
+              <HighlightRow label="Runtime" value={telemetry.isSuccess ? "Operational" : "Pending"} tone={telemetry.isSuccess ? "low" : "medium"} detail="telemetry stream" />
             </div>
           </section>
           <section className="panel p-4">
@@ -756,10 +887,10 @@ export function OverviewPage() {
               <span>{formatMetric(monthlyTotal)}</span>
               <small>{monthlyData?.label ?? "Security signals this cycle"}</small>
             </div>
-            {monthlyStats.isPending ? <p className="text-sm text-slate-500">Loading monthly activity...</p> : null}
-            {monthlyStats.isError ? <p className="text-sm text-slate-500">Monthly activity unavailable.</p> : null}
+            {monthlyStats.isPending ? <p className="text-sm text-zinc-400">Loading monthly activity...</p> : null}
+            {monthlyStats.isError ? <p className="text-sm text-zinc-400">Monthly activity unavailable.</p> : null}
             {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal === 0 ? (
-              <p className="text-sm text-slate-500">No monthly activity yet</p>
+              <p className="text-sm text-zinc-400">No monthly activity yet</p>
             ) : null}
             {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal > 0 && monthlySeries.some((value) => value.count > 0) ? (
               <SparklineBars values={monthlySeries} />
@@ -903,7 +1034,7 @@ export function CampaignsPage() {
               <textarea className="field min-h-20" required placeholder="Scope CIDRs" value={scope} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCreateWarning(""); setScope(e.target.value); }} />
               {createWarning && <p className="notice notice-danger">{createWarning}</p>}
               <button className="btn btn-primary" disabled={create.isPending} type="submit">
-                <ListChecks size={16} /> Create
+                Create Campaign
               </button>
             </form>
             <DataPanel title="Create Error" data={create.error} />
@@ -920,10 +1051,10 @@ export function CampaignsPage() {
             <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
             <div className="mt-3 flex flex-wrap gap-2">
               <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
-                <ShieldCheck size={16} /> Restore Vault
+                Restore Vault
               </button>
               <button className="btn" disabled={!selected} onClick={() => run.mutate()}>
-                <Play size={16} /> Dry Run Plan
+                Dry Run Plan
               </button>
               <button
                 className="btn btn-danger"
@@ -934,7 +1065,7 @@ export function CampaignsPage() {
                   }
                 }}
               >
-                <Trash2 size={16} /> Delete
+                Delete
               </button>
               <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
             </div>
@@ -943,9 +1074,8 @@ export function CampaignsPage() {
           <DataPanel title="Campaign Detail Error" data={detail.error} />
           <DataPanel title="CVSS Error" data={cvss.error} />
           <DataPanel title="Campaign Diff Error" data={diff.error} />
-          <DataPanel title="Campaign Detail" data={detail.data} />
-          <DataPanel title="CVSS Summary" data={cvss.data} />
-          <DataPanel title="Diff" data={diff.data} />
+          {cvss.data && <CvssScoreCard data={cvss.data} />}
+          {diff.data && <CampaignDiffCard data={diff.data} />}
         </>
       )}
       {activeTab === "Findings" && (
@@ -994,11 +1124,11 @@ function ExecutionChainsPanel({
                     <strong>{stage.title}</strong>
                     {stage.final_goal && <span className="badge badge-low">Final goal</span>}
                   </div>
-                  <span className="text-xs font-medium text-slate-500">
+                  <span className="text-xs font-medium text-zinc-400">
                     {stage.uses_previous_output ? "Uses prior output" : "Starts from campaign inputs"}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-slate-600">{stage.purpose}</p>
+                <p className="mt-2 text-sm text-zinc-300">{stage.purpose}</p>
                 {stage.module_ids.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <strong className="text-sm">Run</strong>
@@ -1016,7 +1146,7 @@ function ExecutionChainsPanel({
                     ))}
                   </div>
                 )}
-                <div className="mt-3 grid gap-1 text-xs text-slate-500">
+                <div className="mt-3 grid gap-1 text-xs text-zinc-400">
                   <span><strong>Inputs:</strong> {stage.required_inputs.join(", ") || "none"}</span>
                   <span><strong>Produces:</strong> {stage.produces.join("; ") || "none"}</span>
                   <span><strong>Next:</strong> {stage.next_action}</span>
@@ -1157,7 +1287,7 @@ export function ModulesPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="font-bold">{item.id}</div>
-                    <div className="text-sm text-slate-600">{item.description}</div>
+                    <div className="text-sm text-zinc-400">{item.description}</div>
                   </div>
                   <span className={opsecBadge(item.opsec_level)}>{item.opsec_level || "n/a"}</span>
                 </div>
@@ -1199,7 +1329,7 @@ export function ModulesPage() {
             eyebrow={selected ? selected.id : "Select module"}
             action={selected ? <span className={opsecBadge(selected.opsec_level)}>{selected.opsec_level || "n/a"}</span> : null}
           />
-          {selected?.description && <p className="text-sm text-slate-600">{selected.description}</p>}
+          {selected?.description && <p className="text-sm text-zinc-300">{selected.description}</p>}
           {selected && (selected.capability_flags?.length || selected.supported_modes?.length) ? (
             <div className="mt-2 flex flex-wrap gap-1">
               {(selected.capability_flags ?? []).map((flag) => <span className="badge" key={flag}>{flag}</span>)}
@@ -1358,6 +1488,11 @@ export function ReportsPage() {
           : current
       );
       setLibraryError("");
+      const activePayload = (generate.data ?? lastGenerateResult?.payload) as { filename?: string } | undefined;
+      if (activePayload?.filename === item.filename) {
+        generate.reset();
+        setLastGenerateResult(null);
+      }
     },
     onError: (error) => {
       setLibraryError(readableError(error, "Report could not be deleted."));
@@ -1371,11 +1506,26 @@ export function ReportsPage() {
         (current) => current ? { ...current, reports: [] } : current
       );
       setLibraryError("");
+      generate.reset();
+      setLastGenerateResult(null);
     },
     onError: (error) => {
       setLibraryError(readableError(error, "Report library could not be cleared."));
     }
   });
+
+  // Auto-clear stale generate result if the report file was deleted from library
+  useEffect(() => {
+    if (reports.isSuccess && (generate.data || lastGenerateResult?.payload)) {
+      const activePayload = (generate.data ?? lastGenerateResult?.payload) as { filename?: string } | undefined;
+      const activeFilename = activePayload?.filename;
+      if (activeFilename && !reportItems.some((r) => r.filename === activeFilename)) {
+        generate.reset();
+        setLastGenerateResult(null);
+      }
+    }
+  }, [reports.isSuccess, reportItems, generate.data, lastGenerateResult]);
+
   const deleteDisabled = deleteReport.isPending || clearReports.isPending;
   return (
     <Page
@@ -1429,6 +1579,10 @@ export function ReportsPage() {
         <DataPanel
           title={generateIssue ? "Generate Error" : "Generate Result"}
           data={generate.error ?? generate.data ?? persistedGenerateResult?.payload}
+          onClear={() => {
+            generate.reset();
+            setLastGenerateResult(null);
+          }}
         />
       </section>
       )}
@@ -1463,7 +1617,7 @@ export function ReportsPage() {
             <tbody>
               {reportItems.map((item) => (
                 <tr key={item.filename}>
-                  <td className="font-medium text-slate-900">{item.filename}</td>
+                  <td className="font-medium text-zinc-100 font-mono text-sm">{item.filename}</td>
                   <td><span className="badge">{item.format}</span></td>
                   <td>{formatBytes(item.size_bytes)}</td>
                   <td>{formatReportDate(item.modified_at)}</td>
@@ -1578,7 +1732,7 @@ export function TemplatesPage() {
           {selected ? (
             <div className="preview-card mt-3">
               <div className="font-bold">{selected.name}</div>
-              <p className="mt-1 text-sm text-slate-600">{selected.description}</p>
+              <p className="mt-1 text-sm text-zinc-300">{selected.description}</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <span className="badge">{selected.stages ?? 0} stages</span>
                 <span className="badge">{selected.modules ?? 0} modules</span>
@@ -1599,7 +1753,7 @@ export function TemplatesPage() {
               }}
             />
           </label>
-          <p className="mt-1 text-xs text-slate-500">JSON object. Leave {"{}"} for defaults.</p>
+          <p className="mt-1 text-xs text-zinc-400">JSON object. Leave {"{}"} for defaults.</p>
           {(warning || !paramsValid) && (
             <p className="notice notice-danger mt-2">
               {warning || "Global parameters must be a valid JSON object."}
@@ -1882,8 +2036,8 @@ export function SecurityPage() {
           <div className="profile-row mb-3">
             <span className="profile-avatar-light">{user?.username?.slice(0, 1).toUpperCase() ?? "A"}</span>
             <div>
-              <div className="font-semibold text-slate-950">{user?.username}</div>
-              <div className="text-xs text-slate-500">{formatRole(user?.role)}</div>
+              <div className="font-semibold text-zinc-100">{user?.username}</div>
+              <div className="text-xs text-zinc-400">{formatRole(user?.role)}</div>
             </div>
           </div>
           <form className="grid gap-2" onSubmit={(event) => {
@@ -1923,13 +2077,13 @@ export function SecurityPage() {
           {(keys.data ?? []).map((key) => (
             <div className="key-row" key={key.id}>
               <div className="min-w-0">
-                <div className="font-semibold text-slate-950">{key.name ?? "Unnamed API key"}</div>
-                <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+                <div className="font-semibold text-zinc-100">{key.name ?? "Unnamed API key"}</div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-zinc-400">
                   <span className="font-mono">{apiKeyVisibleIdentifier(key)}</span>
                   {key.scopes ? <span className="badge">Scope: {key.scopes}</span> : null}
                   {apiKeyOwnerLabel(key) ? <span>Owner: {apiKeyOwnerLabel(key)}</span> : null}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-zinc-400">
                   {key.created_at ? <span>Created: {formatDateTime(key.created_at)}</span> : null}
                   {key.expires_at ? <span>Expires: {formatDateTime(key.expires_at)}</span> : <span>No expiry</span>}
                 </div>
@@ -1963,15 +2117,15 @@ export function SecurityPage() {
           >
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-lg font-bold text-slate-950" id="api-key-dialog-title">Save your key</h2>
-                <p className="mt-1 text-sm text-slate-600">Copy this secret key now and store it somewhere safe.</p>
+                <h2 className="text-lg font-bold text-zinc-100" id="api-key-dialog-title">Save your key</h2>
+                <p className="mt-1 text-sm text-zinc-400">Copy this secret key now and store it somewhere safe.</p>
               </div>
               {generatedApiKey.prefix ? <span className="badge font-mono">{generatedApiKey.prefix}</span> : null}
             </div>
-            <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+            <p className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-200">
               This secret key is shown only once. After you close this dialog, ARES will not show the full key again.
             </p>
-            <label className="block text-sm font-semibold text-slate-800">
+            <label className="block text-sm font-semibold text-zinc-300">
               Secret key
               <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
@@ -1989,11 +2143,11 @@ export function SecurityPage() {
               </div>
             </label>
             {copyStatus === "manual" && (
-              <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <p className="mt-2 rounded-md border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-300">
                 Clipboard access was blocked. The key field is selected; press Ctrl+C to copy it manually.
               </p>
             )}
-            {generatedApiKey.note ? <p className="mt-3 text-sm text-slate-600">{generatedApiKey.note}</p> : null}
+            {generatedApiKey.note ? <p className="mt-3 text-sm text-zinc-400">{generatedApiKey.note}</p> : null}
             <div className="mt-5 flex justify-end">
               <button className="btn btn-primary" onClick={closeGeneratedKeyModal} type="button">Done</button>
             </div>
@@ -2056,7 +2210,7 @@ export function EdrPage() {
             <strong>{formatRate(stats.data?.success_rate)}</strong>
           </div>
         </div>
-        <p className="mt-3 text-sm text-slate-600">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
+        <p className="mt-3 text-sm text-zinc-400">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
       </section>
       <DataPanel title="Stats Details" data={stats.data} />
       <DataPanel title="Stats Error" data={stats.error} />
@@ -2433,6 +2587,12 @@ function formatReportDate(value: number): string {
   return new Date(timestamp).toLocaleString();
 }
 
+function formatReportTime(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  const timestamp = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: TelemetrySnapshot; loading: boolean; confirmedFindings: number }) {
   const total = metricNumber(snapshot?.modules, "total");
   const success = metricNumber(snapshot?.modules, "success");
@@ -2461,7 +2621,15 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
       <SectionHeader
         title="Telemetry Report"
         description={loading ? "Waiting for metrics." : `Last sample: ${formatTimestamp(snapshot?.timestamp)}`}
-        action={<span className={snapshot ? "badge badge-low" : "badge badge-medium"}>{snapshot ? "online" : "pending"}</span>}
+        action={
+          <div className="telemetry-live-status" title="Real-time telemetry ingestion pipeline">
+            <span className={`status-indicator-dot ${snapshot ? "active" : "pending"}`} />
+            <span className="status-indicator-text">{snapshot ? "Ingestion Active" : "Awaiting Data"}</span>
+            {snapshot?.timestamp ? (
+              <span className="status-indicator-time font-mono">{formatReportTime(snapshot.timestamp)}</span>
+            ) : null}
+          </div>
+        }
       />
 
       <div className="telemetry-chart" aria-label="Runtime telemetry chart">
@@ -2472,14 +2640,14 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
       </div>
 
       <div className="mini-stat-grid mt-4">
-        <MiniStat title="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} icon={<Database size={16} />} />
-        <MiniStat title="Findings" value={formatMetric(findings)} icon={<ShieldAlert size={16} />} />
-        <MiniStat title="Queue" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} icon={<Layers size={16} />} />
-        <MiniStat title="Throughput" value={throughputValue} detail={latencyDetail} icon={<TrendingUp size={16} />} />
+        <MiniStat title="Module runs" value={formatMetric(total)} detail={`${success} success / ${failed} failed`} />
+        <MiniStat title="Findings" value={formatMetric(findings)} />
+        <MiniStat title="Queue" value={formatMetric(queueDepth)} detail={`${activeWorkers} active workers`} />
+        <MiniStat title="Throughput" value={throughputValue} detail={latencyDetail} />
       </div>
 
       <div className="telemetry-footer">
-        <span><Target size={14} /> Scope: {snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</span>
+        <span>Scope: {snapshot?.campaign_id ? `campaign ${snapshot.campaign_id}` : "global"}</span>
         <span>{hostsAvailable ? `${hostsDiscovered} discovered / ${hostsOwned ?? 0} owned hosts` : "Host ownership unavailable"}</span>
         <span>{workerTotal === 0 ? "no worker sample" : unhealthyWorkers === 0 ? "workers healthy" : `${unhealthyWorkers} unhealthy workers`}</span>
       </div>
@@ -2505,27 +2673,143 @@ function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: num
   );
 }
 
-function DataPanel({ title, data }: { title: string; data: unknown }) {
+function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
+  if (!data) return null;
+  const score = data.base_score ?? data.score ?? data.overall;
+  const severity = String(data.severity ?? (typeof score === "number" && score >= 9 ? "critical" : typeof score === "number" && score >= 7 ? "high" : typeof score === "number" && score >= 4 ? "medium" : "low")).toLowerCase();
+  const vector = data.vector_string ?? data.vector;
+  return (
+    <section className="panel p-4 cvss-card">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <div>
+          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Risk Assessment</div>
+          <h3 className="text-base font-semibold text-white">CVSS Metrics</h3>
+        </div>
+        <span className={`badge status-${severity} font-semibold uppercase text-xs px-2.5 py-1`}>
+          {severity}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+        <div className="bg-[#18181c] border border-[#27272a] rounded-lg p-3">
+          <div className="text-[11px] text-zinc-400">Base Score</div>
+          <div className="text-2xl font-bold font-mono text-white mt-1">{score !== undefined ? String(score) : "N/A"}</div>
+        </div>
+        <div className="bg-[#18181c] border border-[#27272a] rounded-lg p-3 sm:col-span-2">
+          <div className="text-[11px] text-zinc-400">Vector String</div>
+          <div className="text-xs font-mono text-zinc-300 mt-1.5 break-all">{vector ? String(vector) : "Vector string not calculated"}</div>
+        </div>
+      </div>
+      <details className="advanced-details">
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw CVSS Payload</summary>
+        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+      </details>
+    </section>
+  );
+}
+
+function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
+  if (!data) return null;
+  return (
+    <section className="panel p-4 diff-card">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Delta Analysis</div>
+          <h3 className="text-base font-semibold text-white">Campaign Comparison</h3>
+        </div>
+        <span className="badge badge-low text-xs">Compared</span>
+      </div>
+      <details className="advanced-details" open>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Detailed Delta Metrics</summary>
+        <pre className="json-box text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+      </details>
+    </section>
+  );
+}
+
+function DataPanel({
+  title,
+  data,
+  onClear
+}: {
+  title: string;
+  data: unknown;
+  onClear?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
   if (!data) {
     return null;
   }
   const isError = data instanceof Error || data instanceof ApiError;
+  if (isError) {
+    const errorMsg = data instanceof ApiError ? String(data.detail) : data instanceof Error ? data.message : "The request failed.";
+    return (
+      <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs text-rose-300 flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-start gap-2.5">
+          <AlertTriangle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+          <div>
+            <strong className="font-semibold text-rose-200 block mb-0.5">{title}</strong>
+            <span className="leading-relaxed">{errorMsg}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {onClear && (
+            <button
+              className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-rose-300 hover:text-white border-rose-500/30 hover:bg-rose-500/20"
+              onClick={onClear}
+              type="button"
+              title="Dismiss error"
+            >
+              <X size={12} />
+              <span>Dismiss</span>
+            </button>
+          )}
+          <span className="badge badge-high shrink-0 text-[10px] uppercase font-mono">Error</span>
+        </div>
+      </div>
+    );
+  }
+
+  const jsonText = JSON.stringify(serializeError(data), null, 2);
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(jsonText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
-    <section className="panel detail-panel">
-      <SectionHeader
-        title={title}
-        eyebrow={isError ? "Needs attention" : undefined}
-        action={isError ? <span className="badge badge-high">error</span> : <span className="badge">details</span>}
-      />
-      {isError ? (
-        <p className="notice notice-danger">
-          <AlertTriangle size={16} />
-          {data instanceof ApiError ? String(data.detail) : data instanceof Error ? data.message : "The request failed."}
-        </p>
-      ) : null}
+    <section className="panel detail-panel mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Database size={14} className="text-zinc-400" />
+          <strong className="text-xs font-semibold text-zinc-200">{title}</strong>
+        </div>
+        <div className="flex items-center gap-2">
+          {onClear && (
+            <button
+              className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50"
+              onClick={onClear}
+              type="button"
+              title="Clear payload preview"
+            >
+              <X size={12} />
+              <span>Clear</span>
+            </button>
+          )}
+          <button
+            className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1.5"
+            onClick={handleCopy}
+            type="button"
+            title="Copy payload to clipboard"
+          >
+            {copied ? <CheckCircle2 size={12} className="text-emerald-400" /> : <Copy size={12} />}
+            <span>{copied ? "Copied" : "Copy Payload"}</span>
+          </button>
+          <span className="badge text-[10px] uppercase font-mono">Payload</span>
+        </div>
+      </div>
       <details className="advanced-details">
-        <summary>Details</summary>
-        <pre className="json-box">{JSON.stringify(serializeError(data), null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Payload Details</summary>
+        <pre className="json-box mt-2 text-xs font-mono">{jsonText}</pre>
       </details>
     </section>
   );
@@ -2610,7 +2894,7 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="font-bold">{finding.title ?? `Finding ${index + 1}`}</div>
-                  <div className="mt-1 text-sm text-slate-600">{String(finding.description ?? "")}</div>
+                  <div className="mt-1 text-sm text-zinc-400">{String(finding.description ?? "")}</div>
                 </div>
                 <span className={opsecBadge(finding.severity)}>{finding.severity ?? "info"}</span>
               </div>
@@ -2620,7 +2904,7 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
                 {typeof finding.confidence === "number" && <span className="badge">Confidence: {formatRate(finding.confidence)}</span>}
               </div>
               {finding.remediation ? (
-                <p className="mt-2 text-sm text-slate-700">
+                <p className="mt-2 text-sm text-zinc-300">
                   <strong>Remediation:</strong> {String(finding.remediation)}
                 </p>
               ) : null}
@@ -2657,7 +2941,7 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
           <div className="compact-row" key={`${stage.name ?? "stage"}-${index}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold">{index + 1}. {stage.name ?? "stage"}</span>
-              <span className="text-xs font-semibold text-slate-500">{stage.modules?.length ?? 0} modules</span>
+              <span className="text-xs font-semibold text-zinc-400">{stage.modules?.length ?? 0} modules</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               {(stage.modules ?? []).map((moduleId) => <span className="badge" key={moduleId}>{moduleId}</span>)}
@@ -2665,12 +2949,13 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
           </div>
         ))}
       </div>
-      <p className="mt-3 text-sm text-slate-500">Ready for campaign dry-run structure.</p>
+      <p className="mt-3 text-sm text-zinc-400">Ready for campaign dry-run structure.</p>
     </section>
   );
 }
 
 function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; loading?: boolean }) {
+  const [copied, setCopied] = useState(false);
   if (loading) {
     return (
       <div className="detail-summary mt-3">
@@ -2685,14 +2970,32 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
   }
   const targets = campaignTargets(campaign);
   const scope = campaignScopeEntries(campaign);
+
+  const copyScope = () => {
+    void navigator.clipboard.writeText(JSON.stringify(campaign, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <div className="detail-summary mt-3">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-bold">{campaign.name}</h3>
-          <p className="text-sm text-slate-600">{campaign.client ?? "No client"} &middot; {campaign.status ?? "created"}</p>
+          <h3 className="text-base font-bold text-white tracking-tight">{campaign.name}</h3>
+          <p className="text-xs text-zinc-400 mt-0.5">{campaign.client ?? "No client"} &middot; <span className="text-emerald-400 uppercase font-mono text-[11px]">{campaign.status ?? "created"}</span></p>
         </div>
-        <span className="badge">{campaign.operator ?? "operator"}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={copyScope}
+            className="btn btn-compact text-[11px] py-1 px-2.5 flex items-center gap-1.5"
+            title="Copy campaign JSON"
+          >
+            {copied ? <CheckCircle2 size={12} className="text-emerald-400" /> : <Copy size={12} />}
+            <span>{copied ? "Copied" : "Copy Scope"}</span>
+          </button>
+          <span className="badge font-mono text-[11px]">{campaign.operator ?? "operator"}</span>
+        </div>
       </div>
       <div className="mini-stat-grid">
         <MiniStat title="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
@@ -2700,6 +3003,10 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
         <MiniStat title="Noise Profile" value={String(campaign.noise_profile ?? "stealth")} detail="OPSEC guardrail" />
         <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
+      <details className="advanced-details mt-3">
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw Scope Parameters</summary>
+        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(campaign, null, 2)}</pre>
+      </details>
     </div>
   );
 }
@@ -2725,6 +3032,33 @@ function CampaignPicker({
   );
 }
 
+function StatusBadge({ status }: { status?: string }) {
+  const normalized = String(status ?? "").toLowerCase();
+  const isOk = ["active", "running", "ready", "restored", "complete", "completed"].some((item) => normalized.includes(item));
+  const isWarn = ["paused", "pending", "draft", "created"].some((item) => normalized.includes(item));
+  const isDanger = ["failed", "deleted", "blocked", "error"].some((item) => normalized.includes(item));
+  const toneClass = isOk ? "badge badge-low" : isDanger ? "badge badge-high" : isWarn ? "badge badge-medium" : "badge";
+  const dotColor = isOk ? "bg-emerald-400" : isDanger ? "bg-rose-400" : isWarn ? "bg-amber-400" : "bg-zinc-400";
+  return (
+    <span className={toneClass}>
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
+      <span>{status ?? "created"}</span>
+    </span>
+  );
+}
+
+function NoiseProfileBadge({ noise }: { noise?: string }) {
+  const normalized = String(noise ?? "stealth").toLowerCase();
+  const isNoisy = normalized.includes("noisy") || normalized.includes("critical");
+  const isEvasive = normalized.includes("evasive") || normalized.includes("medium");
+  const badgeClass = isNoisy ? "badge badge-high" : isEvasive ? "badge badge-medium" : "badge";
+  return (
+    <span className={`${badgeClass} font-mono text-[11px] uppercase tracking-wider`}>
+      {noise ?? "stealth"}
+    </span>
+  );
+}
+
 function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
   return (
     <section className="panel table-panel">
@@ -2741,13 +3075,17 @@ function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
                 <tr key={campaign.id}>
                   <td className="muted-cell">#{String(index + 1).padStart(2, "0")}</td>
                   <td>
-                    <div className="font-medium text-slate-950">{campaign.name}</div>
-                    <div className="mt-1 flex items-center gap-1 text-xs text-slate-500"><Eye size={13} /> {campaign.id.slice(0, 12)}</div>
+                    <div className="font-semibold text-zinc-100 text-sm tracking-tight">{campaign.name}</div>
+                    <div className="mt-1 flex items-center gap-1.5 text-xs">
+                      <span className="font-mono text-[11px] text-zinc-400 bg-zinc-900/90 px-1.5 py-0.5 rounded border border-zinc-800/80">
+                        {campaign.id.slice(0, 12)}
+                      </span>
+                    </div>
                   </td>
-                  <td>{campaign.client || "Internal"}</td>
-                  <td><span className={statusBadge(campaign.status)}>{campaign.status ?? "created"}</span></td>
-                  <td><span className={opsecBadge(campaign.noise_profile)}>{campaign.noise_profile ?? "stealth"}</span></td>
-                  <td>{campaign.operator || "operator"}</td>
+                  <td className="text-zinc-300 text-sm">{campaign.client || "Internal"}</td>
+                  <td><StatusBadge status={campaign.status} /></td>
+                  <td><NoiseProfileBadge noise={campaign.noise_profile} /></td>
+                  <td className="text-zinc-400 text-sm font-mono">{campaign.operator || "operator"}</td>
                 </tr>
               ))}
             </tbody>
@@ -2775,10 +3113,10 @@ function FindingsTable({ findings }: { findings: any[] }) {
               {findings.map((finding, index) => (
                 <tr key={finding.id ?? index}>
                   <td><span className={opsecBadge(finding.severity)}>{finding.severity ?? "info"}</span></td>
-                  <td className="font-medium text-slate-950">{finding.title ?? `Finding ${index + 1}`}</td>
-                  <td>{finding.module_id ?? "n/a"}</td>
-                  <td>{finding.mitre_technique ?? "n/a"}</td>
-                  <td>{finding.host ?? "n/a"}</td>
+                  <td className="font-semibold text-zinc-100 text-sm">{finding.title ?? `Finding ${index + 1}`}</td>
+                  <td className="text-zinc-300 font-mono text-xs">{finding.module_id ?? "n/a"}</td>
+                  <td className="text-zinc-300 font-mono text-xs">{finding.mitre_technique ?? "n/a"}</td>
+                  <td className="text-zinc-400 text-sm">{finding.host ?? "n/a"}</td>
                 </tr>
               ))}
             </tbody>
@@ -2867,9 +3205,9 @@ function ParamForm({
                 onChange(next);
               }}
             />
-            {description && <span className="mt-1 block text-xs text-slate-600">{description}</span>}
+            {description && <span className="mt-1 block text-xs text-zinc-400">{description}</span>}
             {fieldDefaultHint(field) && (
-              <span className="mt-1 block text-xs font-medium text-slate-500">{fieldDefaultHint(field)}</span>
+              <span className="mt-1 block text-xs font-medium text-zinc-400">{fieldDefaultHint(field)}</span>
             )}
           </label>
         );

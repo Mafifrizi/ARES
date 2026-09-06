@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import {
   CampaignsPage,
   DashboardShell,
@@ -20,6 +21,11 @@ const GraphPage = lazy(() => import("../graph/GraphPage"));
 
 function DashboardRoutes() {
   const { selectedCampaignId, setSelectedCampaignId } = useDashboardUi();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    (window as unknown as { __navigate?: typeof navigate }).__navigate = navigate;
+  }, [navigate]);
 
   return (
     <Routes>

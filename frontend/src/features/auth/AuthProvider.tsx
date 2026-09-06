@@ -117,7 +117,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!ownsProviderLifecycle(loginLifecycle)) {
           throw new Error("Session changed");
         }
-        resetLocalSession();
+        clearTokens();
+        queryClient.clear();
+        clearDashboardSession();
         if (!ownsProviderLifecycle(loginLifecycle)) {
           throw new Error("Session changed");
         }
