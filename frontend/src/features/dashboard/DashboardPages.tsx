@@ -589,10 +589,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           <div className="sidebar-brand">
             <img className="sidebar-mark" src={brandMarkPath} alt="" aria-hidden="true" />
             <div className="min-w-0">
-              <div className="sidebar-title flex items-center gap-1.5">
-                <span>ARES</span>
-                <span className="text-[9px] uppercase font-mono px-1 py-0.5 rounded border border-red-800/40 bg-red-950/40 text-red-400 font-semibold tracking-wider">v6.0</span>
-              </div>
+              <div className="sidebar-title">ARES</div>
               <div className="sidebar-subtitle">Adversary Emulation Suite</div>
             </div>
           </div>

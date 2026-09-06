@@ -45,38 +45,26 @@ export function LoginPage() {
         <div className="pointer-events-none absolute left-1/3 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[32rem] w-[32rem] rounded-full bg-red-900/[0.06] blur-[80px] animate-ares-breathe" />
 
         {/* Brand header */}
-        <div className="relative z-10 flex items-center justify-between animate-login-enter" style={{ animationDelay: "0ms" }}>
-          <div className="flex items-center gap-3">
-            <img
-              className="h-9 w-9 object-contain rounded-md border border-zinc-800 bg-zinc-900/60 p-1 shadow-inner"
-              src={brandMarkPath}
-              alt="ARES"
-            />
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-semibold text-white tracking-tight">ARES Dashboard</h1>
-                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded border border-red-800/40 bg-red-950/40 text-red-400 font-medium">Enterprise</span>
-              </div>
-              <p className="text-[11px] text-zinc-400 font-mono">Autonomous Adversary Emulation Platform</p>
-            </div>
-          </div>
-          <div className="hidden xl:inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-400 font-mono">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>ENCLAVE v6.0</span>
+        <div className="relative z-10 flex items-center gap-3 animate-login-enter" style={{ animationDelay: "0ms" }}>
+          <img
+            className="h-9 w-9 object-contain rounded-md border border-zinc-800 bg-zinc-900/60 p-1"
+            src={brandMarkPath}
+            alt="ARES"
+          />
+          <div>
+            <h1 className="text-base font-semibold text-white tracking-tight">ARES Dashboard</h1>
+            <p className="text-[11px] text-zinc-500 font-mono">Adversary Emulation Suite</p>
           </div>
         </div>
 
         {/* Value proposition */}
         <div className="relative z-10 max-w-lg space-y-6 my-auto py-12">
           <div className="animate-login-enter" style={{ animationDelay: "80ms" }}>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-950/40 border border-red-800/30 text-[11px] font-mono text-red-400 mb-3">
-              <span>Continuous Security Validation</span>
-            </div>
             <h2 className="text-3xl font-semibold text-zinc-100 tracking-tight leading-tight">
-              Autonomous adversary emulation for modern enterprise security.
+              Autonomous adversary emulation for offensive security teams.
             </h2>
             <p className="text-sm text-zinc-400 leading-relaxed mt-3">
-              Coordinate multi-vector attack chains, stress-test defensive barriers across enterprise enclaves, and validate detection posture with complete audit fidelity.
+              Coordinate multi-vector attack chains, assess defensive barriers across enterprise enclaves, and validate resilience against adversary techniques with full audit fidelity.
             </p>
           </div>
 
@@ -92,7 +80,7 @@ export function LoginPage() {
               <div className="flex-1 min-w-0">
                 <strong className="text-zinc-200 block text-xs font-medium">Multi-Vector Attack Graph</strong>
                 <span className="text-zinc-400 text-[11px] leading-relaxed block mt-0.5">
-                  Interactive DAG execution chains with deterministic objective replay and BloodHound ingest.
+                  Interactive DAG execution chains with deterministic objective replay.
                 </span>
               </div>
             </div>
@@ -122,21 +110,14 @@ export function LoginPage() {
               <div className="flex-1 min-w-0">
                 <strong className="text-zinc-200 block text-xs font-medium">Zero-Trust Ticket Barrier</strong>
                 <span className="text-zinc-400 text-[11px] leading-relaxed block mt-0.5">
-                  Cryptographically verified WebSocket sessions, memory-only JWT tokens, and immutable audit logs.
+                  Cryptographically verified WebSocket sessions and immutable audit logging.
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Enterprise Enclave Status Footer */}
-        <div className="relative z-10 flex items-center justify-between text-[11px] text-zinc-500 font-mono border-t border-zinc-800/60 pt-4 mt-auto">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-zinc-400">Zero-Trust Enclave Active</span>
-          </div>
-          <span className="text-zinc-500">v6.0.0-PROD</span>
-        </div>
+        <div />
       </div>
 
       {/* Right Column */}
@@ -154,7 +135,7 @@ export function LoginPage() {
             alt="ARES"
           />
           <div className="text-xl font-semibold text-white tracking-tight">ARES Enclave</div>
-          <p className="text-xs text-zinc-400 mt-1">Autonomous Adversary Emulation</p>
+          <p className="text-xs text-zinc-400 mt-1">Adversary Emulation Suite</p>
         </div>
 
         {/* Auth card */}
@@ -163,12 +144,8 @@ export function LoginPage() {
           style={{ animationDelay: "140ms" }}
         >
           <div className="mb-6">
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-400 font-mono mb-3">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span>ZERO-TRUST GATEWAY</span>
-            </div>
             <h2 className="text-lg font-semibold text-white tracking-tight">Operator Authentication</h2>
-            <p className="text-xs text-zinc-400 mt-1">Sign in with authorized enclave credentials</p>
+            <p className="text-xs text-zinc-500 mt-1">Sign in with your authorized enclave credentials</p>
           </div>
 
           <form onSubmit={(event) => void submit(event)} className="space-y-4">
