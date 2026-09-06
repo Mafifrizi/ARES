@@ -102,12 +102,31 @@ class HostState:
     os_type:      str = ""   # e.g. "Windows Server", "Linux"
     domain_role:  str = ""   # e.g. "domain_controller", "member"
     attack_history: list[dict] = field(default_factory=list)
+    security_controls: dict[str, Any] = field(default_factory=dict)
+    defense_profile: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.ip and not self.ip_address:
             self.ip_address = self.ip
         elif self.ip_address and not self.ip:
             self.ip = self.ip_address
+
+    def update_defense_profile(self, controls: dict[str, Any]) -> None:
+        """Update or merge detected defense controls and security posture."""
+        self.defense_profile.update(controls)
+        self.security_controls.update(controls)
+        self.last_updated = time.time()
+
+    def has_defense(self, control_name: str) -> bool:
+        """Check if a specific security control or defense is active on this host."""
+        norm = control_name.strip().lower()
+        for k, v in self.defense_profile.items():
+            if k.strip().lower() == norm and bool(v):
+                return True
+        for k, v in self.security_controls.items():
+            if k.strip().lower() == norm and bool(v):
+                return True
+        return False
 
     @property
     def owned_by(self) -> str:
@@ -170,6 +189,8 @@ class HostState:
             "reachable_from":        self.reachable_from,
             "can_reach":             self.can_reach,
             "tags":                  self.tags,
+            "security_controls":     dict(self.security_controls),
+            "defense_profile":       dict(self.defense_profile),
         }
 
 
@@ -451,6 +472,8 @@ class OperatorSession:
                 owned_via   = h.get("owned_via", ""),
                 owned_at    = h.get("owned_at"),
                 attack_history = h.get("attack_history", []),
+                security_controls = h.get("security_controls", {}),
+                defense_profile = h.get("defense_profile", {}),
             )
             sess._hosts[ip] = hs
         sess._pivot_proxies = data.get("pivot_proxies", [])

@@ -259,6 +259,20 @@ class EDRAdaptiveBypassModule(BaseModule):
             os_version=ctx.params.get("os_version", ""),
             **passthrough_params,
         )
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_or_create_host") and target:
+            host_state = session.get_or_create_host(target)
+            controls = {
+                "edr_vendor": edr_vendor,
+                "edr_active": bool(edr_vendor and edr_vendor != "unknown"),
+                "blind_spots": raw.get("blind_spots", []),
+            }
+            if edr_vendor and edr_vendor != "unknown":
+                controls[edr_vendor.lower().replace("-", "_").replace(" ", "_")] = True
+            if hasattr(host_state, "update_defense_profile"):
+                host_state.update_defense_profile(controls)
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

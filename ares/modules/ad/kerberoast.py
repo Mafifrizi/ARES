@@ -248,6 +248,61 @@ class KerberoastModule(BaseModule):
     OUTPUTS            = ["kerberos_hashes"]
     MITRE_TECHNIQUES   = ["T1558.003"]
 
+    async def assess_feasibility(self, ctx: "Any") -> Any:
+        """
+        Assess pre-flight feasibility for Kerberoasting.
+        Evaluates DC accessibility, domain credentials, noise profile (Event ID 4769 risk),
+        and recommends cipher tuning or targeted SPN requests.
+        """
+        from ares.modules.base import FeasibilityReport
+        from ares.core.campaign import NoiseProfile
+        ad = self._extract_ad_params(ctx)
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        score = 1.0
+        risk = "medium"
+
+        target_host = ad.get("dc") or getattr(ctx, "target", "")
+        if not target_host:
+            blockers.append("No Domain Controller (dc) or target IP specified")
+            score -= 0.5
+
+        if not ad.get("username"):
+            blockers.append("No domain credentials available to request TGS tickets")
+            score -= 0.4
+            recommendations.append("ad.asreproast")
+
+        noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
+        if noise == NoiseProfile.STEALTH:
+            blockers.append("Blocked in STEALTH profile: TGS requests generate Event ID 4769")
+            score = 0.1
+            risk = "high_noise"
+            recommendations.append("ad.enum_spn")
+            recommendations.append("ad.adcs")
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target_host:
+            host_state = session.get_host(target_host)
+            if host_state:
+                if host_state.has_defense("mde_identity") or host_state.has_defense("kerberos_anomaly_detection"):
+                    risk = "high_noise"
+                    score -= 0.3
+                    recommendations.append("ad.adcs")
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning={
+                "preferred_cipher": "aes256-cts-hmac-sha1-96",
+                "rate_limit_seconds": 5.0 if noise != NoiseProfile.AGGRESSIVE else 0.5,
+            },
+            details={"target_dc": target_host, "spn_source": "enum_spn" if "spn_list" in getattr(ctx, "params", {}) else "dynamic"},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """
         Enforce dc, domain, and domain credentials.

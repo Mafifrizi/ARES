@@ -214,6 +214,52 @@ class ASREPRoastModule(BaseModule):
     OUTPUTS            = ["asrep_hashes"]
     MITRE_TECHNIQUES   = ["T1558.004"]
 
+    async def assess_feasibility(self, ctx: "Any") -> Any:
+        """
+        Assess pre-flight feasibility for AS-REP Roasting.
+        Evaluates DC accessibility, domain targeting, and pre-auth bypass viability.
+        Works without credentials if a user list or userfile is supplied.
+        """
+        from ares.modules.base import FeasibilityReport
+        ad = self._extract_ad_params(ctx)
+        blockers: list[str] = []
+        recommendations: list[str] = []
+        score = 1.0
+        risk = "low"
+
+        target_host = ad.get("dc") or getattr(ctx, "target", "")
+        if not target_host:
+            blockers.append("No Domain Controller (dc) or target IP specified")
+            score -= 0.5
+
+        has_creds = bool(ad.get("username")) and bool(ad.get("password"))
+        has_file = bool(getattr(ctx, "params", {}).get("userfile"))
+        has_list = bool(getattr(ctx, "params", {}).get("usernames"))
+
+        if not has_creds and not has_file and not has_list:
+            blockers.append("No user list or credentials available for AS-REP enumeration")
+            score -= 0.4
+            recommendations.append("ad.enum_users")
+
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "get_host") and target_host:
+            host_state = session.get_host(target_host)
+            if host_state:
+                if host_state.has_defense("mde_identity") or host_state.has_defense("kerberos_anomaly_detection"):
+                    risk = "medium"
+                    score -= 0.2
+
+        feasible = len(blockers) == 0 and score >= 0.4
+        return FeasibilityReport(
+            feasible=feasible,
+            score=max(0.0, min(1.0, score)),
+            risk_level=risk,
+            blockers=blockers,
+            recommended_alternatives=recommendations,
+            opsec_tuning={"batch_size": 10 if risk == "medium" else 50},
+            details={"auth_mode": "authenticated" if has_creds else "unauthenticated_list"},
+        )
+
     async def validate(self, ctx: "Any") -> None:
         """Validate: dc + domain + at least one input mode present."""
         from ares.core.context import ExecutionContext

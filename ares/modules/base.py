@@ -138,6 +138,35 @@ class OpsecLevel(str, Enum):
     HIGH_NOISE = "high_noise"  # DCSync, brute force — blocked in stealth
 
 
+# ── Feasibility Report ────────────────────────────────────────────────────────
+
+@dataclass
+class FeasibilityReport:
+    """
+    Structured pre-flight feasibility evaluation report.
+    Assesses target defense posture, likelihood of success, OPSEC risk,
+    and recommends alternative modules if unfeasible.
+    """
+    feasible: bool = True
+    score: float = 1.0  # 0.0 (impossible/blocked) to 1.0 (optimal)
+    risk_level: str = "low"  # silent, low, medium, high_noise, critical_alarm
+    blockers: list[str] = field(default_factory=list)
+    recommended_alternatives: list[str] = field(default_factory=list)
+    opsec_tuning: dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "feasible": self.feasible,
+            "score": round(self.score, 3),
+            "risk_level": self.risk_level,
+            "blockers": list(self.blockers),
+            "recommended_alternatives": list(self.recommended_alternatives),
+            "opsec_tuning": dict(self.opsec_tuning),
+            "details": dict(self.details),
+        }
+
+
 # ── BaseModule ────────────────────────────────────────────────────────────────
 
 class BaseModule(abc.ABC):
@@ -150,6 +179,39 @@ class BaseModule(abc.ABC):
 
     Formal SDK contract (v0.9.0+) — see validate(), before_request(), finding().
     """
+
+    async def assess_feasibility(self, ctx: "Any") -> FeasibilityReport:
+        """
+        Evaluate whether this module is feasible against target defenses
+        prior to execution. Does not make aggressive network calls.
+
+        Default implementation:
+            - Inspects target host defense profile in ctx.session if available
+            - Evaluates OPSEC level against campaign noise profile
+            - Subclasses override to provide defense-specific logic (e.g. EDR, Credential Guard)
+        """
+        risk = getattr(self.OPSEC_LEVEL, "value", str(self.OPSEC_LEVEL or "low"))
+        noise_profile = getattr(ctx, "opsec_profile", "normal")
+
+        if noise_profile == "stealth" and risk == "high_noise":
+            return FeasibilityReport(
+                feasible=False,
+                score=0.2,
+                risk_level="high_noise",
+                blockers=["Module OPSEC level is high_noise under a stealth campaign profile"],
+                recommended_alternatives=[],
+                opsec_tuning={"suggested_profile": "normal"},
+            )
+
+        return FeasibilityReport(
+            feasible=True,
+            score=1.0,
+            risk_level=risk,
+            blockers=[],
+            recommended_alternatives=[],
+            opsec_tuning={},
+            details={},
+        )
 
     async def validate(self, ctx: "Any") -> None:
         """
