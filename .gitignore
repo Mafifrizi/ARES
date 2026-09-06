@@ -60,3 +60,5 @@ logs/
 frontend/*.tsbuildinfo
 file
 scratch/
+.agents/
+skills-lock.json
