@@ -1,6 +1,7 @@
-import { AlertCircle, Eye, EyeOff, Loader2 } from "lucide-react";
+import { AlertCircle, Eye, EyeOff } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { AresIgniteButton } from "./AresIgniteButton";
 import { BackgroundAnimationCanvas } from "./BackgroundAnimationCanvas";
 import { useAuth } from "./authContext";
 
@@ -112,20 +113,9 @@ export function LoginPage() {
               </div>
             )}
 
-            <button
-              className="w-full mt-2 flex items-center justify-center gap-2 rounded-md bg-zinc-100 hover:bg-white active:scale-[0.98] px-4 py-2.5 text-sm font-semibold text-zinc-950 transition-all duration-150 shadow-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:opacity-50 disabled:cursor-not-allowed"
-              type="submit"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 size={16} className="animate-spin text-zinc-950" />
-                  <span>Signing in...</span>
-                </>
-              ) : (
-                <span>Sign in</span>
-              )}
-            </button>
+            <AresIgniteButton type="submit" isLoading={isSubmitting} disabled={isSubmitting}>
+              Sign in
+            </AresIgniteButton>
           </form>
         </div>
 
