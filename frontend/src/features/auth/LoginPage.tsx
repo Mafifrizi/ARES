@@ -39,10 +39,10 @@ export function LoginPage() {
       {/* Left Column */}
       <div className="hidden lg:flex lg:col-span-7 flex-col justify-between p-12 xl:p-16 border-r border-[#1a1a1f] bg-[#0b0b0e] relative overflow-hidden">
         {/* The mesh IS the animation — purposeful: visualises the live attack graph */}
-        <SecurityMeshCanvas className="opacity-70" />
+        <SecurityMeshCanvas />
 
-        {/* Single ambient glow — draws eye toward centre of mesh */}
-        <div className="pointer-events-none absolute left-1/3 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[32rem] w-[32rem] rounded-full bg-red-900/[0.06] blur-[80px] animate-ares-breathe" />
+        {/* Ambient atmospheric glow — soft ember warmth behind dragon scales */}
+        <div className="pointer-events-none absolute left-1/3 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[36rem] w-[36rem] rounded-full bg-red-950/[0.22] blur-[110px] animate-ares-breathe" />
 
         {/* Brand header */}
         <div className="relative z-10 flex items-center gap-3 animate-login-enter" style={{ animationDelay: "0ms" }}>
