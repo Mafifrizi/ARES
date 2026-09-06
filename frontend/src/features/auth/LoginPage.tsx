@@ -53,7 +53,7 @@ export function LoginPage() {
           />
           <div>
             <h1 className="text-base font-semibold text-white tracking-tight">ARES Dashboard</h1>
-            <p className="text-[11px] text-zinc-500 font-mono">Adversary Emulation Suite</p>
+            <p className="text-[11px] text-zinc-500 font-mono">Automated Red Team Engagement System</p>
           </div>
         </div>
 
@@ -61,7 +61,7 @@ export function LoginPage() {
         <div className="relative z-10 max-w-lg space-y-6 my-auto py-12">
           <div className="animate-login-enter" style={{ animationDelay: "80ms" }}>
             <h2 className="text-3xl font-semibold text-zinc-100 tracking-tight leading-tight">
-              Autonomous adversary emulation for offensive security teams.
+              Autonomous red team engagement platform for offensive security teams.
             </h2>
             <p className="text-sm text-zinc-400 leading-relaxed mt-3">
               Coordinate multi-vector attack chains, assess defensive barriers across enterprise enclaves, and validate resilience against adversary techniques with full audit fidelity.
@@ -135,7 +135,7 @@ export function LoginPage() {
             alt="ARES"
           />
           <div className="text-xl font-semibold text-white tracking-tight">ARES Enclave</div>
-          <p className="text-xs text-zinc-400 mt-1">Adversary Emulation Suite</p>
+          <p className="text-xs text-zinc-400 mt-1">Automated Red Team Engagement System</p>
         </div>
 
         {/* Auth card */}

@@ -3,6 +3,7 @@ from __future__ import annotations
 # The independent literal oracle intentionally keeps every security fact inline.
 # ruff: noqa: E501
 import ast
+import functools
 import hashlib
 import json
 import os
@@ -12662,6 +12663,7 @@ def _module_source_files() -> tuple[Path, ...]:
     return tuple(sorted(result))
 
 
+@functools.lru_cache(maxsize=1)
 def _literal_module_assignments() -> list[tuple[str, str, str, int]]:
     root = _repository_root()
     result = []

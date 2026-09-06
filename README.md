@@ -3,9 +3,9 @@
 <img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="480">
 
 # ARES™
-### Autonomous Adversary Emulation & Continuous Security Validation Platform
+### Autonomous Red Team Engagement & Continuous Security Validation Platform
 
-**The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to safely simulate advanced threat actors, discover deterministic attack paths, and continuously validate defensive posture with zero collateral risk.**
+**The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with zero collateral risk.**
 
 <br>
 
@@ -30,7 +30,7 @@
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **autonomous, goal-directed adversary emulation platform** that models real-world threat actors. By combining hard kernel-level scope firewalls, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 60+ weaponized techniques mapped to MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **autonomous, goal-directed red team engagement platform** that models real-world threat actors. By combining hard kernel-level scope firewalls, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 60+ weaponized techniques mapped to MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
 
 ---
 
@@ -463,7 +463,7 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 
 <div align="center">
 
-**ARES — Enterprise-Grade Autonomous Adversary Emulation.**  
+**ARES — Enterprise-Grade Autonomous Red Team Engagement System.**  
 *Continuous Security Validation. Zero Collateral Risk.*
 
 </div>

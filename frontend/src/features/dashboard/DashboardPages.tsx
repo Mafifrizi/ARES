@@ -590,7 +590,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <img className="sidebar-mark" src={brandMarkPath} alt="" aria-hidden="true" />
             <div className="min-w-0">
               <div className="sidebar-title">ARES</div>
-              <div className="sidebar-subtitle">Adversary Emulation Suite</div>
+              <div className="sidebar-subtitle">Automated Red Team Engagement System</div>
             </div>
           </div>
           <nav className="sidebar-nav" aria-label="Dashboard navigation">
