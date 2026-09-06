@@ -22,11 +22,25 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 
+import tempfile
+
 # ── Required env vars for AresSettings ───────────────────────────────────────
 # AresSettings has Field(...) on secret_key and encryption_key — no defaults.
-# This session-scoped fixture runs automatically before every test (unit AND
-# integration) so AresSettings() and AresContainer.for_test() never crash due
-# to missing env vars in local/CI environments without a .env file.
+# Setting these at module level guarantees test collection never crashes when
+# a test file imports ares.api.server or calls get_settings() at module import time.
+os.environ.setdefault("ARES_SECRET_KEY",             "test-secret-key-min-32-chars-placeholder!!")
+os.environ.setdefault("ARES_ENCRYPTION_KEY",         "test-enc-key-min-32-chars-placeholder-32!!")
+os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestPassword1!")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Ensure tests run against a clean external basetemp outside _REPO_ROOT."""
+    if config.option.basetemp is None:
+        target = Path(tempfile.gettempdir()) / "ares_pytest"
+        target.mkdir(parents=True, exist_ok=True)
+        config.option.basetemp = str(target)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def set_test_env():
     """Set required env vars for the entire test session."""

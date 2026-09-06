@@ -10,9 +10,9 @@ from contextlib import asynccontextmanager
 from dataclasses import MISSING, FrozenInstanceError, fields, is_dataclass, replace
 from typing import Any, get_type_hints
 
-import asyncpg
 import pytest
 import pytest_asyncio
+asyncpg = pytest.importorskip("asyncpg")
 
 import ares.modules.descriptors as _descriptors
 from ares.db.execution_lifecycle import (

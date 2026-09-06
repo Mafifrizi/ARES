@@ -539,6 +539,7 @@ See [docs/architecture.md](docs/architecture.md) and
 
 | Document | Description |
 | --- | --- |
+| [docs/README.md](docs/README.md) | Central documentation portal and subsystem sitemap. |
 | [QUICKSTART.md](QUICKSTART.md) | First engagement walkthrough. |
 | [docs/dashboard-guide.md](docs/dashboard-guide.md) | Dashboard page-by-page guide. |
 | [docs/modules.md](docs/modules.md) | Module catalog and safe workflows. |

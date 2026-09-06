@@ -97,6 +97,8 @@ tabs.
 
 ## Login
 
+The login console (`frontend/src/features/auth/LoginPage.tsx`) is a clean, centered enterprise authentication card (`width: 380px`). It provides standard username/password inputs, explicit focus states, and a solid high-contrast submit button without theatrical sci-fi or decorative cyber elements.
+
 Use the admin account created at startup or an account created by a team lead.
 
 After first login, change the default admin password from `Security`.

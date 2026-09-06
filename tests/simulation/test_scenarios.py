@@ -693,7 +693,8 @@ class TestScenario08ModuleSDKContract:
         helper = ModuleTestHelper(StubKerberoastModule)
         result = await helper.run_full(target="10.0.0.1", domain="CORP",
                                         params={"dc": "10.0.0.1"})
-        assert result.success
+        assert result.status == "preview_only"
+        assert result.raw["would_execute"] is False
 
     def test_module_metadata_decorator(self) -> None:
         from ares.modules.sdk import module_metadata, OpsecLevel, BaseModule
