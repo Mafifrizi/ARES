@@ -2233,3 +2233,49 @@ textarea.field {
 .animate-ares-breathe {
   animation: aresBreathe 9s ease-in-out infinite;
 }
+
+/* Subtle organic floating animation for the ARES Dragon identity */
+@keyframes aresFloat {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-7px); }
+}
+
+.animate-ares-float {
+  animation: aresFloat 5s ease-in-out infinite;
+}
+
+/* Production-grade infinite engineering grid drift */
+@keyframes gridPan {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 40px 40px;
+  }
+}
+
+.animate-grid-drift {
+  animation: gridPan 20s linear infinite;
+}
+
+/* Ambient atmospheric light glide */
+@keyframes spotlightDrift {
+  0% {
+    transform: translate(-50%, -20%) scale(1);
+    opacity: 0.18;
+  }
+  50% {
+    transform: translate(-42%, -5%) scale(1.15);
+    opacity: 0.30;
+  }
+  100% {
+    transform: translate(-55%, -15%) scale(0.95);
+    opacity: 0.18;
+  }
+}
+
+.animate-spotlight-drift {
+  animation: spotlightDrift 14s ease-in-out infinite alternate;
+}
+
+

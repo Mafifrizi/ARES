@@ -99,13 +99,13 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
 
-*ARES Operator Enclave featuring live Dragon-Scale Hexagonal Mesh visualizer and defense-in-depth security boundary.*
+*ARES Operator Enclave featuring live Dynamic Architectural Grid canvas, system environment specifications, and defense-in-depth security boundary.*
 
 </div>
 
 - **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
 - **Key Capabilities**:
-  - Live **Dragon-Scale Hexagonal Mesh Canvas**: Low-overhead hardware-accelerated canvas visualizing DAG lattice density while responding dynamically to operator proximity.
+  - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
   - **HMAC Double-Submit CSRF Protection**: Constant-time verification on all state-mutating requests (`X-ARES-CSRF`).
   - **Cryptographic Brute-Force Shield**: Enforces exponential backoff and IP-based rate limiting on authentication attempts.
@@ -262,7 +262,7 @@ ARES follows a strict defense-in-depth architecture separating presentation, exe
 flowchart TB
     subgraph Client["Presentation Layer (Operator Enclave)"]
         UI["React 19 Dashboard<br>(Vite + TypeScript)"]
-        Mesh["Dragon-Scale Hexagonal Mesh<br>(Canvas 2D Engine)"]
+        Mesh["Dynamic Architectural Grid<br>(Canvas 2D Engine)"]
         WSClient["WebSocket Client<br>(Real-Time Telemetry Stream)"]
     end
 
