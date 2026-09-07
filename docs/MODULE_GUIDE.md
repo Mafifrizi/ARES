@@ -28,35 +28,40 @@ Every ARES module is a Python class that inherits from `BaseModule`:
 ```python
 from ares.sdk import (
     BaseModule, ExecutionContext, ModuleResult,
-    OpsecLevel, Severity, module_metadata,
+    ModuleParams, param, SecretParam,
+    OpsecLevel, Severity, ares_module,
 )
 
-@module_metadata(
-    module_id   = "ad.my_attack",      # unique dot-notation ID
-    name        = "My Attack",
-    category    = "ad",                # ad | linux | cloud | lateral | exfil | credential
-    description = "Does something",
-    author      = "alice@corp.com",
-    opsec       = OpsecLevel.LOW,      # silent | low | medium | high_noise
-    requires    = ["domain_creds"],    # capabilities this module needs
-    outputs     = ["credential_list"], # capabilities this module produces
-    mitre       = ["T1558.003"],       # MITRE ATT&CK technique IDs
-)
-class MyAttackModule(BaseModule):
+# 1. Parameter schema with strict validation & auto UI forms
+class MyAttackParams(ModuleParams):
+    target: str = param("Target domain controller or IP", min_length=1)
+    domain: str = param("AD domain name, e.g. CORP.LOCAL", min_length=1)
+    username: str = param("Domain username", required=False)
+    password: SecretParam = param("User password", secret=True, required=False)
 
-    async def validate(self, ctx: ExecutionContext) -> None:
-        ctx.require("target", "domain")   # raises if missing
+# 2. Modern generic BaseModule[Params, Result]
+class MyAttackModule(BaseModule[MyAttackParams, ModuleResult]):
+    MODULE_ID          = "ad.my_attack"      # unique dot-notation ID
+    MODULE_NAME        = "My Attack"
+    MODULE_CATEGORY    = "ad"                # ad | linux | cloud | lateral | exfil | credential
+    MODULE_DESCRIPTION = "Find something interesting"
+    MODULE_AUTHOR      = "alice@corp.com"
+    PARAMS_MODEL       = MyAttackParams
+    OPSEC_LEVEL        = OpsecLevel.LOW      # silent | low | medium | high_noise
+    REQUIRES           = ["domain_creds"]    # capabilities this module needs
+    OUTPUTS            = ["credential_list"] # capabilities this module produces
+    MITRE_TECHNIQUES   = ["T1558.003"]       # MITRE ATT&CK technique IDs
 
-    async def execute(self, ctx: ExecutionContext) -> ModuleResult:
+    async def execute(self, ctx: ExecutionContext[MyAttackParams]) -> ModuleResult:
         if ctx.dry_run:
-            return ModuleResult(status="dry_run", module_id=self.MODULE_ID)
+            return ModuleResult.ok("Dry-run check validated: target in scope.", module_id=self.MODULE_ID)
 
-        target = ctx.params["target"]
+        # Full type safety on parameters
+        target = ctx.params.target
         await self.before_request(target, "ldap")   # scope + noise check
 
-        # ... attack work ...
-
-        self.finding(
+        # Emit findings using fluent context helper
+        ctx.emit_finding(
             title           = "Kerberoastable account found",
             description     = "Service account has SPN set",
             severity        = Severity.HIGH,
@@ -68,16 +73,10 @@ class MyAttackModule(BaseModule):
 
         return ModuleResult(
             status    = "success",
-            findings  = self._findings,
+            findings  = ctx.findings,
             module_id = self.MODULE_ID,
             raw       = {"spns": [...]},
         )
-
-    async def run(self, **kwargs):
-        """Required: legacy interface called by engine."""
-        ctx = ExecutionContext.for_test(**kwargs)
-        r   = await self.execute(ctx)
-        return r.findings, r.raw
 ```
 
 ---
@@ -146,24 +145,32 @@ Severity.INFO       # Informational
 The scaffold generates a test file with two baseline tests. Add more:
 
 ```python
-@pytest.mark.asyncio
-async def test_finds_kerberoastable_user(module):
-    """When SPN accounts exist, module should find them."""
-    with patch("impacket.examples.GetUserSPNs.GetUserSPNs") as mock:
-        mock.return_value.run.return_value = None
-        # mock file output...
-        findings, raw = await module.run(
-            dc="10.0.0.1", domain="CORP",
-            username="user", password="pass",
-        )
-    assert len(findings) > 0
-    assert findings[0].severity.value == "high"
+from ares.sdk import ModuleTestHarness, Severity
+import pytest
 
 @pytest.mark.asyncio
-async def test_no_spns_no_finding(module):
-    """When no SPN accounts, module should return empty findings."""
-    # ...
-    assert findings == []
+async def test_finds_kerberoastable_user():
+    """Simulate attack module in hermetic test harness."""
+    harness = ModuleTestHarness(MyAttackModule)
+    result = await harness.simulate(
+        params={"target": "10.0.0.1", "domain": "CORP.LOCAL"},
+        dry_run=False,
+    )
+    result.assert_success()
+    result.assert_no_errors()
+    finding = result.assert_finding(severity=Severity.HIGH, mitre="T1558.003")
+    assert "Kerberoastable" in finding.title
+
+@pytest.mark.asyncio
+async def test_dry_run_simulation():
+    """Verify dry-run returns success without side-effects."""
+    harness = ModuleTestHarness(MyAttackModule)
+    result = await harness.simulate(
+        params={"target": "10.0.0.1", "domain": "CORP.LOCAL"},
+        dry_run=True,
+    )
+    result.assert_success()
+    result.assert_no_errors()
 ```
 
 Run tests:

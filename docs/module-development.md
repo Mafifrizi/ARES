@@ -36,21 +36,38 @@ not sufficient to make a plugin eligible for the future gateway. Phase 5C.1
 made no schema change. The later revision `0010` is additive test-only
 persistence and does not make a module eligible or change any live ingress.
 
-The examples below describe the existing SDK surface. They are not proof that
-all current ingresses apply the same policy, that dry-run is universally
-side-effect-free, or that current outcomes and retries are authoritative.
+The examples below describe the modern v2 SDK surface with full backward
+compatibility for existing v1 modules. They are not proof that all current
+ingresses apply the same policy, that dry-run is universally side-effect-free,
+or that current outcomes and retries are authoritative.
 
 ---
 
-## Quick Start
+## Quick Start (v2 Modern Standard)
+
+The modern ARES SDK (`ares.sdk`) introduces type-safe parameter schemas with Pydantic v2, generic `BaseModule[P, R]`, fluent execution helpers, and isolated simulation testing.
+
+### Option A: Modern Class-Based Module (Recommended)
 
 ```python
 # mymodule/mssql_enum.py
-from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult, OpsecLevel, Severity
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    ModuleParams, param, SecretParam,
+    OpsecLevel, Severity,
+)
 from ares.core.errors import NetworkError, ConnectionRefused
 
 
-class MssqlEnumModule(BaseModule):
+# 1. Strictly validated parameter schema (Pydantic v2)
+class MssqlEnumParams(ModuleParams):
+    target: str = param("Target IP address or hostname", min_length=1)
+    port: int = param("MSSQL service port", default=1433, ge=1, le=65535)
+    sa_password: SecretParam = param("Known or candidate SA password", secret=True, required=False)
+
+
+# 2. Inherit from generic BaseModule[Params, Result]
+class MssqlEnumModule(BaseModule[MssqlEnumParams, ModuleResult]):
     """Enumerate MSSQL instances and check for weak authentication."""
 
     # ── Required metadata ───────────────────────────────────────────────
@@ -58,6 +75,7 @@ class MssqlEnumModule(BaseModule):
     MODULE_NAME        = "MSSQL Enumeration"
     MODULE_CATEGORY    = "db"
     MODULE_DESCRIPTION = "Enumerate MSSQL instances, check SA password, xp_cmdshell"
+    PARAMS_MODEL       = MssqlEnumParams
 
     # ── Optional metadata ───────────────────────────────────────────────
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
@@ -68,33 +86,27 @@ class MssqlEnumModule(BaseModule):
 
     # ── ARES SDK contract ─────────────────────────────────────────────
 
-    async def validate(self, ctx: ExecutionContext) -> None:
-        """Check that context has everything we need before executing."""
-        ctx.require("target")           # target IP/hostname
-        if not ctx.params.get("port"):
-            ctx.params["port"] = 1433   # default MSSQL port (set if missing)
-
-    async def execute(self, ctx: ExecutionContext) -> ModuleResult:
+    async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
         """Run the enumeration. Network calls go here."""
-        target = ctx.target
-        port   = ctx.params.get("port", 1433)
-        result = ModuleResult(module_id=self.MODULE_ID, execution_id=ctx.execution_id)
+        # ctx.params provides full static typing and runtime validation!
+        target = ctx.params.target
+        port   = ctx.params.port
 
         if ctx.dry_run:
-            # Simulation mode — return dummy data
-            result.status = "success"
-            result.raw    = {"simulated": True}
-            return result
+            # Simulation mode — return dry-run result
+            return ModuleResult.ok(
+                f"Dry-run validated: {target}:{port} inside approved scope.",
+                module_id=self.MODULE_ID,
+            )
 
         # Existing SDK hook; Phase 5C.2 defines the canonical gateway order.
         await self.before_request(target, action="mssql_enum")
 
         try:
-            # Real implementation: connect to MSSQL and enumerate
-            # import aioodbc / pymssql / etc.
             instances = await self._enumerate(target, port, ctx)
             for inst in instances:
-                f = self.finding(
+                # Emit findings using fluent context helper
+                ctx.emit_finding(
                     title       = f"MSSQL instance on {target}:{port}",
                     description = f"MSSQL {inst['version']} with {inst['auth_method']} auth",
                     severity    = Severity.MEDIUM,
@@ -102,15 +114,19 @@ class MssqlEnumModule(BaseModule):
                     host        = target,
                     evidence    = inst,
                 )
-                result.findings.append(f)
-            result.status    = "success"
-            result.artifacts = {"instances": instances}
+            
+            ctx.store_artifact("instances", instances)
+            return ModuleResult(
+                status="success",
+                findings=ctx.findings,
+                artifacts=ctx.artifacts,
+                module_id=self.MODULE_ID,
+            )
         except ConnectionRefusedError:
             raise ConnectionRefused(
                 f"MSSQL port {port} not open on {target}",
                 module_id=self.MODULE_ID, target=target, port=port,
             )
-        return result
 
     def report(self, result: ModuleResult) -> dict:
         """Return module-specific report section."""
@@ -124,8 +140,31 @@ class MssqlEnumModule(BaseModule):
     # ── Private helpers ─────────────────────────────────────────────────
 
     async def _enumerate(self, target: str, port: int, ctx: ExecutionContext) -> list[dict]:
-        # Stub — real implementation uses pymssql or aioodbc
-        return []
+        # Stub — real implementation connects to MSSQL service
+        return [{"version": "MSSQL 2019", "auth_method": "SQL_AND_WINDOWS"}]
+```
+
+### Option B: Declarative Functional Module (`@ares_module`)
+
+For single-action modules, reconnaissance scripts, or quick extensions:
+
+```python
+from ares.sdk import ares_module, ExecutionContext, ModuleResult, Severity
+
+@ares_module(
+    id="db.mssql_quick_check",
+    name="MSSQL Quick Check",
+    category="db",
+    params_model=MssqlEnumParams,
+    mitre="T1505.001",
+)
+async def mssql_quick_check(ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
+    ctx.emit_finding(
+        title=f"MSSQL Port Active on {ctx.params.target}:{ctx.params.port}",
+        severity=Severity.INFO,
+        mitre_technique="T1505.001",
+    )
+    return ModuleResult(status="success", findings=ctx.findings, module_id="db.mssql_quick_check")
 ```
 
 ---
@@ -137,14 +176,15 @@ class MssqlEnumModule(BaseModule):
 | Attribute | Type | Example | Description |
 |-----------|------|---------|-------------|
 | `MODULE_ID` | `str` | `"ad.kerberoast"` | Unique dotted ID. Must contain exactly one dot. |
-| `MODULE_NAME` | `str` | `"Kerberoasting"` | Human-readable name shown in CLI. |
+| `MODULE_NAME` | `str` | `"Kerberoasting"` | Human-readable name shown in CLI and UI. |
 | `MODULE_CATEGORY` | `str` | `"ad"` | Category prefix (must match MODULE_ID prefix). |
-| `MODULE_DESCRIPTION` | `str` | `"Request Kerberos TGS tickets..."` | One-liner for `ares module list`. |
+| `MODULE_DESCRIPTION` | `str` | `"Request Kerberos TGS tickets..."` | One-liner for `ares module list` and catalog cards. |
 
 ### Optional Attributes
 
 | Attribute | Type | Default | Description |
 |-----------|------|---------|-------------|
+| `PARAMS_MODEL` | `type[ModuleParams]` | `None` | Pydantic v2 model for parameter validation and UI form generation |
 | `OPSEC_LEVEL` | `OpsecLevel` | `LOW` | `SILENT \| LOW \| MEDIUM \| HIGH_NOISE` |
 | `REQUIRES` | `list[str]` | `[]` | Capabilities needed (outputs of upstream modules) |
 | `OUTPUTS` | `list[str]` | `[]` | What this module produces (feeds downstream modules) |
@@ -165,18 +205,16 @@ class MssqlEnumModule(BaseModule):
 
 ## The ARES SDK Contract
 
-### `validate(ctx)` — Called before execution
+### Parameter Validation
+
+When `PARAMS_MODEL` is declared on your module, `BaseModule.validate(ctx)` automatically validates types, defaults, required parameters, and string constraints. You only need to override `validate()` if you have additional cross-field or dynamic business logic:
 
 ```python
 async def validate(self, ctx: ExecutionContext) -> None:
-    # Check required context fields
-    ctx.require("target", "domain")
+    # 1. Base auto-validates against PARAMS_MODEL
+    await super().validate(ctx)
 
-    # Check module-specific params
-    if not ctx.params.get("wordlist"):
-        ctx.params["wordlist"] = "/usr/share/wordlists/rockyou.txt"
-
-    # Custom validation
+    # 2. Add any custom operational guardrails:
     if ctx.opsec_profile == "stealth" and self.OPSEC_LEVEL == OpsecLevel.HIGH_NOISE:
         from ares.core.errors import ModuleValidationError
         raise ModuleValidationError(
@@ -188,7 +226,7 @@ async def validate(self, ctx: ExecutionContext) -> None:
 ### `execute(ctx)` — The attack logic
 
 ```python
-async def execute(self, ctx: ExecutionContext) -> ModuleResult:
+async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
     result = ModuleResult(module_id=self.MODULE_ID, execution_id=ctx.execution_id)
 
     # Don't make real calls in dry_run / simulation mode
@@ -197,24 +235,30 @@ async def execute(self, ctx: ExecutionContext) -> ModuleResult:
         return result
 
     # Existing SDK hook; Phase 5C.2 defines the canonical gateway order.
-    await self.before_request(ctx.target)
+    await self.before_request(ctx.params.target)
 
     try:
-        # Your attack/enumeration logic here
-        data = await self._do_attack(ctx.target, ctx.best_credential())
+        # Attack/enumeration logic
+        data = await self._do_attack(ctx.params.target, ctx.best_credential())
 
-        # Create findings
+        # Create findings using fluent context helper
         for item in data:
-            f = self.finding(title=..., description=..., severity=Severity.HIGH)
-            result.findings.append(f)
+            ctx.emit_finding(
+                title=f"Vulnerability on {ctx.params.target}",
+                description=item["summary"],
+                severity=Severity.HIGH,
+                mitre_technique="T1505.001",
+                evidence=item,
+            )
 
-        # Report new credentials discovered
-        result.new_credentials = [{"username": ..., "hash": ...}]
-
-        # Report new hosts found (triggers service_intel automatically)
-        result.discovered_hosts = ["10.0.0.5", "10.0.0.6"]
+        # Store artifacts and discovered credentials
+        ctx.store_artifact("raw_data", data)
+        ctx.record_credential(username="sa", secret="P@ssw0rd123!", cred_type="db_password")
 
         result.status = "success"
+        result.findings = ctx.findings
+        result.artifacts = ctx.artifacts
+        result.new_credentials = ctx.vault.export_new() if hasattr(ctx.vault, "export_new") else []
 
     except AuthenticationFailed as e:
         # Engine will try next credential in vault
@@ -242,13 +286,24 @@ def report(self, result: ModuleResult) -> dict:
 
 ---
 
-## ExecutionContext Fields
+## ExecutionContext Reference
+
+The `ExecutionContext` object represents the execution runtime environment for a module run:
 
 ```python
+# Typed Parameters
+ctx.params               # P (when ExecutionContext[P] is used) or dict
+ctx.typed_params(Model)  # Parses and returns an instance of Model
+
+# Fluent Helpers (v2 Standard)
+ctx.emit_finding(title, severity, ...)      # Appends to ctx.findings and returns Finding
+ctx.store_artifact(key, value)              # Stores to ctx.artifacts
+ctx.record_credential(username, secret, ..) # Stores to vault and tracks new credential
+
+# Context Metadata
 ctx.target               # str: IP or hostname
-ctx.domain               # str: AD domain (CORP.LOCAL)
+ctx.domain               # str: AD domain (e.g. CORP.LOCAL)
 ctx.port                 # int: target port if relevant
-ctx.params               # dict: module-specific params (from CLI/API)
 ctx.credentials          # list[Credential]: sorted by score (best first)
 ctx.best_credential()    # Credential | None: highest-scored credential
 ctx.session              # OperatorSession: shared campaign state
@@ -272,7 +327,7 @@ Always raise ARES errors (not generic exceptions):
 
 ```python
 from ares.core.errors import (
-    ModuleValidationError,    # bad config / bad context
+    ModuleValidationError,    # bad config / bad context / invalid parameter
     ConnectionRefused,        # TCP refused
     ConnectionTimeout,        # TCP timeout
     HostUnreachable,          # no route
@@ -282,67 +337,92 @@ from ares.core.errors import (
     ScopeError,               # out of scope
     SandboxError,             # module crashed
 )
-
-# Intended legacy engine behavior (not made canonical by Phase 5C.1):
-#   ModuleValidationError → abort module, don't retry
-#   ConnectionRefused     → try fallback protocol/port
-#   AuthenticationFailed  → try next credential
-#   AccountLocked         → STOP immediately, never retry this account
-#   ScopeError            → abort campaign operation
-```
-
----
-
-## ModuleResult Fields
-
-```python
-result = ModuleResult(
-    status           = "success",      # "success"|"failure"|"partial"|"skipped"
-    findings         = [f1, f2],       # list[Finding]
-    artifacts        = {"key": data},  # raw artifacts for evidence
-    new_credentials  = [{"username": "svc", "hash": "aad3..."}],
-    discovered_hosts = ["10.0.0.5"],   # engine auto-scans these
-    raw              = {"debug": ...}, # unstructured output
-    error            = "",             # error message if not success
-)
 ```
 
 ---
 
 ## Testing Your Module
 
+### 1. Isolated Simulation with `ModuleTestHarness` (Recommended)
+
+The v2 SDK includes `ModuleTestHarness`, enabling zero-mock unit testing with simulated scope guards, credential vaults, and fluent assertions:
+
 ```python
 import pytest
-from ares.sdk import ExecutionContext
-from mymodule.mssql_enum import MssqlEnumModule
+from ares.sdk import ModuleTestHarness, Severity
+from mymodule.mssql_enum import MssqlEnumModule, MssqlEnumParams
 
 @pytest.mark.asyncio
-async def test_mssql_enum_validate():
-    ctx = ExecutionContext.for_test(target="10.0.0.10")
-    module = MssqlEnumModule.__new__(MssqlEnumModule)
-    await module.validate(ctx)   # should not raise
+async def test_mssql_enum_simulation():
+    # Instantiate the harness
+    harness = ModuleTestHarness(MssqlEnumModule)
 
-@pytest.mark.asyncio
-async def test_mssql_enum_dry_run():
-    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
-    from ares.core.config import AresSettings
-    from ares.core.noise import NoiseController
-
-    campaign = Campaign(name="test", scope=[ScopeEntry(cidr="10.0.0.0/8")],
-                        noise_profile=NoiseProfile.NORMAL)
-    module = MssqlEnumModule(
-        settings=AresSettings(), campaign=campaign,
-        noise=NoiseController(campaign),
+    # Run the module hermetically
+    result = await harness.simulate(
+        target="10.0.0.10",
+        params={"target": "10.0.0.10", "port": 1433},
+        dry_run=True,
     )
-    ctx = ExecutionContext.for_test(target="10.0.0.10", dry_run=True)
-    result = await module.execute(ctx)
-    assert result.status == "success"
-    assert result.module_id == "db.mssql_enum"
 
-def test_module_metadata():
-    from ares.sdk import validate_module_class
-    errors = validate_module_class(MssqlEnumModule)
-    assert errors == [], f"Module metadata errors: {errors}"
+    # Fluent assertions
+    result.assert_success()
+    result.assert_no_errors()
+    assert result.duration_ms >= 0
+
+@pytest.mark.asyncio
+async def test_mssql_enum_finding_emission():
+    harness = ModuleTestHarness(MssqlEnumModule)
+    result = await harness.simulate(
+        target="10.0.0.10",
+        params={"target": "10.0.0.10", "port": 1433},
+        dry_run=False,
+    )
+    result.assert_success()
+    finding = result.assert_finding(severity=Severity.MEDIUM, mitre="T1505.001")
+    assert "MSSQL instance" in finding.title
+```
+
+### 2. Legacy `ExecutionContext.for_test()` (v1 Standard)
+
+Legacy test cases using direct `ExecutionContext.for_test()` continue to function seamlessly:
+
+```python
+@pytest.mark.asyncio
+async def test_legacy_style():
+    ctx = ExecutionContext.for_test(target="10.0.0.10", params={"port": 1433})
+    module = MssqlEnumModule.__new__(MssqlEnumModule)
+    await module.validate(ctx)
+```
+
+---
+
+## Programmatic Automation (`AresClient`)
+
+Automate engagements, module runs, and telemetry streams from Python scripts or CI/CD pipelines:
+
+```python
+from ares.sdk import AresClient
+
+async def main():
+    async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_key_...") as ares:
+        # Create campaign with approved scope
+        campaign = await ares.campaigns.create(
+            name="Op-Nightshade",
+            scope=["10.0.0.0/24"],
+        )
+
+        # Dispatch module asynchronously
+        job = await ares.modules.run(
+            module_id="db.mssql_enum",
+            target="10.0.0.15",
+            campaign_id=campaign["id"],
+            params={"port": 1433},
+        )
+        print(f"Execution dispatched: {job['execution_id']}")
+
+        # Retrieve campaign findings
+        findings = await ares.campaigns.findings(campaign["id"])
+        print(f"Captured {len(findings)} findings")
 ```
 
 ---
@@ -355,9 +435,9 @@ def test_module_metadata():
 {
   "module_id":   "db.mssql_enum",
   "name":        "MSSQL Enumeration",
-  "version":     "1.0.0",
+  "version":     "2.0.0",
   "author":      "Your Name",
-  "description": "Enumerate MSSQL instances",
+  "description": "Enumerate MSSQL instances and weak authentication",
   "requires":    ["pymssql"],
   "ares_min":    "6.0.0",
   "signature":   "sha256:abc123..."
@@ -367,19 +447,18 @@ def test_module_metadata():
 ### Install
 
 ```bash
-ares module install db/mssql_enum@1.0.0
+ares module install db/mssql_enum@2.0.0
 # or from local path:
 ares module install ./mymodule/
 ```
 
-### Guidelines for accepted modules
+### Quality & Safety Guidelines
 
-- ✅ Must have all 4 required metadata attributes
-- ✅ Must implement `validate()` — check context completeness
-- ✅ Must respect `ctx.dry_run` — no network calls when True
-- ✅ Must raise ARES errors, not generic exceptions
-- ✅ Must have unit tests covering validate + execute + dry_run
-- ✅ Must have MITRE technique mapping
-- ❌ Must NOT access filesystem outside campaign working directory
-- ❌ Must NOT make outbound calls to non-target hosts without operator config
-- ❌ Must NOT store credentials in plaintext (use vault)
+-  Must define all required metadata (`MODULE_ID`, `MODULE_NAME`, `MODULE_CATEGORY`, `MODULE_DESCRIPTION`).
+-  Must declare `PARAMS_MODEL` for robust type validation and clean UI parameter rendering.
+-  Must respect `ctx.dry_run` — zero unauthorized side-effects or network traffic when True.
+-  Must call `await self.before_request(target)` before network interactions.
+-  Must raise standard ARES exceptions rather than raw socket or OS exceptions.
+-  Must include unit tests using `ModuleTestHarness`.
+-  Must NOT access the filesystem outside the campaign workspace.
+-  Must NOT store credentials in plaintext (use `ctx.vault` or `ctx.record_credential`).

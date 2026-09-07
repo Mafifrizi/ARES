@@ -28,7 +28,10 @@ import abc
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
+
+P = TypeVar("P", bound=Any)
+R = TypeVar("R", bound=Any)
 
 from ares.core.campaign import Campaign, Finding, Severity
 from ares.core.config import AresSettings
@@ -71,13 +74,17 @@ def normalize_module_metadata(
     metadata = dict(base or {})
 
     if param_schema is None:
-        try:
-            from ares.modules.params import MODULE_PARAMS
+        params_model = getattr(cls, "PARAMS_MODEL", None)
+        if params_model is not None and hasattr(params_model, "schema_for_api"):
+            param_schema = params_model.schema_for_api()
+        else:
+            try:
+                from ares.modules.params import MODULE_PARAMS
 
-            params_model = MODULE_PARAMS.get(str(getattr(cls, "MODULE_ID", "")))
-            param_schema = params_model.schema_for_api() if params_model else {}
-        except (ImportError, AttributeError):
-            param_schema = {}
+                model = MODULE_PARAMS.get(str(getattr(cls, "MODULE_ID", "")))
+                param_schema = model.schema_for_api() if model else {}
+            except (ImportError, AttributeError):
+                param_schema = {}
 
     schema = param_schema or {}
     required_params = [
@@ -169,7 +176,7 @@ class FeasibilityReport:
 
 # ── BaseModule ────────────────────────────────────────────────────────────────
 
-class BaseModule(abc.ABC):
+class BaseModule(abc.ABC, Generic[P, R]):
     """
     Abstract base for all ARES modules.
 
@@ -179,6 +186,8 @@ class BaseModule(abc.ABC):
 
     Formal SDK contract (v0.9.0+) — see validate(), before_request(), finding().
     """
+
+    PARAMS_MODEL: Any = None
 
     async def assess_feasibility(self, ctx: "Any") -> FeasibilityReport:
         """
@@ -238,6 +247,11 @@ class BaseModule(abc.ABC):
         if not isinstance(ctx, ExecutionContext):
             return  # legacy context — skip validation
 
+        if getattr(self, "PARAMS_MODEL", None) is not None:
+            from ares.sdk.params import validate_params
+
+            ctx.params = validate_params(self.PARAMS_MODEL, ctx.params, module_id=self.MODULE_ID)
+
         # Categories that use API credentials instead of a target IP — skip target check
         _NO_TARGET_CATEGORIES = {"cloud", "reporting", "recon"}
         if getattr(self.__class__, "MODULE_CATEGORY", "") in _NO_TARGET_CATEGORIES:
@@ -255,11 +269,12 @@ class BaseModule(abc.ABC):
         # Check REQUIRES list — each item must be present in params or context
         requires = getattr(self.__class__, "REQUIRES", [])
         if requires:
-            available: set[str] = set(ctx.params.keys())
+            raw_params = ctx.params.model_dump() if hasattr(ctx.params, "model_dump") else (ctx.params or {})
+            available: set[str] = set(raw_params.keys())
             if ctx.target:                 available.add("target")
             if ctx.domain:                 available.add("domain")
             if getattr(ctx, "vault", None): available.add("vault")
-            params = getattr(ctx, "params", {}) or {}
+            params = raw_params
 
             def _present(*names: str) -> bool:
                 return any(params.get(name) not in (None, "", []) for name in names)
@@ -310,14 +325,32 @@ class BaseModule(abc.ABC):
         Returns:
             ModuleResult — structured result consumed by engine
         """
-        findings, raw = await self.run(**ctx.params)
-        return ModuleResult(
-            status    = "success" if findings or raw else "partial",
-            findings  = findings,
-            raw       = raw,
-            module_id = self.MODULE_ID,
-            execution_id = ctx.execution_id if hasattr(ctx, "execution_id") else "",
-        )
+        raw_params = getattr(ctx, "params", {})
+        if hasattr(raw_params, "model_dump"):
+            kwargs = raw_params.model_dump()
+        elif isinstance(raw_params, dict):
+            kwargs = raw_params
+        else:
+            kwargs = {}
+
+        try:
+            findings, raw = await self.run(**kwargs)
+            return ModuleResult(
+                status    = "success" if findings or raw else "partial",
+                findings  = findings,
+                raw       = raw,
+                module_id = self.MODULE_ID,
+                execution_id = getattr(ctx, "execution_id", ""),
+            )
+        except NotImplementedError:
+            findings = getattr(ctx, "findings", [])
+            return ModuleResult(
+                status    = "success" if findings else "partial",
+                findings  = findings,
+                raw       = {},
+                module_id = self.MODULE_ID,
+                execution_id = getattr(ctx, "execution_id", ""),
+            )
 
     def report(self, result: "ModuleResult") -> dict:
         """

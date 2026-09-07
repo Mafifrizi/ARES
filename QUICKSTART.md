@@ -393,22 +393,26 @@ export OPENAI_API_KEY="..."
 Use Strategy only after a campaign exists, scope is correct, authorization
 notes are clear, and the selected LLM backend is configured.
 
-### Public SDK
+### Public SDK (v2 Modern Standard)
 
-Use the public SDK import path for custom modules:
+Use the modern, type-safe SDK import path for custom modules, unit testing, and automation:
 
 ```python
-from ares.sdk import BaseModule, ExecutionContext, Finding, ModuleResult
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    ModuleParams, param, SecretParam,
+    OpsecLevel, Severity, ares_module,
+    ModuleTestHarness, AresClient,
+)
 ```
 
-`ares.modules.sdk` remains as a compatibility shim, but new code should use
-`ares.sdk`.
+`ares.modules.sdk` remains as a 100% backward-compatible shim, but new modules should use `ares.sdk`.
 
 See:
 
-- `docs/module-development.md`
-- `docs/module_sdk.md`
-- `docs/examples/example_http_enum.py`
+- [`docs/module_sdk.md`](docs/module_sdk.md) (Full v2 SDK Architecture & Client Guide)
+- [`docs/module-development.md`](docs/module-development.md) (Step-by-step authoring guide)
+- [`example_modules/example_modern_v2_module.py`](example_modules/example_modern_v2_module.py) (Reference implementation)
 
 ### Validation lab
 

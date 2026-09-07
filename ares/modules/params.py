@@ -38,9 +38,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 SecretParam = SecretStr
 
 
+_PARAM_REQUIRED_UNSET = object()
+
+
 def param(
     description: str = "",
-    required: bool = True,
+    required: bool | Any = _PARAM_REQUIRED_UNSET,
     default: Any = None,
     min_length: int | None = None,
     max_length: int | None = None,
@@ -58,15 +61,20 @@ def param(
         password: SecretStr  = param("Password", secret=True)
         timeout:  int        = param("Timeout seconds", required=False, default=30, ge=1, le=300)
     """
+    if required is _PARAM_REQUIRED_UNSET:
+        is_required = default is None
+    else:
+        is_required = bool(required)
+
     kwargs: dict[str, Any] = {
         "description": description,
-        "json_schema_extra": {"secret": secret, "required": required},
+        "json_schema_extra": {"secret": secret, "required": is_required},
     }
-    if not required and default is not None:
+    if not is_required and default is not None:
         kwargs["default"] = default
-    elif not required:
+    elif not is_required:
         kwargs["default"] = None
-    # else: required=True, no default → pydantic marks as required
+    # else: is_required=True, no default → pydantic marks as required
 
     if min_length is not None:
         kwargs["min_length"] = min_length
@@ -148,7 +156,7 @@ class ModuleParams(BaseModel):
     def safe_dict(self) -> dict[str, Any]:
         """Export params dict, replacing SecretStr values with '***'."""
         result = {}
-        for name, field_info in self.model_fields.items():
+        for name, field_info in self.__class__.model_fields.items():
             val = getattr(self, name, None)
             if isinstance(val, SecretStr):
                 result[name] = "***"

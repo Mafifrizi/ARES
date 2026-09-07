@@ -31,9 +31,12 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 from ares.core.errors import InvalidContext
+
+P = TypeVar("P")
+T = TypeVar("T")
 
 if TYPE_CHECKING:
     from ares.core.campaign import Campaign, NoiseProfile
@@ -46,7 +49,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ExecutionContext:
+class ExecutionContext(Generic[P]):
     """
     Unified execution context passed to every module.
     Immutable after construction (fields are set once by the engine).
@@ -75,7 +78,7 @@ class ExecutionContext:
     port:         int = 0           # specific port if protocol-targeted
 
     # ── Parameters ────────────────────────────────────────────────────────
-    params: dict[str, Any] = field(default_factory=dict)
+    params: P | dict[str, Any] = field(default_factory=dict)
 
     # ── Credentials ───────────────────────────────────────────────────────
     # Ordered by score (highest first). Module tries each in order.
@@ -105,8 +108,9 @@ class ExecutionContext:
     dry_run:       bool  = False   # simulation mode — no real network calls
 
     # ── Metadata ──────────────────────────────────────────────────────────
-    tags:    list[str] = field(default_factory=list)
-    extra:   dict[str, Any] = field(default_factory=dict)
+    tags:     list[str] = field(default_factory=list)
+    extra:    dict[str, Any] = field(default_factory=dict)
+    findings: list[Any] = field(default_factory=list)
 
     # ── Validation ────────────────────────────────────────────────────────
 
@@ -136,6 +140,81 @@ class ExecutionContext:
             getattr(self, f, None) not in (None, "", [])
             for f in fields
         )
+
+    # ── Fluent helpers (v2 Modern SDK) ────────────────────────────────────
+
+    def typed_params(self, model_cls: type[T]) -> T:
+        """Parse, validate, and return params as a typed Pydantic model."""
+        from ares.sdk.params import validate_params
+
+        return validate_params(model_cls, self.params, module_id=self.module_id)
+
+    def emit_finding(
+        self,
+        title: str,
+        severity: Any,
+        description: str = "",
+        mitre_technique: str | None = None,
+        mitre_tactic: str | None = None,
+        evidence: dict[str, Any] | None = None,
+        remediation: str = "",
+        host: str | None = None,
+        confidence: float = 1.0,
+    ) -> Any:
+        """Fluent helper to create and record a finding in the execution context."""
+        from ares.core.campaign import Finding, Severity
+
+        sev = severity if isinstance(severity, Severity) else Severity(str(severity).lower())
+        desc = description.strip() if (description and description.strip()) else (title.strip() or "Finding emitted")
+        finding = Finding(
+            id=str(uuid.uuid4()),
+            title=title,
+            description=desc,
+            severity=sev,
+            mitre_technique=mitre_technique,
+            mitre_tactic=mitre_tactic,
+            evidence=evidence or {},
+            remediation=remediation,
+            host=host or self.target,
+            confidence=confidence,
+            module_id=self.module_id,
+        )
+        if self.runtime_state and hasattr(self.runtime_state, "record_finding"):
+            try:
+                self.runtime_state.record_finding(finding)
+            except Exception:
+                pass
+        self.findings.append(finding)
+        return finding
+
+    def store_artifact(self, artifact: Any) -> Any:
+        """Store an artifact in the execution context's artifact store if available."""
+        if self.artifact_store and hasattr(self.artifact_store, "add"):
+            return self.artifact_store.add(artifact)
+        return None
+
+    def record_credential(
+        self,
+        username: str,
+        secret: str = "",
+        domain: str = "",
+        cred_type: str = "password",
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        """Store a discovered credential in the context vault if available."""
+        if self.vault and hasattr(self.vault, "add"):
+            try:
+                return self.vault.add(
+                    username=username,
+                    secret=secret,
+                    domain=domain or self.domain,
+                    cred_type=cred_type,
+                    host=self.target,
+                    metadata=metadata or {},
+                )
+            except Exception:
+                pass
+        return None
 
     # ── Accessors ─────────────────────────────────────────────────────────
 

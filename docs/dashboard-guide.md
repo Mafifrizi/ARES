@@ -69,7 +69,8 @@ keys, bearer tokens, or sensitive report URLs.
 
 | View | File | Use |
 | --- | --- | --- |
-| Overview | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, and campaign summary. |
+| Overview (Standby / Zero-State) | `docs/assets/screenshots/dashboard-overview-empty.png` | Clean onboarding hero, platform readiness strip, and initialization quick actions. |
+| Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
 | Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
@@ -193,7 +194,13 @@ Current page tabs:
 
 ### Overview
 
-![Dashboard overview telemetry](assets/screenshots/dashboard-overview.png)
+![Dashboard overview standby zero-state](assets/screenshots/dashboard-overview-empty.png)
+
+*Tactical Zero-State Overview — Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
+
+![Dashboard overview active telemetry](assets/screenshots/dashboard-overview.png)
+
+*Active Telemetry Overview — Real-time telemetry, confirmed findings by severity, queue metrics, and campaign status.*
 
 Purpose: quick system status.
 

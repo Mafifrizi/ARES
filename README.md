@@ -125,6 +125,12 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 *Executive Command Center displaying real-time telemetry, confirmed findings by severity, and operational health.*
 
+<br>
+
+![ARES Executive Overview Standby & Fresh-Install Hero](docs/assets/screenshots/dashboard-overview-empty.png)
+
+*Tactical Zero-State Overview — Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
+
 </div>
 
 - **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries.
@@ -398,42 +404,72 @@ ARES enforces strict RBAC permissions across all API endpoints and UI controls:
 
 ---
 
-## 🛠️ Extensible Developer SDK
+## 🛠️ Extensible Developer SDK (v2 Modern Standard)
 
-Build custom adversary modules, integrate proprietary attack tools, or extend telemetry parsers using the clean `ares.sdk` interface:
+ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
+
+### 1. Type-Safe Module Authoring (Generic `BaseModule[P, R]` & `@ares_module`)
+Declare validated parameter schemas with Pydantic v2 and write modules with full IDE autocomplete:
 
 ```python
-from ares.sdk import BaseModule, ExecutionContext, ModuleResult
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    ModuleParams, param, SecretParam,
+    OpsecLevel, Severity, ares_module,
+)
 
-class CustomKerberoastModule(BaseModule):
-    id = "custom.ad.kerberoast"
-    name = "Custom SPN Extraction & Kerberoasting"
-    description = "Extracts SPNs from targeted Active Directory domain controllers."
-    category = "active_directory"
-    mitre_techniques = ["T1558.003"]
-    opsec_level = "medium"
+class KerberoastParams(ModuleParams):
+    dc: str = param("Target Domain Controller IP or FQDN", min_length=3)
+    domain: str = param("AD DNS domain name, e.g. CORP.LOCAL", min_length=3)
+    password: SecretParam = param("Domain user password", secret=True, required=False)
 
-    def run(self, ctx: ExecutionContext) -> ModuleResult:
-        # Hard scope validation is enforced automatically by ctx
-        target_ip = ctx.params.get("target_ip")
-        
-        if ctx.is_dry_run:
-            return ModuleResult.ok("Dry-run validated: target inside approved scope.")
+class CustomKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
+    MODULE_ID = "custom.ad.kerberoast"
+    MODULE_NAME = "Custom Kerberoasting"
+    MODULE_CATEGORY = "ad"
+    OPSEC_LEVEL = OpsecLevel.LOW
+    MITRE_TECHNIQUES = ["T1558.003"]
+    PARAMS_MODEL = KerberoastParams
 
-        # Execute check inside scope boundary
-        hashes = self._extract_spn_hashes(target_ip)
-        
-        # Save captured hash to AES-256 encrypted campaign vault
-        ctx.vault.store_credential(
-            cred_type="kerberos_hash",
-            target=target_ip,
-            secret=hashes
+    async def execute(self, ctx: ExecutionContext[KerberoastParams]) -> ModuleResult:
+        # ctx.params provides full static typing and runtime validation
+        await self.before_request(ctx.params.dc)
+
+        # Emit findings using fluent context helpers
+        finding = ctx.emit_finding(
+            title=f"Kerberoastable SPN Captured on {ctx.params.dc}",
+            severity=Severity.HIGH,
+            mitre_technique="T1558.003",
         )
-        
-        return ModuleResult.ok(f"Extracted {len(hashes)} SPN hashes.", data={"count": len(hashes)})
+        return ModuleResult(status="success", findings=[finding], module_id=self.MODULE_ID)
 ```
 
-See [docs/module-development.md](docs/module-development.md) for full developer documentation.
+### 2. Isolated Testing & Simulation (`ModuleTestHarness`)
+Unit test custom techniques locally with mock scope guards, synthetic credential vaults, and fluent assertion matchers:
+
+```python
+from ares.sdk import ModuleTestHarness, Severity
+
+async def test_module():
+    harness = ModuleTestHarness(CustomKerberoastModule)
+    result = await harness.simulate(params={"dc": "10.0.0.10", "domain": "LAB.LOCAL"})
+    result.assert_success()
+    result.assert_finding(severity=Severity.HIGH, mitre="T1558.003")
+```
+
+### 3. Programmatic Automation (`AresClient`)
+Automate engagements, dispatch modules, and stream real-time WebSocket telemetry via Python scripts or CI/CD pipelines:
+
+```python
+from ares.sdk import AresClient
+
+async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_key_...") as ares:
+    campaign = await ares.campaigns.create(name="Op-Titan", scope=["10.0.0.0/24"])
+    job = await ares.modules.run("ad.kerberoast", target="dc01.corp.local", campaign_id=campaign["id"])
+    findings = await ares.campaigns.findings(campaign["id"])
+```
+
+See [docs/module_sdk.md](docs/module_sdk.md) and [docs/module-development.md](docs/module-development.md) for full developer documentation, architecture specifications, and examples.
 
 ---
 
@@ -443,13 +479,14 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
+- [**Modern Module SDK Specification (v2)**](docs/module_sdk.md)
+- [**Step-by-Step Module Development Guide**](docs/module-development.md)
 - [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
 - [**Adversary Module Catalog & Schemas**](docs/modules.md)
 - [**API Endpoint Reference & Payloads**](docs/api-reference.md)
 - [**Enterprise SSO Integration Guide (SAML 2.0 / OIDC)**](docs/sso-setup.md)
 - [**Enterprise Security & Threat Model**](docs/security-model.md)
 - [**Validation Lab & Test Harness**](docs/validation-lab.md)
-- [**Module Authoring SDK Guide**](docs/module-development.md)
 
 ---
 

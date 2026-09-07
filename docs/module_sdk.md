@@ -1,21 +1,110 @@
-# ARES Module SDK
+# ARES Module & Developer SDK
 
-**Version:** 1.0.0 | **Status:** authoring/preview only in C-LIVE-v1
+**Version:** 2.0.0 (Modern Type-Safe Standard) | **Backward Compatible with v1.0.0**
 
-> Complete guide for ARES module authors.
-> Everything needed to build, test, sign, and publish an ARES module.
+> Complete guide for ARES module authors and automation engineers.
+> Everything needed to build type-safe modules, simulate attacks in isolation, and automate ARES via Python.
 
-`ares.sdk` is the preferred public import path for new modules. The older
-`ares.modules.sdk` path remains available for existing modules.
-
-> C-LIVE-v1 keeps all production descriptors disabled/ineligible. SDK authoring
-> and metadata validation remain available, but `ModuleTestHelper.run` and
-> `run_full` are preview-only and never invoke module `validate`, `run`, or
-> `execute` methods.
+`ares.sdk` is the canonical public import path. It provides:
+1. **Type-Safe Module Authoring**: Generic `BaseModule[P, R]`, Pydantic v2 `ModuleParams`, and declarative `@ares_module`.
+2. **Fluent Execution Context**: `ctx.emit_finding(...)`, `ctx.store_artifact(...)`, `ctx.record_credential(...)`.
+3. **Isolated Testing & Simulation**: `ModuleTestHarness` with fluent assertion matchers (`result.assert_success()`, `result.assert_finding()`).
+4. **Programmatic API Client**: `AresClient` for asynchronous REST and WebSocket automation.
 
 ---
 
-## Quick Start
+## Modern Quick Start (v2 Standard)
+
+```python
+# my_module.py
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    ModuleParams, param, SecretParam,
+    OpsecLevel, Severity, ares_module,
+)
+
+# 1. Declare validated parameter schema with Pydantic v2
+class AttackParams(ModuleParams):
+    dc: str = param(description="Target DC IP or FQDN", min_length=3)
+    domain: str = param(description="AD domain name", min_length=3)
+    password: SecretParam = param(description="Password", secret=True, required=False)
+    port: int = param(description="Target port", default=389, ge=1, le=65535)
+
+# 2. Modern Class-Based Module
+class MyModule(BaseModule[AttackParams, ModuleResult]):
+    MODULE_ID = "myorg.my_attack"
+    MODULE_NAME = "My Attack Module"
+    MODULE_CATEGORY = "ad"
+    PARAMS_MODEL = AttackParams
+    OPSEC_LEVEL = OpsecLevel.LOW
+    MITRE_TECHNIQUES = ["T1087.002"]
+
+    async def execute(self, ctx: ExecutionContext[AttackParams]) -> ModuleResult:
+        # ctx.params has 100% type safety and autocomplete!
+        target_dc = ctx.params.dc
+
+        # Fluent finding emission
+        ctx.emit_finding(
+            title=f"Discovered Service on {target_dc}",
+            severity=Severity.HIGH,
+            mitre_technique="T1087.002",
+        )
+        return ModuleResult(status="success", module_id=self.MODULE_ID)
+
+# 3. Or Declarative Functional Module
+@ares_module(
+    id="myorg.quick_probe",
+    name="Quick Probe",
+    category="recon",
+    params_model=AttackParams,
+    mitre="T1046",
+)
+async def quick_probe(ctx: ExecutionContext[AttackParams]) -> ModuleResult:
+    ctx.emit_finding("Port Active", Severity.INFO, mitre_technique="T1046")
+    return ModuleResult(status="success", module_id="myorg.quick_probe")
+```
+
+---
+
+## Isolated Testing & Simulation (`ares.sdk.testing`)
+
+Test modules locally in complete isolation without starting the engine or databases:
+
+```python
+from ares.sdk import ModuleTestHarness, Severity
+
+async def test_my_module():
+    harness = ModuleTestHarness(MyModule)
+    result = await harness.simulate(
+        params={"dc": "10.0.0.1", "domain": "CORP.LOCAL"},
+        dry_run=True,
+    )
+    result.assert_success()
+    result.assert_no_errors()
+    finding = result.assert_finding(severity=Severity.HIGH, mitre="T1087.002")
+    assert "Discovered Service" in finding.title
+```
+
+---
+
+## Programmatic Automation (`AresClient`)
+
+Control and automate ARES from external Python scripts, SOAR playbooks, or CI/CD pipelines:
+
+```python
+from ares.sdk import AresClient
+
+async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_pat_...") as client:
+    campaign = await client.campaigns.create(name="Op-Titan", scope=["10.10.0.0/24"])
+    print(f"Created Campaign: {campaign['id']}")
+
+    dispatch = await client.modules.run("ad.kerberoast", target="dc01.corp.local", campaign_id=campaign["id"])
+    findings = await client.campaigns.findings(campaign["id"])
+```
+
+---
+
+## Legacy Quick Start (v1.0.0 - Fully Preserved)
 
 ```python
 # my_module.py
