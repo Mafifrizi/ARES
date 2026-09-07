@@ -251,9 +251,11 @@ def test_mcp_subcommand_help_coverage() -> None:
 
 def test_mcp_monitor_options_help() -> None:
     """Verify monitor subcommand flags --campaign, --scope, --demo are documented."""
-    result = runner.invoke(app, ["mcp", "monitor", "--help"])
+    import re
+    result = runner.invoke(app, ["mcp", "monitor", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == EXIT_SUCCESS
-    assert "--campaign" in result.stdout
-    assert "--scope" in result.stdout
-    assert "--demo" in result.stdout
-    assert "OpenClaw style" in result.stdout
+    clean_stdout = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", result.stdout)
+    assert "--campaign" in clean_stdout
+    assert "--scope" in clean_stdout
+    assert "--demo" in clean_stdout
+    assert "OpenClaw style" in clean_stdout
