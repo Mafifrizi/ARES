@@ -8,3 +8,7 @@ re-exports everything so that both import paths work.
 from ares.cli.typer_main import app, cli  # noqa: F401  (re-exported for entry point)
 
 __all__ = ["app", "cli"]
+
+if __name__ == "__main__":
+    cli()
+
