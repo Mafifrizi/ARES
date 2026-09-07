@@ -25,6 +25,7 @@ The documentation is organized into five functional pillars:
 | [MODULE_GUIDE.md](MODULE_GUIDE.md) | Operator quickstart for executing and chaining modules across target hosts. | Operators |
 | [module-development.md](module-development.md) | Step-by-step developer guide for writing, testing with `ModuleTestHarness`, and signing attack modules. | Module Developers |
 | [module_sdk.md](module_sdk.md) | Modern v2 SDK specification (`BaseModule[P, R]`, Pydantic v2 params, testing harness, and `AresClient`). | Developers, Integrators |
+| [mcp-server.md](mcp-server.md) | Universal Model Context Protocol (MCP) server architecture, 7 security guarantees, and multi-client setup. | AI Engineers, Operators |
 
 ### API, Security and Database
 | Document | Description | Target Audience |

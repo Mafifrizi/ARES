@@ -480,6 +480,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
 - [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
+- [**Sovereign MCP Server Specification (Universal AI Gateway)**](docs/mcp-server.md)
 - [**Step-by-Step Module Development Guide**](docs/module-development.md)
 - [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
 - [**Adversary Module Catalog & Schemas**](docs/modules.md)
