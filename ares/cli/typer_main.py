@@ -2720,6 +2720,20 @@ async def test_missing_target_raises(module):
 
 # ── MCP CLI Commands ─────────────────────────────────────────────────────────
 
+@mcp_app.command("console")
+def mcp_console_cmd() -> None:
+    """Launch the ARES Sovereign Agent Interactive TUI Console (OpenClaw/OpenCode style)."""
+    from ares.cli.console import interactive_console_loop
+    interactive_console_loop()
+
+
+@app.command("console")
+def app_console_cmd() -> None:
+    """Launch the ARES Sovereign Agent Interactive TUI Console (OpenClaw/OpenCode style)."""
+    from ares.cli.console import interactive_console_loop
+    interactive_console_loop()
+
+
 @mcp_app.command("stdio")
 def mcp_stdio_cmd() -> None:
     """Run the ARES Sovereign MCP Server over asynchronous stdio (Claude Desktop / Cursor / Windsurf / Cline / Zed)."""
