@@ -406,6 +406,8 @@ def interactive_console_loop() -> None:
                 f"[{COLOR_NEUTRAL}]Verify subsystem readiness matrix[/]",
                 f"  [{COLOR_INDEX}][6][/] [{COLOR_VALUE}]HTTP / SSE Gateway[/]         "
                 f"[{COLOR_NEUTRAL}]Start local network server (Port 8001)[/]",
+                f"  [{COLOR_INDEX}][7][/] [{COLOR_VALUE}]Live TUI Monitor (OpenClaw)[/]  "
+                f"[{COLOR_NEUTRAL}]Two-Pane real-time telemetry & token approval[/]",
                 f"  [{COLOR_ERROR}][0][/] [{COLOR_ERROR}]Exit[/]",
             ]
             console.print(Panel(
@@ -417,7 +419,7 @@ def interactive_console_loop() -> None:
 
             choice = Prompt.ask(
                 f"[{COLOR_LABEL}]Select option[/]",
-                choices=["1", "2", "3", "4", "5", "6", "0"],
+                choices=["1", "2", "3", "4", "5", "6", "7", "0"],
                 default="1",
             )
 
@@ -438,6 +440,9 @@ def interactive_console_loop() -> None:
                 run_system_doctor()
             elif choice == "6":
                 start_sse_server()
+            elif choice == "7":
+                from ares.cli.mcp_tui import run_mcp_monitor
+                run_mcp_monitor()
 
     except KeyboardInterrupt:
         console.print(f"\n[{COLOR_NEUTRAL}]Cancelled[/]")

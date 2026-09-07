@@ -2751,12 +2751,45 @@ def mcp_console_cmd() -> None:
         raise typer.Exit(130)
 
 
+@mcp_app.command("monitor")
+@mcp_app.command("tui")
+def mcp_monitor_cmd(
+    campaign: str = typer.Option("Internal-Audit-2026", "--campaign", "-c", help="Active campaign name to monitor"),
+    scope: str = typer.Option("10.0.1.0/24, 192.168.10.0/24", "--scope", "-s", help="Approved CIDRs scope"),
+    demo: bool = typer.Option(False, "--demo", help="Run automated demonstration telemetry feed"),
+) -> None:
+    """Launch the ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style)."""
+    from ares.cli.mcp_tui import run_mcp_monitor
+    try:
+        code = run_mcp_monitor(campaign=campaign, scope=scope, demo=demo)
+        raise typer.Exit(code)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled[/dim]")
+        raise typer.Exit(130)
+
+
 @app.command("console")
 def app_console_cmd() -> None:
     """Launch the ARES MCP Interactive Console (OpenCode/OpenClaw style)."""
     from ares.cli.console import interactive_console_loop
     try:
         interactive_console_loop()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled[/dim]")
+        raise typer.Exit(130)
+
+
+@app.command("monitor")
+def app_monitor_cmd(
+    campaign: str = typer.Option("Internal-Audit-2026", "--campaign", "-c", help="Active campaign name to monitor"),
+    scope: str = typer.Option("10.0.1.0/24, 192.168.10.0/24", "--scope", "-s", help="Approved CIDRs scope"),
+    demo: bool = typer.Option(False, "--demo", help="Run automated demonstration telemetry feed"),
+) -> None:
+    """Launch the ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style)."""
+    from ares.cli.mcp_tui import run_mcp_monitor
+    try:
+        code = run_mcp_monitor(campaign=campaign, scope=scope, demo=demo)
+        raise typer.Exit(code)
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled[/dim]")
         raise typer.Exit(130)

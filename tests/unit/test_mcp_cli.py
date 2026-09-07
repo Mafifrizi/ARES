@@ -229,6 +229,9 @@ def test_mcp_non_interactive_piped() -> None:
 def test_mcp_subcommand_help_coverage() -> None:
     """Verify comprehensive help is available on all MCP subcommands."""
     subcommands = [
+        "console",
+        "monitor",
+        "tui",
         "doctor",
         "module-catalog",
         "scope-check",
@@ -244,3 +247,13 @@ def test_mcp_subcommand_help_coverage() -> None:
         result = runner.invoke(app, ["mcp", subcmd, "--help"])
         assert result.exit_code == EXIT_SUCCESS, f"Subcommand {subcmd} failed help check"
         assert "Usage:" in result.stdout or "Options" in result.stdout
+
+
+def test_mcp_monitor_options_help() -> None:
+    """Verify monitor subcommand flags --campaign, --scope, --demo are documented."""
+    result = runner.invoke(app, ["mcp", "monitor", "--help"])
+    assert result.exit_code == EXIT_SUCCESS
+    assert "--campaign" in result.stdout
+    assert "--scope" in result.stdout
+    assert "--demo" in result.stdout
+    assert "OpenClaw style" in result.stdout

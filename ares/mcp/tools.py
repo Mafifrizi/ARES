@@ -478,7 +478,7 @@ class McpToolRegistry:
             ttl_seconds=60.0,
         )
 
-        # 4. Broadcast Simulation Event to WebSocket Live Dashboard
+        # 4. Broadcast Simulation Event to WebSocket Live Dashboard & Local TUI Monitor
         await self._broadcast(
             campaign_id,
             {
@@ -489,6 +489,19 @@ class McpToolRegistry:
                 "status": "simulation_ready",
             },
         )
+        try:
+            from ares.mcp.events import McpEventBus
+            McpEventBus.emit("STAGED", {
+                "call": f"ares_dry_run_module(module={module_id})",
+                "module": module_id,
+                "target": target,
+                "action": descriptor.description[:40] if descriptor.description else "Dry-Run Simulation",
+                "risk": f"{descriptor.opsec.value.upper()} (Safe Pre-flight)",
+                "status": "STAGED",
+                "style": "blue",
+            })
+        except Exception:
+            pass
 
         simulation_result = {
             "status": "SIMULATION_SUCCESS",

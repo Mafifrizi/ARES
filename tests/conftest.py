@@ -36,7 +36,7 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestPassword1!")
 def pytest_configure(config: pytest.Config) -> None:
     """Ensure tests run against a clean external basetemp outside _REPO_ROOT."""
     if config.option.basetemp is None:
-        target = Path(tempfile.gettempdir()) / "ares_pytest"
+        target = Path(tempfile.gettempdir()) / f"ares_pytest_{os.getpid()}"
         target.mkdir(parents=True, exist_ok=True)
         config.option.basetemp = str(target)
 

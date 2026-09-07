@@ -8,9 +8,9 @@
 
 <div align="center">
 
-![ARES MCP Interactive Console](assets/screenshots/mcp-console.png)
+![ARES MCP Two-Pane Terminal Monitor](assets/screenshots/mcp-console.png)
 
-*ARES MCP Interactive Terminal Console (OpenCode/OpenClaw style) with ScopeGuard protection and 1-click client configuration.*
+*ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style) with real-time tool telemetry, live scope inspection, and 1-key token authorization.*
 
 </div>
 
@@ -30,7 +30,7 @@ Unlike basic MCP servers that blindly expose raw shell execution or dangerous en
 
 ## 2. 🚀 Step-by-Step Guide: Where Do I Start First?
 
-For operators or developers getting started with ARES MCP for the first time, follow these 5 guided steps:
+For operators or developers getting started with ARES MCP for the first time, follow these 6 guided steps:
 
 ### Step 1: Ensure Your Python Virtual Environment Is Ready
 Open a PowerShell or terminal prompt in the root of the ARES repository:
@@ -49,7 +49,7 @@ Run the `mcp.bat` launcher (or `mcp.ps1` in PowerShell):
 # Or using the native PowerShell script:
 .\mcp
 ```
-An OpenCode / OpenClaw-style interactive console will open, displaying system health, 62 active attack modules, 9 registered operational tools, and options `[1]` through `[0]`.
+An OpenCode / OpenClaw-style interactive console will open, displaying system health, 62 active attack modules, 9 registered operational tools, and options `[1]` through `[7]`.
 
 ### Step 3: Run the Subsystem Healthcheck (`doctor`)
 Before connecting any AI client, verify that all core subsystems are fully operational:
@@ -89,11 +89,20 @@ This command automatically writes the correct absolute Python virtual environmen
 4. Navigate to **Features** &rarr; **MCP Servers**.
 5. The **`ares`** server will appear with a **green status indicator** (`Connected`) and 9 available tools.
 
-### Step 6: Issue Your First Command to the AI Agent
-Open **Cursor Composer / Chat** (`Ctrl + I` or `Ctrl + L`), and try asking:
-> *"Check the active campaigns and list recent vulnerability findings using the ARES MCP tools."*
+### Step 6: Launch the Live Two-Pane Monitor (Companion Terminal)
+In a second terminal window side-by-side with your IDE, launch the real-time Two-Pane Monitor:
+```powershell
+.\mcp.bat monitor
+```
+- **Left Pane (60%)**: Displays live tool invocations as the AI agent calls them (`ares_scope_check`, `ares_dry_run_module`, etc.).
+- **Right Pane (40%)**: Displays real-time scope rules, staged actions, and the **Authorization Gateway**.
+- **Interactive Controls**: When a dangerous action requires confirmation, press **`A`** to approve or **`R`** to reject. Press **`C`** to clear stream, **`Q`** to quit.
 
-The AI Agent will call `ares_list_campaigns` and render the engagement data directly inside your editor.
+### Step 7: Issue Your First Command to the AI Agent
+Open **Cursor Composer / Chat** (`Ctrl + I` or `Ctrl + L`), and try asking:
+> *"Check active campaign status, verify scope for target 10.0.1.50, and stage a dry-run of module ad_kerberoast."*
+
+The AI Agent will call `ares_scope_check` and `ares_dry_run_module`, streaming results directly to both your editor and your live terminal monitor.
 
 ---
 
@@ -137,6 +146,7 @@ The ARES MCP CLI (`mcp.bat`, `mcp.ps1`, or `python -m ares.cli.main mcp`) is des
 | Command | Description | Scriptable / JSON |
 | :--- | :--- | :---: |
 | `.\mcp.bat` | Launches the interactive OpenCode/OpenClaw-style TUI console. | TTY Auto-detect |
+| `.\mcp.bat monitor` | Launches the Two-Pane Split Terminal Monitor with live telemetry & 1-key token authorization. | Interactive TUI |
 | `.\mcp.bat doctor` | Verifies readiness across all protocol, tools, and security gates. | Yes (`--json`) |
 | `.\mcp.bat module-catalog` | Searches and filters 62 attack modules with OPSEC and governance metadata. | Yes (`--json`) |
 | `.\mcp.bat scope-check` | Verifies whether a target IP, CIDR, or hostname is in authorized scope. | Yes (`--json`) |

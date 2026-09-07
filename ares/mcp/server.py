@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Coroutine
 
+from ares.mcp.events import McpEventBus
 from ares.mcp.prompts import McpPromptRegistry
 from ares.mcp.protocol import (
     ErrorCode,
@@ -111,6 +112,26 @@ class AresMcpServer:
                     ).model_dump(exclude_none=True)
 
                 res = await self.tool_registry.call_tool(tool_name, tool_args)
+
+                # Emit real-time telemetry to local ARES MCP TUI Monitor
+                try:
+                    arg_summary = ", ".join(f"{k}={v}" for k, v in list(tool_args.items())[:2])
+                    status_label = "ERROR" if res.isError else "OK"
+                    status_style = "red" if res.isError else "green"
+                    if "scope" in tool_name:
+                        status_label = "BLOCKED: out-of-scope" if res.isError else "ALLOW: in-scope"
+                    elif "dry_run" in tool_name:
+                        status_label = "STAGED"
+                        status_style = "blue"
+
+                    McpEventBus.emit("CALL", {
+                        "call": f"{tool_name}({arg_summary})",
+                        "status": status_label,
+                        "style": status_style,
+                    })
+                except Exception:
+                    pass
+
                 return JSONRPCResponse(id=req.id, result=res.model_dump()).model_dump(exclude_none=True)
 
             # Resources

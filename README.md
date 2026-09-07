@@ -410,32 +410,25 @@ ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that e
 
 <div align="center">
 
-![ARES MCP Interactive Console](docs/assets/screenshots/mcp-console.png)
+![ARES MCP Two-Pane Terminal Monitor](docs/assets/screenshots/mcp-console.png)
 
-*ARES MCP Interactive Terminal Console (OpenCode/OpenClaw style) with ScopeGuard protection and 1-click AI IDE setup.*
+*ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style) with real-time tool telemetry, live scope inspection, and 1-key token authorization.*
 
 </div>
 
 Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, ARES enforces strict **Pre-Flight Scope Invariance (`ScopeGuard`)**, **Anti-Prompt-Injection Taint Isolation**, and **Single-Use 60-second HMAC Confirmation Tokens** before any live offensive action can execute.
 
-### 🚀 Where Do I Start First? (5 Quick Steps)
+### 🚀 Where Do I Start First? (Step-by-Step Onboarding)
 
 For operators or developers connecting Cursor, Claude Desktop, or Windsurf to ARES:
 
-1. **Open a Terminal in the ARES Repository**:
-   Launch the interactive ARES MCP console:
-   ```powershell
-   .\mcp.bat
-   ```
-   *(Note: In Windows PowerShell, prefix with `.\` or use the native script `.\mcp`)*.
-
-2. **Verify Subsystem Readiness (`doctor`)**:
-   Ensure all 6 core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modules, Security Gates) report `PASS`:
+1. **Verify Subsystem Readiness (`doctor`)**:
+   Ensure all core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modules, Security Gates) report `PASS`:
    ```powershell
    .\mcp.bat doctor
    ```
 
-3. **1-Click AI Client Setup (No Manual JSON Editing)**:
+2. **1-Click AI Client Setup (No Manual JSON Editing)**:
    Automatically configure your preferred IDE with a single command:
    ```powershell
    # For Cursor IDE:
@@ -452,14 +445,23 @@ For operators or developers connecting Cursor, Claude Desktop, or Windsurf to AR
    ```
    This writes your active Python virtual environment path directly into the client config file (e.g. `.cursor/mcp.json`).
 
-4. **Reload Window in Cursor IDE**:
+3. **Reload Window in Cursor IDE**:
    - In Cursor, press `Ctrl + Shift + P`.
    - Select **`Developer: Reload Window`**.
    - Open **Settings** (`Ctrl + ,`) &rarr; **Features** &rarr; **MCP Servers**. The **`ares`** server will show a green dot (`Connected`).
 
+4. **Launch the Live Two-Pane Monitor (Optional Companion Window)**:
+   In a dedicated terminal window, run the OpenClaw-style two-pane monitor to watch real-time AI tool invocations, scope checks, and approve tokens:
+   ```powershell
+   .\mcp.bat monitor
+   ```
+   - **Left Pane**: Live stream of tool calls executed by the AI agent (`ares_scope_check`, `ares_dry_run_module`, `ares_run_tool`).
+   - **Right Pane**: ScopeGuard CIDR boundaries, staged action diffs, and the **Authorization Gateway**.
+   - **Controls**: Press **`A`** to approve a pending execution token, **`R`** to reject, **`C`** to clear stream, **`Q`** to quit.
+
 5. **Issue Your First Command to the AI Agent**:
    Open Cursor Composer / Chat (`Ctrl + I` or `Ctrl + L`), and try this prompt:
-   > *"Check active campaign status and list recent vulnerability findings using the ARES MCP tools."*
+   > *"Check active campaign status, verify scope for target 10.0.1.50, and stage a dry-run of module ad_kerberoast."*
 
 For in-depth architecture, the 7 security invariants, CLI scriptability (`--json`), POSIX exit codes, and operational tool schemas, see [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
 

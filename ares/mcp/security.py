@@ -68,6 +68,21 @@ class ConfirmationTokenManager:
         expires_at = time.time() + ttl_seconds
         self._tokens[token] = (expires_at, payload)
         self._purge_expired()
+
+        try:
+            from ares.mcp.events import McpEventBus
+            McpEventBus.emit("AUTH", {
+                "call": f"Token issued for {module_id}: #{token[:16]}",
+                "token": token,
+                "module": module_id,
+                "target": target,
+                "ttl": int(ttl_seconds),
+                "status": f"PENDING: {int(ttl_seconds)}s",
+                "style": "yellow",
+            })
+        except Exception:
+            pass
+
         return token
 
     def validate_and_burn(
@@ -87,6 +102,15 @@ class ConfirmationTokenManager:
         if time.time() > expires_at:
             self._tokens.pop(token, None)
             return False
+
+        # Honor operator reject decision from TUI monitor
+        try:
+            from ares.mcp.events import McpEventBus
+            if McpEventBus.get_token_decision(token) == "REJECTED":
+                self._tokens.pop(token, None)
+                return False
+        except Exception:
+            pass
 
         actual_payload = self._make_payload(campaign_id, module_id, target, params)
         if hmac.compare_digest(expected_payload, actual_payload):
