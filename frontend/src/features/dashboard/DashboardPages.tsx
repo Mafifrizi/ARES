@@ -415,6 +415,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       campaignsLoading: campaigns.isLoading,
       campaignsError: campaigns.error,
       deleteCampaign,
+      isDeletingCampaign: deleteCampaignMutation.isPending,
       refetchCampaigns: () => queryClient.invalidateQueries({ queryKey: ["campaigns"], refetchType: "all" })
     }),
     [
@@ -422,6 +423,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       campaigns.error,
       campaigns.isLoading,
       deleteCampaign,
+      deleteCampaignMutation.isPending,
       liveCampaignId,
       liveConnected,
       liveEvents,
@@ -1136,6 +1138,7 @@ export function CampaignsPage() {
     setSelectedCampaignId: setSelected,
     campaigns: campaignList,
     deleteCampaign,
+    isDeletingCampaign,
     refetchCampaigns
   } = useDashboardUi();
   const [name, setName] = useSessionState("ares.dashboard.campaigns.create.name", "");
@@ -1147,7 +1150,8 @@ export function CampaignsPage() {
   const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.campaigns.tab", "List");
   const [deleteError, setDeleteError] = useState<unknown>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [localDeleting, setLocalDeleting] = useState(false);
+  const isDeleting = localDeleting || Boolean(isDeletingCampaign);
   const detail = useQuery({
     queryKey: ["campaign", selected],
     queryFn: () => api.campaign(selected),
@@ -1195,11 +1199,11 @@ export function CampaignsPage() {
   });
 
   const handleDelete = async (targetId: string) => {
-    if (!targetId) return;
+    if (!targetId || isDeleting) return;
     if (!window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
       return;
     }
-    setIsDeleting(true);
+    setLocalDeleting(true);
     setDeleteError(null);
     try {
       const ok = await deleteCampaign(targetId);
@@ -1213,7 +1217,7 @@ export function CampaignsPage() {
     } catch (err) {
       setDeleteError(err);
     } finally {
-      setIsDeleting(false);
+      setLocalDeleting(false);
     }
   };
 

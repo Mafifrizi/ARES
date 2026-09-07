@@ -43,6 +43,7 @@ export interface DashboardUiState {
   campaignsLoading: boolean;
   campaignsError: unknown;
   deleteCampaign: (id: string) => Promise<boolean>;
+  isDeletingCampaign: boolean;
   refetchCampaigns: () => Promise<unknown>;
 }
 
