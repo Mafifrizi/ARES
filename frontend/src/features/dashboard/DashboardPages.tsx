@@ -4,8 +4,11 @@ import {
   CheckCircle2,
   ChevronDown,
   Copy,
+  Info,
+  Layers,
   Loader2,
   Menu,
+  Plus,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -17,6 +20,7 @@ import {
   FormEvent,
   KeyboardEvent,
   ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -331,12 +335,71 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   });
   const telemetrySnapshot = telemetry.data as TelemetrySnapshot | undefined;
 
+  const queryClient = useQueryClient();
+  const deleteCampaignMutation = useMutation({
+    mutationFn: (id: string) => api.deleteCampaign(id),
+    onSuccess: async (_, id) => {
+      queryClient.setQueryData<Campaign[]>(["campaigns"], (old) =>
+        old ? old.filter((c) => c.id !== id) : []
+      );
+      queryClient.removeQueries({ queryKey: ["campaign", id] });
+      queryClient.removeQueries({ queryKey: ["findings", id] });
+      queryClient.removeQueries({ queryKey: ["cvss", id] });
+      queryClient.removeQueries({ queryKey: ["reports", id] });
+
+      if (selectedCampaignId === id) {
+        setSelectedCampaignId("");
+      }
+      if (liveCampaignId === id) {
+        setLiveCampaignId("");
+        setLiveConnected(false);
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["telemetry"], refetchType: "all" });
+      await queryClient.invalidateQueries({ queryKey: ["monthlyStats"], refetchType: "all" });
+      await queryClient.invalidateQueries({ queryKey: ["campaigns"], refetchType: "all" });
+    }
+  });
+
+  const deleteCampaign = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        await deleteCampaignMutation.mutateAsync(id);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [deleteCampaignMutation]
+  );
+
+  useEffect(() => {
+    if (selectedCampaignId && campaigns.isSuccess) {
+      const exists = (campaigns.data ?? []).some((c) => c.id === selectedCampaignId);
+      if (!exists) {
+        setSelectedCampaignId("");
+      }
+    }
+  }, [selectedCampaignId, campaigns.data, campaigns.isSuccess, setSelectedCampaignId]);
+
+  useEffect(() => {
+    if (liveCampaignId && campaigns.isSuccess) {
+      const exists = (campaigns.data ?? []).some((c) => c.id === liveCampaignId);
+      if (!exists) {
+        setLiveCampaignId("");
+        setLiveConnected(false);
+      }
+    }
+  }, [liveCampaignId, campaigns.data, campaigns.isSuccess, setLiveCampaignId, setLiveConnected]);
+
   useCampaignEventSocket({
     campaignId: liveCampaignId,
     enabled: liveConnected,
     onDisconnected: () => setLiveConnected(false),
     onEvent: (event) => setLiveEvents((items) => [event, ...items].slice(0, 100))
   });
+
+  const campaignList = campaigns.data ?? [];
 
   const dashboardUi = useMemo<DashboardUiState>(
     () => ({
@@ -347,12 +410,22 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       liveConnected,
       setLiveConnected,
       liveEvents,
-      clearLiveEvents: () => setLiveEvents([])
+      clearLiveEvents: () => setLiveEvents([]),
+      campaigns: campaignList,
+      campaignsLoading: campaigns.isLoading,
+      campaignsError: campaigns.error,
+      deleteCampaign,
+      refetchCampaigns: () => queryClient.invalidateQueries({ queryKey: ["campaigns"], refetchType: "all" })
     }),
     [
+      campaignList,
+      campaigns.error,
+      campaigns.isLoading,
+      deleteCampaign,
       liveCampaignId,
       liveConnected,
       liveEvents,
+      queryClient,
       selectedCampaignId,
       setLiveCampaignId,
       setLiveConnected,
@@ -603,7 +676,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <select
                   className="topbar-scope-select"
                   aria-label="Active campaign scope"
-                  value={selectedCampaignId}
+                  value={selectedCampaignId && campaignList.some((c) => c.id === selectedCampaignId) ? selectedCampaignId : ""}
                   onChange={(e) => {
                     setSelectedCampaignId(e.target.value);
                     if (e.target.value) {
@@ -612,7 +685,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   }}
                 >
                   <option value="">Scope: Global / All</option>
-                  {(campaigns.data ?? []).map((c) => (
+                  {campaignList.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name || c.id.slice(0, 12)}
                     </option>
@@ -668,26 +741,54 @@ export function DashboardShell({ children }: { children: ReactNode }) {
             <div className="topbar-right">
               {/* Telemetry Operational Status */}
               <div className="relative">
-                <button
-                  className="topbar-status-btn"
-                  type="button"
-                  aria-label="System operational status"
-                  aria-expanded={telemetryOpen}
-                  onClick={() => setTelemetryOpen((v) => !v)}
-                  title="System operational health and telemetry status"
-                >
-                  <span className={`status-dot ${health.isSuccess && !telemetry.isError ? "online" : "warning"}`} />
-                  <span className="status-title">{health.isSuccess ? "Operational" : "Connecting"}</span>
-                  <span className="status-pill-count font-mono">
-                    {telemetrySnapshot ? `${metricNumber(telemetrySnapshot.modules, "total")} runs` : "v6.0"}
-                  </span>
-                </button>
+                {(() => {
+                  const healthSnapshot = health.data as Record<string, unknown> | undefined;
+                  const healthStatus = String(healthSnapshot?.status ?? "").toLowerCase();
+                  const isHealthOk = health.isSuccess && healthStatus === "ok";
+                  const isHealthDegraded = health.isSuccess && healthStatus === "degraded";
+                  const isHealthOffline = health.isError;
+                  const isHealthConnecting = health.isLoading;
+
+                  let topbarDotClass = "online";
+                  let topbarText = "Operational";
+
+                  if (isHealthOffline) {
+                    topbarDotClass = "danger";
+                    topbarText = "Offline";
+                  } else if (isHealthConnecting) {
+                    topbarDotClass = "warning";
+                    topbarText = "Connecting";
+                  } else if (isHealthDegraded || telemetry.isError) {
+                    topbarDotClass = "warning";
+                    topbarText = isHealthDegraded ? "Degraded" : "Telemetry Lag";
+                  } else if (isHealthOk) {
+                    topbarDotClass = "online";
+                    topbarText = "Operational";
+                  }
+
+                  return (
+                    <button
+                      className="topbar-status-btn"
+                      type="button"
+                      aria-label="System operational status"
+                      aria-expanded={telemetryOpen}
+                      onClick={() => setTelemetryOpen((v) => !v)}
+                      title={`System operational health: ${topbarText} (API: ${healthStatus || "pending"})`}
+                    >
+                      <span className={`status-dot ${topbarDotClass}`} />
+                      <span className="status-title">{topbarText}</span>
+                      <span className="status-pill-count font-mono">
+                        {telemetrySnapshot ? `${metricNumber(telemetrySnapshot.modules, "total")} runs` : healthSnapshot?.version ? `v${healthSnapshot.version}` : "v6.0"}
+                      </span>
+                    </button>
+                  );
+                })()}
 
                 {telemetryOpen && (
                   <aside className="telemetry-popover" aria-label="Enclave telemetry quick view">
                     <div className="telemetry-popover-header">
                       <div className="flex items-center gap-2">
-                        <span className="status-dot online" />
+                        <span className={`status-dot ${health.isSuccess && !telemetry.isError ? "online" : "warning"}`} />
                         <strong>Enclave Subsystem Health</strong>
                       </div>
                       <button className="icon-button icon-button-small" onClick={() => setTelemetryOpen(false)} aria-label="Close telemetry view" type="button">
@@ -695,6 +796,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                       </button>
                     </div>
                     <div className="telemetry-popover-grid">
+                      <div className="popover-stat">
+                        <span>API Backend</span>
+                        <strong>{health.isSuccess ? String((health.data as Record<string, unknown> | undefined)?.status ?? "ok").toUpperCase() : health.isError ? "OFFLINE" : "CHECKING"}</strong>
+                      </div>
                       <div className="popover-stat">
                         <span>Worker Pool</span>
                         <strong>{metricNumber(telemetrySnapshot?.workers, "active")} active</strong>
@@ -704,14 +809,10 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                         <strong>{metricNumber(telemetrySnapshot?.queue, "depth")} queued</strong>
                       </div>
                       <div className="popover-stat">
-                        <span>Module Error Rate</span>
-                        <strong>{telemetrySnapshot ? `${formatRate(metricNumber(telemetrySnapshot.modules, "error_rate"))}` : "0%"}</strong>
-                      </div>
-                      <div className="popover-stat">
                         <span>Live Ingest</span>
                         <div className="mt-0.5 flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${liveConnected ? "bg-emerald-400" : "bg-zinc-500"}`} />
-                          <strong className="!mt-0 text-zinc-100">{liveConnected ? "Connected" : "Standby"}</strong>
+                          <span className={`h-1.5 w-1.5 rounded-full ${telemetry.isSuccess ? "bg-emerald-400" : "bg-zinc-500"}`} />
+                          <strong className="!mt-0 text-zinc-100">{telemetry.isSuccess ? "Active" : "Standby"}</strong>
                         </div>
                       </div>
                     </div>
@@ -821,32 +922,169 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 }
 
 export function OverviewPage() {
+  const navigate = useNavigate();
+  const writeDashboardSession = useDashboardSessionWriter();
+  const { campaigns: campaignList, campaignsLoading } = useDashboardUi();
   const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
   const monthlyStats = useQuery({ queryKey: ["monthlyStats"], queryFn: api.monthlyStats });
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const snapshot = telemetry.data as TelemetrySnapshot | undefined;
   const monthlyData = monthlyStats.data as MonthlyFindingStats | undefined;
-  const campaignList = campaigns.data ?? [];
-  const activeCampaigns = campaignList.filter((campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted").length;
+  const nonDeletedCampaigns = campaignList.filter(
+    (campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted"
+  );
+  const runningCampaigns = nonDeletedCampaigns.filter((campaign) =>
+    ["running", "active", "executing"].includes(String(campaign.status ?? "").toLowerCase())
+  );
+  const trackedCount = nonDeletedCampaigns.length;
+  const runningCount = runningCampaigns.length;
+
   const findings = typeof monthlyData?.confirmed_findings === "number" ? monthlyData.confirmed_findings : 0;
   const monthlyTotal = typeof monthlyData?.total === "number" ? monthlyData.total : 0;
   const monthlySeries = normalizeMonthlySeries(monthlyData?.period, monthlyData?.series);
+
+  // Dynamic header status subtitle (strictly distinguish running execution vs in-scope campaigns)
+  let overviewSubtitle: string;
+  if (trackedCount === 0) {
+    overviewSubtitle = "Enclave standby · No campaigns in scope · Ready for campaign deployment";
+  } else if (runningCount > 0) {
+    overviewSubtitle = `${runningCount} active execution${runningCount === 1 ? "" : "s"} · ${trackedCount} in scope · Enclave telemetry streaming`;
+  } else {
+    overviewSubtitle = `${trackedCount} campaign${trackedCount === 1 ? "" : "s"} in scope · Telemetry pipeline standby · Fail-closed policy enforced`;
+  }
+
+  // Fresh install empty-state (Task 5)
+  if (!campaignsLoading && trackedCount === 0) {
+    return (
+      <Page title="Overview" subtitle={overviewSubtitle}>
+        <div className="dashboard-empty-hero">
+          <div className="fresh-hero-icon-wrap">
+            <ShieldAlert size={32} className="text-rose-500" />
+          </div>
+          <h2>No Campaigns Initialized</h2>
+          <p>
+            Initialize an authorized red-team engagement to define target boundaries,
+            configure CIDR scopes, and execute automated validation modules.
+          </p>
+          <div className="fresh-hero-actions">
+            <button
+              className="btn btn-primary flex items-center gap-2 px-4 py-2 text-sm font-semibold"
+              onClick={() => {
+                writeDashboardSession("ares.dashboard.campaigns.tab", "List");
+                navigate("/campaigns");
+              }}
+              type="button"
+            >
+              <Plus size={16} />
+              <span>Create First Campaign</span>
+            </button>
+            <button
+              className="btn flex items-center gap-2 px-4 py-2 text-sm"
+              onClick={() => navigate("/modules")}
+              type="button"
+            >
+              <Layers size={15} />
+              <span>Browse Module Catalog</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="fresh-readiness-panel">
+          <div className="telemetry-strip flex items-center justify-between text-xs text-zinc-400">
+            <div className="flex items-center gap-5">
+              <span><strong className="text-zinc-200">Runtime:</strong> Ready</span>
+              <span><strong className="text-zinc-200">Worker Pool:</strong> {metricNumber(snapshot?.workers, "active")} active</span>
+              <span><strong className="text-zinc-200">Task Queue:</strong> {metricNumber(snapshot?.queue, "depth")} queued</span>
+            </div>
+            <span className="text-zinc-500 font-mono text-[11px]">Awaiting first engagement initialization</span>
+          </div>
+        </div>
+      </Page>
+    );
+  }
+
+  // Tactical operational highlights (Task 2 & 3)
+  const failedRuns = metricNumber(snapshot?.modules, "failed");
+  const errorRate = metricNumber(snapshot?.modules, "error_rate");
+  const hostsDiscovered = metricNumber(snapshot?.hosts, "discovered");
+  const hostsOwned = metricNumberOrNull(snapshot?.hosts, "owned");
+
   return (
-    <Page
-      title="Overview"
-    >
+    <Page title="Overview" subtitle={overviewSubtitle}>
       <div className="dashboard-grid">
         <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} confirmedFindings={findings} />
         <div className="side-stack">
-          <section className="panel p-4">
+          <section className="panel-subtle">
             <SectionHeader title="Highlights" />
             <div className="highlight-list">
-              <HighlightRow label="Active campaigns" value={String(activeCampaigns)} tone="low" detail="available engagements" />
-              <HighlightRow label="Findings" value={String(findings)} tone={findings > 0 ? "medium" : "low"} detail="confirmed observations" />
-              <HighlightRow label="Runtime" value={telemetry.isSuccess ? "Operational" : "Pending"} tone={telemetry.isSuccess ? "low" : "medium"} detail="telemetry stream" />
+              {runningCount > 0 ? (
+                <HighlightRow
+                  label="Engagement Posture"
+                  value={`${runningCount} Running`}
+                  tone="low"
+                  detail={`${runningCount} engagement${runningCount === 1 ? "" : "s"} actively executing validation modules`}
+                />
+              ) : trackedCount > 0 ? (
+                <HighlightRow
+                  label="Engagement Posture"
+                  value="Staged"
+                  tone="neutral"
+                  detail={
+                    trackedCount === 1
+                      ? "1 campaign in scope — awaiting execution run"
+                      : `${trackedCount} campaigns in scope — awaiting execution run`
+                  }
+                />
+              ) : (
+                <HighlightRow
+                  label="Engagement Posture"
+                  value="Standby"
+                  tone="neutral"
+                  detail="No active engagements"
+                />
+              )}
+
+              {failedRuns > 0 ? (
+                <HighlightRow
+                  label="Execution Health"
+                  value={`${failedRuns} Failed`}
+                  tone="high"
+                  detail={`${formatRate(errorRate)} module failure rate detected`}
+                />
+              ) : snapshot ? (
+                <HighlightRow
+                  label="Execution Health"
+                  value="Nominal"
+                  tone="low"
+                  detail="Zero module execution errors recorded"
+                />
+              ) : (
+                <HighlightRow
+                  label="Execution Health"
+                  value="Standby"
+                  tone="neutral"
+                  detail="Awaiting telemetry sample ingestion"
+                />
+              )}
+
+              {hostsDiscovered > 0 ? (
+                <HighlightRow
+                  label="Attack Surface"
+                  value={`${hostsDiscovered} Mapped`}
+                  tone={hostsOwned && hostsOwned > 0 ? "high" : "low"}
+                  detail={hostsOwned && hostsOwned > 0 ? `${hostsOwned} targets owned` : "Perimeter discovered, 0 targets owned"}
+                />
+              ) : (
+                <HighlightRow
+                  label="Attack Surface"
+                  value="Unmapped"
+                  tone="neutral"
+                  detail="Run recon modules to map attack surface"
+                />
+              )}
             </div>
           </section>
-          <section className="panel p-4">
+
+          <section className="panel-subtle">
             <SectionHeader title="Monthly Statistics" />
             <div className="monthly-stat">
               <span>{formatMetric(monthlyTotal)}</span>
@@ -893,8 +1131,13 @@ function normalizeMonthlySeries(
 
 export function CampaignsPage() {
   const queryClient = useQueryClient();
-  const { selectedCampaignId: selected, setSelectedCampaignId: setSelected } = useDashboardUi();
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+  const {
+    selectedCampaignId: selected,
+    setSelectedCampaignId: setSelected,
+    campaigns: campaignList,
+    deleteCampaign,
+    refetchCampaigns
+  } = useDashboardUi();
   const [name, setName] = useSessionState("ares.dashboard.campaigns.create.name", "");
   const [client, setClient] = useSessionState("ares.dashboard.campaigns.create.client", "Internal");
   const [targets, setTargets] = useSessionState("ares.dashboard.campaigns.create.targets", "");
@@ -903,6 +1146,8 @@ export function CampaignsPage() {
   const [createWarning, setCreateWarning] = useState("");
   const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.campaigns.tab", "List");
+  const [deleteError, setDeleteError] = useState<unknown>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const detail = useQuery({
     queryKey: ["campaign", selected],
     queryFn: () => api.campaign(selected),
@@ -940,28 +1185,37 @@ export function CampaignsPage() {
       setNoiseProfile("stealth");
       setCreateWarning("");
       setActiveTab("Scope");
-      void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.setQueryData<Campaign[]>(["campaigns"], (old) => [campaign, ...(old ?? [])]);
+      void queryClient.invalidateQueries({ queryKey: ["campaigns"], refetchType: "all" });
     }
   });
   const restore = useMutation({ mutationFn: () => api.restoreVault(selected) });
   const run = useMutation({
     mutationFn: () => api.runCampaign(selected, { plan: { stages: [] }, global_params: {}, dry_run: true })
   });
-  const remove = useMutation({
-    mutationFn: () => api.deleteCampaign(selected),
-    onSuccess: () => {
-      const deleted = selected;
-      setSelected("");
-      setOtherId("");
-      void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
-      void queryClient.removeQueries({ queryKey: ["campaign", deleted] });
-      void queryClient.removeQueries({ queryKey: ["findings", deleted] });
-      void queryClient.removeQueries({ queryKey: ["cvss", deleted] });
-      void queryClient.removeQueries({ queryKey: ["reports", deleted] });
-    }
-  });
 
-  const campaignList = campaigns.data ?? [];
+  const handleDelete = async (targetId: string) => {
+    if (!targetId) return;
+    if (!window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const ok = await deleteCampaign(targetId);
+      if (ok) {
+        setSelected("");
+        setOtherId("");
+        setActiveTab("List");
+      } else {
+        setDeleteError("Failed to delete campaign");
+      }
+    } catch (err) {
+      setDeleteError(err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <Page
@@ -1005,15 +1259,19 @@ export function CampaignsPage() {
             <DataPanel title="Create Error" data={create.error} />
           </section>
           <CampaignTable campaigns={campaignList} />
-          <DataPanel title="Campaign Error" data={campaigns.error} />
         </>
       )}
       {activeTab === "Scope" && (
         <>
           <section className="panel p-4">
             <SectionHeader title="Campaign Detail" />
-            <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
-            <CampaignScopeSummary campaign={detail.data ?? campaigns.data?.find((item) => item.id === selected)} loading={detail.isFetching} />
+            <div>
+              <label htmlFor="scope-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Target Campaign
+              </label>
+              <CampaignPicker id="scope-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
+            </div>
+            <CampaignScopeSummary campaign={detail.data ?? campaignList.find((item) => item.id === selected)} loading={detail.isFetching} />
             <div className="mt-3 flex flex-wrap gap-2">
               <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
                 Restore Vault
@@ -1023,19 +1281,15 @@ export function CampaignsPage() {
               </button>
               <button
                 className="btn btn-danger"
-                disabled={!selected || remove.isPending}
-                onClick={() => {
-                  if (window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
-                    remove.mutate();
-                  }
-                }}
+                disabled={!selected || isDeleting}
+                onClick={() => handleDelete(selected)}
               >
-                Delete
+                {isDeleting ? "Deleting…" : "Delete"}
               </button>
               <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
             </div>
           </section>
-          <DataPanel title="Delete Error" data={remove.error} />
+          <DataPanel title="Delete Error" data={deleteError} />
           <DataPanel title="Campaign Detail Error" data={detail.error} />
           <DataPanel title="CVSS Error" data={cvss.error} />
           <DataPanel title="Campaign Diff Error" data={diff.error} />
@@ -1047,7 +1301,12 @@ export function CampaignsPage() {
         <section className="grid gap-4">
           <section className="panel p-4">
             <SectionHeader title="Campaign Findings" />
-            <CampaignPicker campaigns={campaignList} value={selected} onChange={setSelected} />
+            <div>
+              <label htmlFor="findings-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Target Campaign
+              </label>
+              <CampaignPicker id="findings-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
+            </div>
             {!selected ? <EmptyState text="Select a campaign to review findings." /> : null}
           </section>
           {selected ? <DataPanel title="Findings Error" data={findings.error} /> : null}
@@ -1126,9 +1385,8 @@ function ExecutionChainsPanel({
 }
 
 export function ModulesPage() {
-  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
   const queryClient = useQueryClient();
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
   const executionChains = useQuery({ queryKey: ["executionChains"], queryFn: api.executionChains });
   const [selectedId, setSelectedId] = useSessionState("ares.dashboard.modules.selectedId", "");
@@ -1183,7 +1441,7 @@ export function ModulesPage() {
     return related;
   }, [executionChains.data]);
   const selected = list.find((item) => item.id === selectedId);
-  const selectedCampaign = campaignDetail.data ?? (campaigns.data ?? []).find((item) => item.id === campaignId);
+  const selectedCampaign = campaignDetail.data ?? campaignList.find((item) => item.id === campaignId);
   const scopeWarning = moduleScopeWarning(selected, selectedCampaign, params, dryRun);
   const categories = unique(list.map((item) => item.category || ""));
   const visible = list.filter((item) => {
@@ -1211,8 +1469,10 @@ export function ModulesPage() {
   const requiresConfirmation = sensitive || isFeasibilityBlocked;
   const dryRunSupported = selected?.dry_run_supported !== false;
   const kerberoastTargetMissing = selected?.id === "ad.kerberoast" && !String(params.target_user ?? "").trim();
-  const canRun = Boolean(campaignId && selectedId) && (!requiresConfirmation || confirmed) && !run.isPending && (!dryRun || dryRunSupported);
-  const runBlocked = !canRun || Boolean(scopeWarning) || kerberoastTargetMissing;
+  const [attemptedRun, setAttemptedRun] = useState(false);
+  const executionConditionBlocked = (!requiresConfirmation || confirmed) && !run.isPending && (!dryRun || dryRunSupported) && !Boolean(scopeWarning) && !kerberoastTargetMissing;
+  const canRun = Boolean(campaignId && selectedId) && executionConditionBlocked;
+  const runBlocked = !canRun;
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
   const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
   const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
@@ -1316,12 +1576,40 @@ export function ModulesPage() {
             </div>
           ) : null}
           {selected?.dependency_notes?.length ? (
-            <p className="notice mt-3">Dependencies: {selected.dependency_notes.join("; ")}</p>
+            <p className="mt-2 text-xs text-zinc-400 flex items-center gap-1.5">
+              <Info size={13} className="text-zinc-500 shrink-0" />
+              <span className="text-zinc-400 font-medium">Dependencies:</span> {selected.dependency_notes.join("; ")}
+            </p>
           ) : null}
           {selected && !dryRunSupported && (
-            <p className="notice notice-danger mt-3">Dry-run is unavailable for this module. No preview will be generated.</p>
+            <p className="mt-1 text-xs text-amber-400/80 flex items-center gap-1.5">
+              <Info size={13} className="text-amber-400 shrink-0" />
+              <span>Dry-run preview is unavailable for this module.</span>
+            </p>
           )}
-          <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
+          <div className="mt-3">
+            <label htmlFor="module-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+              Target Campaign
+            </label>
+            <CampaignPicker
+              id="module-campaign-select"
+              campaigns={campaignList}
+              value={campaignId}
+              hasError={attemptedRun && !campaignId}
+              onChange={(id) => {
+                setCampaignId(id);
+                if (id) {
+                  setAttemptedRun(false);
+                }
+              }}
+            />
+            {attemptedRun && !campaignId && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400" role="alert">
+                <AlertTriangle size={13} className="shrink-0 text-rose-400" />
+                Select a scoped campaign before executing this module.
+              </p>
+            )}
+          </div>
           {campaignId && campaignDetail.isFetching && (
             <div className="notice mt-3">
               <Loader2 className="spin" size={16} /> Loading campaign scope...
@@ -1334,9 +1622,14 @@ export function ModulesPage() {
               className="mt-4 grid gap-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (runBlocked) {
+                if (!campaignId) {
+                  setAttemptedRun(true);
                   return;
                 }
+                if (!executionConditionBlocked) {
+                  return;
+                }
+                setAttemptedRun(false);
                 run.mutate();
               }}
             >
@@ -1450,7 +1743,7 @@ export function ModulesPage() {
                   )}
                 </div>
               )}
-              {runHint && (
+              {runHint && runHint !== "Select a campaign before running a module." && (
                 <p className="notice">
                   {runHint}
                 </p>
@@ -1472,7 +1765,11 @@ export function ModulesPage() {
                     : "Confirm authorized high-noise or sensitive execution"}
                 </label>
               )}
-              <button className="btn btn-primary" type="submit" disabled={runBlocked}>
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
+              >
                 {run.isPending ? (
                   <>
                     <Loader2 className="spin" size={16} /> Running...
@@ -1515,8 +1812,7 @@ export function ModulesPage() {
 }
 
 export function ReportsPage() {
-  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
   const [format, setFormat] = useSessionState("ares.dashboard.reports.format", "html");
   const [warning, setWarning] = useState("");
   const [libraryError, setLibraryError] = useState("");
@@ -1624,33 +1920,68 @@ export function ReportsPage() {
           title="Generate Report"
           description="Export findings, scope, and remediation."
         />
-        <div className="compact-form-row">
-          <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={(id) => { setCampaignId(id); setWarning(""); }} />
-          <select className="field" value={format} onChange={(e) => setFormat(e.target.value)}>
-            {["html", "pdf", "markdown", "json"].map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <button
-            className="btn btn-primary"
-            disabled={generate.isPending}
-            onClick={() => {
-              if (!campaignId) {
-                setWarning("Campaign is required.");
-                return;
-              }
-              setWarning("");
-              generate.mutate();
-            }}
-          >
-            {generate.isPending ? (
-              <>
-                <Loader2 className="spin" size={16} /> Generating...
-              </>
-            ) : (
-              "Generate Report"
+        <div className="grid gap-3 sm:grid-cols-3 items-end">
+          <div>
+            <label htmlFor="report-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+              Target Campaign
+            </label>
+            <CampaignPicker
+              id="report-campaign-select"
+              campaigns={campaignList}
+              value={campaignId}
+              hasError={Boolean(warning && !campaignId)}
+              onChange={(id) => {
+                setCampaignId(id);
+                setWarning("");
+              }}
+            />
+            {warning && !campaignId && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400" role="alert">
+                <AlertTriangle size={13} className="shrink-0 text-rose-400" />
+                {warning}
+              </p>
             )}
-          </button>
+          </div>
+          <div>
+            <label htmlFor="report-format-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+              Export Format
+            </label>
+            <select
+              id="report-format-select"
+              className="field"
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
+              <option value="html">HTML Document</option>
+              <option value="pdf">PDF Document</option>
+              <option value="markdown">Markdown</option>
+              <option value="json">JSON Export</option>
+            </select>
+          </div>
+          <div>
+            <button
+              className="btn btn-primary w-full"
+              disabled={generate.isPending}
+              onClick={() => {
+                if (!campaignId) {
+                  setWarning("Select a scoped campaign before generating a report.");
+                  return;
+                }
+                setWarning("");
+                generate.mutate();
+              }}
+            >
+              {generate.isPending ? (
+                <>
+                  <Loader2 className="spin" size={16} /> Generating...
+                </>
+              ) : (
+                "Generate Report"
+              )}
+            </button>
+          </div>
         </div>
-        {warning && <p className="notice notice-danger mt-3">{warning}</p>}
+        {warning && campaignId && <p className="notice notice-danger mt-3">{warning}</p>}
         {pdfIssueHint && (
           <p className="notice notice-danger mt-3">
             <AlertTriangle size={16} />
@@ -1875,14 +2206,14 @@ export function TemplatesPage() {
 
 export function StrategyPage() {
   const { user } = useAuth();
-  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId } = useDashboardUi();
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+  const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
   const active = useQuery({ queryKey: ["strategy-active"], queryFn: api.activeStrategy });
   const [goal, setGoal] = useSessionState("ares.dashboard.strategy.goal", "domain_admin");
   const [llmBackend, setLlmBackend] = useSessionState("ares.dashboard.strategy.llmBackend", "claude");
   const [authorizations, setAuthorizations] = useSessionState("ares.dashboard.strategy.authorizations", "");
   const [lastEngageResult, setLastEngageResult] = useSessionState<PersistedResult | null>("ares.dashboard.strategy.lastEngage", null);
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.strategy.tab", "Objective");
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const strategyResultKey = `${campaignId}:${goal}:${llmBackend}:${authorizations}`;
   const engage = useMutation({
     mutationFn: () =>
@@ -1904,6 +2235,19 @@ export function StrategyPage() {
   });
   const persistedEngageResult = lastEngageResult?.key === strategyResultKey ? lastEngageResult : null;
   const allowed = user?.role === "team_lead" || user?.role === "operator";
+
+  const llmBackends = (active.data?.llm_backends as Record<string, boolean> | undefined);
+  const isEngineUnconfigured = llmBackends ? llmBackends[llmBackend] === false : false;
+
+  const handleEngage = () => {
+    if (!campaignId) {
+      setAttemptedSubmit(true);
+      return;
+    }
+    setAttemptedSubmit(false);
+    engage.mutate();
+  };
+
   return (
     <Page
       title="Strategy"
@@ -1915,35 +2259,101 @@ export function StrategyPage() {
       {activeTab === "Objective" && (
         <section className="panel p-4">
           <SectionHeader title="Objective Builder" />
-          <CampaignPicker campaigns={campaigns.data ?? []} value={campaignId} onChange={setCampaignId} />
-          <select className="field mt-3" value={goal} onChange={(e) => setGoal(e.target.value)}>
-            {["domain_admin", "enterprise_admin", "cloud_admin", "data_exfil", "persistence", "full_compromise"].map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-          <select className="field mt-3" value={llmBackend} onChange={(e) => setLlmBackend(e.target.value)}>
-            <option value="claude">Claude / ANTHROPIC_API_KEY</option>
-            <option value="openai">OpenAI / OPENAI_API_KEY</option>
-            <option value="local">Local Ollama</option>
-          </select>
-          <p className="notice mt-2">
-            {strategyBackendHint(llmBackend)}
-          </p>
-          <textarea
-            className="field mt-3 min-h-28"
-            placeholder="Authorization notes, one per line"
-            value={authorizations}
-            onChange={(e) => setAuthorizations(e.target.value)}
-          />
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="strategy-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Target Campaign
+              </label>
+              <CampaignPicker
+                id="strategy-campaign-select"
+                campaigns={campaignList}
+                value={campaignId}
+                hasError={attemptedSubmit && !campaignId}
+                onChange={(id) => {
+                  setCampaignId(id);
+                  if (id) {
+                    setAttemptedSubmit(false);
+                  }
+                }}
+              />
+              {attemptedSubmit && !campaignId && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400" role="alert">
+                  <AlertTriangle size={13} className="shrink-0 text-rose-400" />
+                  Select a scoped campaign before starting Strategy.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="strategy-goal-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Strategic Objective
+              </label>
+              <select
+                id="strategy-goal-select"
+                className="field"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+              >
+                <option value="domain_admin">Domain Admin (Active Directory)</option>
+                <option value="enterprise_admin">Enterprise Admin (Forest Root)</option>
+                <option value="cloud_admin">Cloud Admin (Identity Provider)</option>
+                <option value="data_exfil">Data Exfiltration</option>
+                <option value="persistence">Persistence & Foothold</option>
+                <option value="full_compromise">Full Infrastructure Compromise</option>
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="strategy-engine-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                AI Planning Engine
+              </label>
+              <select
+                id="strategy-engine-select"
+                className="field"
+                value={llmBackend}
+                onChange={(e) => setLlmBackend(e.target.value)}
+              >
+                <option value="claude">Claude (Anthropic)</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="local">Local (Ollama)</option>
+              </select>
+              {isEngineUnconfigured && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-amber-400/90">
+                  <Info size={13} className="shrink-0 text-amber-400" />
+                  {llmBackend === "claude"
+                    ? "Anthropic API key is not configured in the server environment. Configure it on the server or select another engine."
+                    : llmBackend === "openai"
+                      ? "OpenAI API key is not configured in the server environment. Configure it on the server or select another engine."
+                      : "Local Ollama service is not reachable at http://127.0.0.1:11434. Start Ollama or verify server connection."}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label htmlFor="strategy-authorizations" className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Explicit Authorizations
+              </label>
+              <textarea
+                id="strategy-authorizations"
+                className="field min-h-24"
+                placeholder="Authorization notes or specific module constraints, one per line"
+                value={authorizations}
+                onChange={(e) => setAuthorizations(e.target.value)}
+              />
+            </div>
+          </div>
+
           {!allowed && (
-            <p className="notice notice-danger mt-2">
+            <p className="notice notice-danger mt-3">
               Strategy engagement requires operator or team lead role.
             </p>
           )}
-          {!campaignId && (
-            <p className="notice mt-2">
-              Select a scoped campaign before starting Strategy.
-            </p>
-          )}
-          <button className="btn btn-primary mt-3" disabled={!allowed || !campaignId || engage.isPending} onClick={() => engage.mutate()}>
+
+          <button
+            className="btn btn-primary mt-4"
+            disabled={!allowed || engage.isPending}
+            onClick={handleEngage}
+          >
             {engage.isPending ? (
               <>
                 <Loader2 className="spin" size={16} /> Engaging...
@@ -2355,9 +2765,9 @@ export function LivePage() {
     liveConnected,
     setLiveConnected,
     liveEvents,
-    clearLiveEvents
+    clearLiveEvents,
+    campaigns: campaignList
   } = useDashboardUi();
-  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const campaignId = liveCampaignId || selectedCampaignId;
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.live.tab", "Stream");
   const streamEvents = liveEvents.slice(0, 10);
@@ -2379,7 +2789,7 @@ export function LivePage() {
           description="Watch selected campaign events."
         />
         <CampaignPicker
-          campaigns={campaigns.data ?? []}
+          campaigns={campaignList}
           value={campaignId}
           onChange={(id) => {
             setLiveCampaignId(id);
@@ -2440,6 +2850,7 @@ export function LivePage() {
 
 function Page({
   title,
+  subtitle,
   actions,
   tabs,
   activeTab,
@@ -2447,6 +2858,7 @@ function Page({
   children
 }: {
   title: string;
+  subtitle?: ReactNode;
   actions?: ReactNode;
   tabs?: string[];
   activeTab?: string;
@@ -2487,7 +2899,7 @@ function Page({
           <div>
             <p className="page-eyebrow">{meta.eyebrow}</p>
             <h1>{title}</h1>
-            <p>{meta.description}</p>
+            <p className="page-subtitle">{subtitle ?? meta.description}</p>
           </div>
         </div>
         {actions ? <div className="page-actions">{actions}</div> : null}
@@ -2684,6 +3096,10 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
   const throughputValue = tasksPerMin === null ? "n/a" : `${formatMetric(tasksPerMin)}/min`;
   const latencyDetail = p95 === null ? "no run timing data" : `${formatMetric(p95, " ms")} p95`;
 
+  const isIngestionActive = Boolean(snapshot && snapshot.timestamp);
+  const ingestionDotClass = loading ? "pending" : isIngestionActive ? "active" : "pending";
+  const ingestionText = loading ? "Connecting..." : isIngestionActive ? "Ingestion Active" : "Awaiting Data";
+
   return (
     <section className="panel telemetry-panel">
       <SectionHeader
@@ -2691,8 +3107,8 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
         description={loading ? "Waiting for metrics." : `Last sample: ${formatTimestamp(snapshot?.timestamp)}`}
         action={
           <div className="telemetry-live-status" title="Real-time telemetry ingestion pipeline">
-            <span className={`status-indicator-dot ${snapshot ? "active" : "pending"}`} />
-            <span className="status-indicator-text">{snapshot ? "Ingestion Active" : "Awaiting Data"}</span>
+            <span className={`status-indicator-dot ${ingestionDotClass}`} />
+            <span className="status-indicator-text">{ingestionText}</span>
             {snapshot?.timestamp ? (
               <span className="status-indicator-time font-mono">{formatReportTime(snapshot.timestamp)}</span>
             ) : null}
@@ -2729,14 +3145,20 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
 }
 
 function TelemetryBar({ label, value, tone = "ok" }: { label: string; value: number | null; tone?: "ok" | "danger" }) {
-  const clamped = value === null ? 0 : Math.max(0, Math.min(100, value));
+  const isNa = value === null;
+  const isZero = value === 0;
+  const clamped = isNa ? 0 : Math.max(0, Math.min(100, value));
+  const trackClass = `telemetry-bar-track ${isNa ? "is-na" : isZero ? "is-zero" : ""}`;
+  const valueLabel = isNa ? "n/a" : `${clamped}%`;
+  const valueClass = isNa ? "is-na font-mono" : isZero ? "is-zero font-mono" : "font-mono";
+
   return (
-    <div className="telemetry-bar" title={value === null ? "Not enough telemetry data" : undefined}>
+    <div className="telemetry-bar" title={isNa ? "No data yet" : isZero ? "0% (measured baseline)" : `${label}: ${clamped}%`}>
       <span>{label}</span>
-      <div className="telemetry-bar-track">
+      <div className={trackClass}>
         <div className={tone === "danger" ? "telemetry-bar-fill danger" : "telemetry-bar-fill"} style={{ width: `${clamped}%` }} />
       </div>
-      <strong>{value === null ? "n/a" : `${clamped}%`}</strong>
+      <strong className={valueClass}>{valueLabel}</strong>
     </div>
   );
 }
@@ -3079,14 +3501,26 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
 function CampaignPicker({
   campaigns,
   value,
-  onChange
+  onChange,
+  id,
+  hasError,
+  className
 }: {
   campaigns: Campaign[];
   value: string;
   onChange: (id: string) => void;
+  id?: string;
+  hasError?: boolean;
+  className?: string;
 }) {
+  const safeValue = value && campaigns.some((c) => c.id === value) ? value : "";
   return (
-    <select className="field" value={value} onChange={(event) => onChange(event.target.value)}>
+    <select
+      id={id}
+      className={`field ${hasError ? "border-rose-500/70 focus:border-rose-500" : ""} ${className ?? ""}`.trim()}
+      value={safeValue}
+      onChange={(event) => onChange(event.target.value)}
+    >
       <option value="">Select campaign</option>
       {campaigns.map((campaign) => (
         <option key={campaign.id} value={campaign.id}>

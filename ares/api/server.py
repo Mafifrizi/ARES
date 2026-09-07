@@ -1901,12 +1901,15 @@ async def list_campaigns(
             "X-Total-Count": str(total),
             "X-Page": str(page),
             "X-Per-Page": str(per_page),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
         },
     )
 
 
 @app.get("/campaigns/{campaign_id}", tags=["campaigns"])
 async def get_campaign(
+    response: Response,
     campaign_id: str,
     actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
@@ -1915,6 +1918,8 @@ async def get_campaign(
     if not c:
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(c, actor)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     return c
 
 
@@ -1994,6 +1999,7 @@ async def issue_campaign_websocket_ticket(
 
 @app.delete("/campaigns/{campaign_id}", tags=["campaigns"])
 async def delete_campaign(
+    response: Response,
     campaign_id: str,
     actor: AuthenticatedUser = Depends(require_team_lead()),
     db: AresDatabase = Depends(get_db),
@@ -2013,6 +2019,8 @@ async def delete_campaign(
         f"id={campaign_id} name={c.get('name', '')} reports_deleted={deleted_reports}",
         None,
     )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
     return {"status": "deleted", "campaign_id": campaign_id}
 
 
@@ -2688,6 +2696,41 @@ async def start_autonomous_engagement(
     }
 
 
+_ollama_status_cache: tuple[float, bool] = (0.0, False)
+
+
+async def _check_ollama_reachable() -> bool:
+    """Check if local Ollama daemon is reachable. Fail-safe: catches all exceptions, never raises."""
+    global _ollama_status_cache
+    import time
+    now = time.monotonic()
+    if now - _ollama_status_cache[0] < 10.0:
+        return _ollama_status_cache[1]
+
+    raw_url = (
+        os.environ.get("OLLAMA_HOST")
+        or os.environ.get("OLLAMA_BASE_URL")
+        or "http://127.0.0.1:11434"
+    ).strip().rstrip("/")
+    if not raw_url.startswith("http://") and not raw_url.startswith("https://"):
+        raw_url = f"http://{raw_url}"
+    if "://localhost:" in raw_url:
+        raw_url = raw_url.replace("://localhost:", "://127.0.0.1:")
+
+    is_ok = False
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=0.8, follow_redirects=False) as client:
+            resp = await client.get(f"{raw_url}/api/tags")
+            is_ok = resp.status_code == 200
+    except Exception:
+        # Failsafe: catch all timeout, connection refused, DNS failure, or non-200 protocol errors
+        is_ok = False
+
+    _ollama_status_cache = (now, is_ok)
+    return is_ok
+
+
 @app.get("/strategy/active", tags=["strategy"])
 async def list_active_engagements(
     actor: AuthenticatedUser = Depends(require_operator()),
@@ -2698,11 +2741,17 @@ async def list_active_engagements(
             "ARES_MAX_ENGAGEMENTS", _MAX_CONCURRENT_ENGAGEMENTS
         )
     )
+    ollama_ready = await _check_ollama_reachable()
     return {
         "active_engagements": dict(_active_engagements),
         "count": len(_active_engagements),
         "max_allowed": _max,
         "slots_available": max(0, _max - len(_active_engagements)),
+        "llm_backends": {
+            "claude": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "openai": bool(os.environ.get("OPENAI_API_KEY")),
+            "local": ollama_ready,
+        },
     }
 
 

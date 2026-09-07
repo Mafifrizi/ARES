@@ -129,10 +129,13 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries.
 - **Key Capabilities**:
-  - **Unified Scope Context**: Switch seamlessly between `Scope: Global / All` (enterprise-wide telemetry) and specific engagement campaigns (`AD Lab Simulation`).
-  - **Finding Severity Breakdown**: Live counters for Critical, High, Medium, Low, and Informational findings with CVSS v3 score tracking.
-  - **Telemetry & Worker Health**: Monitor background task queue depth, execution error rates, and active worker statuses in real time.
-  - **Audited Activity Stream**: Immutable event log tracking every module dispatch, credential discovery, and lateral progression.
+  - **Operational Design System**: Engineered with high-density visual hierarchy (inspired by Grafana, Linear, and Sentry) — featuring subtle left-accented contextual panels (`panel-subtle`), dynamic reactive topbar health indicators, and distinct dashed progress tracks for uninitialized metric baselines.
+  - **Actionable Engagement Insights**: Replaces redundant raw counts with contextual security posture insights:
+    - *Engagement Posture*: Clear state delineation (`Staged`, `Executing`, or `Standby`) distinguishing scoped targets from executing campaigns.
+    - *Execution Health*: Real-time monitor of pipeline anomalies, module execution failures, and enclave stability.
+    - *Attack Surface*: Live tracking of discovered hosts, credential pivots, and network penetration depth.
+  - **Telemetry & Pipeline Ingestion**: Real-time worker pool throughput, P95 task duration, and live event ingestion indicators.
+  - **Tactical Fresh-Install Hero**: Automatic empty-state fallback with a centered initialization CTA and minimal readiness strip when starting with zero campaigns.
 
 ---
 
@@ -150,8 +153,9 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Prevents catastrophic out-of-scope scanning and eliminates unencrypted credential files on operator laptops.
 - **Key Capabilities**:
+  - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
   - **Hard CIDR Whitelists**: Network-level boundary enforcement. The engine intercepts and drops any request targeting unapproved IP addresses or subnets.
-  - **Noise Profiles & Jitter**: Configure engagement throttle levels (`Stealth`, `Low Noise`, `Aggressive`) with randomized delay distributions.
+  - **Noise Profiles & Jitter**: Configure engagement throttle levels (`Stealth`, `Normal`, `Aggressive`) with randomized delay distributions.
   - **AES-256 Encrypted Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest with AES-256-GCM.
   - **Clean Teardown Workflows**: Single-click campaign deletion that securely cleans up all associated database rows, graph vertices, and temporary artifacts.
 
@@ -172,6 +176,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 - **The Problem Solved**: Replaces unvalidated, unreliable GitHub scripts with typed, reproducible, and auditable adversary modules.
 - **Key Capabilities**:
   - **Comprehensive Vector Coverage**: 60+ modular techniques covering Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
+  - **Streamlined Execution Panel**: Clean execution view with persistent field labels, demoted low-weight dependency hints, and focused on-submit validation replacing intrusive default warning cards.
   - **Dynamic Typed Schemas**: UI forms are generated dynamically from Python Pydantic models with strict validation.
   - **Dry-Run Safety Engine**: Validate target responsiveness, parameters, and expected outcome before transmitting offensive traffic.
   - **Role-Gated Execution**: Operator and Team Lead permissions required for execution; sensitive high-noise modules require explicit confirmation.
@@ -213,6 +218,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Eliminates the 40+ hours typically spent manually writing, formatting, and redacting pentest reports.
 - **Key Capabilities**:
+  - **Structured Generation Grid**: Aligned multi-column layout with persistent `<label>` elements (`Target Campaign`, `Export Format`) and clean inline validation error feedback.
   - **Multi-Format Export**: One-click generation of **PDF**, **HTML**, **Markdown**, and **JSON** deliverables.
   - **Automated Headless PDF Engine**: Integrated fallback using Microsoft Edge / Chromium headless mode for clean PDF export without complex GTK dependencies on Windows.
   - **Automated Evidence Redaction**: Automatically redacts sensitive raw passwords and private keys in customer deliverables while retaining audit proofs.
@@ -234,8 +240,9 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Coordinates multi-module attack chains autonomously without requiring constant manual operator intervention.
 - **Key Capabilities**:
-  - **Goal-Directed Execution Engine**: Define high-level objectives (`domain_admin`, `full_compromise`, `cloud_audit`), and let the engine chain techniques.
-  - **Plug-and-Play AI Planners**: Integrate with Anthropic Claude, OpenAI, or local Ollama models to analyze engagement context and propose optimal next steps.
+  - **Dynamic Engine Verification**: Real-time asynchronous healthchecks against local Ollama daemons (`GET /api/tags`) with sub-second timeouts and TTL caching, paired with dynamic server-side cloud key verification (`Claude`, `OpenAI`).
+  - **Clean Operator-Centric Design**: Persistent field labels (`Target Campaign`, `Strategic Objective`, `AI Planning Engine`, `Explicit Authorizations`), human-readable goal descriptions, and complete elimination of server environment variable leakage in UI labels.
+  - **Focused On-Submit Validation**: Warning boxes removed from default page render; validation errors display inline beneath target fields only upon execution attempt.
   - **Adaptive Containment Governor**: Continuously evaluates defensive telemetry and noise thresholds, automatically slowing down or aborting aggressive actions when detection risk peaks.
 
 ---

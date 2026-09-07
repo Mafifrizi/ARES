@@ -6671,3 +6671,26 @@ class TestMainWebSocketAuthoritativeLifetime:
                     "expected pending broadcast cleanup",
                 )
             await _settle_main_websocket(socket, route_task)
+
+
+@pytest.mark.asyncio
+async def test_strategy_active_returns_llm_backends_resiliently():
+    """Verify /strategy/active provides fail-safe llm_backends availability without 500s."""
+    from ares.api.server import app
+    from ares.api.rbac import get_current_user, AuthenticatedUser
+    from starlette.testclient import TestClient
+
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(username="test_op", role="operator")
+    try:
+        client = TestClient(app, base_url="http://localhost")
+        resp = client.get("/strategy/active")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "llm_backends" in data
+        assert isinstance(data["llm_backends"], dict)
+        assert "claude" in data["llm_backends"]
+        assert "openai" in data["llm_backends"]
+        assert "local" in data["llm_backends"]
+        assert isinstance(data["llm_backends"]["local"], bool)
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

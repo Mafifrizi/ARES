@@ -1,5 +1,5 @@
 import { createContext, Dispatch, SetStateAction, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { UserProfile } from "../../api/types";
+import type { Campaign, UserProfile } from "../../api/types";
 
 const DASHBOARD_SESSION_PREFIX = "ares.dashboard.";
 const DASHBOARD_PRINCIPAL_KEY = `${DASHBOARD_SESSION_PREFIX}principal`;
@@ -39,6 +39,11 @@ export interface DashboardUiState {
   setLiveConnected: Dispatch<SetStateAction<boolean>>;
   liveEvents: unknown[];
   clearLiveEvents: () => void;
+  campaigns: Campaign[];
+  campaignsLoading: boolean;
+  campaignsError: unknown;
+  deleteCampaign: (id: string) => Promise<boolean>;
+  refetchCampaigns: () => Promise<unknown>;
 }
 
 export const DashboardUiContext = createContext<DashboardUiState | null>(null);
