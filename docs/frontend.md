@@ -97,12 +97,12 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - The topbar keeps the user identity plus current-device and all-device logout
   actions.
 
-## Enterprise UI & Design Standards
+## Enterprise UI & Design Principles
 
-The ARES frontend adheres to strict enterprise-grade product design standards:
+The ARES frontend adheres to strict enterprise-grade product design principles:
 
 - **Anti-Slop Restraint**: Frivolous sci-fi tropes, fake cipher streams, blinking LED animations, and gratuitous padlock icons are forbidden.
-- **Authoritative Authentication**: `LoginPage.tsx` presents a focused, centered card (`width: 380px`) with clear input labels, standard focus rings, and a high-contrast solid action button.
+- **Authoritative Authentication**: `LoginPage.tsx` presents a focused, centered card (`width: 380px`) with clear input labels, crisp focus rings, and a high-contrast solid action button.
 - **High-Density Cockpit**: `DashboardPages.tsx` presents KPI cards with pure numeric values, status deltas, and clean labels without floating decorative icons. Navigation sidebars are kept clean without noisy enclave badges.
 - **Text-First Action Buttons**: Operational buttons (`Restore Vault`, `Dry Run Plan`, `Create Campaign`) use clear, text-first labels rather than confusing icon soup.
 - **Semantic Design Tokens**: Styles are governed by HSL tokens in `src/styles.css` (`--ares-bg`, `--ares-surface`, `--ares-surface-elevated`, `--ares-border`, `--ares-accent`). Monospace fonts are reserved for technical evidence (IPs, hashes, tickets, CVSS vectors).

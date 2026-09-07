@@ -82,12 +82,12 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
 
 ---
 
-## 3. Enterprise Design Standards (Anti-Slop Guidelines)
+## 3. Enterprise Design Principles (Anti-Slop Guidelines)
 
 The ARES user interface adheres to strict enterprise product design principles, benchmarked against platforms like Datadog, Linear, and SentinelOne:
 
 1. **Zero AI-Slop / Frivolous Sci-Fi Tropes**:
-   - The login surface is a clean, focused, authoritative card (`width: 380px`) with clear input labels, standard focus rings, and high-contrast solid buttons.
+   - The login surface is a clean, focused, authoritative card (`width: 380px`) with clear input labels, crisp focus rings, and high-contrast solid buttons.
    - Blinking status lights, fake cipher text streams, and decorative padlock icons are strictly prohibited.
    - Frivolous badges such as `AIRGAPPED ENCLAVE` have been eliminated from navigation sidebars.
 

@@ -80,7 +80,7 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 |------|---------|
 | `engine.py` | `AresEngine` — async orchestrator, runs `ExecutionPlan` |
 | `context.py` | `ExecutionContext` — unified module input object |
-| `errors.py` | Standard error hierarchy (`ModuleError`, `NetworkError`, etc.) |
+| `errors.py` | Unified error hierarchy (`ModuleError`, `NetworkError`, etc.) |
 | `di.py` | `AresContainer` — dependency injection / service locator |
 | `campaign.py` | `Campaign`, `Finding`, `ScopeEntry`, `NoiseProfile` |
 | `config.py` | `AresSettings` (Pydantic), `@lru_cache` singleton |

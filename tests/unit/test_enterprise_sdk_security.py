@@ -171,7 +171,7 @@ def test_lockout_circuit_breaker_trips_immediately():
     lockout_cb = LockoutCircuitBreaker()
     assert lockout_cb.state == CircuitBreakerState.CLOSED
 
-    # Inspect standard AccountLocked error
+    # Inspect AccountLocked error
     lockout_cb.inspect_error(AccountLocked("Account locked out"), username="admin_corp")
     assert lockout_cb.state == CircuitBreakerState.OPEN
     assert "admin_corp" in lockout_cb.locked_accounts

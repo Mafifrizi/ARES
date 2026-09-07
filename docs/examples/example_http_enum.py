@@ -165,7 +165,7 @@ class HttpEnumModule(BaseModule):
         Format this module's result for the campaign report.
         Called by ReportGenerator. Extend the default dict with narrative.
         """
-        base = super().report(result)   # get standard structure from BaseModule
+        base = super().report(result)   # get base normalized structure from BaseModule
         base["narrative"] = (
             "HTTP service enumeration identified web servers and their configurations. "
             "Review for outdated server versions, exposed admin panels, and directory listings."

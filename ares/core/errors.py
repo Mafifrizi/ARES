@@ -1,5 +1,5 @@
 """
-ARES Standard Error Hierarchy
+ARES Unified Error Hierarchy
 All ARES exceptions inherit from AresError.
 
 Design principles:

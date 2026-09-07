@@ -244,7 +244,7 @@ ARES uses four account roles. Role values are lowercase in API requests:
 | Role | Intended use | Access model |
 |------|--------------|--------------|
 | `team_lead` | Engagement lead or local administrator. | Full API access, user registration, security audit, campaign deletion, restricted authorization, and normal operator work. |
-| `operator` | Day-to-day operator. | Campaign workflows, module execution, reports, graph, artifacts, and standard validation flows. Cannot register users. |
+| `operator` | Day-to-day operator. | Campaign workflows, module execution, reports, graph, artifacts, and core validation flows. Cannot register users. |
 | `recon` | Low-risk review/recon identity. | Read-heavy access. The module permission matrix marks enumeration, fingerprint, and network modules as recon-safe, but the main dashboard execution endpoints are still operator-gated in this release. |
 | `reporter` | Reviewer or stakeholder. | Read-only campaign/report/graph-style access. No module execution and no user administration. |
 

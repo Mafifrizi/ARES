@@ -13,7 +13,7 @@ to get started - from dev environment setup to submitting a pull request.
 4. [Writing a New Module](#writing-a-new-module)
 5. [Testing Requirements](#testing-requirements)
 6. [Pull Request Process](#pull-request-process)
-7. [Code Standards](#code-standards)
+7. [Code Guidelines & Conventions](#code-guidelines--conventions)
 
 ---
 
@@ -255,7 +255,7 @@ pytest tests/unit/ --cov=ares --cov-fail-under=82 -v  # with coverage
 
 ---
 
-## Code Standards
+## Code Guidelines & Conventions
 
 - **Python 3.10+** - use `match`, `|` union types, `TypeAlias` where appropriate
 - **Pydantic v2** for all settings and data models

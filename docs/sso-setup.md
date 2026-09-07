@@ -6,11 +6,11 @@ This document provides a comprehensive guide for configuring and utilizing **Ent
 
 ## PART 1 — End-User Authentication Guide
 
-### When to Use Standard "Sign in" vs. "Or continue with SSO"
+### When to Use Direct Local "Sign in" vs. "Or continue with SSO"
 
 | Login Method | When to Use | Credentials |
 | :--- | :--- | :--- |
-| **Standard "Sign in"** | For local operator accounts and development/lab environments (e.g., the bootstrap superuser `admin` or dedicated local accounts created via `POST /auth/register`). | Local username and password stored in the ARES database (hashed via bcrypt). |
+| **Direct Local "Sign in"** | For local operator accounts and development/lab environments (e.g., the bootstrap superuser `admin` or dedicated local accounts created via `POST /auth/register`). | Local username and password stored in the ARES database (hashed via bcrypt). |
 | **"Or continue with SSO"** | When your organization manages identities centrally via an Identity Provider (IdP) such as Okta, Microsoft Entra ID (Azure AD), Google Workspace, Ping Identity, or Keycloak. | Your corporate/organization credentials entered on your IdP's official sign-in page. |
 
 > [!NOTE]

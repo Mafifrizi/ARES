@@ -212,7 +212,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ### 6. 📑 Automated Report Engine & Evidence Library
 
-*Instant deliverable generation producing branded, audit-ready compliance reports across multiple standard formats.*
+*Instant deliverable generation producing branded, audit-ready compliance reports across multiple enterprise formats (Executive PDF, Technical Markdown, Defect CSV).*
 
 <div align="center">
 
@@ -398,7 +398,7 @@ ARES enforces strict RBAC permissions across all API endpoints and UI controls:
 | Role | Operational Scope | Administrative Authority |
 | :--- | :--- | :--- |
 | **`team_lead`** | Complete platform authority: campaign creation/deletion, user provisioning, security audits, high-noise module overrides. | Full |
-| **`operator`** | Day-to-day operations: execute authorized modules, review findings, explore attack graph, generate reports. | Standard |
+| **`operator`** | Day-to-day operations: execute authorized modules, review findings, explore attack graph, generate reports. | Operational Tier |
 | **`recon`** | Read-heavy reconnaissance: execute safe discovery and network fingerprinting modules. Execution of disruptive modules is blocked. | Read-Heavy |
 | **`reporter`** | Stakeholder review: read-only access to campaign analytics, findings, attack graphs, and generated deliverables. | Read-Only |
 

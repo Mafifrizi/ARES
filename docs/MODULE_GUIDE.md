@@ -92,7 +92,7 @@ These are the two most important metadata fields for the capability-based planne
 
 The `CapabilityGraph` uses these to automatically determine execution order when running a goal. If you set them correctly, your module will be discovered and used automatically by the planner.
 
-**Standard capability names:**
+**Core capability identifiers:**
 
 | Capability | Description |
 |------------|-------------|

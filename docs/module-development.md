@@ -324,7 +324,7 @@ async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
 
 ```python
 def report(self, result: ModuleResult) -> dict:
-    base = super().report(result)   # get standard structure
+    base = super().report(result)   # get base normalized structure
     base["narrative"] = "Your narrative here..."
     base["recommendations"] = [
         "Enable AES-only Kerberos encryption",
@@ -370,7 +370,7 @@ ctx.record_metric(m, v)  # record to telemetry
 
 ---
 
-## Standard Error Handling
+## Core Exception & Error Handling
 
 Always raise ARES errors (not generic exceptions):
 
@@ -507,7 +507,7 @@ ares module install ./mymodule/
 -  Must declare `PARAMS_MODEL` for robust type validation and clean UI parameter rendering.
 -  Must respect `ctx.dry_run` — zero unauthorized side-effects or network traffic when True.
 -  Must call `await self.before_request(target)` before network interactions.
--  Must raise standard ARES exceptions rather than raw socket or OS exceptions.
+-  Must raise native ARES exceptions rather than raw socket or OS exceptions.
 -  Must include unit tests using `ModuleTestHarness`.
 -  Must NOT access the filesystem outside the campaign workspace.
 -  Must NOT store credentials in plaintext (use `ctx.vault` or `ctx.record_credential`).
