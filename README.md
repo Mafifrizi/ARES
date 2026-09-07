@@ -473,22 +473,6 @@ See [docs/module_sdk.md](docs/module_sdk.md) and [docs/module-development.md](do
 
 ---
 
-## 🤖 Sovereign Model Context Protocol (MCP) AI Gateway
-
-ARES provides a first-class, security-hardened **Model Context Protocol (MCP)** server enabling AI orchestration platforms (**Cursor IDE, Windsurf, VS Code Cline, Zed, Claude Desktop, Open-WebUI, LibreChat, and LangChain**) to safely query findings, explore attack graphs, and trigger governed simulation without risking unauthorized actions.
-
-![ARES Sovereign MCP Server — Universal AI Gateway](docs/assets/screenshots/mcp-server-gateway.png)
-
-### Key Capabilities:
-- **Dual Transport Protocols**: Local asynchronous `stdio` for IDEs and remote `SSE` (Server-Sent Events over HTTP) for distributed teams and web chatbots.
-- **The 7 Unbreakable Security Guarantees**: Enforces pre-flight `ScopeGuard`, cryptographic single-use confirmation tokens (TTL 60s), anti-prompt-injection taint isolation (`UntrustedTargetData`), and Active Directory lockout circuit breakers.
-- **Live WebSocket Synchronization**: Every tool execution dispatched by an AI agent is broadcast live to the ARES Web Dashboard (`/ws/campaigns/{id}/events`), giving human operators real-time mission-control visibility.
-- **One-Command Client Setup**: Run `ares mcp config --client cursor` (or `claude`, `windsurf`, `cline`, `open-webui`) to generate ready-to-use configuration files.
-
-See [docs/mcp-server.md](docs/mcp-server.md) for full setup guides and architectural specifications.
-
----
-
 ## 📚 Documentation Sitemap
 
 Comprehensive documentation is available in the [`docs/`](docs/) directory:
