@@ -16,8 +16,9 @@ Tests:
 from __future__ import annotations
 
 import json
-import pytest
+
 import httpx
+import pytest
 
 from ares.mcp import (
     AresMcpServer,
@@ -36,7 +37,7 @@ from ares.sdk.resilience import CircuitBreakerState
 
 @pytest.fixture
 def mcp_server() -> AresMcpServer:
-    return AresMcpServer(secret_key="ares_test_secret_for_mcp_tests_only_32_bytes!!")
+    return AresMcpServer(secret_key="ares_test_secret_for_mcp_tests_only_32_bytes!!")  # noqa: S106
 
 
 # ── 1. Protocol Negotiation Tests ────────────────────────────────────────────
@@ -114,7 +115,9 @@ async def test_mcp_tools_list_schema(mcp_server: AresMcpServer) -> None:
 @pytest.mark.asyncio
 async def test_mcp_resources_and_prompts(mcp_server: AresMcpServer) -> None:
     # Resources List
-    res_list = await mcp_server.handle_message({"jsonrpc": "2.0", "id": 20, "method": "resources/list"})
+    res_list = await mcp_server.handle_message(
+        {"jsonrpc": "2.0", "id": 20, "method": "resources/list"}
+    )
     resources = res_list["result"]["resources"]
     uris = [r["uri"] for r in resources]
     assert "ares://campaigns/active" in uris
@@ -170,7 +173,7 @@ def test_scope_gate_verification() -> None:
 # ── 5. Confirmation Token Handshake (Anti-Replay) Tests ─────────────────────
 
 def test_confirmation_token_manager_lifecycle() -> None:
-    mgr = ConfirmationTokenManager(secret_key="test_secret_key_32_bytes_long!!")
+    mgr = ConfirmationTokenManager(secret_key="test_secret_key_32_bytes_long!!")  # noqa: S106
 
     # Issue token
     token = mgr.issue_token(
@@ -303,7 +306,7 @@ def test_secret_redaction() -> None:
     }
     masked = SecretMasker.mask(data)
     assert masked["username"] == "admin_corp"
-    assert masked["password"] == "***REDACTED***"
+    assert masked["password"] == "***REDACTED***"  # noqa: S105
     assert masked["ntlm_hash"] == "***REDACTED***"
     assert masked["metadata"]["private_key"] == "***REDACTED***"
     assert masked["metadata"]["target"] == "10.0.0.1"
@@ -358,7 +361,8 @@ def test_multi_format_tool_exporter(mcp_server: AresMcpServer) -> None:
 async def test_sse_transport_authentication(mcp_server: AresMcpServer) -> None:
     app = create_sse_app(mcp_server, api_key="test_super_secret_token_123")
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # 1. Unauthenticated -> 401
         res_unauth = await client.get("/sse")
         assert res_unauth.status_code == 401
@@ -378,6 +382,7 @@ async def test_sse_transport_authentication(mcp_server: AresMcpServer) -> None:
 
 def test_mcp_cli_commands() -> None:
     from typer.testing import CliRunner
+
     from ares.cli.typer_main import app
 
     runner = CliRunner()
@@ -385,11 +390,21 @@ def test_mcp_cli_commands() -> None:
     # 1. Doctor command
     doc_res = runner.invoke(app, ["mcp", "doctor"])
     assert doc_res.exit_code == 0
-    assert "ARES Sovereign MCP Readiness Check" in doc_res.stdout
+    assert "ARES MCP Subsystem Readiness Check" in doc_res.stdout
     assert "Protocol Engine" in doc_res.stdout
 
     # 2. Config commands for various clients
-    for client_name in ("claude", "cursor", "windsurf", "cline", "zed", "open-webui", "librechat", "langchain"):
+    clients = (
+        "claude",
+        "cursor",
+        "windsurf",
+        "cline",
+        "zed",
+        "open-webui",
+        "librechat",
+        "langchain",
+    )
+    for client_name in clients:
         cfg_res = runner.invoke(app, ["mcp", "config", "--client", client_name])
         assert cfg_res.exit_code == 0, f"Config failed for {client_name}"
 

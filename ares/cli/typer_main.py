@@ -43,10 +43,12 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 import typer
+from rich import box
 from rich import print as rprint
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.syntax import Syntax
 from rich.table import Table
 
 app     = typer.Typer(
@@ -260,7 +262,7 @@ signing_app  = typer.Typer(help="Module signing and verification", no_args_is_he
 goal_app     = typer.Typer(help="Goal-based autonomous attack planning", no_args_is_help=True)
 graph_app    = typer.Typer(help="Attack graph queries and visualization", no_args_is_help=True)
 dashboard_app = typer.Typer(help="Local dashboard developer tools", no_args_is_help=True)
-mcp_app       = typer.Typer(help="ARES MCP — Model Context Protocol Gateway", no_args_is_help=False, invoke_without_command=True)
+mcp_app       = typer.Typer(help="ARES MCP - Model Context Protocol Gateway", no_args_is_help=False, invoke_without_command=True)
 
 app.add_typer(campaign_app, name="campaign")
 app.add_typer(target_app,   name="target")
@@ -2722,55 +2724,323 @@ async def test_missing_target_raises(module):
 
 @mcp_app.callback(invoke_without_command=True)
 def mcp_default_callback(ctx: typer.Context) -> None:
-    """ARES MCP Gateway. Launches interactive console when called without subcommands."""
+    """ARES MCP Gateway. Launches interactive console when invoked without subcommands."""
     if ctx.invoked_subcommand is None:
-        from ares.cli.console import interactive_console_loop
-        interactive_console_loop()
+        if sys.stdin.isatty():
+            from ares.cli.console import interactive_console_loop
+            try:
+                interactive_console_loop()
+            except KeyboardInterrupt:
+                console.print("\n[dim]Cancelled[/dim]")
+                raise typer.Exit(130)
+        else:
+            from ares.cli.mcp_commands import get_doctor_diagnostics
+            diag = get_doctor_diagnostics()
+            console.print(f"ARES MCP v6.0.0 (Non-interactive mode) - Status: {diag['status']}")
+            raise typer.Exit(0)
 
 
 @mcp_app.command("console")
 def mcp_console_cmd() -> None:
     """Launch the ARES MCP Interactive Console (OpenCode/OpenClaw style)."""
     from ares.cli.console import interactive_console_loop
-    interactive_console_loop()
+    try:
+        interactive_console_loop()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled[/dim]")
+        raise typer.Exit(130)
 
 
 @app.command("console")
 def app_console_cmd() -> None:
-    """Launch the ARES Sovereign Agent Interactive TUI Console (OpenClaw/OpenCode style)."""
+    """Launch the ARES MCP Interactive Console (OpenCode/OpenClaw style)."""
     from ares.cli.console import interactive_console_loop
-    interactive_console_loop()
+    try:
+        interactive_console_loop()
+    except KeyboardInterrupt:
+        console.print("\n[dim]Cancelled[/dim]")
+        raise typer.Exit(130)
+
+
+@mcp_app.command("doctor")
+def mcp_doctor_cmd(
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON status"),
+) -> None:
+    """Check health, readiness, and security gates of ARES MCP subsystems."""
+    from ares.cli.mcp_commands import get_doctor_diagnostics
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    diag = get_doctor_diagnostics()
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        out_console.print(json.dumps(diag, indent=2))
+    else:
+        table = Table(title="ARES MCP Subsystem Readiness Check", box=box.ROUNDED)
+        table.add_column("Subsystem", style="cyan")
+        table.add_column("Status", justify="center")
+        table.add_column("Details")
+
+        for item in diag["subsystems"]:
+            status_style = "green" if item["status"] == "PASS" else "red"
+            table.add_row(item["subsystem"], f"[{status_style}]{item['status']}[/]", item["details"])
+
+        out_console.print(table)
+
+    raise typer.Exit(0 if diag["healthy"] else 1)
+
+
+@mcp_app.command("module-catalog")
+@mcp_app.command("catalog")
+def mcp_module_catalog_cmd(
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category (ad, cloud, windows, linux, etc.)"),
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search keyword in module ID or class name"),
+    json_output: bool = typer.Option(False, "--json", help="Output catalog as machine-readable JSON"),
+) -> None:
+    """Browse 60+ attack modules, OPSEC noise levels, and governance policies."""
+    from ares.cli.mcp_commands import query_module_catalog
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    modules = query_module_catalog(category=category, query=query)
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        out_console.print(json.dumps(modules, indent=2))
+        raise typer.Exit(0)
+
+    table = Table(title=f"ARES Module Catalog ({len(modules)} Modules)", box=box.ROUNDED)
+    table.add_column("Module ID", style="cyan")
+    table.add_column("Category", style="yellow")
+    table.add_column("OPSEC Noise", justify="center")
+    table.add_column("Governance")
+    table.add_column("Source Engine Class")
+
+    for item in modules:
+        opsec_val = item["opsec_level"].lower()
+        opsec_style = {"silent": "green", "low": "green", "medium": "yellow", "high_noise": "red"}.get(opsec_val, "white")
+        gov_badge = "[yellow]Approval Required[/]" if item["requires_approval"] else "[green]Standard[/]"
+        table.add_row(
+            item["module_id"],
+            item["category"],
+            f"[{opsec_style}]{item['opsec_level'].upper()}[/]",
+            gov_badge,
+            item["source_class"],
+        )
+
+    out_console.print(table)
+    raise typer.Exit(0)
+
+
+@mcp_app.command("scope-check")
+def mcp_scope_check_cmd(
+    target: str = typer.Option(..., "--target", "-t", help="Target IP, hostname, or domain to verify"),
+    cidr: Optional[str] = typer.Option(None, "--cidr", "-c", help="Specific CIDR network rule to test against"),
+    campaign: str = typer.Option("default-lab", "--campaign", help="Campaign ID"),
+    strict: bool = typer.Option(True, "--strict/--no-strict", help="Exit with code 1 if target is out of scope"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """Verify deterministically if a target IP, CIDR, or hostname is authorized."""
+    from ares.cli.mcp_commands import check_scope
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    result = check_scope(target=target, cidr=cidr, campaign_id=campaign)
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        out_console.print(json.dumps(result, indent=2))
+    else:
+        status_color = "green" if result["in_scope"] else "red"
+        out_console.print(Panel(
+            f"[cyan]Target:[/]       [bold white]{result['target']}[/]\n"
+            f"[cyan]Status:[/]       [{status_color}]{result['status']}[/]\n"
+            f"[cyan]Authorized:[/]   {'YES' if result['in_scope'] else 'NO'}\n"
+            f"[cyan]Scope Rules:[/]  {', '.join(result['scope_rules'])}",
+            title=f"[{status_color}]Scope Verification Result[/]",
+            border_style=status_color,
+            box=box.ROUNDED,
+        ))
+
+    if strict and not result["in_scope"]:
+        raise typer.Exit(1)
+    raise typer.Exit(0)
+
+
+@mcp_app.command("dry-run")
+def mcp_dry_run_cmd(
+    target: str = typer.Option(..., "--target", "-t", help="Target IP or hostname"),
+    module: str = typer.Option(..., "--module", "-m", help="Module ID (e.g. ad.kerberoast)"),
+    campaign: str = typer.Option("default-lab", "--campaign", help="Campaign ID"),
+    params: str = typer.Option("{}", "--params", "-p", help="JSON dictionary string of parameters"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """Simulate module pre-flight execution and obtain a single-use confirmation token."""
+    from ares.cli.mcp_commands import execute_dry_run
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    try:
+        parsed_params = json.loads(params)
+        if not isinstance(parsed_params, dict):
+            raise ValueError()
+    except Exception:
+        console.print("[red]Invalid --params JSON. Must be a valid JSON dictionary string (e.g. '{\"domain\": \"corp.local\"}').[/]")
+        raise typer.Exit(2)
+
+    data = execute_dry_run(target=target, module_id=module, campaign_id=campaign, params=parsed_params)
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        out_console.print(json.dumps(data, indent=2))
+    else:
+        token = data.get("confirmation_token", "N/A")
+        scope_valid = data.get("scope_validation", {}).get("in_scope", True)
+        opsec = data.get("opsec_assessment", {}).get("noise_level", "low")
+
+        status_badge = "[green][OK] IN-SCOPE[/]" if scope_valid else "[red][FAIL] OUT-OF-SCOPE[/]"
+        out_console.print(Panel(
+            f"[cyan]Module:[/]             [bold white]{module}[/]\n"
+            f"[cyan]Target:[/]             [bold white]{target}[/]\n"
+            f"[cyan]ScopeGuard:[/]         {status_badge}\n"
+            f"[cyan]OPSEC Noise:[/]        [yellow]{opsec.upper()}[/]\n"
+            f"[cyan]Confirmation Token:[/] [yellow]{token}[/] (Valid for 60s)\n"
+            f"[cyan]Status:[/]             [green]{data.get('status', 'SUCCESS')}[/]",
+            title="[green]Pre-Flight Dry-Run Card[/]",
+            border_style="green" if scope_valid else "red",
+            box=box.ROUNDED,
+        ))
+
+    if data.get("is_error"):
+        raise typer.Exit(1)
+    raise typer.Exit(0)
+
+
+@mcp_app.command("setup")
+def mcp_setup_cmd(
+    client: Optional[str] = typer.Option(None, "--client", "-c", help="Target client: cursor, claude, windsurf, or cline"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """1-Click automated configuration for AI IDEs and clients without manual JSON editing."""
+    from ares.cli.mcp_commands import setup_client_configuration
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    chosen_client = client
+    if not chosen_client:
+        if sys.stdin.isatty():
+            from rich.prompt import Prompt
+            console.print("[bold white]Select client to configure:[/]")
+            console.print("  [cyan][1][/] Cursor IDE")
+            console.print("  [cyan][2][/] Claude Desktop")
+            console.print("  [cyan][3][/] Windsurf")
+            console.print("  [cyan][4][/] VS Code (Cline)")
+            sel = Prompt.ask("Choice", choices=["1", "2", "3", "4"], default="1")
+            chosen_client = {"1": "cursor", "2": "claude", "3": "windsurf", "4": "cline"}[sel]
+        else:
+            console.print("[red]Missing required option --client in non-interactive mode. Available: cursor, claude, windsurf, cline[/]")
+            raise typer.Exit(2)
+
+    code, msg = setup_client_configuration(chosen_client)
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        out_console.print(json.dumps({"client": chosen_client, "status": "SUCCESS" if code == 0 else "ERROR", "message": msg, "exit_code": code}, indent=2))
+    else:
+        status_color = "green" if code == 0 else "red"
+        out_console.print(Panel(
+            f"[{status_color}]{msg}[/]",
+            title=f"[{status_color}]Client Setup: {chosen_client.capitalize()}[/]",
+            border_style=status_color,
+            box=box.ROUNDED,
+        ))
+
+    raise typer.Exit(code)
+
+
+@mcp_app.command("run-tool")
+def mcp_run_tool_cmd(
+    tool_name: str = typer.Argument(..., help="Name of the MCP tool to execute (e.g. ares_list_campaigns)"),
+    args: str = typer.Option("{}", "--args", "-a", help="JSON dictionary string of tool arguments"),
+    json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
+) -> None:
+    """Execute an ARES operational MCP tool headlessly and output structured results."""
+    from ares.mcp import AresMcpServer
+    from ares.cli.mcp_cli_utils import get_mcp_console
+
+    try:
+        parsed_args = json.loads(args)
+        if not isinstance(parsed_args, dict):
+            raise ValueError()
+    except Exception:
+        console.print("[red]Invalid --args JSON. Must be a valid JSON dictionary string (e.g. '{\"campaign_id\": \"test\"}').[/]")
+        raise typer.Exit(2)
+
+    server = AresMcpServer()
+    tools = {t.name: t for t in server.tool_registry.list_tools()}
+    if tool_name not in tools:
+        console.print(f"[red]Unknown tool '{tool_name}'. Available tools: {', '.join(tools.keys())}[/]")
+        raise typer.Exit(2)
+
+    result = asyncio.run(server.tool_registry.call_tool(tool_name, parsed_args))
+    raw_text = result.content[0].text if result.content else "{}"
+    out_console = get_mcp_console(json_mode=json_output)
+
+    if json_output:
+        try:
+            out_console.print(json.dumps(json.loads(raw_text), indent=2))
+        except Exception:
+            out_console.print(json.dumps({"content": raw_text, "isError": result.isError}, indent=2))
+    else:
+        status_color = "red" if result.isError else "green"
+        try:
+            formatted = json.dumps(json.loads(raw_text), indent=2)
+            syntax = Syntax(formatted, "json", theme="monokai", line_numbers=True)
+            out_console.print(Panel(syntax, title=f"[{status_color}]Result: {tool_name}[/]", border_style=status_color, box=box.ROUNDED))
+        except Exception:
+            out_console.print(Panel(raw_text, title=f"[{status_color}]Result: {tool_name}[/]", border_style=status_color, box=box.ROUNDED))
+
+    raise typer.Exit(1 if result.isError else 0)
 
 
 @mcp_app.command("stdio")
 def mcp_stdio_cmd() -> None:
-    """Run the ARES Sovereign MCP Server over asynchronous stdio (Claude Desktop / Cursor / Windsurf / Cline / Zed)."""
+    """Run the ARES MCP Server over asynchronous stdio (Claude Desktop / Cursor / Windsurf / Cline / Zed)."""
     from ares.mcp import run_stdio_server
     try:
         asyncio.run(run_stdio_server())
     except KeyboardInterrupt:
-        pass
+        console.print("\n[dim]Stdio server stopped.[/dim]")
+        raise typer.Exit(130)
 
 
 @mcp_app.command("sse")
 def mcp_sse_cmd(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host address to bind"),
     port: int = typer.Option(8001, "--port", "-p", help="Port to listen on"),
-    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="Required Bearer API Key for network auth"),
+    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="Optional Bearer API Key for network authentication"),
 ) -> None:
-    """Run the ARES Sovereign MCP Server over HTTP with Server-Sent Events (SSE)."""
+    """Run the ARES MCP Server over HTTP with Server-Sent Events (SSE)."""
     import uvicorn
+    from ares.cli.mcp_cli_utils import warn_cli_secret_exposure
     from ares.mcp import AresMcpServer, create_sse_app
+
+    if api_key:
+        warn_cli_secret_exposure()
+
     server = AresMcpServer()
     sse_app = create_sse_app(server, api_key=api_key)
     console.print(Panel(
-        f"[bold green]ARES Sovereign MCP Server (SSE Mode)[/]\n\n"
-        f"  [cyan]Endpoint:[/cyan]  http://{host}:{port}/sse\n"
-        f"  [cyan]Auth:[/cyan]      {'Protected by API Key' if api_key else 'Open / Localhost Only'}\n"
-        f"  [cyan]Clients:[/cyan]   Open-WebUI, LibreChat, Remote Agents, Docker",
+        f"[bold green]ARES MCP Server (SSE Mode)[/]\n\n"
+        f"  [cyan]Endpoint:[/]  http://{host}:{port}/sse\n"
+        f"  [cyan]Auth:[/]      {'Protected by API Key' if api_key else 'Open / Localhost Only'}\n"
+        f"  [cyan]Clients:[/]   Open-WebUI, LibreChat, Remote Agents, Docker\n\n"
+        f"Press [yellow]Ctrl+C[/] to stop the server.",
         title="ares mcp sse",
+        border_style="green",
+        box=box.ROUNDED,
     ))
-    uvicorn.run(sse_app, host=host, port=port, log_level="info")
+    try:
+        uvicorn.run(sse_app, host=host, port=port, log_level="info")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]SSE server stopped.[/]")
+        raise typer.Exit(130)
 
 
 @mcp_app.command("config")
@@ -2789,43 +3059,22 @@ def mcp_config_cmd(
     executable = sys.executable
 
     if c_lower in ("claude", "claudedesktop"):
-        cfg = {
-            "mcpServers": {
-                "ares": {
-                    "command": executable,
-                    "args": ["-m", "ares.mcp"],
-                }
-            }
-        }
+        cfg = {"mcpServers": {"ares": {"command": executable, "args": ["-m", "ares.mcp"]}}}
         console.print("[bold green]Paste this into your Claude Desktop configuration file (`claude_desktop_config.json`):[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower == "cursor":
-        cfg = {
-            "mcpServers": {
-                "ares": {
-                    "command": executable,
-                    "args": ["-m", "ares.mcp"],
-                }
-            }
-        }
+        cfg = {"mcpServers": {"ares": {"command": executable, "args": ["-m", "ares.mcp"]}}}
         console.print("[bold green]Paste this into your Cursor MCP configuration (`.cursor/mcp.json`):[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower == "windsurf":
-        cfg = {
-            "mcpServers": {
-                "ares": {
-                    "command": executable,
-                    "args": ["-m", "ares.mcp"],
-                }
-            }
-        }
+        cfg = {"mcpServers": {"ares": {"command": executable, "args": ["-m", "ares.mcp"]}}}
         console.print("[bold green]Paste this into Windsurf MCP configuration (`~/.codeium/windsurf/mcp_config.json`):[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower in ("cline", "roo", "roocode"):
         cfg = {
@@ -2840,7 +3089,7 @@ def mcp_config_cmd(
         }
         console.print("[bold green]Paste this into your VS Code Cline settings (`cline_mcp_settings.json`):[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower == "zed":
         cfg = {
@@ -2858,7 +3107,7 @@ def mcp_config_cmd(
         }
         console.print("[bold green]Paste this into your Zed settings (`~/.config/zed/settings.json`):[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower in ("open-webui", "webui"):
         cfg = {
@@ -2868,7 +3117,7 @@ def mcp_config_cmd(
         }
         console.print("[bold green]Open-WebUI Tool Connection Details:[/]\n")
         console.print(json.dumps(cfg, indent=2))
-        return
+        raise typer.Exit(0)
 
     if c_lower == "librechat":
         yaml_content = f"""mcpServers:
@@ -2876,19 +3125,20 @@ def mcp_config_cmd(
     type: sse
     url: {host}/sse
     headers:
-      Authorization: "Bearer {api_key}"
+      Authorization: Bearer {api_key}
 """
         console.print("[bold green]Paste this into your `librechat.yaml` configuration:[/]\n")
         console.print(yaml_content)
-        return
+        raise typer.Exit(0)
 
     if c_lower == "langchain":
         from ares.mcp.export import generate_langchain_snippet
         console.print("[bold green]LangChain MCP Integration Code Snippet:[/]\n")
         console.print(generate_langchain_snippet())
-        return
+        raise typer.Exit(0)
 
     console.print(f"[red]Unknown client '{client}'. Available: claude, cursor, windsurf, cline, zed, open-webui, librechat, langchain[/]")
+    raise typer.Exit(2)
 
 
 @mcp_app.command("export-tools")
@@ -2909,35 +3159,12 @@ def mcp_export_tools_cmd(
         out = export_json_schema(tools)
     else:
         console.print(f"[red]Unknown format '{format}'. Use 'openai', 'gemini', or 'json'.[/]")
-        raise typer.Exit(1)
+        raise typer.Exit(2)
 
     console.print(json.dumps(out, indent=2))
+    raise typer.Exit(0)
 
 
-@mcp_app.command("doctor")
-def mcp_doctor_cmd() -> None:
-    """Check readiness of ARES Sovereign MCP server, tools, and security gates."""
-    from ares.mcp import AresMcpServer
-    from ares.modules.descriptors import FIRST_PARTY_DESCRIPTORS
-
-    server = AresMcpServer()
-    tools = server.tool_registry.list_tools()
-    resources = server.resource_registry.list_resources()
-    prompts = server.prompt_registry.list_prompts()
-
-    table = Table(title="ARES Sovereign MCP Readiness Check")
-    table.add_column("Subsystem", style="cyan")
-    table.add_column("Status", style="green")
-    table.add_column("Details")
-
-    table.add_row("Protocol Engine", "PASS", "JSON-RPC 2.0 (MCP 2024-11-05)")
-    table.add_row("Operational Tools", "PASS", f"{len(tools)} tools registered (Tier-1 & Tier-2)")
-    table.add_row("Context Resources", "PASS", f"{len(resources)} URI streams registered")
-    table.add_row("Purple-Team Prompts", "PASS", f"{len(prompts)} workflow templates")
-    table.add_row("Descriptor Catalog", "PASS", f"{len(FIRST_PARTY_DESCRIPTORS)} modules indexed")
-    table.add_row("Security Gates", "PASS", "ScopeGuard + TokenManager + TaintSanitizer + AD Lockout Breaker")
-
-    console.print(table)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

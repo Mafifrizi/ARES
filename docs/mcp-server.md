@@ -148,10 +148,58 @@ Human operators watching the Web Dashboard will see:
 
 ---
 
-## 6. CLI Commands Reference
+## 6. Product-Grade CLI & Scripting Reference
 
-- `ares mcp stdio`: Launch the MCP server over stdio.
-- `ares mcp sse --host 0.0.0.0 --port 8001 --api-key <key>`: Launch the MCP server over HTTP/SSE.
-- `ares mcp config --client <client>`: Print configuration snippet for your AI client.
-- `ares mcp export-tools --format [openai|gemini|json]`: Export tool definitions to OpenAI, Gemini, or JSON-Schema.
-- `ares mcp doctor`: Run self-diagnostic readiness check across protocol, tools, descriptors, and security gates.
+The ARES MCP CLI (`ares mcp` or `mcp.bat`) supports both an interactive tactical console and headless, non-interactive scriptability designed for pipelines, automation, and CI/CD.
+
+### Command Matrix
+
+| Command | Description | Scriptable / JSON |
+| :--- | :--- | :--- |
+| `ares mcp` | Default launcher. Opens interactive console if TTY, or prints status if piped. | Yes |
+| `ares mcp console` | Explicitly launch the interactive OpenCode/OpenClaw-style TUI console. | No (Interactive) |
+| `ares mcp doctor [--json]` | Validate readiness across protocol, tools, resources, and security gates. | `0` (healthy), `1` (unhealthy) |
+| `ares mcp module-catalog [-c <cat>] [-q <query>] [--json]` | Search and filter 60+ attack modules with OPSEC noise and governance. | Full JSON list |
+| `ares mcp scope-check -t <target> [-c <cidr>] [--strict/--no-strict] [--json]` | Deterministically check whether an IP/CIDR/hostname is in authorized scope. | `0` (in-scope), `1` (out-of-scope) |
+| `ares mcp dry-run -t <target> -m <module> [-p <json_params>] [--json]` | Run pre-flight simulation and generate 60s cryptographic confirmation token. | Full JSON card |
+| `ares mcp setup --client <cursor\|claude\|windsurf\|cline> [--json]` | 1-Click automated configuration for AI IDEs without manual JSON editing. | `0` (success), `2` (invalid client) |
+| `ares mcp run-tool <tool_name> [-a <json_args>] [--json]` | Execute an operational MCP tool headlessly and output structured results. | Tool JSON payload |
+| `ares mcp stdio` | Run the MCP server over standard input/output (for desktop AI clients). | Stdio JSON-RPC 2.0 |
+| `ares mcp sse [--host <h>] [--port <p>] [--api-key <k>]` | Run the MCP server over HTTP with Server-Sent Events (SSE). | SSE stream |
+| `ares mcp config --client <client>` | Generate ready-to-copy JSON configuration for 8+ AI clients. | Formatted config snippet |
+| `ares mcp export-tools --format <openai\|gemini\|json>` | Export MCP tool definitions for external LLM function calling frameworks. | Schema JSON |
+
+### Standardized Exit Codes
+
+Following GitHub CLI, Docker CLI, and POSIX conventions:
+- **`0`**: Operation completed successfully / target in-scope.
+- **`1`**: General operational failure, subsystem check failed, or target out-of-scope (`--strict`).
+- **`2`**: Invalid CLI input, malformed JSON arguments, or unknown tool/client.
+- **`130`**: User cancelled operation via SIGINT (`Ctrl+C`).
+
+### Pipeline & Automation Features
+
+1. **NO_COLOR Support**:
+   Adheres to [no-color.org](https://no-color.org). When the `NO_COLOR` environment variable is set (`export NO_COLOR=1` or `$env:NO_COLOR="1"`), all ANSI color codes are stripped:
+   ```bash
+   NO_COLOR=1 ares mcp doctor
+   ```
+
+2. **Machine-Readable JSON Output**:
+   All diagnostic, inspection, and verification commands support `--json` for direct parsing by `jq`, PowerShell, or automated scripts:
+   ```bash
+   # Extract confirmation token for automated pipeline execution
+   TOKEN=$(ares mcp dry-run -t 10.0.0.5 -m ad.kerberoast --json | jq -r .confirmation_token)
+   ```
+
+3. **TTY Detection**:
+   When called in non-TTY environments (pipes, redirects, background jobs), `ares mcp` automatically avoids launching interactive menus and outputs headless status summaries.
+
+4. **1-Click Windows Launcher (`mcp.bat`)**:
+   Windows operators can run `mcp.bat` directly from the repository root:
+   ```cmd
+   mcp.bat doctor
+   mcp.bat scope-check --target 10.0.0.5 --cidr 10.0.0.0/24
+   mcp.bat setup --client cursor
+   ```
+

@@ -404,6 +404,32 @@ ARES enforces strict RBAC permissions across all API endpoints and UI controls:
 
 ---
 
+## 🔌 ARES MCP Gateway & Product-Grade CLI
+
+ARES includes a production-grade Model Context Protocol (MCP) Gateway that enables AI development environments (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline, Zed, Open-WebUI, LibreChat) to interact with the ARES purple-team offensive platform under strict governance.
+
+### Quick Start (Windows & Linux)
+
+Launch the interactive OpenCode/OpenClaw-style console:
+```cmd
+mcp.bat
+```
+Or use the scriptable CLI directly:
+```bash
+# Verify health and security readiness
+python -m ares.cli.main mcp doctor --json
+
+# Pre-flight check and obtain execution confirmation token
+python -m ares.cli.main mcp dry-run --target 10.0.0.5 --module ad.kerberoast
+
+# 1-Click IDE Setup (Cursor, Claude, Windsurf, Cline)
+python -m ares.cli.main mcp setup --client cursor
+```
+
+See [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md) for full protocol guarantees, exit codes, and pipeline automation guides.
+
+---
+
 ## 🛠️ Extensible Developer SDK (Next-Gen Autonomous Architecture)
 
 ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
@@ -480,7 +506,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
 - [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
-- [**Sovereign MCP Server Specification (Universal AI Gateway)**](docs/mcp-server.md)
+- [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md)
 - [**Step-by-Step Module Development Guide**](docs/module-development.md)
 - [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
 - [**Adversary Module Catalog & Schemas**](docs/modules.md)
