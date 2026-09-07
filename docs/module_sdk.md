@@ -7,9 +7,12 @@
 
 `ares.sdk` is the canonical public import path. It provides:
 1. **Type-Safe Module Authoring**: Generic `BaseModule[P, R]`, Pydantic v2 `ModuleParams`, and declarative `@ares_module`.
-2. **Fluent Execution Context**: `ctx.emit_finding(...)`, `ctx.store_artifact(...)`, `ctx.record_credential(...)`.
-3. **Isolated Testing & Simulation**: `ModuleTestHarness` with fluent assertion matchers (`result.assert_success()`, `result.assert_finding()`).
-4. **Programmatic API Client**: `AresClient` for asynchronous REST and WebSocket automation.
+2. **Enterprise Security & Governance**: Declarative `@module_contract`, `ScopeEnforcementInterceptor`, `AdaptiveNoiseInterceptor`, `SecretSanitizationInterceptor`, and `AuditProvenanceInterceptor`.
+3. **Capability-Based Sandboxing**: `NetworkPermission`, `VaultPermission`, `FilesystemPermission`, and `ProcessPermission`.
+4. **Intelligent Resilience & Circuit Breakers**: `CircuitBreaker` and `LockoutCircuitBreaker` for zero-collateral safety.
+5. **Taint Tracking & Provenance**: `UntrustedTargetData[T]` (anti-prompt injection) and `EvidenceRecord` (SHA-256 Merkle chain).
+6. **Isolated Testing & Simulation**: `ModuleTestHarness` with fluent assertions (`result.assert_success()`, `result.assert_provenance_verified()`).
+7. **Programmatic API Client**: `AresClient` for asynchronous REST and WebSocket automation.
 
 ---
 
@@ -65,6 +68,61 @@ async def quick_probe(ctx: ExecutionContext[AttackParams]) -> ModuleResult:
 ```
 
 ---
+
+---
+
+## Enterprise Security & Governance Contracts (`@module_contract`)
+
+For production environments and autonomous operations, ARES enforces code-level capabilities, zero-trust scope verification, and circuit breaking via `@module_contract`:
+
+```python
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    ModuleParams, param, SecretParam,
+    NetworkPermission, VaultPermission,
+    LockoutCircuitBreaker, UntrustedTargetData, EvidenceRecord,
+    module_contract, OpsecLevel, Severity,
+)
+
+class KerberoastParams(ModuleParams):
+    dc: str = param("Target DC IP or FQDN", min_length=3)
+    domain: str = param("AD domain name", min_length=3)
+
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[88, 389], protocols=["tcp", "udp"]),
+        VaultPermission(read_types=["domain_creds"], write_types=["kerberos_hash"]),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=KerberoastParams,
+)
+class EnterpriseKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
+    MODULE_ID = "ad.enterprise_kerberoast"
+    MODULE_NAME = "Enterprise Kerberoast"
+    MODULE_CATEGORY = "ad"
+    OPSEC_LEVEL = OpsecLevel.LOW
+
+    async def execute(self, ctx: ExecutionContext[KerberoastParams]) -> ModuleResult:
+        # 1. Scope and Noise budget are enforced automatically by interceptor pipeline!
+        target_dc = ctx.params.dc
+
+        # 2. Taint Tracking: wrap untrusted target data to prevent prompt injection
+        untrusted_banner = UntrustedTargetData("DC01 Windows Server 2022", source=target_dc)
+
+        # 3. Cryptographic Chain-of-Custody Evidence Record
+        evidence = EvidenceRecord(
+            evidence_id="ev-krb-001",
+            source_target=target_dc,
+            payload={"spn": "MSSQLSvc/sql01.corp.local", "etype": 23},
+        )
+
+        finding = ctx.emit_finding(
+            title=f"Kerberoastable SPN on {target_dc}",
+            severity=Severity.HIGH,
+            evidence={"hash": evidence.sha256_hash},
+        )
+        return ModuleResult.ok("Execution completed", module_id=self.MODULE_ID, findings=[finding])
+```
 
 ## Isolated Testing & Simulation (`ares.sdk.testing`)
 

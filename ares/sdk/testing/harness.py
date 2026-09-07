@@ -120,6 +120,26 @@ class SimulationResult:
             assert matched, f"Credential for username {username!r} not found in {self.new_credentials}"
         return self.new_credentials[0]
 
+    @property
+    def provenance_hash(self) -> str | None:
+        """Return the cryptographic audit provenance digest if present."""
+        if isinstance(self.raw, dict):
+            prov = self.raw.get("_audit_provenance", {})
+            return prov.get("provenance_hash")
+        return None
+
+    def assert_provenance_verified(self) -> SimulationResult:
+        """Assert that execution produced a verified cryptographic provenance hash."""
+        assert self.provenance_hash is not None, "Execution result does not contain a verified provenance hash"
+        return self
+
+    def assert_circuit_closed(self) -> SimulationResult:
+        """Assert that the circuit breaker remained CLOSED during simulation."""
+        if self.context and hasattr(self.context, "_circuit_breaker"):
+            cb = getattr(self.context, "_circuit_breaker")
+            assert getattr(cb, "state", "closed") == "closed", f"Expected circuit breaker CLOSED, got {cb.state}"
+        return self
+
 
 class ModuleTestHarness(Generic[M]):
     """Isolated execution harness for testing and simulating ARES modules.

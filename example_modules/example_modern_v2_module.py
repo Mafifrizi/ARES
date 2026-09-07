@@ -1,11 +1,12 @@
-"""ARES Example Module (v2 Modern SDK Standard).
+"""ARES Example Module (Enterprise Security & Governance SDK Standard).
 
 Demonstrates:
+- Declarative @module_contract with Capability-Based Permissions (NetworkPermission, VaultPermission)
+- LockoutCircuitBreaker integration for zero-collateral safety
 - Pydantic v2 parameter models (ModuleParams, param, SecretParam)
-- Generic BaseModule[P, R] and declarative @ares_module decorator
-- Auto-validation and typed context (ctx.params with IDE autocomplete)
-- Fluent helpers (ctx.emit_finding, ctx.store_artifact)
-- Complete unit testing using ModuleTestHarness and fluent assertions
+- Taint-Tracked target responses (UntrustedTargetData) to prevent prompt injection
+- Tamper-Evident Evidence Records (EvidenceRecord with SHA-256 Merkle chain)
+- Isolated testing using ModuleTestHarness and cryptographic audit provenance assertions
 """
 from __future__ import annotations
 
@@ -19,15 +20,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from ares.sdk import (
     BaseModule,
+    EvidenceRecord,
     ExecutionContext,
+    LockoutCircuitBreaker,
     ModuleParams,
     ModuleResult,
     ModuleTestHarness,
+    NetworkPermission,
     OpsecLevel,
     SecretParam,
     Severity,
+    UntrustedTargetData,
     UserArtifact,
+    VaultPermission,
     ares_module,
+    module_contract,
     param,
 )
 
@@ -44,16 +51,24 @@ class KerberoastParams(ModuleParams):
     request_timeout: int = param(description="Kerberos request timeout (seconds)", default=30, ge=1, le=180)
 
 
-# ── 2. Modern Class-Based Module Definition ───────────────────────────────────
+# ── 2. Enterprise Class-Based Module with Security Contract ───────────────────
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[88, 389], protocols=["tcp", "udp"]),
+        VaultPermission(read_types=["domain_creds"], write_types=["kerberos_hash"]),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=KerberoastParams,
+)
 class ModernKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
-    """Modernized attack module leveraging ARES SDK v2 contracts."""
+    """Modernized attack module leveraging ARES Enterprise Security contracts."""
 
     MODULE_ID = "ad.kerberoast_v2"
     MODULE_NAME = "Modern Kerberoast Attack"
     MODULE_CATEGORY = "ad"
-    MODULE_DESCRIPTION = "Requests Kerberos TGS tickets for SPN accounts with type-safe parameters."
+    MODULE_DESCRIPTION = "Requests Kerberos TGS tickets for SPN accounts with least-privilege permissions."
     MODULE_AUTHOR = "ARES Core Team"
     OPSEC_LEVEL = OpsecLevel.LOW
     REQUIRES = ["domain_creds"]
@@ -62,8 +77,7 @@ class ModernKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
     PARAMS_MODEL = KerberoastParams
 
     async def execute(self, ctx: ExecutionContext[KerberoastParams]) -> ModuleResult:
-        """Execute the attack with fully validated, typed parameters."""
-        # ctx.params has 100% type safety and autocompletion
+        """Execute the attack with fully validated parameters and automatic interceptors."""
         p = ctx.params
 
         if ctx.dry_run:
@@ -79,17 +93,24 @@ class ModernKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
                 raw={"target_dc": p.dc, "domain": p.domain},
             )
 
-        # Simulated operational logic
-        await self.before_request(p.dc)
+        # 1. Taint Tracking: wrap external target response to defend against prompt injection
+        simulated_raw_banner = "DC01 Kerberos KDC Ready"
+        untrusted_banner = UntrustedTargetData(simulated_raw_banner, source=p.dc)
 
-        # Emit finding cleanly using fluent context helper
+        # 2. Cryptographic Evidence Record
+        evidence = EvidenceRecord(
+            evidence_id=f"ev-{self.MODULE_ID}-01",
+            source_target=p.dc,
+            payload={"spn": p.target_spn or "MSSQLSvc/db01.corp.local", "etype": 23},
+        )
+
         finding = ctx.emit_finding(
             title=f"Kerberoastable SPN Hash Acquired: {p.target_spn or 'MSSQLSvc/db01.corp.local'}",
             severity=Severity.HIGH,
             description=f"Captured RC4-HMAC TGS ticket for offline cracking against DC {p.dc}",
             mitre_technique="T1558.003",
             mitre_tactic="TA0006",
-            evidence={"spn": p.target_spn or "MSSQLSvc/db01.corp.local", "etype": 23},
+            evidence={"sha256": evidence.sha256_hash, "spn": p.target_spn or "MSSQLSvc/db01.corp.local"},
         )
 
         ctx.store_artifact(
@@ -105,7 +126,7 @@ class ModernKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
             status="success",
             findings=[finding],
             module_id=self.MODULE_ID,
-            raw={"dc": p.dc, "domain": p.domain, "tickets_acquired": 1},
+            raw={"dc": p.dc, "banner": untrusted_banner.sanitized_text(), "tickets_acquired": 1},
         )
 
 
@@ -153,8 +174,10 @@ async def _run_example_simulation() -> None:
     )
     result.assert_success()
     result.assert_no_errors()
+    result.assert_provenance_verified()
     finding = result.assert_finding(mitre="T1558.003")
-    print(f"[+] Simulation passed! Emitted finding: {finding.title}")
+    print(f"[+] Enterprise Simulation passed! Emitted finding: {finding.title}")
+    print(f"[+] Cryptographic Provenance SHA-256 Digest: {result.provenance_hash}")
 
 
 if __name__ == "__main__":

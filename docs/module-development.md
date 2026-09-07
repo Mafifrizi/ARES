@@ -169,6 +169,55 @@ async def mssql_quick_check(ctx: ExecutionContext[MssqlEnumParams]) -> ModuleRes
 
 ---
 
+### Option C: Enterprise Security Contract (`@module_contract`)
+
+For zero-trust operations, strict capability sandboxing, and circuit breaking:
+
+```python
+from ares.sdk import (
+    BaseModule, ExecutionContext, ModuleResult,
+    NetworkPermission, VaultPermission, LockoutCircuitBreaker,
+    UntrustedTargetData, EvidenceRecord, module_contract, Severity,
+)
+
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[1433], protocols=["tcp"]),
+        VaultPermission(write_types=["db_credential"]),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=MssqlEnumParams,
+)
+class EnterpriseMssqlModule(BaseModule[MssqlEnumParams, ModuleResult]):
+    MODULE_ID = "db.mssql_enterprise"
+    MODULE_NAME = "Enterprise MSSQL Enumeration"
+    MODULE_CATEGORY = "db"
+    MODULE_DESCRIPTION = "Audited, least-privilege MSSQL module"
+
+    async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
+        # Scope, Jitter, and Rate Limits are handled automatically by the interceptor pipeline!
+        target = ctx.params.target
+
+        # Taint tracking on external server response
+        untrusted_banner = UntrustedTargetData("MSSQL 2019 RTM", source=target)
+
+        # Tamper-evident evidence record with SHA-256 Merkle link
+        evidence = EvidenceRecord(
+            evidence_id="ev-mssql-01",
+            source_target=target,
+            payload={"version": untrusted_banner.sanitized_text()},
+        )
+
+        ctx.emit_finding(
+            title=f"MSSQL Active on {target}",
+            severity=Severity.LOW,
+            evidence={"sha256": evidence.sha256_hash},
+        )
+        return ModuleResult.ok("Execution completed", module_id=self.MODULE_ID)
+```
+
+---
+
 ## Module Metadata Reference
 
 ### Required Attributes

@@ -707,6 +707,19 @@ class ModuleResult:
             "module_id":        self.module_id,
         }
 
+    @classmethod
+    def ok(cls, message: str = "", module_id: str = "", **kwargs: Any) -> ModuleResult:
+        """Create a successful ModuleResult with optional narrative message."""
+        raw = kwargs.pop("raw", {})
+        if message and "message" not in raw:
+            raw = {**raw, "message": message}
+        return cls(status="success", module_id=module_id, raw=raw, **kwargs)
+
+    @classmethod
+    def failed(cls, error: str = "", module_id: str = "", **kwargs: Any) -> ModuleResult:
+        """Create a failed ModuleResult with an error message."""
+        return cls(status="failed", module_id=module_id, error=error, **kwargs)
+
 
 _REQUIRED_MODULE_ATTRS: list[str] = [
     "MODULE_ID", "MODULE_NAME", "MODULE_CATEGORY", "MODULE_DESCRIPTION",

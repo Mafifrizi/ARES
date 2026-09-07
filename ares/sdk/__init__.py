@@ -77,6 +77,47 @@ from ares.sdk.client import (
     AresValidationError,
 )
 
+# Enterprise Security Pipeline & Interceptors
+from ares.sdk.pipeline import (
+    AdaptiveNoiseInterceptor,
+    AuditProvenanceInterceptor,
+    BaseExecutionInterceptor,
+    ExecutionInterceptor,
+    ExecutionPipeline,
+    ScopeEnforcementInterceptor,
+    SecretSanitizationInterceptor,
+)
+
+# Capability-Based Permissions & Sandboxing
+from ares.sdk.security import (
+    CapabilitySandbox,
+    FilesystemPermission,
+    NetworkPermission,
+    ProcessPermission,
+    SecurityCapabilityViolation,
+    SecurityPermission,
+    VaultPermission,
+)
+
+# Resilience & Circuit Breakers
+from ares.sdk.resilience import (
+    CircuitBreaker,
+    CircuitBreakerState,
+    CircuitBreakerTripped,
+    LockoutCircuitBreaker,
+)
+
+# Taint Tracking & Tamper-Evident Evidence
+from ares.sdk.taint import (
+    EvidenceRecord,
+    UntrustedTargetData,
+)
+
+# Declarative Module Contracts
+from ares.sdk.contracts import (
+    module_contract,
+)
+
 __all__ = [
     # Base module contracts
     "BaseModule",
@@ -85,11 +126,36 @@ __all__ = [
     "validate_module_class",
     "ExecutionContext",
     "ares_module",
+    "module_contract",
     # Parameter schema contracts (Pydantic v2)
     "ModuleParams",
     "param",
     "SecretParam",
     "validate_params",
+    # Pipeline & Interceptors
+    "ExecutionPipeline",
+    "ExecutionInterceptor",
+    "BaseExecutionInterceptor",
+    "ScopeEnforcementInterceptor",
+    "AdaptiveNoiseInterceptor",
+    "SecretSanitizationInterceptor",
+    "AuditProvenanceInterceptor",
+    # Security & Capabilities
+    "SecurityPermission",
+    "NetworkPermission",
+    "VaultPermission",
+    "FilesystemPermission",
+    "ProcessPermission",
+    "SecurityCapabilityViolation",
+    "CapabilitySandbox",
+    # Resilience & Circuit Breakers
+    "CircuitBreaker",
+    "CircuitBreakerState",
+    "CircuitBreakerTripped",
+    "LockoutCircuitBreaker",
+    # Taint Tracking & Evidence
+    "UntrustedTargetData",
+    "EvidenceRecord",
     # Errors
     "AresError",
     "ModuleError",
