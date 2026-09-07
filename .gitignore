@@ -58,6 +58,7 @@ ares.db-wal
 evidence/
 logs/
 frontend/*.tsbuildinfo
+.cursor/
 file
 scratch/
 .agents/

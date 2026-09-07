@@ -1,11 +1,11 @@
-"""ARES Sovereign Agent Console (OpenClaw / OpenCode-style TUI).
+"""ARES MCP - Model Context Protocol Gateway Console (OpenCode / OpenClaw style).
 
-Unified, zero-friction, single-terminal interactive console for:
-- 1-Click Auto-Setup for Cursor, Claude, Windsurf, Cline (zero manual JSON copy-paste)
-- Interactive Module Catalog Explorer with OPSEC filter
-- Target Scope & Pre-Flight Dry-Run Simulator with HMAC confirmation tokens
-- Interactive MCP Tool Runner with syntax-highlighted visual cards
-- One-touch System Diagnostics and Background SSE Server management
+Tactical, unified, zero-friction interactive terminal for:
+- 1-Click Auto-Setup for Cursor, Claude Desktop, Windsurf, and Cline
+- Interactive Module Catalog Explorer with OPSEC noise ratings
+- Pre-Flight Target ScopeGuard & Dry-Run Simulator with HMAC confirmation tokens
+- Interactive Tool Runner with syntax-highlighted visual cards
+- System Readiness Diagnostics & Local SSE Gateway launcher
 """
 from __future__ import annotations
 
@@ -30,44 +30,46 @@ from ares.modules.descriptors import FIRST_PARTY_DESCRIPTORS
 
 console = Console(safe_box=True)
 
-BANNER_ART = r"""
-[bold cyan]     ___   ___  ___ ___ [/]   [bold white] __  __  ___  ___ [/]
-[bold cyan]    / _ \ / _ \/ __| _ \ [/]  [bold white]|  \/  |/ __|| _ \ [/]
-[bold cyan]   / // // // /\__ \ _// [/]  [bold white]| |\/| | (__ |  _/ [/]
-[bold cyan]  /_/ \_\\___/ |___/_/   [/]  [bold white]|_|  |_|\___||_|   [/]
+ASCII_BANNER = r"""
+[bold cyan]   _   ___ ___ ___ [/]  [bold white] __  __ ___ ___ [/]
+[bold cyan]  /_\ | _ \ __/ __|[/]  [bold white]|  \/  / __| _ \ [/]
+[bold cyan] / _ \|   / _|\__ \ [/] [bold white]| |\/| | (__|  _/ [/]
+[bold cyan]/_/ \_\_|_\___|___/[/]  [bold white]|_|  |_|\___|_|   [/]
 """
 
 
 def render_header() -> None:
-    """Render the cyberpunk styled sovereign console header."""
-    console.print(Align.center(BANNER_ART))
-    
-    status_text = Text()
-    status_text.append(" [*] GATEWAY ACTIVE ", style="bold black on green")
-    status_text.append("  ")
-    status_text.append(" 62 MODULES ", style="bold white on blue")
-    status_text.append("  ")
-    status_text.append(" 9 MCP TOOLS ", style="bold black on cyan")
-    status_text.append("  ")
-    status_text.append(" SCOPEGUARD ARMED ", style="bold black on yellow")
-    status_text.append("  ")
-    status_text.append(" HMAC-256 TOKENS ", style="bold white on magenta")
+    """Render the tactical ARES MCP header."""
+    console.print(Align.center(ASCII_BANNER))
 
-    console.print(Align.center(status_text))
-    console.print(Align.center("[dim]ARES Sovereign Model Context Protocol - Zero-Friction Unified Terminal[/]\n"))
+    header_table = Table(box=box.ASCII, show_header=False, expand=True, border_style="cyan")
+    header_table.add_column(justify="left")
+    header_table.add_column(justify="right")
+
+    header_table.add_row(
+        "[bold white]ARES MCP[/bold white] [dim]- Automated Red Team Engagement System[/dim]",
+        "[bold green][*] READY[/bold green] [dim]v6.0.0[/dim]",
+    )
+    header_table.add_row(
+        "[cyan]Modules:[/] [bold white]62 Active[/]   [cyan]Tools:[/] [bold white]9 Governed[/]   [cyan]Transport:[/] [bold white]Stdio + SSE[/]",
+        "[cyan]ScopeGuard:[/] [bold green]Enforced[/]   [cyan]Auth:[/] [bold yellow]HMAC-SHA256[/]",
+    )
+
+    console.print(header_table)
+    console.print()
 
 
 def auto_setup_client(workspace_root: Path) -> None:
     """1-Click Auto-Setup for AI IDEs and clients without manual copy-paste."""
     render_header()
     console.print(Panel(
-        "[bold white]Select your AI Environment to automatically configure MCP connection:[/]\n\n"
-        "  [bold cyan][1][/] Cursor IDE         [dim](Auto-creates .cursor/mcp.json in workspace)[/]\n"
-        "  [bold cyan][2][/] Claude Desktop     [dim](Auto-configures %APPDATA%\\Claude\\claude_desktop_config.json)[/]\n"
-        "  [bold cyan][3][/] Windsurf           [dim](Auto-configures ~/.codeium/windsurf/mcp_config.json)[/]\n"
-        "  [bold cyan][4][/] VS Code (Cline)    [dim](Auto-creates cline_mcp_settings.json)[/]\n"
-        "  [bold cyan][0][/] Back to Main Menu",
-        title="[bold green][!] 1-Click Client Auto-Setup[/]",
+        "[bold white]Select your AI client to configure MCP connection automatically:[/]\n\n"
+        "  [bold cyan][1][/] Cursor IDE         [dim]Auto-configures .cursor/mcp.json in workspace[/]\n"
+        "  [bold cyan][2][/] Claude Desktop     [dim]Auto-configures %APPDATA%\\Claude\\claude_desktop_config.json[/]\n"
+        "  [bold cyan][3][/] Windsurf           [dim]Auto-configures ~/.codeium/windsurf/mcp_config.json[/]\n"
+        "  [bold cyan][4][/] VS Code (Cline)    [dim]Auto-configures cline_mcp_settings.json[/]\n"
+        "  [bold cyan][0][/] Back to Menu",
+        title="[bold green]1-Click Client Setup[/]",
         border_style="green",
         box=box.ASCII,
     ))
@@ -97,15 +99,12 @@ def auto_setup_client(workspace_root: Path) -> None:
         mcp_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
         console.print(Panel(
-            f"[bold green][OK] SUCCESS: Cursor MCP configuration automatically installed![/]\n\n"
-            f"  [cyan]File Location:[/cyan]  {mcp_file}\n"
-            f"  [cyan]Python Path:[/cyan]    {executable}\n"
-            f"  [cyan]Registered Tool Count:[/cyan] 9 Operational Tools\n\n"
-            f"[bold white]What to do next:[/]\n"
-            f"  1. Open Cursor Settings (`Ctrl + ,`) -> [bold cyan]Features -> MCP[/]\n"
-            f"  2. You will see [bold green]ares (Active)[/] with a green status indicator!\n"
-            f"  3. Open Cursor Chat (`Ctrl + L`) and start asking ARES directly.",
-            title="[bold green]Cursor IDE Connected[/]",
+            f"[bold green][OK] Cursor MCP configuration successfully written![/]\n\n"
+            f"  [cyan]Config Path:[/]   {mcp_file}\n"
+            f"  [cyan]Python:[/]        {executable}\n"
+            f"  [cyan]Tools:[/]         9 ARES offensive security tools registered\n\n"
+            f"[bold white]Next Steps:[/] Open Cursor Settings -> Features -> MCP to verify the connection.",
+            title="[bold green]Cursor IDE Setup Complete[/]",
             border_style="green",
             box=box.ASCII,
         ))
@@ -113,7 +112,7 @@ def auto_setup_client(workspace_root: Path) -> None:
     elif choice == "2":
         appdata = os.environ.get("APPDATA")
         if not appdata:
-            console.print("[bold red]Could not locate %APPDATA% directory.[/]")
+            console.print("[bold red]Could not locate %APPDATA% directory on this system.[/]")
             Prompt.ask("\nPress Enter to return...")
             return
 
@@ -135,13 +134,11 @@ def auto_setup_client(workspace_root: Path) -> None:
         claude_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
         console.print(Panel(
-            f"[bold green][OK] SUCCESS: Claude Desktop configuration automatically installed![/]\n\n"
-            f"  [cyan]File Location:[/cyan]  {claude_file}\n"
-            f"  [cyan]Python Path:[/cyan]    {executable}\n\n"
-            f"[bold white]What to do next:[/]\n"
-            f"  1. Restart Claude Desktop.\n"
-            f"  2. The tool icon (hammer) will now feature ARES tools.",
-            title="[bold green]Claude Desktop Connected[/]",
+            f"[bold green][OK] Claude Desktop configuration successfully written![/]\n\n"
+            f"  [cyan]Config Path:[/]   {claude_file}\n"
+            f"  [cyan]Python:[/]        {executable}\n\n"
+            f"[bold white]Next Steps:[/] Restart Claude Desktop. The hammer icon will show ARES tools.",
+            title="[bold green]Claude Desktop Setup Complete[/]",
             border_style="green",
             box=box.ASCII,
         ))
@@ -166,9 +163,9 @@ def auto_setup_client(workspace_root: Path) -> None:
         windsurf_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
         console.print(Panel(
-            f"[bold green][OK] SUCCESS: Windsurf MCP configuration automatically installed![/]\n\n"
-            f"  [cyan]File Location:[/cyan] {windsurf_file}\n",
-            title="[bold green]Windsurf Connected[/]",
+            f"[bold green][OK] Windsurf configuration successfully written![/]\n\n"
+            f"  [cyan]Config Path:[/] {windsurf_file}\n",
+            title="[bold green]Windsurf Setup Complete[/]",
             border_style="green",
             box=box.ASCII,
         ))
@@ -187,32 +184,35 @@ def auto_setup_client(workspace_root: Path) -> None:
         }
         cline_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         console.print(Panel(
-            f"[bold green][OK] SUCCESS: Cline MCP configuration created in workspace![/]\n\n"
-            f"  [cyan]File Location:[/cyan] {cline_file}\n",
-            title="[bold green]Cline Connected[/]",
+            f"[bold green][OK] Cline MCP settings written to workspace![/]\n\n"
+            f"  [cyan]Config Path:[/] {cline_file}\n",
+            title="[bold green]Cline Setup Complete[/]",
             border_style="green",
             box=box.ASCII,
         ))
 
-    Prompt.ask("\n[dim]Press Enter to continue...[/]")
+    Prompt.ask("\n[dim]Press Enter to return to menu...[/]")
 
 
 def explore_catalog() -> None:
     """Interactive Module Catalog Explorer."""
     render_header()
-    query = Prompt.ask("[bold yellow]Filter keyword or category[/] [dim](e.g. 'ad', 'kerberos', or Enter for all)[/]", default="").strip().lower()
+    query = Prompt.ask("[bold yellow]Filter by keyword or category[/] [dim](e.g. 'ad', 'kerberos', or Enter for all)[/]", default="").strip().lower()
 
     matches = []
     for mod_id, desc in sorted(FIRST_PARTY_DESCRIPTORS.items()):
-        if not query or query in mod_id.lower() or query in desc.description.lower() or query in desc.category.lower():
-            matches.append((mod_id, desc))
+        category_str = desc.category.value if hasattr(desc.category, "value") else str(desc.category)
+        opsec_val = desc.opsec.value if hasattr(desc.opsec, "value") else str(desc.opsec)
+        source_cls = str(desc.source_class)
+        if not query or query in mod_id.lower() or query in category_str.lower() or query in source_cls.lower():
+            matches.append((mod_id, desc, category_str, opsec_val, source_cls))
 
-    table = Table(title=f"ARES Module Catalog ({len(matches)} Modules Found)", box=box.ASCII)
+    table = Table(title=f"ARES Module Catalog ({len(matches)} Modules)", box=box.ASCII)
     table.add_column("Module ID", style="bold cyan")
     table.add_column("Category", style="yellow")
     table.add_column("OPSEC Noise", justify="center")
-    table.add_column("Privileges")
-    table.add_column("Description")
+    table.add_column("Execution Governance")
+    table.add_column("Source Engine Class")
 
     opsec_styles = {
         "silent": "[bold green]SILENT[/]",
@@ -221,33 +221,32 @@ def explore_catalog() -> None:
         "high_noise": "[bold red]HIGH NOISE[/]",
     }
 
-    for mod_id, desc in matches[:30]:
-        opsec_badge = opsec_styles.get(desc.opsec_level.value, desc.opsec_level.value)
-        priv_badge = "[red]ROOT/SYSTEM[/]" if desc.requires_privileged_access else "[green]User[/]"
+    for mod_id, desc, category_str, opsec_val, source_cls in matches[:25]:
+        opsec_badge = opsec_styles.get(opsec_val.lower(), opsec_val.upper())
+        priv_badge = "[red]Approval Required[/]" if desc.explicit_attempt_approval else "[green]Standard[/]"
         table.add_row(
             mod_id,
-            desc.category,
+            category_str,
             opsec_badge,
             priv_badge,
-            desc.description[:50] + ("..." if len(desc.description) > 50 else ""),
+            source_cls,
         )
 
     console.print(table)
-    if len(matches) > 30:
-        console.print(f"[dim]...showing first 30 of {len(matches)} matching modules.[/]")
+    if len(matches) > 25:
+        console.print(f"[dim]...showing first 25 of {len(matches)} matching modules.[/]")
 
-    Prompt.ask("\n[dim]Press Enter to continue...[/]")
+    Prompt.ask("\n[dim]Press Enter to return to menu...[/]")
 
 
 def simulate_dry_run() -> None:
     """Interactive ScopeGuard & Dry-Run Simulator."""
     render_header()
     console.print(Panel(
-        "[bold white]Pre-Flight Dry-Run Simulator[/]\n\n"
-        "Simulates attack module execution with [bold green]zero live packets[/].\n"
-        "Validates target against ScopeGuard CIDR rules, assesses OPSEC risk,\n"
-        "and issues a 60-second cryptographic confirmation token required for live execution.",
-        title="[bold yellow][TGT] Target Scope & Dry-Run Simulator[/]",
+        "[bold white]Pre-Flight Attack Simulation (Zero Packets Sent)[/]\n\n"
+        "Validates target against authorized CIDR ranges, evaluates OPSEC noise,\n"
+        "and issues a 60-second HMAC-SHA256 confirmation token required for live execution.",
+        title="[bold yellow]Target Scope & Dry-Run Simulator[/]",
         border_style="yellow",
         box=box.ASCII,
     ))
@@ -257,7 +256,7 @@ def simulate_dry_run() -> None:
     campaign_id = Prompt.ask("[bold cyan]Campaign ID[/]", default="lab-engagement-01")
 
     server = AresMcpServer()
-    result = asyncio.run(server.tool_registry.execute_tool(
+    result = asyncio.run(server.tool_registry.call_tool(
         "ares_dry_run_module",
         {
             "campaign_id": campaign_id,
@@ -277,23 +276,23 @@ def simulate_dry_run() -> None:
     scope_valid = data.get("scope_validation", {}).get("in_scope", True)
     opsec = data.get("opsec_assessment", {}).get("noise_level", "low")
 
-    status_badge = "[bold green][OK] IN-SCOPE (CLEARED)[/]" if scope_valid else "[bold red][FAIL] OUT-OF-SCOPE (BLOCKED)[/]"
+    status_badge = "[bold green][OK] IN-SCOPE (APPROVED)[/]" if scope_valid else "[bold red][FAIL] OUT-OF-SCOPE (BLOCKED)[/]"
     token_display = f"[bold yellow]{token}[/]" if token != "N/A" else "[red]NONE[/]"
 
     console.print(Panel(
-        f"  [bold white]Module:[/bold white]              [cyan]{module_id}[/cyan]\n"
-        f"  [bold white]Target:[/bold white]              [white]{target}[/white]\n"
-        f"  [bold white]ScopeGuard Status:[/bold white]   {status_badge}\n"
-        f"  [bold white]OPSEC Noise Level:[/bold white]   [yellow]{opsec.upper()}[/yellow]\n"
-        f"  [bold white]Confirmation Token:[/bold white]  {token_display} [dim](Valid for 60s)[/]\n"
-        f"  [bold white]Dry-Run Result:[/bold white]      [green]{data.get('status', 'SUCCESS')}[/green]\n\n"
-        f"[dim]Use this confirmation_token with `ares_execute_module` to authorize live execution.[/]",
+        f"  [bold white]Module:[/bold white]            [cyan]{module_id}[/cyan]\n"
+        f"  [bold white]Target:[/bold white]            [white]{target}[/white]\n"
+        f"  [bold white]ScopeGuard:[/]          {status_badge}\n"
+        f"  [bold white]OPSEC Noise:[/]         [yellow]{opsec.upper()}[/yellow]\n"
+        f"  [bold white]Confirmation Token:[/]  {token_display} [dim](Valid for 60s)[/]\n"
+        f"  [bold white]Dry-Run Status:[/]      [green]{data.get('status', 'SUCCESS')}[/green]\n\n"
+        f"[dim]Use this confirmation_token with live execution tools to authorize the operation.[/]",
         title="[bold green]Pre-Flight Verification Card[/]",
         border_style="green",
         box=box.ASCII,
     ))
 
-    Prompt.ask("\n[dim]Press Enter to continue...[/]")
+    Prompt.ask("\n[dim]Press Enter to return to menu...[/]")
 
 
 def run_interactive_tool() -> None:
@@ -304,45 +303,49 @@ def run_interactive_tool() -> None:
 
     tool_lines = []
     for i, t in enumerate(tools):
-        tool_lines.append(f"  [bold cyan][{i+1}][/] [bold white]{t.name}[/bold white] - [dim]{t.description[:65]}...[/dim]")
+        tool_lines.append(f"  [bold cyan][{i+1}][/] [bold white]{t.name}[/bold white] [dim]- {t.description[:65]}...[/dim]")
 
     console.print(Panel(
         "\n".join(tool_lines),
-        title="[bold cyan][OPS] Operational Tool Suite (9 Tools Available)[/]",
+        title="[bold cyan]Operational Tools (9 Registered)[/]",
         border_style="cyan",
         box=box.ASCII,
     ))
 
-    selection = Prompt.ask("[bold yellow]Select tool number to execute[/] [dim](or 0 to cancel)[/]", default="1")
+    selection = Prompt.ask("[bold yellow]Select tool number to execute[/] [dim](0 to cancel)[/]", default="1")
     if not selection.isdigit() or int(selection) < 1 or int(selection) > len(tools):
         return
 
     chosen_tool = tools[int(selection) - 1]
     console.print(f"\n[bold green]Executing:[/] [cyan]{chosen_tool.name}[/cyan]...")
 
+    req_fields = getattr(chosen_tool.inputSchema, "required", None) or []
+    if isinstance(chosen_tool.inputSchema, dict):
+        req_fields = chosen_tool.inputSchema.get("required", [])
+
     args: dict[str, Any] = {}
-    if "campaign_id" in chosen_tool.inputSchema.get("required", []):
+    if "campaign_id" in req_fields:
         args["campaign_id"] = Prompt.ask("  Enter [cyan]campaign_id[/]", default="lab-engagement-01")
-    if "target" in chosen_tool.inputSchema.get("required", []):
+    if "target" in req_fields:
         args["target"] = Prompt.ask("  Enter [cyan]target IP/domain[/]", default="10.0.0.5")
-    if "module_id" in chosen_tool.inputSchema.get("required", []):
+    if "module_id" in req_fields:
         args["module_id"] = Prompt.ask("  Enter [cyan]module_id[/]", default="ad.kerberoast")
-    if "finding_id" in chosen_tool.inputSchema.get("required", []):
+    if "finding_id" in req_fields:
         args["finding_id"] = Prompt.ask("  Enter [cyan]finding_id[/]", default="f-demo-01")
-    if "confirmation_token" in chosen_tool.inputSchema.get("required", []):
+    if "confirmation_token" in req_fields:
         args["confirmation_token"] = Prompt.ask("  Enter [cyan]confirmation_token[/]", default="")
 
-    result = asyncio.run(server.tool_registry.execute_tool(chosen_tool.name, args))
+    result = asyncio.run(server.tool_registry.call_tool(chosen_tool.name, args))
     raw_text = result.content[0].text if result.content else "{}"
 
     try:
         formatted = json.dumps(json.loads(raw_text), indent=2)
         syntax = Syntax(formatted, "json", theme="monokai", line_numbers=True)
-        console.print(Panel(syntax, title=f"[bold green]Execution Result - {chosen_tool.name}[/]", border_style="green", box=box.ASCII))
+        console.print(Panel(syntax, title=f"[bold green]Result - {chosen_tool.name}[/]", border_style="green", box=box.ASCII))
     except Exception:
-        console.print(Panel(raw_text, title=f"[bold green]Execution Result - {chosen_tool.name}[/]", border_style="green", box=box.ASCII))
+        console.print(Panel(raw_text, title=f"[bold green]Result - {chosen_tool.name}[/]", border_style="green", box=box.ASCII))
 
-    Prompt.ask("\n[dim]Press Enter to continue...[/]")
+    Prompt.ask("\n[dim]Press Enter to return to menu...[/]")
 
 
 def run_system_doctor() -> None:
@@ -353,30 +356,31 @@ def run_system_doctor() -> None:
     resources = server.resource_registry.list_resources()
     prompts = server.prompt_registry.list_prompts()
 
-    table = Table(title="ARES Sovereign MCP Subsystem Diagnostics", box=box.ASCII)
+    table = Table(title="ARES MCP Subsystem Readiness Check", box=box.ASCII)
     table.add_column("Subsystem", style="bold cyan")
     table.add_column("Status", style="bold green", justify="center")
-    table.add_column("Specification")
+    table.add_column("Details")
 
-    table.add_row("Protocol Engine", "[*] PASS", "JSON-RPC 2.0 (MCP 2024-11-05 Specification)")
-    table.add_row("Operational Tools", "[*] PASS", f"{len(tools)} tools registered (Tier-1 & Tier-2)")
-    table.add_row("Context Resources", "[*] PASS", f"{len(resources)} live URI streams active")
-    table.add_row("Purple-Team Prompts", "[*] PASS", f"{len(prompts)} workflow templates indexed")
-    table.add_row("Descriptor Catalog", "[*] PASS", f"{len(FIRST_PARTY_DESCRIPTORS)} offensive modules ready")
-    table.add_row("Security Gates", "[*] PASS", "ScopeGuard + TokenManager + TaintSanitizer + AD Lockout Breaker")
+    table.add_row("Protocol Engine", "PASS", "JSON-RPC 2.0 (MCP 2024-11-05)")
+    table.add_row("Operational Tools", "PASS", f"{len(tools)} tools registered (Tier-1 & Tier-2)")
+    table.add_row("Context Resources", "PASS", f"{len(resources)} URI streams registered")
+    table.add_row("Workflow Prompts", "PASS", f"{len(prompts)} templates indexed")
+    table.add_row("Module Catalog", "PASS", f"{len(FIRST_PARTY_DESCRIPTORS)} modules indexed")
+    table.add_row("Security Gates", "PASS", "ScopeGuard + TokenManager + TaintSanitizer + AD Lockout Breaker")
 
     console.print(table)
-    Prompt.ask("\n[dim]Press Enter to continue...[/]")
+    Prompt.ask("\n[dim]Press Enter to return to menu...[/]")
 
 
 def start_sse_server() -> None:
     """Start SSE HTTP server."""
     render_header()
     console.print(Panel(
-        "[bold white]ARES Sovereign MCP Server (HTTP / SSE Mode)[/]\n\n"
-        "  [cyan]Default Endpoint:[/cyan] http://127.0.0.1:8001/sse\n"
-        "  [cyan]Press Ctrl+C[/cyan] to stop the server and return to this console anytime.",
-        title="[bold green][NET] SSE HTTP Gateway[/]",
+        "[bold white]ARES MCP HTTP Gateway (SSE Mode)[/]\n\n"
+        "  [cyan]Endpoint:[/cyan]   http://127.0.0.1:8001/sse\n"
+        "  [cyan]Clients:[/cyan]    Open-WebUI, LibreChat, Remote Agents, Docker\n\n"
+        "Press [bold yellow]Ctrl+C[/bold yellow] anytime to stop the server and return to this console.",
+        title="[bold green]SSE HTTP Gateway[/]",
         border_style="green",
         box=box.ASCII,
     ))
@@ -390,32 +394,32 @@ def start_sse_server() -> None:
     try:
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
     except KeyboardInterrupt:
-        console.print("\n[yellow]Server stopped. Returning to console...[/]")
+        console.print("\n[yellow]Gateway stopped. Returning to console...[/]")
 
 
 def interactive_console_loop() -> None:
-    """Main OpenClaw/OpenCode-style interactive TUI loop."""
+    """Main OpenCode/OpenClaw-style interactive TUI loop."""
     workspace_root = Path.cwd()
 
     while True:
         render_header()
         console.print(Panel(
-            "  [bold green][1][/] [bold white][!] 1-Click Auto-Setup for Cursor / Claude / Windsurf[/] [dim](Zero copy-paste)[/]\n"
-            "  [bold cyan][2][/] [bold white][SEC] Module Catalog Explorer[/] [dim](Search 62+ modules & OPSEC noise)[/]\n"
-            "  [bold yellow][3][/] [bold white][TGT] Target ScopeGuard & Dry-Run Simulator[/] [dim](Issue 60s Token)[/]\n"
-            "  [bold magenta][4][/] [bold white][OPS] Interactive MCP Tool Runner[/] [dim](Execute any of the 9 tools)[/]\n"
-            "  [bold blue][5][/] [bold white][DOC] System Doctor Diagnostics[/] [dim](Verify all subsystems)[/]\n"
-            "  [bold green][6][/] [bold white][NET] Launch SSE HTTP Server[/] [dim](Port 8001 Webhook / SSE)[/]\n"
-            "  [bold red][0][/] [bold white][X] Exit Console[/]",
-            title="[bold white]ARES SOVEREIGN AGENT CONSOLE - MAIN MENU[/]",
+            "  [bold green][1][/] [bold white]1-Click Client Setup[/]       [dim]Auto-configure Cursor, Claude, or Windsurf[/dim]\n"
+            "  [bold cyan][2][/] [bold white]Module Catalog[/]             [dim]Browse 62 attack modules & OPSEC noise ratings[/dim]\n"
+            "  [bold yellow][3][/] [bold white]Scope & Dry-Run Simulator[/]  [dim]Validate target CIDR and issue 60s token[/dim]\n"
+            "  [bold magenta][4][/] [bold white]Run MCP Tool[/]               [dim]Execute operational tools with rich card output[/dim]\n"
+            "  [bold blue][5][/] [bold white]System Diagnostics (Doctor)[/] [dim]Verify subsystem readiness matrix[/dim]\n"
+            "  [bold green][6][/] [bold white]HTTP / SSE Gateway[/]         [dim]Start local network server (Port 8001)[/dim]\n"
+            "  [bold red][0][/] [bold white]Exit[/]",
+            title="[bold white]ARES MCP - CONSOLE[/]",
             border_style="cyan",
             box=box.ASCII,
         ))
 
-        choice = Prompt.ask("[bold yellow]Select an option[/]", choices=["1", "2", "3", "4", "5", "6", "0"], default="1")
+        choice = Prompt.ask("[bold yellow]Select option[/]", choices=["1", "2", "3", "4", "5", "6", "0"], default="1")
 
         if choice == "0":
-            console.print("\n[bold cyan]Shutting down ARES Sovereign Console. Farewell, Operator.[/]")
+            console.print("\n[bold cyan]ARES MCP Console closed.[/]")
             break
         elif choice == "1":
             auto_setup_client(workspace_root)

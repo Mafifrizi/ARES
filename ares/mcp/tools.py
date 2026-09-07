@@ -414,18 +414,20 @@ class McpToolRegistry:
 
         results = []
         for mod_id, desc in FIRST_PARTY_DESCRIPTORS.items():
-            if category_filter and desc.category.value != category_filter:
+            category_val = desc.category.value if hasattr(desc.category, "value") else str(desc.category)
+            if category_filter and category_val.lower() != category_filter.lower():
                 continue
-            if query_filter and query_filter not in mod_id.lower() and query_filter not in desc.description.lower():
+            if query_filter and query_filter not in mod_id.lower() and query_filter not in str(desc.source_class).lower() and query_filter not in category_val.lower():
                 continue
 
             results.append({
                 "module_id": mod_id,
-                "category": desc.category.value,
-                "opsec_level": desc.opsec.value,
-                "description": desc.description,
-                "required_capabilities": [c.value for c in desc.required_capabilities],
-                "parameters_count": len(desc.parameters),
+                "category": category_val,
+                "opsec_level": desc.opsec.value if hasattr(desc.opsec, "value") else str(desc.opsec),
+                "source_class": desc.source_class,
+                "required_capabilities": [c.value if hasattr(c, "value") else str(c) for c in desc.required_capabilities],
+                "parameters_count": len(desc.parameter_fields),
+                "requires_approval": desc.explicit_attempt_approval,
             })
 
         return CallToolResult(

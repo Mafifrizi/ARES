@@ -260,7 +260,7 @@ signing_app  = typer.Typer(help="Module signing and verification", no_args_is_he
 goal_app     = typer.Typer(help="Goal-based autonomous attack planning", no_args_is_help=True)
 graph_app    = typer.Typer(help="Attack graph queries and visualization", no_args_is_help=True)
 dashboard_app = typer.Typer(help="Local dashboard developer tools", no_args_is_help=True)
-mcp_app       = typer.Typer(help="Sovereign Model Context Protocol (MCP) AI Gateway", no_args_is_help=True)
+mcp_app       = typer.Typer(help="ARES MCP — Model Context Protocol Gateway", no_args_is_help=False, invoke_without_command=True)
 
 app.add_typer(campaign_app, name="campaign")
 app.add_typer(target_app,   name="target")
@@ -2720,9 +2720,17 @@ async def test_missing_target_raises(module):
 
 # ── MCP CLI Commands ─────────────────────────────────────────────────────────
 
+@mcp_app.callback(invoke_without_command=True)
+def mcp_default_callback(ctx: typer.Context) -> None:
+    """ARES MCP Gateway. Launches interactive console when called without subcommands."""
+    if ctx.invoked_subcommand is None:
+        from ares.cli.console import interactive_console_loop
+        interactive_console_loop()
+
+
 @mcp_app.command("console")
 def mcp_console_cmd() -> None:
-    """Launch the ARES Sovereign Agent Interactive TUI Console (OpenClaw/OpenCode style)."""
+    """Launch the ARES MCP Interactive Console (OpenCode/OpenClaw style)."""
     from ares.cli.console import interactive_console_loop
     interactive_console_loop()
 
