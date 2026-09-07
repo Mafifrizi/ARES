@@ -1,4 +1,4 @@
-"""ARES Example Module (Enterprise Security & Governance SDK Standard).
+"""ARES Example Module (Next-Gen Autonomous Architecture & Sovereign Security).
 
 Demonstrates:
 - Declarative @module_contract with Capability-Based Permissions (NetworkPermission, VaultPermission)

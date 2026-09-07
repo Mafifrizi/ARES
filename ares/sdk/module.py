@@ -1,4 +1,4 @@
-"""Modern ARES Module Authoring Contracts (v2 Standard).
+"""Next-Gen ARES Module Authoring Contracts (v2 Sovereign Tier).
 
 Provides:
 - BaseModule[P, R]: Type-safe generic base class for class-based modules.

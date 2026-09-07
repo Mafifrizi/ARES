@@ -404,7 +404,7 @@ ARES enforces strict RBAC permissions across all API endpoints and UI controls:
 
 ---
 
-## 🛠️ Extensible Developer SDK (v2 Modern Standard)
+## 🛠️ Extensible Developer SDK (Next-Gen Autonomous Architecture)
 
 ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
 
@@ -479,7 +479,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
-- [**Modern Module SDK Specification (v2)**](docs/module_sdk.md)
+- [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
 - [**Step-by-Step Module Development Guide**](docs/module-development.md)
 - [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
 - [**Adversary Module Catalog & Schemas**](docs/modules.md)

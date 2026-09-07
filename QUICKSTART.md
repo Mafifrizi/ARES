@@ -393,7 +393,7 @@ export OPENAI_API_KEY="..."
 Use Strategy only after a campaign exists, scope is correct, authorization
 notes are clear, and the selected LLM backend is configured.
 
-### Public SDK (v2 Modern Standard)
+### Public SDK (Next-Gen Autonomous Architecture)
 
 Use the modern, type-safe SDK import path for custom modules, unit testing, and automation:
 

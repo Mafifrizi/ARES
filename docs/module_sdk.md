@@ -1,6 +1,6 @@
 # ARES Module & Developer SDK
 
-**Version:** 2.0.0 (Modern Type-Safe Standard) | **Backward Compatible with v1.0.0**
+**Version:** 2.0.0 (Next-Gen Sovereign Architecture) | **Backward Compatible with v1.0.0**
 
 > Complete guide for ARES module authors and automation engineers.
 > Everything needed to build type-safe modules, simulate attacks in isolation, and automate ARES via Python.
@@ -16,7 +16,7 @@
 
 ---
 
-## Modern Quick Start (v2 Standard)
+## Quick Start (Next-Gen Architecture)
 
 ```python
 # my_module.py

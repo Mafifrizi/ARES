@@ -1,4 +1,4 @@
-"""Public ARES SDK import surface (v2 Modern Standard).
+"""Public ARES SDK import surface (Next-Gen Autonomous Architecture).
 
 Provides everything needed for module authoring, testing, and programmatic automation:
 

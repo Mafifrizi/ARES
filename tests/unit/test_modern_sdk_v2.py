@@ -1,4 +1,4 @@
-"""Unit tests for ARES SDK v2 Modern Standard.
+"""Unit tests for ARES SDK v2 Next-Gen Autonomous Architecture.
 
 Tests:
 1. Pydantic v2 parameter models (ModuleParams, param, SecretParam, validate_params).

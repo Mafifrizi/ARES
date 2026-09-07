@@ -43,7 +43,7 @@ or that current outcomes and retries are authoritative.
 
 ---
 
-## Quick Start (v2 Modern Standard)
+## Quick Start (Next-Gen Architecture)
 
 The modern ARES SDK (`ares.sdk`) introduces type-safe parameter schemas with Pydantic v2, generic `BaseModule[P, R]`, fluent execution helpers, and isolated simulation testing.
 
@@ -344,7 +344,7 @@ The `ExecutionContext` object represents the execution runtime environment for a
 ctx.params               # P (when ExecutionContext[P] is used) or dict
 ctx.typed_params(Model)  # Parses and returns an instance of Model
 
-# Fluent Helpers (v2 Standard)
+# Fluent Helpers (Next-Gen Architecture)
 ctx.emit_finding(title, severity, ...)      # Appends to ctx.findings and returns Finding
 ctx.store_artifact(key, value)              # Stores to ctx.artifacts
 ctx.record_credential(username, secret, ..) # Stores to vault and tracks new credential
@@ -431,7 +431,7 @@ async def test_mssql_enum_finding_emission():
     assert "MSSQL instance" in finding.title
 ```
 
-### 2. Legacy `ExecutionContext.for_test()` (v1 Standard)
+### 2. Legacy `ExecutionContext.for_test()` (v1 Legacy Interface)
 
 Legacy test cases using direct `ExecutionContext.for_test()` continue to function seamlessly:
 
