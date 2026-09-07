@@ -17,6 +17,8 @@ Unlike basic MCP servers that blindly expose raw endpoints or CLI execution to L
 - It monitors execution with an Active Directory Lockout Circuit Breaker to prevent client downtime.
 - It broadcasts all tool activity in real-time to the ARES Web Dashboard via WebSocket.
 
+![ARES Sovereign MCP Server — Universal AI Gateway](assets/screenshots/mcp-server-gateway.png)
+
 ---
 
 ## 2. 🛡️ The 7 Unbreakable Security Guarantees
