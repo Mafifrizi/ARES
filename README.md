@@ -406,27 +406,62 @@ ARES enforces strict RBAC permissions across all API endpoints and UI controls:
 
 ## 🔌 ARES MCP Gateway & Product-Grade CLI
 
-ARES includes a production-grade Model Context Protocol (MCP) Gateway that enables AI development environments (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline, Zed, Open-WebUI, LibreChat) to interact with the ARES purple-team offensive platform under strict governance.
+ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that enables modern AI coding assistants (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline, Zed, Open-WebUI, LibreChat) to interact with the ARES purple-team offensive platform safely and under strict governance.
 
-### Quick Start (Windows & Linux)
+<div align="center">
 
-Launch the interactive OpenCode/OpenClaw-style console:
-```cmd
-mcp.bat
-```
-Or use the scriptable CLI directly:
-```bash
-# Verify health and security readiness
-python -m ares.cli.main mcp doctor --json
+![ARES MCP Interactive Console](docs/assets/screenshots/mcp-console.png)
 
-# Pre-flight check and obtain execution confirmation token
-python -m ares.cli.main mcp dry-run --target 10.0.0.5 --module ad.kerberoast
+*ARES MCP Interactive Terminal Console (OpenCode/OpenClaw style) with ScopeGuard protection and 1-click AI IDE setup.*
 
-# 1-Click IDE Setup (Cursor, Claude, Windsurf, Cline)
-python -m ares.cli.main mcp setup --client cursor
-```
+</div>
 
-See [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md) for full protocol guarantees, exit codes, and pipeline automation guides.
+Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, ARES enforces strict **Pre-Flight Scope Invariance (`ScopeGuard`)**, **Anti-Prompt-Injection Taint Isolation**, and **Single-Use 60-second HMAC Confirmation Tokens** before any live offensive action can execute.
+
+### 🚀 Mulai Dari Mana Dulu? (5 Langkah Cepat)
+
+Bagi operator atau developer baru yang ingin menghubungkan Cursor atau Claude Desktop ke ARES:
+
+1. **Buka Terminal di Folder ARES**:
+   Luncurkan konsol interaktif ARES MCP:
+   ```powershell
+   .\mcp.bat
+   ```
+   *(Tips: Di Windows PowerShell, wajib gunakan prefix `.\` atau gunakan script native `.\mcp`)*.
+
+2. **Periksa Kesiapan Subsistem (Doctor Check)**:
+   Pastikan seluruh 6 subsistem (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modul, Security Gates) berstatus `PASS`:
+   ```powershell
+   .\mcp.bat doctor
+   ```
+
+3. **1-Click Setup AI Client (Tanpa Edit JSON Manual)**:
+   Konfigurasi IDE kamu secara otomatis hanya dengan satu perintah:
+   ```powershell
+   # Untuk Cursor IDE:
+   .\mcp.bat setup --client cursor
+
+   # Untuk Claude Desktop:
+   .\mcp.bat setup --client claude
+
+   # Untuk Windsurf:
+   .\mcp.bat setup --client windsurf
+
+   # Untuk VS Code (Cline):
+   .\mcp.bat setup --client cline
+   ```
+   Perintah ini langsung menulis path virtual environment Python kamu ke file konfigurasi yang tepat (misal: `.cursor/mcp.json`).
+
+4. **Reload Window di Cursor IDE**:
+   - Buka Cursor IDE, tekan `Ctrl + Shift + P`.
+   - Pilih **`Developer: Reload Window`**.
+   - Buka **Settings** (`Ctrl + ,`) &rarr; **Features** &rarr; **MCP Servers**. Server **`ares`** akan aktif dengan status lingkaran hijau (`Connected`).
+
+5. **Beri Perintah Pertama ke AI Agent**:
+   Buka Cursor Composer / Chat (`Ctrl + I` atau `Ctrl + L`), dan coba prompt berikut:
+   > *"Periksa status campaign aktif dan daftar temuan kerentanan (findings) menggunakan tools ARES MCP."*
+
+Untuk dokumentasi lengkap tentang 7 garansi keamanan, CLI scriptable `--json`, exit codes POSIX, dan referensi 9 tools operasional, baca [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
 
 ---
 

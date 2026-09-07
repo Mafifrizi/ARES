@@ -414,6 +414,27 @@ See:
 - [`docs/module-development.md`](docs/module-development.md) (Step-by-step authoring guide)
 - [`example_modules/example_modern_v2_module.py`](example_modules/example_modern_v2_module.py) (Reference implementation)
 
+### Connecting AI Assistants (ARES MCP Gateway)
+
+To connect AI coding environments (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline) directly to ARES under strict ScopeGuard governance:
+
+1. **Launch ARES MCP Console**:
+   ```powershell
+   .\mcp.bat
+   ```
+   *(Or native PowerShell: `.\mcp`)*
+
+2. **1-Click AI Client Setup**:
+   ```powershell
+   .\mcp.bat setup --client cursor
+   ```
+
+3. **Reload & Verify**:
+   - In Cursor, run `Ctrl + Shift + P` &rarr; `Developer: Reload Window`.
+   - Check **Settings** &rarr; **Features** &rarr; **MCP Servers** (`ares` should be connected).
+
+See [**ARES MCP Gateway Specification**](docs/mcp-server.md) for full architecture and tool guides.
+
 ### Validation lab
 
 Run the validation lab after changing API or dashboard behavior:
