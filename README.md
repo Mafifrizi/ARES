@@ -418,50 +418,50 @@ ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that e
 
 Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, ARES enforces strict **Pre-Flight Scope Invariance (`ScopeGuard`)**, **Anti-Prompt-Injection Taint Isolation**, and **Single-Use 60-second HMAC Confirmation Tokens** before any live offensive action can execute.
 
-### 🚀 Mulai Dari Mana Dulu? (5 Langkah Cepat)
+### 🚀 Where Do I Start First? (5 Quick Steps)
 
-Bagi operator atau developer baru yang ingin menghubungkan Cursor atau Claude Desktop ke ARES:
+For operators or developers connecting Cursor, Claude Desktop, or Windsurf to ARES:
 
-1. **Buka Terminal di Folder ARES**:
-   Luncurkan konsol interaktif ARES MCP:
+1. **Open a Terminal in the ARES Repository**:
+   Launch the interactive ARES MCP console:
    ```powershell
    .\mcp.bat
    ```
-   *(Tips: Di Windows PowerShell, wajib gunakan prefix `.\` atau gunakan script native `.\mcp`)*.
+   *(Note: In Windows PowerShell, prefix with `.\` or use the native script `.\mcp`)*.
 
-2. **Periksa Kesiapan Subsistem (Doctor Check)**:
-   Pastikan seluruh 6 subsistem (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modul, Security Gates) berstatus `PASS`:
+2. **Verify Subsystem Readiness (`doctor`)**:
+   Ensure all 6 core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modules, Security Gates) report `PASS`:
    ```powershell
    .\mcp.bat doctor
    ```
 
-3. **1-Click Setup AI Client (Tanpa Edit JSON Manual)**:
-   Konfigurasi IDE kamu secara otomatis hanya dengan satu perintah:
+3. **1-Click AI Client Setup (No Manual JSON Editing)**:
+   Automatically configure your preferred IDE with a single command:
    ```powershell
-   # Untuk Cursor IDE:
+   # For Cursor IDE:
    .\mcp.bat setup --client cursor
 
-   # Untuk Claude Desktop:
+   # For Claude Desktop:
    .\mcp.bat setup --client claude
 
-   # Untuk Windsurf:
+   # For Windsurf:
    .\mcp.bat setup --client windsurf
 
-   # Untuk VS Code (Cline):
+   # For VS Code (Cline):
    .\mcp.bat setup --client cline
    ```
-   Perintah ini langsung menulis path virtual environment Python kamu ke file konfigurasi yang tepat (misal: `.cursor/mcp.json`).
+   This writes your active Python virtual environment path directly into the client config file (e.g. `.cursor/mcp.json`).
 
-4. **Reload Window di Cursor IDE**:
-   - Buka Cursor IDE, tekan `Ctrl + Shift + P`.
-   - Pilih **`Developer: Reload Window`**.
-   - Buka **Settings** (`Ctrl + ,`) &rarr; **Features** &rarr; **MCP Servers**. Server **`ares`** akan aktif dengan status lingkaran hijau (`Connected`).
+4. **Reload Window in Cursor IDE**:
+   - In Cursor, press `Ctrl + Shift + P`.
+   - Select **`Developer: Reload Window`**.
+   - Open **Settings** (`Ctrl + ,`) &rarr; **Features** &rarr; **MCP Servers**. The **`ares`** server will show a green dot (`Connected`).
 
-5. **Beri Perintah Pertama ke AI Agent**:
-   Buka Cursor Composer / Chat (`Ctrl + I` atau `Ctrl + L`), dan coba prompt berikut:
-   > *"Periksa status campaign aktif dan daftar temuan kerentanan (findings) menggunakan tools ARES MCP."*
+5. **Issue Your First Command to the AI Agent**:
+   Open Cursor Composer / Chat (`Ctrl + I` or `Ctrl + L`), and try this prompt:
+   > *"Check active campaign status and list recent vulnerability findings using the ARES MCP tools."*
 
-Untuk dokumentasi lengkap tentang 7 garansi keamanan, CLI scriptable `--json`, exit codes POSIX, dan referensi 9 tools operasional, baca [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
+For in-depth architecture, the 7 security invariants, CLI scriptability (`--json`), POSIX exit codes, and operational tool schemas, see [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
 
 ---
 

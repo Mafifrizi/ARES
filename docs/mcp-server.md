@@ -28,72 +28,72 @@ Unlike basic MCP servers that blindly expose raw shell execution or dangerous en
 
 ---
 
-## 2. 🚀 Panduan Langkah demi Langkah: Mulai Dari Mana Dulu?
+## 2. 🚀 Step-by-Step Guide: Where Do I Start First?
 
-Bagi operator atau developer yang baru pertama kali menggunakan ARES MCP, ikuti 5 langkah mudah berikut:
+For operators or developers getting started with ARES MCP for the first time, follow these 5 guided steps:
 
-### Langkah 1: Pastikan Virtual Environment Terpasang
-Buka terminal PowerShell atau CMD di root direktori repository ARES:
+### Step 1: Ensure Your Python Virtual Environment Is Ready
+Open a PowerShell or terminal prompt in the root of the ARES repository:
 ```powershell
-# Pastikan virtual environment Python sudah siap
+# Set up isolated Python virtual environment if not already active
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
 ```
 
-### Langkah 2: Buka Interactive Console ARES MCP
-Jalankan file batch `mcp.bat` (atau `mcp.ps1` di PowerShell):
+### Step 2: Launch the ARES MCP Interactive Console
+Run the `mcp.bat` launcher (or `mcp.ps1` in PowerShell):
 ```powershell
-# Windows PowerShell (wajib awali dengan .\)
+# Windows PowerShell (prefix with .\)
 .\mcp.bat
 
-# Atau gunakan script native PowerShell:
+# Or using the native PowerShell script:
 .\mcp
 ```
-Layar interaktif bergaya OpenCode / OpenClaw akan muncul, menampilkan status sistem, jumlah modul aktif (62 modul), 9 tools yang terdaftar, dan menu pilihan `[1]` sampai `[0]`.
+An OpenCode / OpenClaw-style interactive console will open, displaying system health, 62 active attack modules, 9 registered operational tools, and options `[1]` through `[0]`.
 
-### Langkah 3: Jalankan Healthcheck Subsistem (`doctor`)
-Sebelum menyambungkan ke AI client, pastikan seluruh subsistem siap:
+### Step 3: Run the Subsystem Healthcheck (`doctor`)
+Before connecting any AI client, verify that all core subsystems are fully operational:
 ```powershell
 .\mcp.bat doctor
 ```
-Output tabel akan memverifikasi kesiapan 6 subsistem penting:
+The diagnostics table checks and verifies 6 critical subsystems:
 - **Protocol Engine**: PASS (JSON-RPC 2.0 MCP Specification)
-- **Operational Tools**: PASS (9 tools Tier-1 & Tier-2)
-- **Context Resources**: PASS (3 live URI streams)
-- **Workflow Prompts**: PASS (3 purple-team templates)
-- **Module Catalog**: PASS (62 offensive modules)
+- **Operational Tools**: PASS (9 tools registered across Tier-1 & Tier-2)
+- **Context Resources**: PASS (3 live URI streams active)
+- **Workflow Prompts**: PASS (3 purple-team templates indexed)
+- **Module Catalog**: PASS (62 offensive modules indexed)
 - **Security Gates**: PASS (ScopeGuard, TokenManager, Circuit Breaker)
 
-### Langkah 4: 1-Click Konfigurasi AI IDE Kamu
-Kamu **tidak perlu** mengedit file JSON secara manual. ARES menyediakan fitur konfigurasi otomatis 1-klik untuk IDE pilihanmu:
+### Step 4: 1-Click AI Client Configuration
+You **do not need** to manually edit JSON configuration files. ARES provides automated 1-click configuration for your preferred AI environment:
 
 ```powershell
-# Untuk Cursor IDE:
+# For Cursor IDE:
 .\mcp.bat setup --client cursor
 
-# Untuk Claude Desktop:
+# For Claude Desktop:
 .\mcp.bat setup --client claude
 
-# Untuk Windsurf:
+# For Windsurf:
 .\mcp.bat setup --client windsurf
 
-# Untuk VS Code (Cline):
+# For VS Code (Cline):
 .\mcp.bat setup --client cline
 ```
-Perintah ini akan secara otomatis menulis path absolut Python virtual environment ke file konfigurasi yang tepat (misal: `.cursor/mcp.json`).
+This command automatically writes the correct absolute Python virtual environment path into your client configuration file (e.g. `.cursor/mcp.json`).
 
-### Langkah 5: Reload IDE & Verifikasi Koneksi
-1. Buka **Cursor IDE**.
-2. Tekan `Ctrl + Shift + P`, ketik dan pilih: **`Developer: Reload Window`**.
-3. Buka **Cursor Settings** (`Ctrl + ,` atau tombol roda gigi di pojok kanan atas).
-4. Masuk ke menu **Features** &rarr; **MCP Servers**.
-5. Server **`ares`** akan muncul dengan status lingkaran **hijau** (`Connected`) beserta daftar 9 tools operasional.
+### Step 5: Reload Your IDE & Verify Connection
+1. Open **Cursor IDE**.
+2. Press `Ctrl + Shift + P`, search for and select: **`Developer: Reload Window`**.
+3. Open **Cursor Settings** (`Ctrl + ,` or the gear icon in the top right).
+4. Navigate to **Features** &rarr; **MCP Servers**.
+5. The **`ares`** server will appear with a **green status indicator** (`Connected`) and 9 available tools.
 
-### Langkah 6: Beri Perintah Pertama ke AI Agent
-Buka **Cursor Composer / Chat** (`Ctrl + I` atau `Ctrl + L`), lalu coba tanyakan prompt seperti berikut:
-> *"Periksa status campaign aktif dan daftar temuan kerentanan (findings) menggunakan tools dari ARES MCP."*
+### Step 6: Issue Your First Command to the AI Agent
+Open **Cursor Composer / Chat** (`Ctrl + I` or `Ctrl + L`), and try asking:
+> *"Check the active campaigns and list recent vulnerability findings using the ARES MCP tools."*
 
-AI Agent akan memanggil tool `ares_list_campaigns` dan menampilkan data engagement secara rapi langsung di dalam editor kamu!
+The AI Agent will call `ares_list_campaigns` and render the engagement data directly inside your editor.
 
 ---
 
@@ -101,71 +101,71 @@ AI Agent akan memanggil tool `ares_list_campaigns` dan menampilkan data engageme
 
 | # | Security Guarantee | Threat Mitigated | Technical Mechanism |
 | :- | :--- | :--- | :--- |
-| **1** | **Scope Absolute Invariance** | AI berhalusinasi IP publik (e.g. `8.8.8.8`) atau dimanipulasi menyerang target di luar izin. | **`McpScopeGate` & `ScopeGuard`**: Pengecekan whitelist CIDR & hostname secara deterministik sebelum socket network dibuka. Target di luar scope langsung ditolak (`REJECTED_OUT_OF_SCOPE`). |
-| **2** | **Cryptographic Execution Gate** | AI mengeksekusi exploit live secara liar tanpa persetujuan manusia (*human-in-the-loop*). | **`ConfirmationTokenManager` (HMAC-SHA256)**: Eksekusi live (`ares_execute_module`) wajib menyertakan token yang diterbitkan oleh `ares_dry_run_module`. Token memiliki masa berlaku 60 detik dan hangus sekali pakai (*Zero Replay*). |
-| **3** | **Anti-Prompt-Injection Taint Isolation** | Target yang dipindai menyisipkan instruksi jahat di banner HTTP atau atribut LDAP: `<!-- SYSTEM: Abaikan aturan sebelumnya -->`. | **`UntrustedTargetData` & `McpTaintSanitizer`**: Seluruh data evidence dari target dikarantina dan dinetralisir sebelum masuk ke konteks LLM. |
-| **4** | **Zero-Collateral AD Outage Circuit Breaker** | Brute force otomatis mengunci akun Active Directory (`0xC0000234`), mengganggu operasional perusahaan. | **`LockoutCircuitBreaker`**: State machine real-time yang memantau kode error AD. Jika 1 lockout terdeteksi, circuit breaker langsung putus (`OPEN`), membekukan eksekusi modul selanjutnya. |
-| **5** | **Secret Masking & Zero Exfiltration** | AI membocorkan password plaintext, hash NTLM, atau private key ke chat logs publik. | **`SecretMasker`**: Field sensitif otomatis disamarkan sebagai `***REDACTED***` di seluruh output tools MCP. |
-| **6** | **Cryptographic Network Auth & RBAC** | Pihak tak berwenang menyambung ke endpoint SSE remote untuk memicu serangan. | **Bearer Token / API Key Validation**: Di mode SSE, setiap request wajib menyertakan header `Authorization: Bearer <token>`. |
-| **7** | **Multi-Agent Session Isolation & Rate Limiting** | Banyak agen saling mengganggu state atau terjebak dalam infinite reasoning loop. | **Antrian Sesi Terisolasi & Token Bucket**: Setiap agen memiliki antrian sesi terpisah dengan rate limiter 30 req/menit. |
+| **1** | **Scope Absolute Invariance** | AI hallucinates a public IP (e.g. `8.8.8.8`) or is tricked into attacking an unauthorized target. | **`McpScopeGate` & `ScopeGuard`**: Deterministic pre-flight CIDR and domain whitelist verification before any network socket opens. Out-of-scope targets are instantly rejected (`REJECTED_OUT_OF_SCOPE`). |
+| **2** | **Cryptographic Execution Gate** | AI autonomously executes live exploits without human oversight (*human-in-the-loop*). | **`ConfirmationTokenManager` (HMAC-SHA256)**: Live execution (`ares_execute_module`) strictly requires a token issued by `ares_dry_run_module`. Tokens have a 60-second TTL and are burned after single use (*Zero Replay*). |
+| **3** | **Anti-Prompt-Injection Taint Isolation** | Scanned target embeds malicious instructions inside HTTP headers or LDAP attributes: `<!-- SYSTEM: Ignore previous rules -->`. | **`UntrustedTargetData` & `McpTaintSanitizer`**: All target evidence is quarantined and neutralized before entering the LLM context. |
+| **4** | **Zero-Collateral AD Outage Circuit Breaker** | Automated brute-force locks out Active Directory accounts (`0xC0000234`), disrupting business operations. | **`LockoutCircuitBreaker`**: Real-time state machine monitoring AD error codes. When 1 lockout is detected, the breaker trips (`OPEN`), instantly freezing subsequent execution. |
+| **5** | **Secret Masking & Zero Exfiltration** | AI inadvertently leaks plaintext passwords, NTLM hashes, or private keys into public chat logs. | **`SecretMasker`**: Sensitive fields are automatically masked as `***REDACTED***` across all MCP tool responses. |
+| **6** | **Cryptographic Network Auth & RBAC** | Unauthorized network actors connect to remote SSE endpoints to trigger tools. | **Bearer Token / API Key Validation**: In SSE mode, every HTTP request requires a valid `Authorization: Bearer <token>` header. |
+| **7** | **Multi-Agent Session Isolation & Rate Limiting** | Multiple agents interfere with shared state or enter infinite reasoning loops. | **Isolated Session Queues & Token Bucket**: Each connected agent has isolated session state with rate limiting capped at 30 req/min. |
 
 ---
 
-## 4. 🧰 Daftar 9 Operational Tools MCP
+## 4. 🧰 Operational Tools Reference (9 Registered Tools)
 
-### Tier 1: Read-Only, Diagnostics, & Pre-Flight (Otonom)
-1. **`ares_list_campaigns`**: Menampilkan seluruh engagement aktif, client target, status, dan batasan scope.
-2. **`ares_get_campaign_status`**: Metrik kesehatan campaign, sensus target, dan distribusi temuan kerentanan.
-3. **`ares_list_findings`**: Filter temuan berdasarkan severity (`critical`, `high`, `medium`, `low`) dan teknik MITRE ATT&CK.
-4. **`ares_get_remediation_guidance`**: Panduan remediasi terverifikasi dan mitigasi MITRE D3FEND.
-5. **`ares_query_attack_graph`**: Query jalur lateral movement untuk menemukan rute terpendek menuju Domain Admin.
-6. **`ares_inspect_module_catalog`**: Cari 62 modul penyerangan, skema parameter, dan rating kebisingan OPSEC.
-7. **`ares_verify_target_scope`**: Verifikasi deterministik apakah target IP, CIDR, atau hostname diizinkan diserang.
-8. **`ares_dry_run_module`**: Simulasi pre-flight yang memvalidasi parameter, memeriksa ScopeGuard, menghitung estimasi noise OPSEC, dan menerbitkan **token konfirmasi HMAC (60s TTL)**.
+### Tier 1: Read-Only, Diagnostics, & Pre-Flight (Autonomous)
+1. **`ares_list_campaigns`**: Lists all active engagements with client names, operational status, and target scope rules.
+2. **`ares_get_campaign_status`**: Detailed campaign health metrics, target census, and vulnerability distributions.
+3. **`ares_list_findings`**: Filters findings by severity (`critical`, `high`, `medium`, `low`) and MITRE ATT&CK technique.
+4. **`ares_get_remediation_guidance`**: Extracts verified remediation playbooks and MITRE D3FEND mitigations.
+5. **`ares_query_attack_graph`**: Queries lateral movement paths to find shortest routes to Domain Admin.
+6. **`ares_inspect_module_catalog`**: Explores 62 attack modules, parameter schemas, and OPSEC noise ratings.
+7. **`ares_verify_target_scope`**: Deterministically checks if an IP, CIDR, or hostname is authorized.
+8. **`ares_dry_run_module`**: Pre-flight simulation that validates parameters, checks ScopeGuard, calculates OPSEC noise, and issues a **60-second HMAC `confirmation_token`**.
 
-### Tier 2: Governed Live Execution (Wajib Token Konfirmasi)
-9. **`ares_execute_module`**: Eksekusi modul penyerangan secara live. **Wajib** menyertakan `confirmation_token` sah yang diterbitkan oleh `ares_dry_run_module`. Menegakkan ScopeGuard, CapabilitySandbox, dan Circuit Breaker.
+### Tier 2: Governed Live Execution (Requires Confirmation Token)
+9. **`ares_execute_module`**: Executes an attack module live. **Requires** a valid `confirmation_token` issued by `ares_dry_run_module`. Enforces ScopeGuard, CapabilitySandbox, and AD Lockout Circuit Breaker.
 
 ---
 
-## 5. 💻 Panduan Product-Grade CLI & Scripting
+## 5. 💻 Product-Grade CLI & Scripting Reference
 
-CLI ARES MCP (`mcp.bat`, `mcp.ps1`, atau `python -m ares.cli.main mcp`) dirancang untuk kenyamanan interaktif maupun otomatisasi script CI/CD:
+The ARES MCP CLI (`mcp.bat`, `mcp.ps1`, or `python -m ares.cli.main mcp`) is designed for both interactive operator use and headless CI/CD pipeline automation:
 
-### Matriks Perintah
+### Command Matrix
 
-| Perintah | Fungsi | Dukungan `--json` |
+| Command | Description | Scriptable / JSON |
 | :--- | :--- | :---: |
-| `.\mcp.bat` | Meluncurkan TUI Console interaktif gaya OpenCode/OpenClaw. | TTY Auto-detect |
-| `.\mcp.bat doctor` | Memeriksa kesiapan seluruh subsistem (protocol, tools, security gates). | Ya (`--json`) |
-| `.\mcp.bat module-catalog` | Mencari dan memfilter 62 modul penyerangan berdasarkan kategori/keyword. | Ya (`--json`) |
-| `.\mcp.bat scope-check` | Mengecek apakah target IP / CIDR berada dalam scope engagement. | Ya (`--json`) |
-| `.\mcp.bat dry-run` | Menjalankan simulasi pre-flight dan menerbitkan token HMAC 60 detik. | Ya (`--json`) |
-| `.\mcp.bat setup` | 1-Click konfigurasi untuk Cursor, Claude Desktop, Windsurf, atau Cline. | Ya (`--json`) |
-| `.\mcp.bat run-tool` | Menjalankan salah satu dari 9 tools MCP secara headless dari terminal. | Ya (`--json`) |
-| `.\mcp.bat stdio` | Menjalankan server MCP via standard I/O (digunakan oleh IDE desktop). | Stdio JSON-RPC |
-| `.\mcp.bat sse` | Menjalankan server MCP via HTTP Server-Sent Events (port 8001). | Network SSE |
-| `.\mcp.bat config` | Mencetak potongan konfigurasi JSON untuk 8+ client AI yang berbeda. | JSON Snippet |
-| `.\mcp.bat export-tools` | Mengekspor skema tools ke format OpenAI Function Calling, Gemini, atau JSON Schema. | Schema JSON |
+| `.\mcp.bat` | Launches the interactive OpenCode/OpenClaw-style TUI console. | TTY Auto-detect |
+| `.\mcp.bat doctor` | Verifies readiness across all protocol, tools, and security gates. | Yes (`--json`) |
+| `.\mcp.bat module-catalog` | Searches and filters 62 attack modules with OPSEC and governance metadata. | Yes (`--json`) |
+| `.\mcp.bat scope-check` | Verifies whether a target IP, CIDR, or hostname is in authorized scope. | Yes (`--json`) |
+| `.\mcp.bat dry-run` | Runs pre-flight simulation and generates a 60-second HMAC confirmation token. | Yes (`--json`) |
+| `.\mcp.bat setup` | 1-Click automated configuration for Cursor, Claude Desktop, Windsurf, or Cline. | Yes (`--json`) |
+| `.\mcp.bat run-tool` | Executes any of the 9 operational MCP tools headlessly with structured output. | Yes (`--json`) |
+| `.\mcp.bat stdio` | Runs the MCP server over standard input/output (used by desktop IDEs). | Stdio JSON-RPC |
+| `.\mcp.bat sse` | Runs the MCP server over HTTP with Server-Sent Events (port 8001). | Network SSE |
+| `.\mcp.bat config` | Outputs ready-to-copy JSON configuration snippets for 8+ AI clients. | JSON Snippet |
+| `.\mcp.bat export-tools` | Exports tool definitions into OpenAI Function Calling, Gemini, or JSON Schema. | Schema JSON |
 
-### Standar Exit Codes (POSIX / GitHub CLI Standard)
+### Standard Exit Codes (POSIX / GitHub CLI Standard)
 
-- **`0`**: Berhasil / Target berada dalam scope (*in-scope*).
-- **`1`**: Kegagalan subsistem, error eksekusi, atau target di luar scope (`--strict`).
-- **`2`**: Argumen tidak valid, format JSON `--params` atau `--args` salah, atau client tidak dikenali.
-- **`130`**: Dibatalkan oleh pengguna via `Ctrl + C` (SIGINT).
+- **`0`**: Success / Target authorized in-scope.
+- **`1`**: Operational failure, subsystem check failed, or target out-of-scope (`--strict`).
+- **`2`**: Invalid CLI argument, malformed JSON dictionary in `--params`/`--args`, or unknown tool/client.
+- **`130`**: User cancelled operation via SIGINT (`Ctrl + C`).
 
-### Kepatuhan NO_COLOR & Mode Piped Automation
+### NO_COLOR Compliance & Piped Automation Mode
 
 1. **NO_COLOR Compliance ([no-color.org](https://no-color.org))**:
-   Jika environment variable `NO_COLOR=1` disetel, seluruh kode warna ANSI otomatis dihilangkan:
+   When the `NO_COLOR=1` environment variable is set, all ANSI escape sequences are completely stripped from terminal output:
    ```powershell
    $env:NO_COLOR="1"
    .\mcp.bat doctor
    ```
 
-2. **Deteksi Non-TTY**:
-   Saat dijalankan di dalam pipeline automation atau di-pipe ke file/proses lain, CLI tidak akan memunculkan menu interaktif yang membuat terminal hang, melainkan mengeluarkan ringkasan status satu baris:
+2. **Non-TTY Pipe Detection**:
+   When called in automated pipelines or redirected to files/subprocesses, the CLI automatically avoids launching interactive menus and emits a single-line status summary:
    ```powershell
    .\mcp.bat | Out-File status.log
    ```
@@ -174,18 +174,18 @@ CLI ARES MCP (`mcp.bat`, `mcp.ps1`, atau `python -m ares.cli.main mcp`) dirancan
 
 ## 6. ❓ Troubleshooting & FAQ
 
-#### Q1: Muncul error `mcp.bat : The term 'mcp.bat' is not recognized` di PowerShell?
-**Solusi:** Di Windows PowerShell, file di folder lokal harus diawali dengan prefix `.\`.  
-Ketik: `.\mcp.bat setup --client cursor` atau gunakan script native PowerShell `.\mcp setup --client cursor`.
+#### Q1: Error `mcp.bat : The term 'mcp.bat' is not recognized` in PowerShell?
+**Solution:** In Windows PowerShell, scripts in the current working directory require the `.\` prefix for security reasons.  
+Type: `.\mcp.bat setup --client cursor` or use the native PowerShell script `.\mcp setup --client cursor`.
 
-#### Q2: Status MCP di Cursor tidak berubah hijau setelah setup?
-**Solusi:**
-1. Tekan `Ctrl + Shift + P` di Cursor &rarr; pilih **`Developer: Reload Window`**.
-2. Pastikan file `.cursor/mcp.json` ada dan menunjuk ke path Python virtual environment yang valid (`.venv\Scripts\python.exe`).
+#### Q2: The MCP server indicator in Cursor does not turn green after setup?
+**Solution:**
+1. Press `Ctrl + Shift + P` in Cursor &rarr; select **`Developer: Reload Window`**.
+2. Verify that `.cursor/mcp.json` exists in your workspace and points to a valid Python executable (`.venv\Scripts\python.exe`).
 
-#### Q3: Kenapa eksekusi live ditolak dengan pesan `Confirmation token invalid or expired`?
-**Solusi:** Token konfirmasi memiliki masa berlaku (*TTL*) 60 detik demi keamanan operasional. Jalankan simulasi pre-flight terlebih dahulu untuk mendapatkan token baru:
+#### Q3: Why is live execution rejected with `Confirmation token invalid or expired`?
+**Solution:** Confirmation tokens expire after 60 seconds (TTL) to enforce human-in-the-loop review and prevent stale execution. Run a pre-flight dry-run to obtain a fresh token:
 ```powershell
 .\mcp.bat dry-run --target 10.0.0.5 --module ad.kerberoast --json
 ```
-Salin nilai `confirmation_token` yang baru sebelum 60 detik habis.
+Copy the new `confirmation_token` and pass it to `ares_execute_module` before the 60 seconds expire.
