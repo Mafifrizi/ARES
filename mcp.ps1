@@ -9,12 +9,17 @@ if (-not $rootDir) {
     $rootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 }
 
-$venvPython = Join-Path $rootDir ".venv\Scripts\python.exe"
+$aresPs1 = Join-Path $rootDir "ares.ps1"
 
-if (Test-Path $venvPython) {
-    & $venvPython -m ares.cli.main mcp @ScriptArgs
+if (Test-Path $aresPs1) {
+    & $aresPs1 mcp @ScriptArgs
 } else {
-    python -m ares.cli.main mcp @ScriptArgs
+    $venvPython = Join-Path $rootDir ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        & $venvPython -m ares.cli.main mcp @ScriptArgs
+    } else {
+        python -m ares.cli.main mcp @ScriptArgs
+    }
 }
 
 exit $LASTEXITCODE

@@ -410,7 +410,7 @@ ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that e
 
 <div align="center">
 
-![ARES MCP Two-Pane Terminal Monitor](docs/assets/screenshots/mcp-console.png)
+![ARES MCP Two-Pane Terminal Monitor](docs/assets/screenshots/mcp-monitor.png)
 
 *ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style) with real-time tool telemetry, live scope inspection, and 1-key token authorization.*
 

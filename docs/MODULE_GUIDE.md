@@ -1,4 +1,4 @@
-# ARES Module Development Guide
+# ARES Module Quickstart & Scaffolding Guide
 
 **Version:** 1.0.0
 

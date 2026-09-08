@@ -8,7 +8,7 @@
 
 <div align="center">
 
-![ARES MCP Two-Pane Terminal Monitor](assets/screenshots/mcp-console.png)
+![ARES MCP Two-Pane Terminal Monitor](assets/screenshots/mcp-monitor.png)
 
 *ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style) with real-time tool telemetry, live scope inspection, and 1-key token authorization.*
 
@@ -140,6 +140,14 @@ The AI Agent will call `ares_scope_check` and `ares_dry_run_module`, streaming r
 ## 5. 💻 Product-Grade CLI & Scripting Reference
 
 The ARES MCP CLI (`mcp.bat`, `mcp.ps1`, or `python -m ares.cli.main mcp`) is designed for both interactive operator use and headless CI/CD pipeline automation:
+
+<div align="center">
+
+![ARES MCP Interactive Console](assets/screenshots/mcp-console.png)
+
+*ARES MCP Interactive Console (OpenCode / OpenClaw style) with 1-click AI client setup and tool execution.*
+
+</div>
 
 ### Command Matrix
 
