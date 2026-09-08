@@ -7,5 +7,4 @@ if exist ".venv\Scripts\python.exe" (
 ) else (
     python -m ares.cli.main %*
 )
-set EXIT_CODE=%ERRORLEVEL%
-endlocal & exit /b %EXIT_CODE%
+endlocal
