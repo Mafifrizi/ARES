@@ -38,13 +38,32 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import SCCMParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.ad.sccm")
 
 
-class SCCMModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[80, 443, 135, 445, 389, 636, 8530, 8531], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=SCCMParams,
+)
+class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
     """
     ad.sccm — SCCM/MECM enumeration and credential extraction
 
@@ -66,9 +85,9 @@ class SCCMModule(BaseModule):
     REQUIRES           = ["domain_creds"]
     OUTPUTS            = ["cleartext_credentials", "sccm_findings", "owned_hosts"]
     MITRE_TECHNIQUES   = ["T1078.002", "T1021.006"]
+    PARAMS_MODEL       = SCCMParams
 
     async def validate(self, ctx: "Any") -> None:
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -84,6 +103,11 @@ class SCCMModule(BaseModule):
                 "ad.sccm requires 'domain'.",
                 module_id=self.MODULE_ID, field="domain",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         from ares.modules.base import ModuleResult
@@ -97,6 +121,27 @@ class SCCMModule(BaseModule):
             sccm_server=ctx.params.get("sccm_server", ""),
             target=ctx.params.get("target", ""),
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"sccm-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=ad["dc"],
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "sccm", "enumeration"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

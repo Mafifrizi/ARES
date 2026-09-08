@@ -12,9 +12,21 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.kerberoast")
 from ares.core.campaign import Finding, Severity, NoiseProfile
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
 from ares.core.errors import AresError, ModuleValidationError
+from ares.modules.params import KerberoastParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 from ares.modules.ad.dependencies import (
     ad_bind_dry_run_metadata,
     ensure_ad_dependencies,
@@ -229,7 +241,15 @@ def classify_kerberoast_outcome(
         "LDAP completed successfully; no service principal candidates were found.",
     )
 
-class KerberoastModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[88, 389, 636, 3268, 3269], protocols=["tcp", "udp"]),
+        ProcessPermission(allow_subprocesses=True, allowed_binaries=["python", "python3"]),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=KerberoastParams,
+)
+class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
     """
     ad.kerberoast — Request TGS tickets for SPN accounts — hashcat-ready hashes
 
@@ -247,6 +267,7 @@ class KerberoastModule(BaseModule):
     REQUIRES           = ["domain_creds"]
     OUTPUTS            = ["kerberos_hashes"]
     MITRE_TECHNIQUES   = ["T1558.003"]
+    PARAMS_MODEL       = KerberoastParams
 
     async def assess_feasibility(self, ctx: "Any") -> Any:
         """
@@ -308,7 +329,6 @@ class KerberoastModule(BaseModule):
         Enforce dc, domain, and domain credentials.
         Also block early in STEALTH profile — each TGS request logs Event ID 4769.
         """
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         from ares.core.campaign import NoiseProfile
@@ -340,6 +360,11 @@ class KerberoastModule(BaseModule):
                 "detected by SIEM. Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+). Credentials sourced from vault."""
@@ -361,6 +386,27 @@ class KerberoastModule(BaseModule):
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain, target_user=target_user,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"kerb-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "kerberos", "kerberoast"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

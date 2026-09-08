@@ -21,9 +21,21 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.asreproast")
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
 from ares.core.errors import AresError, ModuleValidationError
+from ares.modules.params import ASREPRoastParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 from ares.modules.ad.dependencies import (
     ad_bind_dry_run_metadata,
     build_ad_bind_plan,
@@ -196,7 +208,15 @@ def classify_asrep_request_error(exc: BaseException) -> tuple[str, str]:
     return "module_error", _sanitize_asrep_failure_reason(exc)
 
 
-class ASREPRoastModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[88, 389, 636], protocols=["tcp", "udp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=ASREPRoastParams,
+)
+class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
     """
     ad.asreproast — Capture AS-REP hashes from accounts without Kerberos pre-auth
 
@@ -213,6 +233,7 @@ class ASREPRoastModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["asrep_hashes"]
     MITRE_TECHNIQUES   = ["T1558.004"]
+    PARAMS_MODEL       = ASREPRoastParams
 
     async def assess_feasibility(self, ctx: "Any") -> Any:
         """
@@ -269,12 +290,12 @@ class ASREPRoastModule(BaseModule):
         domain = ctx.params.get("domain") or ctx.domain
         if not dc:
             raise ModuleValidationError(
-                "ad.asreproast requires \'dc\' (Domain Controller IP)",
+                "ad.asreproast requires 'dc' (Domain Controller IP)",
                 module_id=self.MODULE_ID, field="dc",
             )
         if not domain:
             raise ModuleValidationError(
-                "ad.asreproast requires \'domain\' (e.g. corp.local)",
+                "ad.asreproast requires 'domain' (e.g. corp.local)",
                 module_id=self.MODULE_ID, field="domain",
             )
         ad        = self._extract_ad_params(ctx)
@@ -284,10 +305,20 @@ class ASREPRoastModule(BaseModule):
         if not has_creds and not has_file and not has_list:
             raise ModuleValidationError(
                 "ad.asreproast requires one of: domain credentials (username+password), "
-                "\'userfile\' param (path to username list), or "
-                "\'usernames\' param (inline list).",
+                "'userfile' param (path to username list), or "
+                "'usernames' param (inline list).",
                 module_id=self.MODULE_ID, field="usernames",
             )
+        if isinstance(ctx.params, dict):
+            if "dc" not in ctx.params and dc:
+                ctx.params["dc"] = dc
+            if "domain" not in ctx.params and domain:
+                ctx.params["domain"] = domain
+            if ad.get("username") and "username" not in ctx.params:
+                ctx.params["username"] = ad["username"]
+            if ad.get("password") and "password" not in ctx.params:
+                ctx.params["password"] = ad["password"]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
@@ -318,6 +349,27 @@ class ASREPRoastModule(BaseModule):
             dc=dc, username=username, password=password,
             domain=domain, userfile=userfile, usernames=usernames,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"asrep-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "asrep", "asreproast"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

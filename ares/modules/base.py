@@ -632,8 +632,18 @@ class BaseModule(abc.ABC, Generic[P, R]):
         Safe to call even when ctx is a bare namespace (test mode).
         """
         cred = getattr(ctx, "best_credential", lambda: None)()
-        username = ctx.params.get("username") or (cred.username if cred else "")
-        password = ctx.params.get("password", "")
+        params = ctx.params if hasattr(ctx, "params") and ctx.params is not None else {}
+        def _get_val(k: str, default: Any = "") -> Any:
+            if hasattr(params, "get"):
+                val = params.get(k, default)
+            else:
+                val = getattr(params, k, default)
+            if hasattr(val, "get_secret_value"):
+                return val.get_secret_value()
+            return val
+
+        username = _get_val("username") or (cred.username if cred else "")
+        password = _get_val("password", "")
         if cred and not password:
             vault = getattr(ctx, "vault", None)
             if vault:
@@ -642,8 +652,8 @@ class BaseModule(abc.ABC, Generic[P, R]):
                 except Exception:
                     pass
         return {
-            "dc":       ctx.params.get("dc") or getattr(ctx, "target", ""),
-            "domain":   getattr(ctx, "domain", "") or ctx.params.get("domain", ""),
+            "dc":       _get_val("dc") or getattr(ctx, "target", ""),
+            "domain":   getattr(ctx, "domain", "") or _get_val("domain", ""),
             "username": username,
             "password": password,
         }

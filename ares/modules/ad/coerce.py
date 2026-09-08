@@ -28,13 +28,34 @@ from typing import Any
 from ares.core.campaign import Finding, Severity, NoiseProfile
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import ModuleValidationError
+from ares.modules.params import CoerceParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.ad.coerce")
 
 
-class CoerceModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=CoerceParams,
+)
+class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
     """
     ad.coerce — Force target to authenticate to attacker listener via PetitPotam (MS-EFSRPC
 
@@ -56,9 +77,9 @@ class CoerceModule(BaseModule):
     OUTPUTS            = ["coercion_sent"]
     MITRE_TECHNIQUES   = ["T1187"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
+    PARAMS_MODEL       = CoerceParams
 
     async def validate(self, ctx: "Any") -> None:
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -86,6 +107,11 @@ class CoerceModule(BaseModule):
                 "Start lateral.smb_relay first, then run ad.coerce.",
                 module_id=self.MODULE_ID, field="listener_ip",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -104,6 +130,27 @@ class CoerceModule(BaseModule):
             dc=ad["dc"], username=ad["username"], password=ad["password"],
             domain=ad["domain"], listener_ip=listener_ip, method=method,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"coerce-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=ad["dc"],
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "coerce", "forced_auth"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

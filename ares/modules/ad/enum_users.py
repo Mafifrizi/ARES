@@ -14,7 +14,18 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.enum_users")
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import DomainAuthParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 from ares.core.errors import AresError, ModuleValidationError, NetworkError
 from ares.modules.ad.dependencies import (
@@ -42,7 +53,15 @@ def _days_since(dt: datetime.datetime | None) -> int | None:
         return None
     return max(0, (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - dt).days)
 
-class ADEnumUsersModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DomainAuthParams,
+)
+class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
     ad.enum_users — Enumerate domain users, attributes, dormant accounts, password policy
 
@@ -60,10 +79,10 @@ class ADEnumUsersModule(BaseModule):
     OUTPUTS            = ["user_list"]
     MITRE_TECHNIQUES   = ["T1087.002", "T1201"]
     MODULE_TIMEOUT_SECONDS: int | None = 90  # seconds
+    PARAMS_MODEL       = DomainAuthParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce dc, domain, and credentials before any LDAP connection is made."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -86,6 +105,11 @@ class ADEnumUsersModule(BaseModule):
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+). Credentials sourced from vault."""
@@ -101,6 +125,30 @@ class ADEnumUsersModule(BaseModule):
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain, use_ldaps=use_ldaps,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for user in raw.get("user_list", []):
+            username_val = user.get("samAccountName", user.get("username", "unknown"))
+            ev = EvidenceRecord(
+                artifact_id=f"user-{str(username_val).lower()}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "username": username_val,
+                    "enabled": user.get("enabled", True),
+                    "admin_count": user.get("adminCount", 0),
+                    "spns": user.get("spns", []),
+                    "dont_expire_password": user.get("dontExpirePassword", False),
+                    "no_preauth": user.get("noPreauth", False),
+                },
+                tags=["ad", "user", "enumeration"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

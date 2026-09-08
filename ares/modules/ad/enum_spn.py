@@ -7,7 +7,18 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.enum_spn")
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import DomainAuthParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 from ares.core.errors import AresError, ModuleValidationError
 from ares.modules.ad.dependencies import (
@@ -37,7 +48,15 @@ def classify_enum_spn_outcome(spn_count: int) -> tuple[str, str]:
         "LDAP completed successfully; no enabled user accounts with service principals were found.",
     )
 
-class ADEnumSPNModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DomainAuthParams,
+)
+class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
     ad.enum_spn — Find SPN accounts (Kerberoasting candidates)
 
@@ -50,10 +69,10 @@ class ADEnumSPNModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["spn_list"]
     MITRE_TECHNIQUES=["T1558.003","T1087.002"]
+    PARAMS_MODEL       = DomainAuthParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce dc, domain, and credentials before any LDAP connection is made."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -75,6 +94,11 @@ class ADEnumSPNModule(BaseModule):
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+). Credentials sourced from vault."""
@@ -94,6 +118,26 @@ class ADEnumSPNModule(BaseModule):
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for spn in raw.get("spn_list", []):
+            ev = EvidenceRecord(
+                artifact_id=f"spn-{spn.get('samAccountName', 'unknown').lower()}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "samAccountName": spn.get("samAccountName"),
+                    "spns": spn.get("spns"),
+                    "memberOf": spn.get("memberOf"),
+                },
+                tags=["ad", "spn", "kerberoasting", "enumeration"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

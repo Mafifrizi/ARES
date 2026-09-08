@@ -112,6 +112,31 @@ class ModuleParams(BaseModel):
         str_strip_whitespace=True,
     )
 
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            val = getattr(self, key)
+            if val is None:
+                return default
+            if hasattr(val, "get_secret_value"):
+                return val.get_secret_value()
+            return val
+        except AttributeError:
+            return default
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            val = getattr(self, key)
+            if hasattr(val, "get_secret_value"):
+                return val.get_secret_value()
+            return val
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        return hasattr(self, key)
+
     @classmethod
     def validate_dict(cls, data: dict[str, Any]) -> ModuleParams:
         """

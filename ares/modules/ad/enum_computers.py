@@ -12,7 +12,18 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.enum_computers")
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import DomainAuthParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 from ares.core.errors import AresError, ModuleValidationError, NetworkError
 from ares.modules.ad.dependencies import build_ad_bind_plan
@@ -64,7 +75,15 @@ def _format_ldap_connection_failure(
         f"Reason: {_safe_ldap_exception_text(exc)}"
     )
 
-class ADEnumComputersModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DomainAuthParams,
+)
+class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
     ad.enum_computers — Enumerate domain computers, OS versions, stale accounts, DCs
 
@@ -77,10 +96,10 @@ class ADEnumComputersModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["computer_list"]
     MITRE_TECHNIQUES=["T1018","T1087.002"]
+    PARAMS_MODEL       = DomainAuthParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -101,6 +120,11 @@ class ADEnumComputersModule(BaseModule):
                 "ad.enum_computers requires domain credentials.",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+). Credentials sourced from vault."""
@@ -117,6 +141,28 @@ class ADEnumComputersModule(BaseModule):
             dc=dc, username=username, password=password, domain=domain,
             use_ldaps=use_ldaps,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for comp in raw.get("computer_list", []):
+            ev = EvidenceRecord(
+                artifact_id=f"computer-{comp.get('name', 'unknown').lower()}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "name": comp.get("name"),
+                    "os": comp.get("os"),
+                    "os_version": comp.get("os_version"),
+                    "is_dc": comp.get("is_dc", False),
+                    "dns_name": comp.get("dns_name"),
+                },
+                tags=["ad", "computer", "enumeration"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

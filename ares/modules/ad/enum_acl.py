@@ -10,8 +10,21 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.ad.enum_acl")
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import ModuleValidationError
+from ares.modules.params import DomainAuthParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 
 # Active Directory extended rights GUIDs
 DCSYNC_RIGHTS = {
@@ -19,7 +32,15 @@ DCSYNC_RIGHTS = {
     "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2": "DS-Replication-Get-Changes-All",
 }
 
-class ADEnumACLModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DomainAuthParams,
+)
+class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
     ad.enum_acl — Find WriteDACL, GenericAll, GenericWrite, DCSync delegation misconfigs
 
@@ -32,10 +53,10 @@ class ADEnumACLModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["acl_findings"]
     MITRE_TECHNIQUES=["T1222.001","T1003.006"]
+    PARAMS_MODEL       = DomainAuthParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce dc, domain, and credentials before any LDAP connection is made."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -57,6 +78,11 @@ class ADEnumACLModule(BaseModule):
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+). Credentials sourced from vault."""
@@ -71,6 +97,27 @@ class ADEnumACLModule(BaseModule):
         findings, raw = await self.run(
             dc=dc, username=username, password=password, domain=domain,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"acl-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=dc,
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "acl", "enumeration"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

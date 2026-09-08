@@ -23,13 +23,32 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import LAPSEnumParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.ad.laps_enum")
 
 
-class LAPSEnumModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=LAPSEnumParams,
+)
+class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
     """
     ad.laps_enum — Read LAPS local admin passwords from Active Directory computer objects. Supports LAPS v1 (ms-Mcs
 
@@ -51,9 +70,9 @@ class LAPSEnumModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1552.004"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MODULE_TIMEOUT_SECONDS: int | None = 60  # seconds
+    PARAMS_MODEL       = LAPSEnumParams
 
     async def validate(self, ctx: "Any") -> None:
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -75,6 +94,11 @@ class LAPSEnumModule(BaseModule):
                 "on ms-Mcs-AdmPwd (identified by ad.enum_acl).",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -90,6 +114,26 @@ class LAPSEnumModule(BaseModule):
             username=ad["username"], password=ad["password"],
             vault=getattr(ctx, "vault", None),
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for cred in raw.get("laps_passwords", []):
+            ev = EvidenceRecord(
+                artifact_id=f"laps-{cred.get('computer', 'unknown').lower()}",
+                source_target=ad["dc"],
+                collected_by=self.MODULE_ID,
+                data={
+                    "computer": cred.get("computer"),
+                    "account": cred.get("account", "Administrator"),
+                    "version": cred.get("version", "LAPS"),
+                },
+                tags=["ad", "laps", "credentials"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

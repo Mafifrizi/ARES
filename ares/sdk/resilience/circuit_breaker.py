@@ -103,6 +103,11 @@ class LockoutCircuitBreaker(CircuitBreaker):
         super().__init__(name=name, failure_threshold=1, recovery_timeout_s=recovery_timeout_s)
         self.locked_accounts: set[str] = set()
 
+    def record_failure(self, exc: Exception | None = None) -> None:
+        """Record a failure event. Trips circuit ONLY if lockout indicators are detected."""
+        if exc is not None:
+            self.inspect_error(exc)
+
     def inspect_error(self, exc: Exception, username: str = "") -> None:
         """Inspects exception for lockout signatures and trips instantly if detected."""
         if isinstance(exc, AccountLocked):

@@ -26,8 +26,21 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.core.errors import ModuleValidationError
+from ares.modules.params import ADCSParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.ad.adcs")
 
@@ -51,7 +64,15 @@ _DANGEROUS_RIGHTS = {
 }
 
 
-class ADCSModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[80, 443, 389, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=ADCSParams,
+)
+class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
     """
     ad.adcs — Detect ADCS ESC1–ESC8 misconfigurations via LDAP. Exploit ESC1 to obtain a certificate as any us
 
@@ -72,6 +93,7 @@ class ADCSModule(BaseModule):
     OUTPUTS            = ["adcs_findings", "certificate"]
     MITRE_TECHNIQUES   = ["T1649"]
     MODULE_TIMEOUT_SECONDS: int | None = 180  # seconds
+    PARAMS_MODEL       = ADCSParams
 
     async def assess_feasibility(self, ctx: "Any") -> Any:
         """
@@ -122,7 +144,6 @@ class ADCSModule(BaseModule):
         )
 
     async def validate(self, ctx: "Any") -> None:
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -143,6 +164,11 @@ class ADCSModule(BaseModule):
                 "ad.adcs requires domain credentials — pass 'username'/'password'.",
                 module_id=self.MODULE_ID, field="username",
             )
+        if isinstance(ctx.params, dict):
+            for k in ("dc", "domain", "username", "password"):
+                if k not in ctx.params and ad.get(k):
+                    ctx.params[k] = ad[k]
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -161,6 +187,27 @@ class ADCSModule(BaseModule):
             username=ad["username"], password=ad["password"],
             exploit_esc1=exploit_esc1, target_user=target_user,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"adcs-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=ad["dc"],
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["ad", "adcs", "certificates"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
