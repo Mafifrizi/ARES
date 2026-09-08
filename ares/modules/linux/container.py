@@ -12,11 +12,33 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.linux.container")
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.errors import ModuleValidationError
 from ares.core.tracing import trace_module
+from ares.modules.params import ContainerEscapeParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    FilesystemPermission,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 
 
-class ContainerEscapeModule(BaseModule):
+@module_contract(
+    permissions=[
+        FilesystemPermission(allowed_subdirs=["loot", "artifacts"], read_only=True),
+        NetworkPermission(ports=[80, 443, 2375, 6443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=ContainerEscapeParams,
+)
+class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
     """
     linux.container — Docker socket abuse, privileged escape, K8s RBAC misconfigs
 
@@ -33,20 +55,26 @@ class ContainerEscapeModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["container_escape_vectors", "k8s_rbac_findings"]
     MITRE_TECHNIQUES   = ["T1611", "T1552.007", "T1613"]
+    PARAMS_MODEL       = ContainerEscapeParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
-        if not target:
-            raise ModuleValidationError(
-                "linux.container requires 'target' — IP or hostname of container host.",
-                module_id=self.MODULE_ID, field="target",
-            )
+        if isinstance(ctx, ExecutionContext):
+            target = getattr(ctx, "target", "")
+            if not target and hasattr(ctx, "params") and isinstance(ctx.params, dict):
+                target = ctx.params.get("target") or ctx.params.get("host", "")
+            if not target:
+                raise ModuleValidationError(
+                    "linux.container requires 'target' — IP or hostname of container host.",
+                    module_id=self.MODULE_ID, field="target",
+                )
+            if isinstance(ctx.params, dict):
+                if "target" not in ctx.params and target:
+                    ctx.params["target"] = target
+                if "username" not in ctx.params:
+                    ctx.params["username"] = ctx.params.get("ssh_user", "root")
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
@@ -54,7 +82,37 @@ class ContainerEscapeModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, ContainerEscapeParams):
+            kwargs = params.model_dump()
+        elif isinstance(params, dict):
+            kwargs = params
+        else:
+            kwargs = {}
+
+        findings, raw = await self.run(**kwargs)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"cntr-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=getattr(ctx, "target", "container-host"),
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["linux", "container", "container_escape"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

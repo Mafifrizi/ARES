@@ -11,8 +11,20 @@ import asyncio, re
 from typing import Any
 from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.errors import ModuleValidationError
 from ares.core.tracing import trace_module
+from ares.modules.params import KernelSuggesterParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.linux.kernel_suggester")
 
@@ -29,9 +41,18 @@ _KERNEL_CVES: list[tuple[str, str, str, str, str]] = [
     (r"[345]\.[0-9]+",       "CVE-2017-7308",  "af_packet ring buffer LPE", "HIGH", "< 4.10.6"),
 ]
 
-class KernelSuggesterModule(BaseModule):
+
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[22], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=KernelSuggesterParams,
+)
+class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
     """
-    linux.kernel_suggester — Read kernel version via SSH and map to known LPE CVEs — detection and suggestion only, no exploi
+    linux.kernel_suggester — Read kernel version via SSH and map to known LPE CVEs — detection and suggestion only, no exploitation
 
     OPSEC: LOW
     MITRE: "T1068", "T1082"
@@ -50,20 +71,37 @@ class KernelSuggesterModule(BaseModule):
     REQUIRES           = ["ssh_credentials"]
     OUTPUTS            = ["privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1068", "T1082"]
+    PARAMS_MODEL       = KernelSuggesterParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
-        if not target:
-            raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
-                module_id=self.MODULE_ID, field="target",
-            )
+        if isinstance(ctx, ExecutionContext):
+            target = getattr(ctx, "target", "")
+            if not target and hasattr(ctx, "params") and isinstance(ctx.params, dict):
+                target = ctx.params.get("target") or ctx.params.get("host", "")
+            if not target:
+                raise ModuleValidationError(
+                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    module_id=self.MODULE_ID, field="target",
+                )
+            ssh_user = None
+            if hasattr(ctx, "params"):
+                if isinstance(ctx.params, dict):
+                    ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+                elif hasattr(ctx.params, "username"):
+                    ssh_user = getattr(ctx.params, "username", None)
+            if not ssh_user:
+                raise ModuleValidationError(
+                    f"{self.MODULE_ID} requires 'username' or 'ssh_user' for SSH authentication.",
+                    module_id=self.MODULE_ID, field="username",
+                )
+            if isinstance(ctx.params, dict):
+                if "target" not in ctx.params and target:
+                    ctx.params["target"] = target
+                if "username" not in ctx.params and ssh_user:
+                    ctx.params["username"] = ssh_user
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -72,15 +110,50 @@ class KernelSuggesterModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target   = getattr(ctx, "target", ctx.params.get("target", ""))
-        username = ctx.params.get("username", "")
-        password = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        key_path = ctx.params.get("key_path", "")
-        params = dict(ctx.params)
-        for key in ("target", "username", "password", "key_path"):
-            params.pop(key, None)
+        target   = getattr(ctx, "target", "")
+        username = ""
+        password = None
+        key_path = None
+        params_dict: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, KernelSuggesterParams):
+            target = params.target or target
+            username = params.username
+            password = params.password.get_secret_value() if params.password else None
+            key_path = params.key_path
+            params_dict = {"ssh_port": params.ssh_port}
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            username = params.get("username", "")
+            raw_pass = params.get("password") or params.get("secret")
+            password = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else raw_pass
+            key_path = params.get("key_path")
+            params_dict = {k: v for k, v in params.items() if k not in ("target", "username", "password", "secret", "key_path")}
+
         findings, raw = await self.run(target=target, username=username, password=password,
-                                        key_path=key_path, **params)
+                                        key_path=key_path, **params_dict)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"kernel-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["linux", "kernel", "kernel_suggester"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(status="success" if findings else "partial",
                             findings=findings, raw=raw, module_id=self.MODULE_ID,
                             execution_id=getattr(ctx, "execution_id", ""))

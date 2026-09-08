@@ -24,11 +24,24 @@ import os
 import shlex
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.errors import ModuleValidationError
+from ares.core.logger import get_logger
 from ares.core.security import sanitize_hostname
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import LDPreloadParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    UntrustedTargetData,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.linux.ld_preload")
 
@@ -51,7 +64,15 @@ _CMD_SUID_BINS = (
 )
 
 
-class LDPreloadModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[22], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=True, allowed_binaries=["/bin/bash", "sudo", "cat", "ls", "grep", "find"]),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=LDPreloadParams,
+)
+class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     """
     linux.ld_preload — Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths —
 
@@ -71,27 +92,34 @@ class LDPreloadModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1574.006", "T1082"]
-
-    async def validate(self, ctx: "Any") -> None:
-        """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
+    PARAMS_MODEL       = LDPreloadParams
+    async def validate(self, ctx: Any) -> None:
+        """Pre-flight parameter checks before any network call."""
         from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
-        if not target:
-            raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
-                module_id=self.MODULE_ID, field="target",
-            )
-        ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
-        if target != "localhost" and not ssh_user:
-            raise ModuleValidationError(
-                f"{self.MODULE_ID} targeting remote host '{target}' requires 'username' or 'ssh_user'. "
-                "Local controller fallback is prohibited.",
-                module_id=self.MODULE_ID, field="username",
-            )
+        if isinstance(ctx, ExecutionContext):
+            target = getattr(ctx, "target", "")
+            if not target and hasattr(ctx, "params") and isinstance(ctx.params, dict):
+                target = ctx.params.get("target") or ctx.params.get("host", "")
+            if not target:
+                raise ModuleValidationError(
+                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    module_id=self.MODULE_ID, field="target",
+                )
+            ssh_user = None
+            if hasattr(ctx, "params") and isinstance(ctx.params, dict):
+                ssh_user = ctx.params.get("username") or ctx.params.get("ssh_user")
+            if target != "localhost" and not ssh_user:
+                raise ModuleValidationError(
+                    f"{self.MODULE_ID} targeting remote host '{target}' requires 'username' or 'ssh_user'. "
+                    "Local controller fallback is prohibited.",
+                    module_id=self.MODULE_ID, field="username",
+                )
+            if isinstance(ctx.params, dict):
+                if "target" not in ctx.params and target:
+                    ctx.params["target"] = target
+                if "username" not in ctx.params and ssh_user:
+                    ctx.params["username"] = ssh_user
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -108,10 +136,53 @@ class LDPreloadModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "host": host},
             )
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, LDPreloadParams):
+            host = params.target or getattr(ctx, "target", "localhost")
+            ssh_user = params.username
+            ssh_key = params.key_path
+            ssh_pass = params.password.get_secret_value() if params.password else None
+            ssh_port = params.ssh_port
+        elif isinstance(params, dict):
+            host = params.get("target") or params.get("host") or getattr(ctx, "target", "localhost")
+            ssh_user = params.get("username") or params.get("ssh_user")
+            ssh_key = params.get("key_path") or params.get("ssh_key")
+            raw_pass = params.get("password") or params.get("secret") or params.get("ssh_pass")
+            ssh_pass = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else raw_pass
+            ssh_port = int(params.get("ssh_port", 22))
+        else:
+            host = getattr(ctx, "target", "localhost")
+            ssh_user = None
+            ssh_key = None
+            ssh_pass = None
+            ssh_port = 22
+
         findings, raw = await self.run(
             host=host, ssh_user=ssh_user, ssh_key=ssh_key,
             ssh_pass=ssh_pass, ssh_port=ssh_port,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"ldpreload-{finding.title[:20].lower().replace(' ', '-')}",
+                source_target=host,
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "description": finding.description,
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["linux", "ld_preload"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
