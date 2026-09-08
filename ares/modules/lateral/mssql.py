@@ -23,11 +23,29 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import MSSQLParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.lateral.mssql")
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[1433], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=MSSQLParams,
+)
 class MSSQLModule(BaseModule):
     """
     lateral.mssql — MSSQL lateral movement via xp_cmdshell, linked servers, EXECUTE AS LOGIN, and UNC path NTLM coer
@@ -48,6 +66,7 @@ class MSSQLModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["command_output", "lateral_session"]
     MITRE_TECHNIQUES   = ["T1505.001"]
+    PARAMS_MODEL       = MSSQLParams
 
     async def validate(self, ctx: "Any") -> None:
         await super().validate(ctx)
@@ -94,6 +113,27 @@ class MSSQLModule(BaseModule):
             port=port, command=command, technique=technique,
             linked=linked, listener=listener,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"lateral-mssql-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "username": username,
+                    "technique": technique,
+                    "title": finding.title,
+                },
+                tags=["lateral", "mssql"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

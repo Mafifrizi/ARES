@@ -17,13 +17,32 @@ from typing import Any
 
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import GoldenTicketParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    FilesystemPermission,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.golden_ticket")
 
 
-class GoldenTicketModule(BaseModule):
+@module_contract(
+    permissions=[
+        FilesystemPermission(read_only=False),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=GoldenTicketParams,
+)
+class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
     """
     credential.golden_ticket — Forge a Kerberos TGT using the krbtgt hash — provides persistent domain access that survives pas
 
@@ -44,6 +63,7 @@ class GoldenTicketModule(BaseModule):
     REQUIRES           = ["ntlm_hashes", "domain_admin_creds"]
     OUTPUTS            = ["golden_ticket", "kerberos_ticket"]
     MITRE_TECHNIQUES   = ["T1558.001"]
+    PARAMS_MODEL       = GoldenTicketParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -121,12 +141,13 @@ class GoldenTicketModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce domain, krbtgt hash, and domain SID before ticket forge."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         import re as _re
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict) and not ctx.params.get("domain") and getattr(ctx, "domain", None):
+            ctx.params["domain"] = ctx.domain
         domain      = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
         krbtgt_hash = ctx.params.get("krbtgt_hash", "")
         domain_sid  = ctx.params.get("domain_sid", "")
@@ -161,6 +182,7 @@ class GoldenTicketModule(BaseModule):
                 "Expected: S-1-5-21-<sub1>-<sub2>-<sub3>",
                 module_id=self.MODULE_ID, field="domain_sid",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -175,6 +197,27 @@ class GoldenTicketModule(BaseModule):
             **params,
             target=getattr(ctx, "target", ctx.params.get("target", "")),
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        if raw.get("ccache_path") or raw.get("ticket_b64"):
+            ev = EvidenceRecord(
+                artifact_id=f"golden-ticket-{str(params.get('username', 'admin')).lower()}",
+                source_target=params.get("domain", "domain"),
+                collected_by=self.MODULE_ID,
+                data={
+                    "domain": params.get("domain"),
+                    "username": params.get("username"),
+                    "domain_sid": params.get("domain_sid"),
+                    "ccache_path": raw.get("ccache_path"),
+                },
+                tags=["credential", "kerberos", "golden_ticket"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

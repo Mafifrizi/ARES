@@ -41,6 +41,14 @@ class ScopeEnforcementInterceptor(BaseExecutionInterceptor):
         if not target:
             return  # Targetless modules (cloud/recon metadata) handled by validation
 
+        # Skip network scope validation for local/offline modules that do not declare network capabilities
+        perms = getattr(module, "PERMISSIONS", [])
+        if perms:
+            from ares.sdk.security.permissions import NetworkPermission
+            has_net = any(isinstance(p, NetworkPermission) or getattr(p, "name", "") == "network" for p in perms)
+            if not has_net:
+                return
+
         # 1. Check direct ScopeGuard if attached to context
         if hasattr(ctx, "scope_guard") and ctx.scope_guard is not None:
             ctx.scope_guard.assert_in_scope(target, action=getattr(module, "MODULE_ID", "module"))

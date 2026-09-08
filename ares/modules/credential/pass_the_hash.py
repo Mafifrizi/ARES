@@ -14,13 +14,32 @@ from typing import Any
 
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import PassTheHashParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.pass_the_hash")
 
 
-class PassTheHashModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 139, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=PassTheHashParams,
+)
+class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
     """
     credential.pass_the_hash — Authenticate to target using NTLM hash — no plaintext password required"
 
@@ -41,6 +60,7 @@ class PassTheHashModule(BaseModule):
     REQUIRES           = ["ntlm_hashes"]
     OUTPUTS            = ["valid_credentials", "owned_hosts"]
     MITRE_TECHNIQUES   = ["T1550.002"]
+    PARAMS_MODEL       = PassTheHashParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -104,11 +124,19 @@ class PassTheHashModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce target and NTLM hash before any SMB connection."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username"):
+                ctx.params["username"] = "Administrator"
+            if not ctx.params.get("nt_hash") and ctx.params.get("hash"):
+                ctx.params["nt_hash"] = ctx.params["hash"]
         target  = getattr(ctx, "target", "") or ctx.params.get("target", "")
         nt_hash = ctx.params.get("nt_hash", "") or ctx.params.get("hash", "")
         if not target:
@@ -123,6 +151,7 @@ class PassTheHashModule(BaseModule):
                 "the 32-character NT hash from ad.dcsync output.",
                 module_id=self.MODULE_ID, field="nt_hash",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -141,6 +170,27 @@ class PassTheHashModule(BaseModule):
             target=target, username=username, nt_hash=nt_hash,
             lm_hash=lm_hash, domain=domain, command=command
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for cred in raw.get("valid_credentials", []):
+            ev = EvidenceRecord(
+                artifact_id=f"pth-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "username": username,
+                    "domain": domain,
+                    "owned": bool(raw.get("owned_hosts")),
+                },
+                tags=["credential", "pass_the_hash", "lateral_movement"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

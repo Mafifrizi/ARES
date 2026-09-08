@@ -13,14 +13,33 @@ from __future__ import annotations
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import CredentialReuseParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.logger import get_logger, audit
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.reuse")
 
 
-class CredentialReuseModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[22, 389, 445, 636, 3389, 5985, 5986], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=CredentialReuseParams,
+)
+class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
     """
     Try each captured credential against one or more targets.
 
@@ -38,14 +57,16 @@ class CredentialReuseModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1078", "T1550.002"]
 
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
+    PARAMS_MODEL       = CredentialReuseParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict) and not ctx.params.get("target") and getattr(ctx, "target", None):
+            ctx.params["target"] = ctx.target
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
@@ -59,6 +80,7 @@ class CredentialReuseModule(BaseModule):
                 "run ad.kerberoast/dcsync/pass_the_hash first.",
                 module_id=self.MODULE_ID, field="vault",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
@@ -75,6 +97,26 @@ class CredentialReuseModule(BaseModule):
             vault=getattr(ctx, "vault", None),
             target=getattr(ctx, "target", ctx.params.get("target", "")),
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for cred in raw.get("valid_credentials", []):
+            ev = EvidenceRecord(
+                artifact_id=f"reuse-{str(cred.get('username', 'cred')).lower()}",
+                source_target=getattr(ctx, "target", ctx.params.get("target", "")),
+                collected_by=self.MODULE_ID,
+                data={
+                    "username": cred.get("username"),
+                    "domain": cred.get("domain"),
+                    "service": cred.get("service"),
+                },
+                tags=["credential", "reuse", "spray"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

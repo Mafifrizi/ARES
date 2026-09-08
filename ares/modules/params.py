@@ -137,6 +137,13 @@ class ModuleParams(BaseModel):
             return False
         return hasattr(self, key)
 
+    def __iter__(self) -> Any:
+        for k, v in super().__iter__():
+            if hasattr(v, "get_secret_value"):
+                yield k, v.get_secret_value()
+            else:
+                yield k, v
+
     @classmethod
     def validate_dict(cls, data: dict[str, Any]) -> ModuleParams:
         """

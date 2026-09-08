@@ -398,7 +398,7 @@ def test_module_outcome_success_mapping(outcome: str, expected: bool) -> None:
     assert _is_successful_module_outcome(outcome) is expected
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="module", autouse=True)
 def _app_mock_db():
     global _PRODUCTION_C_LIVE_DESCRIPTOR_GATE
     # Clear lru_cache so unit tests always use UNIT env vars,

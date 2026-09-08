@@ -212,7 +212,7 @@ class Campaign(BaseModel):
             target = ip.strip().lower()
             explicit_hosts = {
                 entry.strip().lower()
-                for entry in [*self.targets, self.dc]
+                for entry in [*self.targets, self.dc, self.domain]
                 if entry and entry.strip()
             }
             if target and target in explicit_hosts:
@@ -254,7 +254,7 @@ class Campaign(BaseModel):
                 else:
                     _log.debug("scope_check_hostname_resolved: %r → %s (in scope)", ip, resolved_ip)
                 return in_scope
-            except _socket.gaierror as dns_exc:
+            except (_socket.gaierror, TimeoutError, Exception) as dns_exc:
                 _log.warning(
                     "scope_check_dns_failed: hostname %r could not be resolved (%s) — BLOCKING "
                     "(add explicit IP to scope or ensure DNS is available)",

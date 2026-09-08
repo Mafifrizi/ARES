@@ -27,6 +27,22 @@ from typing import Any, TYPE_CHECKING
 from ares.core.campaign import Campaign, Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import (
+    PsExecParams,
+    WmiExecParams,
+    WinRMParams,
+    SSHPivotParams,
+    RDPLateralParams,
+)
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 if TYPE_CHECKING:
     from ares.credential.vault import CredentialVault, Credential
@@ -139,11 +155,19 @@ class BaseLateralModule(BaseModule):
         Enforce target and credentials before any network connection.
         Applied to all lateral modules: psexec, wmiexec, dcom, winrm, rdp, ssh.
         """
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
@@ -164,6 +188,7 @@ class BaseLateralModule(BaseModule):
                 "pass 'password', 'nt_hash' (NTLM), or provide a vault credential.",
                 module_id=self.MODULE_ID, field="password",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """
@@ -199,6 +224,27 @@ class BaseLateralModule(BaseModule):
             target=target, username=username, domain=domain,
             secret=secret, command=command, **params,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"lateral-{self.MODULE_ID.replace('.', '-')}-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "username": username,
+                    "domain": domain,
+                    "title": finding.title,
+                },
+                tags=["lateral", self.MODULE_ID.split(".")[-1]],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw,
@@ -272,6 +318,14 @@ class BaseLateralModule(BaseModule):
 
 # ── PsExec ─────────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[139, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=PsExecParams,
+)
 class PsExecLateral(BaseLateralModule):
     """
     PsExec-style lateral movement via SMB + Service Control Manager.
@@ -286,6 +340,7 @@ class PsExecLateral(BaseLateralModule):
     REQUIRES           = ["smb_access", "local_admin_creds"]
     OUTPUTS            = ["lateral_session", "command_output"]
     MITRE_TECHNIQUES   = ["T1569.002", "T1021.002"]
+    PARAMS_MODEL       = PsExecParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -505,6 +560,14 @@ class PsExecLateral(BaseLateralModule):
 
 # ── WmiExec ────────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=WmiExecParams,
+)
 class WmiExecLateral(BaseLateralModule):
     """
     WMI-based lateral movement via Win32_Process.Create.
@@ -519,6 +582,7 @@ class WmiExecLateral(BaseLateralModule):
     REQUIRES           = ["wmi_access", "domain_creds"]
     OUTPUTS            = ["lateral_session", "command_output"]
     MITRE_TECHNIQUES   = ["T1047", "T1021.002"]
+    PARAMS_MODEL       = WmiExecParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -706,6 +770,14 @@ class WmiExecLateral(BaseLateralModule):
 
 # ── WinRM ──────────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[5985, 5986], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=WinRMParams,
+)
 class WinRMLateral(BaseLateralModule):
     """
     WinRM / PowerShell Remoting lateral movement.
@@ -720,6 +792,7 @@ class WinRMLateral(BaseLateralModule):
     REQUIRES           = ["winrm_access", "domain_creds"]
     OUTPUTS            = ["lateral_session", "command_output", "powershell_session"]
     MITRE_TECHNIQUES   = ["T1021.006", "T1059.001"]
+    PARAMS_MODEL       = WinRMParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -820,6 +893,14 @@ class WinRMLateral(BaseLateralModule):
 
 # ── SSH Pivot ──────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[22], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=SSHPivotParams,
+)
 class SSHPivot(BaseLateralModule):
     """
     SSH lateral movement and pivot tunnel establishment.
@@ -837,6 +918,7 @@ class SSHPivot(BaseLateralModule):
     REQUIRES           = ["ssh_access", "ssh_credentials"]
     OUTPUTS            = ["lateral_session", "socks5_proxy", "command_output"]
     MITRE_TECHNIQUES   = ["T1021.004", "T1090.001"]
+    PARAMS_MODEL       = SSHPivotParams
 
     async def move(self, target, username, domain, secret, command="id", **kwargs) -> LateralResult:
         import time
@@ -987,6 +1069,14 @@ class SSHPivot(BaseLateralModule):
 
 # ── RDP Lateral ────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[3389], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=RDPLateralParams,
+)
 class RDPLateral(BaseLateralModule):
     """
     RDP-based lateral movement.
@@ -1002,6 +1092,7 @@ class RDPLateral(BaseLateralModule):
     OUTPUTS            = ["lateral_session"]
     MITRE_TECHNIQUES   = ["T1021.001"]
     MIN_NOISE_PROFILE  = "normal"
+    PARAMS_MODEL       = RDPLateralParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """

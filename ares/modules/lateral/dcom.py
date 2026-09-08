@@ -32,10 +32,28 @@ from ares.modules.lateral.modules import (
     BaseLateralModule, LateralResult, LateralTechnique,
 )
 from ares.modules.base import OpsecLevel
+from ares.modules.params import DCOMParams
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.lateral.dcom")
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DCOMParams,
+)
 class DCOMLateral(BaseLateralModule):
     """
     DCOM-based lateral movement via MMC20.Application,
@@ -59,6 +77,7 @@ class DCOMLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1021.003"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth — creates remote process
+    PARAMS_MODEL       = DCOMParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -106,11 +125,19 @@ class DCOMLateral(BaseLateralModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
@@ -122,6 +149,7 @@ class DCOMLateral(BaseLateralModule):
                 "lateral.dcom requires 'username' with local_admin_creds.",
                 module_id=self.MODULE_ID, field="username",
             )
+        await super().validate(ctx)
 
     async def move(
         self,

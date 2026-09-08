@@ -39,7 +39,17 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import SMBRelayParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.lateral.smb_relay")
 
@@ -161,6 +171,14 @@ async def _check_smb_signing(target: str, port: int = 445, timeout: float = 8.0)
     return result
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[139, 389, 445, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=SMBRelayParams,
+)
 class SMBRelayAuditModule(BaseModule):
     """
     Checks SMB signing configuration on one or more targets.
@@ -179,6 +197,7 @@ class SMBRelayAuditModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["smb_signing_config", "relay_candidates"]
     MITRE_TECHNIQUES   = ["T1557.001", "T1082"]
+    PARAMS_MODEL       = SMBRelayParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -212,6 +231,26 @@ class SMBRelayAuditModule(BaseModule):
         check_ldap = ctx.params.get("check_ldap", False)
 
         findings, raw = await self.run(targets=targets, check_ldap=check_ldap)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"lateral-smb-relay-audit-{str(targets[0] if targets else 'audit').replace('.', '-')}",
+                source_target=targets[0] if targets else "audit",
+                collected_by=self.MODULE_ID,
+                data={
+                    "targets": targets,
+                    "check_ldap": check_ldap,
+                    "title": finding.title,
+                },
+                tags=["lateral", "smb_relay"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

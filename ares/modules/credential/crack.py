@@ -22,7 +22,18 @@ from typing import Any
 
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import CredentialCrackParams
+from ares.sdk import (
+    BaseModule,
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.crack")
@@ -52,7 +63,15 @@ _CRACK_PRIORITY: dict[str, int] = {
 }
 
 
-class CrackModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[]),
+        ProcessPermission(allow_subprocesses=True, allowed_binaries=["hashcat", "john", "hashcat.exe", "john.exe"]),
+    ],
+    circuit_breaker=CircuitBreaker(name="credential_crack", failure_threshold=5, recovery_timeout_s=60.0),
+    params_model=CredentialCrackParams,
+)
+class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
     """
     credential.crack — "Crack hashes in CredentialVault using hashcat (GPU
 
@@ -74,10 +93,10 @@ class CrackModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1110.002"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MODULE_TIMEOUT_SECONDS: int | None = 3600  # seconds
+    PARAMS_MODEL       = CredentialCrackParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce vault has hash credentials to crack."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -102,6 +121,7 @@ class CrackModule(BaseModule):
                 "or all hashes have already been cracked.",
                 module_id=self.MODULE_ID, field="vault",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -119,6 +139,26 @@ class CrackModule(BaseModule):
         findings, raw = await self.run(
             vault=vault, timeout_s=timeout_s, use_gpu=use_gpu, wordlist=wordlist,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for cred in raw.get("cracked_credentials", []):
+            ev = EvidenceRecord(
+                artifact_id=f"crack-{cred.get('username', 'unknown').lower()}",
+                source_target="localhost",
+                collected_by=self.MODULE_ID,
+                data={
+                    "username": cred.get("username"),
+                    "domain": cred.get("domain"),
+                    "hash_type": cred.get("hash_type"),
+                },
+                tags=["credential", "crack", "hashcat"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

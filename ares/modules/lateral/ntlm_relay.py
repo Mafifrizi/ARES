@@ -32,7 +32,17 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import NTLMRelayParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.lateral.ntlm_relay")
 
@@ -72,6 +82,14 @@ class RBCDResult:
     error:          str = ""
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[88, 135, 389, 445, 636], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=NTLMRelayParams,
+)
 class NTLMRelayModule(BaseModule):
     """
     lateral.ntlm_relay — Full NTLM relay attack automation
@@ -96,6 +114,7 @@ class NTLMRelayModule(BaseModule):
     REQUIRES           = ["domain_creds"]
     OUTPUTS            = ["relay_targets", "machine_account", "kerberos_ticket", "owned_hosts"]
     MITRE_TECHNIQUES   = ["T1557.001", "T1134.001"]
+    PARAMS_MODEL       = NTLMRelayParams
 
     async def validate(self, ctx: "Any") -> None:
         await super().validate(ctx)
@@ -137,6 +156,26 @@ class NTLMRelayModule(BaseModule):
             target_user=ctx.params.get("target_user", "administrator"),
             mode=ctx.params.get("mode", "full"),
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"lateral-ntlm-relay-{ad['dc'].replace('.', '-')}",
+                source_target=ad["dc"],
+                collected_by=self.MODULE_ID,
+                data={
+                    "dc": ad["dc"],
+                    "domain": ad["domain"],
+                    "title": finding.title,
+                },
+                tags=["lateral", "ntlm_relay"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

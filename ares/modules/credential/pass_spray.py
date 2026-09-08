@@ -16,7 +16,18 @@ from typing import Any
 
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import PassSprayParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.pass_spray")
@@ -208,7 +219,15 @@ def generate_smart_wordlist(
     return unique
 
 
-class PassSprayModule(BaseModule):
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[389, 636, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=PassSprayParams,
+)
+class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
     """
     credential.pass_spray — Low-and-slow password spray against domain accounts — built-in lockout protection, one password 
 
@@ -229,6 +248,7 @@ class PassSprayModule(BaseModule):
     REQUIRES           = ["user_list"]
     OUTPUTS            = ["valid_credentials"]
     MITRE_TECHNIQUES   = ["T1110.003"]
+    PARAMS_MODEL       = PassSprayParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -305,11 +325,15 @@ class PassSprayModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce target, user list, and password list before spray."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
         target    = getattr(ctx, "target", "") or ctx.params.get("target", "")
         users     = ctx.params.get("users", [])
         passwords = ctx.params.get("passwords", [])
@@ -329,6 +353,7 @@ class PassSprayModule(BaseModule):
                 "credential.pass_spray requires 'passwords' list.",
                 module_id=self.MODULE_ID, field="passwords",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -347,6 +372,26 @@ class PassSprayModule(BaseModule):
         findings, raw = await self.run(
             target=target, domain=domain, users=users, passwords=passwords, **params
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for cred in raw.get("valid_credentials", []):
+            ev = EvidenceRecord(
+                artifact_id=f"spray-{cred.get('username', 'unknown').lower()}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "username": cred.get("username"),
+                    "domain": cred.get("domain", domain),
+                    "protocol": cred.get("protocol", "smb"),
+                },
+                tags=["credential", "password_spray", "valid_account"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
