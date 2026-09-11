@@ -25,7 +25,17 @@ from typing import Any
 from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import SNMPEnumParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.network.snmp_enum")
 
@@ -103,7 +113,7 @@ def _snmp_walk_sync(host: str, community: str, port: int,
             ContextData, ObjectType, ObjectIdentity,
         )
     except ImportError:
-        return []
+        return ["_error: pysnmp not installed"]
 
     rows: list[str] = []
     engine = SnmpEngine()
@@ -118,17 +128,25 @@ def _snmp_walk_sync(host: str, community: str, port: int,
         if error_indication or error_status:
             break
         for var_bind in var_binds:
-            val = str(var_bind[1]).strip()
-            if val and val not in rows:
-                rows.append(val)
+            rows.append(str(var_bind[1]))
+            if len(rows) >= max_rows:
+                break
         if len(rows) >= max_rows:
             break
     return rows
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[161, 162], protocols=["udp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=SNMPEnumParams,
+)
 class SnmpEnumModule(BaseModule):
     """
-    network.snmp_enum — Test common SNMP community strings and enumerate system info via OID walk — identifies default c
+    network.snmp_enum — Test common SNMP community strings and enumerate system info via OID walk — identifies default credentials, system details, interfaces, and running processes
 
     OPSEC: LOW
     MITRE: "T1046", "T1590"
@@ -146,20 +164,24 @@ class SnmpEnumModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["snmp_findings", "system_info"]
     MITRE_TECHNIQUES   = ["T1046", "T1590"]
+    PARAMS_MODEL       = SNMPEnumParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 f"{self.MODULE_ID} requires 'target' — IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -170,10 +192,47 @@ class SnmpEnumModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True,
                                      "target": getattr(ctx, "target", "")})
-        target = getattr(ctx, "target", ctx.params.get("target", ""))
-        params = dict(ctx.params)
-        params.pop("target", None)
-        findings, raw = await self.run(target=target, **params)
+        target = getattr(ctx, "target", "")
+        port = 161
+        communities = None
+        extra_params: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, SNMPEnumParams):
+            target = params.target or target
+            port = params.port or port
+            communities = params.communities
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            port = int(params.get("port") or params.get("snmp_port", 161))
+            communities = params.get("communities")
+            extra_params = {k: v for k, v in params.items() if k not in ("target", "port", "snmp_port", "communities")}
+
+        kwargs: dict[str, Any] = {"target": target, "port": port, **extra_params}
+        if communities is not None:
+            kwargs["communities"] = communities
+
+        findings, raw = await self.run(**kwargs)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"snmp-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["network", "snmp_enum"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw.get("valid_communities")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

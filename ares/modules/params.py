@@ -836,7 +836,7 @@ class PivotParams(ModuleParams):
         "SSH private key path", required=False, default=None, max_length=512
     )
     local_port: int = param(
-        "Local SOCKS5 port", required=False, default=1080, ge=1024, le=65535
+        "Local SOCKS5 port", required=False, default=1080, ge=0, le=65535
     )
 
 

@@ -15,7 +15,17 @@ from typing import Any
 from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import DNSEnumParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.network.dns_enum")
 
@@ -43,9 +53,17 @@ _COMMON_SUBDOMAINS: list[str] = [
 _RECORD_TYPES: list[str] = ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME", "PTR"]
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[53], protocols=["udp", "tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="network.dns_enum", failure_threshold=10),
+    params_model=DNSEnumParams,
+)
 class DnsEnumModule(BaseModule):
     """
-    network.dns_enum — DNS zone transfer attempt, subdomain brute force, and record enumeration — maps DNS infrastructu
+    network.dns_enum — DNS zone transfer attempt, subdomain brute force, and record enumeration — maps DNS infrastructure and finds internal hostnames
 
     OPSEC: LOW
     MITRE: "T1590.002"
@@ -63,20 +81,26 @@ class DnsEnumModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["dns_records", "subdomains"]
     MITRE_TECHNIQUES   = ["T1590.002"]
+    PARAMS_MODEL       = DNSEnumParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 f"{self.MODULE_ID} requires 'target' — IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -84,13 +108,50 @@ class DnsEnumModule(BaseModule):
         """
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
-            return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target = getattr(ctx, "target", ctx.params.get("target", ""))
-        domain = ctx.params.get("domain") or target
-        params = dict(ctx.params)
-        params.pop("target", None)
-        params.pop("domain", None)
-        findings, raw = await self.run(target=target, domain=domain, **params)
+            return ModuleResult(
+                status="dry_run", module_id=self.MODULE_ID,
+                raw={"dry_run": True},
+            )
+        target = getattr(ctx, "target", "")
+        domain = getattr(ctx, "domain", "")
+        brute = True
+        extra_params: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, DNSEnumParams):
+            target = params.target or target
+            domain = params.domain or domain or target
+            brute = getattr(params, "brute", True)
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            domain = params.get("domain") or domain or target
+            brute = params.get("brute_force", params.get("brute", True))
+            extra_params = {k: v for k, v in params.items() if k not in ("target", "domain", "brute", "brute_force")}
+
+        findings, raw = await self.run(
+            target=target, domain=domain, brute_force=brute, brute=brute, **extra_params,
+        )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"dns-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "domain": domain,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["network", "dns_enum"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw.get("dns_records")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

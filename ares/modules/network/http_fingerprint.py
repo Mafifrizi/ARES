@@ -14,7 +14,17 @@ from typing import Any
 from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import HTTPFingerprintParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.network.http_fingerprint")
 
@@ -60,9 +70,17 @@ _HEADER_FINGERPRINTS: list[tuple[str, str, str]] = [
 ]
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="network.http_fingerprint", failure_threshold=10),
+    params_model=HTTPFingerprintParams,
+)
 class HttpFingerprintModule(BaseModule):
     """
-    network.http_fingerprint — Fingerprint web servers and applications — detect server software, frameworks, CMS, admin interf
+    network.http_fingerprint — Fingerprint web servers and applications — detect server software, frameworks, CMS, admin interfaces, and exposed sensitive paths
 
     OPSEC: LOW
     MITRE: "T1592.002", T1046 := "T1046"
@@ -80,20 +98,24 @@ class HttpFingerprintModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["web_fingerprint", "admin_interfaces"]
     MITRE_TECHNIQUES   = ["T1592.002", T1046 := "T1046"]
+    PARAMS_MODEL       = HTTPFingerprintParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 f"{self.MODULE_ID} requires 'target' — IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -102,10 +124,45 @@ class HttpFingerprintModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target = getattr(ctx, "target", ctx.params.get("target", ""))
-        params = dict(ctx.params)
-        params.pop("target", None)
-        findings, raw = await self.run(target=target, **params)
+        target = getattr(ctx, "target", "")
+        ports = [80, 443, 8080, 8443, 8888]
+        timeout = 5.0
+        extra_params: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, HTTPFingerprintParams):
+            target = params.target or target
+            ports = params.ports or ports
+            timeout = params.timeout or timeout
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            ports = params.get("ports") or params.get("http_ports") or ports
+            timeout = params.get("timeout") or timeout
+            extra_params = {k: v for k, v in params.items() if k not in ("target", "ports", "http_ports", "timeout")}
+
+        findings, raw = await self.run(
+            target=target, ports=ports, timeout=timeout, **extra_params,
+        )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"http-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["network", "http_fingerprint"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw.get("web_fingerprint")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

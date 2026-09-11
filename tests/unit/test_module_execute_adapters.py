@@ -38,8 +38,8 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
         (
             "ares.modules.network.dns_enum",
             "DnsEnumModule",
-            {"target": "example.com", "domain": "example.com"},
-            {"target": "example.com", "domain": "example.com"},
+            {"target": "10.0.0.1", "domain": "example.com"},
+            {"target": "10.0.0.1", "domain": "example.com"},
         ),
         (
             "ares.modules.network.port_scan",
@@ -58,6 +58,12 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
             "SnmpEnumModule",
             {"target": "10.0.0.1", "port": 161, "communities": ["public"]},
             {"target": "10.0.0.1", "port": 161},
+        ),
+        (
+            "ares.modules.network.pivot",
+            "PivotModule",
+            {"target": "10.0.0.1", "username": "admin", "password": "pw", "local_port": 1080},
+            {"target": "10.0.0.1", "username": "admin", "local_port": 1080},
         ),
         (
             "ares.modules.cloud.identity_federation",

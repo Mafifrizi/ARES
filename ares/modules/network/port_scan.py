@@ -20,7 +20,17 @@ from typing import Any
 from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import PortScanParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.network.port_scan")
 
@@ -80,9 +90,17 @@ async def _tcp_connect(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="network.port_scan", failure_threshold=15),
+    params_model=PortScanParams,
+)
 class PortScanModule(BaseModule):
     """
-    network.port_scan — Async TCP connect scan — identifies open ports and maps them to services and recommended attack 
+    network.port_scan — Async TCP connect scan — identifies open ports and maps them to services and recommended attack paths
 
     OPSEC: MEDIUM
     MITRE: "T1046"
@@ -100,20 +118,24 @@ class PortScanModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["open_ports", "service_map"]
     MITRE_TECHNIQUES   = ["T1046"]
+    PARAMS_MODEL       = PortScanParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 "network.port_scan requires 'target' — IP or CIDR to scan.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -123,12 +145,64 @@ class PortScanModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True, "target": getattr(ctx, "target", "")})
-        params = dict(ctx.params)
-        params.pop("target", None)
+        target = getattr(ctx, "target", "")
+        ports = _DEFAULT_PORTS
+        timeout = 2.0
+        extra_params: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, PortScanParams):
+            target = params.target or target
+            timeout = params.timeout or timeout
+            if isinstance(params.ports, str):
+                if params.ports in ("top1000", "all", ""):
+                    ports = _DEFAULT_PORTS
+                else:
+                    try:
+                        ports = [int(p.strip()) for p in params.ports.split(",") if p.strip().isdigit()]
+                    except Exception:
+                        ports = _DEFAULT_PORTS
+            elif isinstance(params.ports, list):
+                ports = params.ports
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            timeout = float(params.get("timeout", 2.0))
+            raw_ports = params.get("ports")
+            if isinstance(raw_ports, list):
+                ports = raw_ports
+            elif isinstance(raw_ports, str):
+                if raw_ports in ("top1000", "all", ""):
+                    ports = _DEFAULT_PORTS
+                else:
+                    try:
+                        ports = [int(p.strip()) for p in raw_ports.split(",") if p.strip().isdigit()]
+                    except Exception:
+                        ports = _DEFAULT_PORTS
+            extra_params = {k: v for k, v in params.items() if k not in ("target", "ports", "timeout")}
+
         findings, raw = await self.run(
-            **params,
-            target=getattr(ctx, "target", ctx.params.get("target", "")),
+            target=target, ports=ports, timeout=timeout, **extra_params,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"portscan-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["network", "port_scan"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw.get("open_ports")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
@@ -138,7 +212,17 @@ class PortScanModule(BaseModule):
     @trace_module("network.port_scan")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
         target   = kwargs.get("target", "")
-        ports    = kwargs.get("ports", _DEFAULT_PORTS)
+        raw_ports = kwargs.get("ports", _DEFAULT_PORTS)
+        if isinstance(raw_ports, str):
+            if raw_ports in ("top1000", "all", ""):
+                ports = _DEFAULT_PORTS
+            else:
+                try:
+                    ports = [int(p.strip()) for p in raw_ports.split(",") if p.strip().isdigit()]
+                except Exception:
+                    ports = _DEFAULT_PORTS
+        else:
+            ports = raw_ports or _DEFAULT_PORTS
         dry_run  = kwargs.get("dry_run", False)
         timeout  = float(kwargs.get("timeout", 2.0))
         # Concurrency: stealth=10, normal=50, aggressive=200

@@ -28,7 +28,17 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import PivotParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.network.pivot")
 
@@ -36,9 +46,17 @@ logger = get_logger("ares.modules.network.pivot")
 _PIVOT_MANAGERS: dict[str, "Any"] = {}   # campaign_id → PivotManager
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=PivotParams,
+)
 class PivotModule(BaseModule):
     """
-    network.pivot — Create SOCKS5/SSH tunnels through compromised hosts. All subsequent modules route through tunnel
+    network.pivot — Create SOCKS5/SSH tunnels through compromised hosts. All subsequent modules route through tunnel automatically. Generates proxychains.conf. Supports chained pivots.
 
     OPSEC: LOW
     MITRE: "T1090.001", "T1021.004"
@@ -59,37 +77,51 @@ class PivotModule(BaseModule):
     OUTPUTS            = ["pivot_tunnel", "proxy_url", "proxychains_config"]
     MITRE_TECHNIQUES   = ["T1090.001", "T1021.004"]
     MODULE_TIMEOUT_SECONDS: int | None = 60  # seconds
+    PARAMS_MODEL       = PivotParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce pivot host + credentials."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 "network.pivot requires 'target' — IP or hostname of the pivot host "
                 "(a host where you have SSH access).",
                 module_id=self.MODULE_ID, field="target",
             )
-        username = ctx.params.get("username", "")
+        username = (ctx.params.get("username", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "username", ""))
         if not username:
             raise ModuleValidationError(
                 "network.pivot requires 'username' for SSH authentication.",
                 module_id=self.MODULE_ID, field="username",
             )
-        has_secret = bool(ctx.params.get("password") or ctx.params.get("key_path") or
-                          ctx.params.get("secret") or
-                          (getattr(ctx, "vault", None) and
-                           getattr(getattr(ctx, "vault", None), "_store", None)))
+        has_secret = False
+        if isinstance(ctx.params, dict):
+            has_secret = bool(ctx.params.get("password") or ctx.params.get("key_path") or
+                              ctx.params.get("secret") or
+                              (getattr(ctx, "vault", None) and
+                               getattr(getattr(ctx, "vault", None), "_store", None)))
+        elif isinstance(ctx.params, PivotParams):
+            has_secret = bool(ctx.params.password or ctx.params.key_path or
+                              (getattr(ctx, "vault", None) and
+                               getattr(getattr(ctx, "vault", None), "_store", None)))
         if not has_secret:
             raise ModuleValidationError(
                 "network.pivot requires SSH credentials — "
                 "pass 'password', 'key_path', or provide a vault credential.",
                 module_id=self.MODULE_ID, field="password",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -100,16 +132,34 @@ class PivotModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
 
-        target   = sanitize_hostname(
-            getattr(ctx, "target", "") or ctx.params.get("target", "")
-        )
-        username = ctx.params.get("username", "")
-        secret   = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        key_path = ctx.params.get("key_path", "")
-        ssh_port = int(ctx.params.get("ssh_port", 22))
-        local_port      = int(ctx.params.get("local_port", 0))
-        reachable_nets  = ctx.params.get("reachable_subnets", [])
-        campaign_id     = getattr(getattr(self, "campaign", None), "id", "default")
+        target   = getattr(ctx, "target", "")
+        username = ""
+        secret   = ""
+        key_path = ""
+        ssh_port = 22
+        local_port = 0
+        reachable_nets: list[str] = []
+        campaign_id = getattr(getattr(self, "campaign", None), "id", "default")
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, PivotParams):
+            target = params.target or target
+            username = params.username or ""
+            raw_pass = params.password
+            secret = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
+            key_path = params.key_path or ""
+            local_port = params.local_port or 0
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            username = params.get("username", "")
+            raw_pass = params.get("password") or params.get("secret", "")
+            secret = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
+            key_path = params.get("key_path", "")
+            ssh_port = int(params.get("ssh_port", 22))
+            local_port = int(params.get("local_port", 0))
+            reachable_nets = params.get("reachable_subnets", [])
+
+        target = sanitize_hostname(target)
 
         # Reveal from vault if no plaintext secret
         if not secret and not key_path:
@@ -126,6 +176,26 @@ class PivotModule(BaseModule):
             key_path=key_path, ssh_port=ssh_port, local_port=local_port,
             reachable_subnets=reachable_nets, campaign_id=campaign_id,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"pivot-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["network", "pivot"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
