@@ -15,9 +15,28 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import WMISubscriptionParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.persistence.wmi_subscription")
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=WMISubscriptionParams,
+)
 class WMISubscriptionModule(BaseModule):
     """
     persistence.wmi_subscription — Create a WMI FilterToConsumerBinding that executes a command on event trigger — highly stealthy 
@@ -39,6 +58,7 @@ class WMISubscriptionModule(BaseModule):
     REQUIRES           = ["local_admin_creds"]
     OUTPUTS            = ["persistence_established"]
     MITRE_TECHNIQUES   = ["T1546.003"]
+    PARAMS_MODEL       = WMISubscriptionParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -125,15 +145,51 @@ class WMISubscriptionModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target   = getattr(ctx, "target", ctx.params.get("target", ""))
-        username = ctx.params.get("username", "")
-        password = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
-        command  = ctx.params.get("command", "")
-        sub_name = ctx.params.get("subscription_name", "WindowsUpdate")
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, WMISubscriptionParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        target   = getattr(ctx, "target", pdict.get("target", ""))
+        username = pdict.get("username", "")
+        raw_pwd  = pdict.get("password") or getattr(ctx, "password", "") or pdict.get("secret", "")
+        if hasattr(raw_pwd, "get_secret_value"):
+            password = raw_pwd.get_secret_value()
+        elif raw_pwd is not None:
+            password = str(raw_pwd)
+        else:
+            password = ""
+        domain   = getattr(ctx, "domain", "") or pdict.get("domain", "")
+        command  = pdict.get("command", "")
+        sub_name = pdict.get("subscription_name", "WindowsUpdate")
         findings, raw = await self.run(target=target, username=username, password=password,
                                         domain=domain, command=command, subscription_name=sub_name)
-        return ModuleResult(status="success" if findings else "partial",
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"wmi-{str(finding.host or target).replace(':', '-').replace('/', '-')}",
+                source_target=getattr(ctx, "target", target),
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "subscription_name": sub_name,
+                    "persistence_established": raw.get("persistence_established", False),
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["persistence", "wmi_subscription", "t1546_003"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        return ModuleResult(status="success" if (findings or raw) else "partial",
                             findings=findings, raw=raw, module_id=self.MODULE_ID,
                             execution_id=getattr(ctx, "execution_id", ""))
 

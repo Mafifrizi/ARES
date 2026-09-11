@@ -163,6 +163,61 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
             },
             {"target": "10.0.0.1", "domain": "corp.local", "users": ["alice"]},
         ),
+        (
+            "ares.modules.persistence.scheduled_task",
+            "ScheduledTaskPersistence",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "domain": "corp.local",
+                "task_name": "AresUpdater",
+                "command": "powershell.exe -NoP -W Hidden",
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "task_name": "AresUpdater",
+            },
+        ),
+        (
+            "ares.modules.persistence.scheduled_task",
+            "RegistryRunKeyPersistence",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "domain": "corp.local",
+                "key_name": "AresUpdate",
+                "command": r"C:\Windows\Temp\ares.exe",
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "value_name": "AresUpdate",
+                "payload": r"C:\Windows\Temp\ares.exe",
+            },
+        ),
+        (
+            "ares.modules.persistence.wmi_subscription",
+            "WMISubscriptionModule",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "domain": "corp.local",
+                "subscription_name": "AresMonitor",
+                "command": "powershell.exe -NoP -W Hidden",
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "subscription_name": "AresMonitor",
+            },
+        ),
     ],
 )
 def test_execute_adapter_deduplicates_explicit_ctx_params(

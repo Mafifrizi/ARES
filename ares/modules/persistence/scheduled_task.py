@@ -24,6 +24,17 @@ from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.logger import get_logger, audit
 from ares.core.tracing import trace_module
+from ares.modules.params import RegistryRunParams, ScheduledTaskParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.persistence")
 
@@ -89,6 +100,14 @@ def _tsch_register_sync(target: str, username: str, password: str,
             pass
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 139, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=ScheduledTaskParams,
+)
 class ScheduledTaskPersistence(BaseModule):
     """
     persistence.scheduled_task — Register a Windows scheduled task that executes at user logon via impacket tsch RPC (T1053.005)
@@ -106,6 +125,7 @@ class ScheduledTaskPersistence(BaseModule):
     REQUIRES         = ["target", "credential"]
     OUTPUTS          = ["persistence_established", "task_name"]
     MITRE_TECHNIQUES = ["T1053.005"]
+    PARAMS_MODEL     = ScheduledTaskParams
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
@@ -197,7 +217,48 @@ class ScheduledTaskPersistence(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, ScheduledTaskParams):
+            kwargs = params.model_dump()
+        elif isinstance(params, dict):
+            kwargs = dict(params)
+        else:
+            kwargs = {}
+
+        raw_pwd = kwargs.get("password") or getattr(ctx, "password", "")
+        if hasattr(raw_pwd, "get_secret_value"):
+            kwargs["password"] = raw_pwd.get_secret_value()
+        elif raw_pwd is not None:
+            kwargs["password"] = str(raw_pwd)
+        else:
+            kwargs["password"] = ""
+
+        if not kwargs.get("target") and getattr(ctx, "target", ""):
+            kwargs["target"] = ctx.target
+
+        findings, raw = await self.run(**kwargs)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"schedtask-{str(finding.host or kwargs.get('target', 'host')).replace(':', '-').replace('/', '-')}",
+                source_target=getattr(ctx, "target", kwargs.get("target", "")),
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "task_name": raw.get("task_name", kwargs.get("task_name", "")),
+                    "persistence_established": raw.get("persistence_established", False),
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["persistence", "scheduled_task", "t1053_005"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
@@ -322,6 +383,14 @@ def _rrp_set_run_key(target: str, username: str, password: str,
     dce.disconnect()
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 139, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=RegistryRunParams,
+)
 class RegistryRunKeyPersistence(BaseModule):
     """
     persistence.registry_run — Add payload to HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
@@ -339,6 +408,7 @@ class RegistryRunKeyPersistence(BaseModule):
     REQUIRES         = ["target", "credential"]
     OUTPUTS          = ["persistence_established", "registry_key"]
     MITRE_TECHNIQUES = ["T1547.001"]
+    PARAMS_MODEL     = RegistryRunParams
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
@@ -367,7 +437,54 @@ class RegistryRunKeyPersistence(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, RegistryRunParams):
+            kwargs = params.model_dump()
+        elif isinstance(params, dict):
+            kwargs = dict(params)
+        else:
+            kwargs = {}
+
+        raw_pwd = kwargs.get("password") or getattr(ctx, "password", "")
+        if hasattr(raw_pwd, "get_secret_value"):
+            kwargs["password"] = raw_pwd.get_secret_value()
+        elif raw_pwd is not None:
+            kwargs["password"] = str(raw_pwd)
+        else:
+            kwargs["password"] = ""
+
+        if not kwargs.get("target") and getattr(ctx, "target", ""):
+            kwargs["target"] = ctx.target
+
+        # Map key_name / command to value_name / payload if needed
+        if "key_name" in kwargs and "value_name" not in kwargs:
+            kwargs["value_name"] = kwargs["key_name"]
+        if "command" in kwargs and "payload" not in kwargs:
+            kwargs["payload"] = kwargs["command"]
+
+        findings, raw = await self.run(**kwargs)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"regrun-{str(finding.host or kwargs.get('target', 'host')).replace(':', '-').replace('/', '-')}",
+                source_target=getattr(ctx, "target", kwargs.get("target", "")),
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "registry_key": raw.get("registry_key", ""),
+                    "persistence_established": raw.get("persistence_established", False),
+                    "mitre": finding.mitre_technique,
+                },
+                tags=["persistence", "registry_run", "t1547_001"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
