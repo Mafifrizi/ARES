@@ -20,6 +20,17 @@ from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.logger import get_logger, audit
 from ares.core.tracing import trace_module
+from ares.modules.params import SmbSharesParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.exfil.smb_shares")
 
@@ -62,6 +73,14 @@ def _list_share_recursive(conn: Any, share: str, path: str = "*",
     return hits
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[139, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=SmbSharesParams,
+)
 class SmbSharesExfil(BaseModule):
     """
     exfil.smb_shares — Enumerate accessible SMB shares and scan for sensitive files including configs, keys, and credential
@@ -79,6 +98,7 @@ class SmbSharesExfil(BaseModule):
     REQUIRES         = ["target", "credential"]
     OUTPUTS          = ["file_share_list", "sensitive_file_paths"]
     MITRE_TECHNIQUES = ["T1039", "T1021.002"]
+    PARAMS_MODEL     = SmbSharesParams
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
@@ -102,9 +122,49 @@ class SmbSharesExfil(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, SmbSharesParams):
+            kwargs = params.model_dump()
+        elif isinstance(params, dict):
+            kwargs = dict(params)
+        else:
+            kwargs = {}
+
+        raw_pwd = kwargs.get("password") or getattr(ctx, "password", "")
+        if hasattr(raw_pwd, "get_secret_value"):
+            kwargs["password"] = raw_pwd.get_secret_value()
+        elif raw_pwd is not None:
+            kwargs["password"] = str(raw_pwd)
+        else:
+            kwargs["password"] = ""
+
+        if not kwargs.get("target") and getattr(ctx, "target", ""):
+            kwargs["target"] = ctx.target
+
+        findings, raw = await self.run(**kwargs)
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for file_path in raw.get("sensitive_file_paths", [])[:20]:
+            file_name = file_path.rsplit("\\", 1)[-1]
+            ev = EvidenceRecord(
+                artifact_id=f"smb-file-{file_name.lower().replace('.', '-')}",
+                source_target=getattr(ctx, "target", kwargs.get("target", "")),
+                collected_by=self.MODULE_ID,
+                data={
+                    "file_path": file_path,
+                    "target": getattr(ctx, "target", kwargs.get("target", "")),
+                },
+                tags=["exfil", "smb_shares", "t1039"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or raw.get("file_share_list")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

@@ -16,6 +16,17 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import StagedCollectionParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.exfil.staged_collection")
 
@@ -30,6 +41,14 @@ _COLLECTION_PATTERNS = [
     "*wallet.dat", "*.wallet",
 ]
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[22, 135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="exfil.staged_collection", failure_threshold=5),
+    params_model=StagedCollectionParams,
+)
 class StagedCollectionModule(BaseModule):
     """
     exfil.staged_collection — "Search for high-value files (credentials, keys, configs, backups
@@ -51,6 +70,7 @@ class StagedCollectionModule(BaseModule):
     OUTPUTS            = ["sensitive_file_paths", "collection_inventory"]
     MITRE_TECHNIQUES   = ["T1119", "T1039", "T1552"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
+    PARAMS_MODEL       = StagedCollectionParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -79,18 +99,62 @@ class StagedCollectionModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target   = getattr(ctx, "target", ctx.params.get("target", ""))
-        username = ctx.params.get("username", "")
-        password = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        key_path = ctx.params.get("key_path", "")
-        platform = ctx.params.get("platform", "linux")
-        search_paths = ctx.params.get("search_paths", ["/home", "/root", "/etc", "/var/www", "/opt"])
-        findings, raw = await self.run(target=target, username=username, password=password,
-                                        key_path=key_path, platform=platform,
-                                        search_paths=search_paths)
-        return ModuleResult(status="success" if findings else "partial",
-                            findings=findings, raw=raw, module_id=self.MODULE_ID,
-                            execution_id=getattr(ctx, "execution_id", ""))
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, StagedCollectionParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        target       = getattr(ctx, "target", pdict.get("target", ""))
+        username     = pdict.get("username", "")
+        raw_pwd      = pdict.get("password") or getattr(ctx, "password", "") or pdict.get("secret", "")
+        if hasattr(raw_pwd, "get_secret_value"):
+            password = raw_pwd.get_secret_value()
+        elif raw_pwd is not None:
+            password = str(raw_pwd)
+        else:
+            password = ""
+        key_path     = pdict.get("key_path", "")
+        platform     = pdict.get("platform", "linux")
+        search_paths = pdict.get("search_paths", ["/home", "/root", "/etc", "/var/www", "/opt"])
+        destination  = pdict.get("destination", "")
+        max_files    = int(pdict.get("max_files", 200))
+
+        findings, raw = await self.run(
+            target=target, username=username, password=password,
+            key_path=key_path, platform=platform,
+            search_paths=search_paths, max_files=max_files,
+            destination=destination,
+        )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for file_info in raw.get("files_found", [])[:20]:
+            file_name = file_info.get("path", "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            ev = EvidenceRecord(
+                artifact_id=f"staged-{file_name.lower().replace('.', '-')}",
+                source_target=getattr(ctx, "target", target),
+                collected_by=self.MODULE_ID,
+                data={
+                    "path": file_info.get("path"),
+                    "pattern": file_info.get("pattern"),
+                    "destination": destination,
+                },
+                tags=["exfil", "staged_collection", "t1119"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        return ModuleResult(
+            status="success" if (findings or raw.get("files_found")) else "partial",
+            findings=findings, raw=raw, module_id=self.MODULE_ID,
+            execution_id=getattr(ctx, "execution_id", ""),
+        )
 
     @trace_module("exfil.staged_collection")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:

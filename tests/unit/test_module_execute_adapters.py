@@ -218,6 +218,62 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
                 "subscription_name": "AresMonitor",
             },
         ),
+        (
+            "ares.modules.exfil.secrets_scan",
+            "SecretsScan",
+            {
+                "target": "10.0.0.1",
+                "username": "root",
+                "password": "Password1!",
+                "key_path": "/root/.ssh/id_rsa",
+                "platform": "linux",
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "root",
+                "password": "Password1!",
+                "key_path": "/root/.ssh/id_rsa",
+                "platform": "linux",
+            },
+        ),
+        (
+            "ares.modules.exfil.smb_shares",
+            "SmbSharesExfil",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "domain": "corp.local",
+                "max_depth": 2,
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "domain": "corp.local",
+                "max_depth": 2,
+            },
+        ),
+        (
+            "ares.modules.exfil.staged_collection",
+            "StagedCollectionModule",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "destination": "/tmp/staged",
+                "platform": "linux",
+                "max_files": 100,
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "password": "Password1!",
+                "destination": "/tmp/staged",
+                "platform": "linux",
+                "max_files": 100,
+            },
+        ),
     ],
 )
 def test_execute_adapter_deduplicates_explicit_ctx_params(
