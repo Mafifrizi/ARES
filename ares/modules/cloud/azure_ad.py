@@ -28,6 +28,15 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import AzureADParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.cloud.azure_ad")
 
@@ -46,6 +55,14 @@ _ENUM_SCOPES = [
 ]
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.azure_ad", failure_threshold=5),
+    params_model=AzureADParams,
+)
 class AzureADModule(BaseModule):
     """
     cloud.azure_ad — Azure AD / Entra ID identity attack techniques: device code flow, service principal exposure.
@@ -67,6 +84,7 @@ class AzureADModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["access_tokens", "azure_ad_findings"]
     MITRE_TECHNIQUES   = ["T1528", "T1606"]
+    PARAMS_MODEL       = AzureADParams
 
     async def validate(self, ctx: "Any") -> None:
         await super().validate(ctx)
@@ -74,7 +92,14 @@ class AzureADModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        tenant_id = ctx.params.get("tenant_id", "")
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AzureADParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        tenant_id = pdict.get("tenant_id", "")
         if not tenant_id:
             raise ModuleValidationError(
                 "cloud.azure_ad requires 'tenant_id' — Azure AD tenant ID (UUID). "
@@ -91,16 +116,58 @@ class AzureADModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
 
-        tenant_id      = ctx.params.get("tenant_id", "")
-        client_id      = ctx.params.get("client_id", "")
-        client_secret  = ctx.params.get("client_secret", "")
-        access_token   = ctx.params.get("access_token", "")
-        technique      = ctx.params.get("technique", "enumerate")   # enumerate|device_code|sp_audit
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AzureADParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        tenant_id = pdict.get("tenant_id", "")
+        client_id = pdict.get("client_id", "")
+
+        raw_sec = pdict.get("client_secret")
+        if hasattr(raw_sec, "get_secret_value"):
+            client_secret = raw_sec.get_secret_value()
+        elif raw_sec is not None:
+            client_secret = str(raw_sec)
+        else:
+            client_secret = ""
+
+        raw_tok = pdict.get("access_token")
+        if hasattr(raw_tok, "get_secret_value"):
+            access_token = raw_tok.get_secret_value()
+        elif raw_tok is not None:
+            access_token = str(raw_tok)
+        else:
+            access_token = ""
+
+        technique = pdict.get("technique", "enumerate")
 
         findings, raw = await self.run(
             tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
             access_token=access_token, technique=technique,
         )
+
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"azure-ad-{str(tenant_id)[:8]}-{finding.mitre_technique}",
+                source_target=f"azure_ad:{str(tenant_id)[:8]}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "azure_ad", "identity"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

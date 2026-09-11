@@ -24,6 +24,15 @@ logger = get_logger("ares.modules.cloud.azure")
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import AzureParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 _SENSITIVE_PORTS: set[int] = {22, 23, 3389, 5985, 5986, 1433, 3306, 5432,
                                6379, 9200, 27017, 445, 135, 2375, 2376}
@@ -37,6 +46,14 @@ def _get_credential(tenant_id=None, client_id=None, client_secret=None):
     return DefaultAzureCredential()
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.azure", failure_threshold=5),
+    params_model=AzureParams,
+)
 class AzureModule(BaseModule):
     """
     cloud.azure — AAD enum, storage misconfig, RBAC audit, NSG rules
@@ -54,6 +71,7 @@ class AzureModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["azure_findings"]
     MITRE_TECHNIQUES   = ["T1526", "T1530", "T1580", "T1078.004"]
+    PARAMS_MODEL       = AzureParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -62,8 +80,15 @@ class AzureModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        has_cred = bool(ctx.params.get("subscription_id") or
-                        ctx.params.get("client_id") or
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AzureParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        has_cred = bool(pdict.get("subscription_id") or
+                        pdict.get("client_id") or
                         __import__("os").environ.get("AZURE_CLIENT_ID"))
         if not has_cred:
             raise ModuleValidationError(
@@ -79,10 +104,55 @@ class AzureModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
-        return ModuleResult(status="success" if (findings or raw) else "partial",
-                            findings=findings, raw=raw, module_id=self.MODULE_ID,
-                            execution_id=getattr(ctx, "execution_id", ""))
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AzureParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        raw_sec = pdict.get("client_secret")
+        if hasattr(raw_sec, "get_secret_value"):
+            client_secret = raw_sec.get_secret_value()
+        elif raw_sec is not None:
+            client_secret = str(raw_sec)
+        else:
+            client_secret = None
+
+        subscription_id = pdict.get("subscription_id") or ""
+
+        findings, raw = await self.run(
+            subscription_id=subscription_id,
+            tenant_id=pdict.get("tenant_id"),
+            client_id=pdict.get("client_id"),
+            client_secret=client_secret,
+        )
+
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"azure-{subscription_id[:8]}-{finding.mitre_technique}",
+                source_target=f"azure:{subscription_id[:8]}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "azure", "recon"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        return ModuleResult(
+            status="success" if (findings or raw) else "partial",
+            findings=findings, raw=raw, module_id=self.MODULE_ID,
+            execution_id=getattr(ctx, "execution_id", ""),
+        )
 
     @trace_module("cloud.azure")
     async def run(self, subscription_id: str, tenant_id: str | None = None,

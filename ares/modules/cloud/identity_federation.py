@@ -34,6 +34,15 @@ from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
 from ares.core.security import sanitize_hostname
+from ares.modules.params import CloudFederationParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 if TYPE_CHECKING:
     pass
@@ -41,6 +50,14 @@ if TYPE_CHECKING:
 logger = get_logger("ares.modules.cloud.identity_federation")
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[80, 443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.identity_federation_abuse", failure_threshold=5),
+    params_model=CloudFederationParams,
+)
 class CloudIdentityFederationModule(BaseModule):
     """
     cloud.identity_federation_abuse — Cross-cloud identity federation enumeration and abuse.
@@ -60,6 +77,7 @@ class CloudIdentityFederationModule(BaseModule):
     OUTPUTS            = ["federation_trusts", "golden_saml_paths", "oauth_tokens", "pivot_paths"]
     MITRE_TECHNIQUES   = ["T1606.002", "T1528", "T1550.001", "T1484.002"]
     MODULE_TIMEOUT_SECONDS: int | None = 300
+    PARAMS_MODEL       = CloudFederationParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight: need at least one cloud or AD credential."""
@@ -68,11 +86,18 @@ class CloudIdentityFederationModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        has_azure  = bool(ctx.params.get("tenant_id") or ctx.params.get("client_id"))
-        has_aws    = bool(ctx.params.get("access_key") or
+        params = getattr(ctx, "params", {})
+        if isinstance(params, CloudFederationParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        has_azure  = bool(pdict.get("tenant_id") or pdict.get("client_id"))
+        has_aws    = bool(pdict.get("access_key") or
                          __import__("os").environ.get("AWS_ACCESS_KEY_ID"))
-        has_ad     = bool(ctx.params.get("adfs_url") or ctx.params.get("krbtgt_hash"))
-        has_google = bool(ctx.params.get("project_id") or ctx.params.get("credentials_file"))
+        has_ad     = bool(pdict.get("adfs_url") or pdict.get("krbtgt_hash"))
+        has_google = bool(pdict.get("project_id") or pdict.get("credentials_file"))
         if not any([has_azure, has_aws, has_ad, has_google]):
             raise ModuleValidationError(
                 "cloud.identity_federation_abuse requires at least one credential: "
@@ -90,24 +115,81 @@ class CloudIdentityFederationModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "mode": ctx.params.get("mode", "enumerate")},
             )
-        params = dict(ctx.params)
-        for key in (
+        params = getattr(ctx, "params", {})
+        if isinstance(params, CloudFederationParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        raw_cs = pdict.get("client_secret")
+        if hasattr(raw_cs, "get_secret_value"):
+            client_secret = raw_cs.get_secret_value()
+        elif raw_cs is not None:
+            client_secret = str(raw_cs)
+        else:
+            client_secret = ""
+
+        raw_sk = pdict.get("secret_key")
+        if hasattr(raw_sk, "get_secret_value"):
+            secret_key = raw_sk.get_secret_value()
+        elif raw_sk is not None:
+            secret_key = str(raw_sk)
+        else:
+            secret_key = ""
+
+        raw_kt = pdict.get("krbtgt_hash")
+        if hasattr(raw_kt, "get_secret_value"):
+            krbtgt_hash = raw_kt.get_secret_value()
+        elif raw_kt is not None:
+            krbtgt_hash = str(raw_kt)
+        else:
+            krbtgt_hash = ""
+
+        tenant_id = pdict.get("tenant_id") or ""
+        client_id = pdict.get("client_id") or ""
+        access_key = pdict.get("access_key") or ""
+        adfs_url = pdict.get("adfs_url") or ""
+        domain = pdict.get("domain") or ""
+        mode = pdict.get("mode") or "enumerate"
+
+        extra = {k: v for k, v in pdict.items() if k not in (
             "tenant_id", "client_id", "client_secret", "access_key", "secret_key",
             "adfs_url", "krbtgt_hash", "domain", "mode",
-        ):
-            params.pop(key, None)
+        )}
+
         findings, raw = await self.run(
-            tenant_id=ctx.params.get("tenant_id", ""),
-            client_id=ctx.params.get("client_id", ""),
-            client_secret=ctx.params.get("client_secret", ""),
-            access_key=ctx.params.get("access_key", ""),
-            secret_key=ctx.params.get("secret_key", ""),
-            adfs_url=ctx.params.get("adfs_url", ""),
-            krbtgt_hash=ctx.params.get("krbtgt_hash", ""),
-            domain=ctx.params.get("domain", ""),
-            mode=ctx.params.get("mode", "enumerate"),
-            **params,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            access_key=access_key,
+            secret_key=secret_key,
+            adfs_url=adfs_url,
+            krbtgt_hash=krbtgt_hash,
+            domain=domain,
+            mode=mode,
+            **extra,
         )
+
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"cloud-federation-{finding.mitre_technique}",
+                source_target=f"federation:{domain or tenant_id or 'hybrid'}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "federation", "saml", "oidc"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

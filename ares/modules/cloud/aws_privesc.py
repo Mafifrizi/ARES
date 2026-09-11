@@ -18,6 +18,15 @@ from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import AWSPrivescParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.cloud.aws_privesc")
 
@@ -42,6 +51,14 @@ _PRIVESC_ACTIONS: list[tuple[str, str, str]] = [
 ]
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.aws_privesc", failure_threshold=5),
+    params_model=AWSPrivescParams,
+)
 class AWSPrivescModule(BaseModule):
     """
     cloud.aws_privesc — Enumerate current IAM permissions and identify privilege escalation paths — PassRole abuse, Assu
@@ -62,6 +79,7 @@ class AWSPrivescModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["aws_privesc_paths", "aws_findings"]
     MITRE_TECHNIQUES   = ["T1078.004", "T1548", "T1098"]
+    PARAMS_MODEL       = AWSPrivescParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -70,8 +88,16 @@ class AWSPrivescModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        has_key = bool(ctx.params.get("access_key") or
-                       ctx.params.get("aws_access_key") or
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AWSPrivescParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        has_key = bool(pdict.get("access_key") or
+                       pdict.get("aws_access_key") or
+                       pdict.get("profile") or
                        __import__("os").environ.get("AWS_ACCESS_KEY_ID"))
         if not has_key:
             raise ModuleValidationError(
@@ -87,10 +113,62 @@ class AWSPrivescModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
-        return ModuleResult(status="success" if (findings or raw.get("privesc_paths")) else "partial",
-                            findings=findings, raw=raw, module_id=self.MODULE_ID,
-                            execution_id=getattr(ctx, "execution_id", ""))
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AWSPrivescParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        raw_sec = pdict.get("secret_key")
+        if hasattr(raw_sec, "get_secret_value"):
+            secret_key = raw_sec.get_secret_value()
+        elif raw_sec is not None:
+            secret_key = str(raw_sec)
+        else:
+            secret_key = None
+
+        raw_tok = pdict.get("session_token")
+        if hasattr(raw_tok, "get_secret_value"):
+            session_token = raw_tok.get_secret_value()
+        elif raw_tok is not None:
+            session_token = str(raw_tok)
+        else:
+            session_token = None
+
+        findings, raw = await self.run(
+            profile=pdict.get("profile"),
+            access_key=pdict.get("access_key") or pdict.get("aws_access_key"),
+            secret_key=secret_key,
+            session_token=session_token,
+            region=pdict.get("region") or pdict.get("aws_region") or "us-east-1",
+        )
+
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"aws-privesc-{pdict.get('region', 'us-east-1')}-{finding.mitre_technique}",
+                source_target=f"aws:{pdict.get('region', 'us-east-1')}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "aws", "privesc"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        return ModuleResult(
+            status="success" if (findings or raw.get("privesc_paths")) else "partial",
+            findings=findings, raw=raw, module_id=self.MODULE_ID,
+            execution_id=getattr(ctx, "execution_id", ""),
+        )
 
     @trace_module("cloud.aws_privesc")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:

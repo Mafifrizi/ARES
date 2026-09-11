@@ -9,10 +9,27 @@ logger = get_logger("ares.modules.cloud.aws")
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import AWSParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 SENSITIVE_PORTS = {22:"SSH",23:"Telnet",3389:"RDP",1433:"MSSQL",3306:"MySQL",
                    5432:"PostgreSQL",27017:"MongoDB",6379:"Redis",9200:"Elasticsearch"}
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.aws", failure_threshold=5),
+    params_model=AWSParams,
+)
 class AWSEnumModule(BaseModule):
     """
     cloud.aws — IAM enum, S3 misconfig, IMDS check, Security Group audit
@@ -26,6 +43,7 @@ class AWSEnumModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["aws_findings"]
     MITRE_TECHNIQUES=["T1526","T1530","T1552.005","T1580"]
+    PARAMS_MODEL       = AWSParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -34,8 +52,15 @@ class AWSEnumModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AWSParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
         # Cloud modules need AWS credentials — check at least one method available
-        has_key = bool(ctx.params.get("access_key") or ctx.params.get("aws_profile"))
+        has_key = bool(pdict.get("access_key") or pdict.get("profile") or pdict.get("aws_profile"))
         has_env = bool(__import__("os").environ.get("AWS_ACCESS_KEY_ID"))
         if not has_key and not has_env:
             raise ModuleValidationError(
@@ -50,13 +75,58 @@ class AWSEnumModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AWSParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        raw_sec = pdict.get("secret_key")
+        if hasattr(raw_sec, "get_secret_value"):
+            secret_key = raw_sec.get_secret_value()
+        elif raw_sec is not None:
+            secret_key = str(raw_sec)
+        else:
+            secret_key = None
+
+        raw_tok = pdict.get("session_token")
+        if hasattr(raw_tok, "get_secret_value"):
+            session_token = raw_tok.get_secret_value()
+        elif raw_tok is not None:
+            session_token = str(raw_tok)
+        else:
+            session_token = None
+
         findings, raw = await self.run(
-            profile=ctx.params.get("profile"),
-            access_key=ctx.params.get("access_key"),
-            secret_key=ctx.params.get("secret_key"),
-            session_token=ctx.params.get("session_token"),
-            region=ctx.params.get("region", "us-east-1"),
+            profile=pdict.get("profile"),
+            access_key=pdict.get("access_key"),
+            secret_key=secret_key,
+            session_token=session_token,
+            region=pdict.get("region") or "us-east-1",
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"aws-{pdict.get('region', 'us-east-1')}-{finding.mitre_technique}",
+                source_target=f"aws:{pdict.get('region', 'us-east-1')}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "aws", "recon"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

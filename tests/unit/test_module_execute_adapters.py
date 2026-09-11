@@ -333,6 +333,90 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
                 "auto_approve": False,
             },
         ),
+        (
+            "ares.modules.cloud.aws",
+            "AWSEnumModule",
+            {
+                "profile": "prod",
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "region": "us-west-2",
+            },
+            {
+                "profile": "prod",
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "region": "us-west-2",
+            },
+        ),
+        (
+            "ares.modules.cloud.aws_privesc",
+            "AWSPrivescModule",
+            {
+                "profile": "prod",
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "region": "us-west-2",
+            },
+            {
+                "profile": "prod",
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "region": "us-west-2",
+            },
+        ),
+        (
+            "ares.modules.cloud.azure",
+            "AzureModule",
+            {
+                "subscription_id": "00000000-0000-0000-0000-000000000000",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+            },
+            {
+                "subscription_id": "00000000-0000-0000-0000-000000000000",
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+            },
+        ),
+        (
+            "ares.modules.cloud.azure_ad",
+            "AzureADModule",
+            {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+                "technique": "enumerate",
+            },
+            {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+                "technique": "enumerate",
+            },
+        ),
+        (
+            "ares.modules.cloud.gcp",
+            "GCPModule",
+            {
+                "project_id": "corp-cloud-prod",
+                "credentials_file": "/tmp/sa.json",
+            },
+            {
+                "project_id": "corp-cloud-prod",
+                "credentials_file": "/tmp/sa.json",
+            },
+        ),
+        (
+            "ares.modules.cloud.identity_federation",
+            "CloudIdentityFederationModule",
+            {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+                "domain": "corp.local",
+                "mode": "enumerate",
+            },
+            {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "client_id": "22222222-2222-2222-2222-222222222222",
+                "domain": "corp.local",
+                "mode": "enumerate",
+            },
+        ),
     ],
 )
 def test_execute_adapter_deduplicates_explicit_ctx_params(

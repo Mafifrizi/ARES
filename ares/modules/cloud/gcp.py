@@ -32,6 +32,15 @@ logger = get_logger("ares.modules.cloud.gcp")
 from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import GCPParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 _SA_KEY_MAX_AGE_DAYS = 90   # Keys older than this are flagged
 _PUBLIC_MEMBERS = frozenset({"allUsers", "allAuthenticatedUsers"})
@@ -52,6 +61,14 @@ def _get_gcp_credentials(credentials_file: str | None = None) -> "Any":
     return credentials
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="cloud.gcp", failure_threshold=5),
+    params_model=GCPParams,
+)
 class GCPModule(BaseModule):
     """
     cloud.gcp — IAM bindings, GCS misconfig, SA key audit, metadata server
@@ -69,6 +86,7 @@ class GCPModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["gcp_findings"]
     MITRE_TECHNIQUES   = ["T1526", "T1530", "T1552.005", "T1580"]
+    PARAMS_MODEL       = GCPParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
@@ -77,8 +95,15 @@ class GCPModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        has_cred = bool(ctx.params.get("project_id") or
-                        ctx.params.get("credentials_file") or
+        params = getattr(ctx, "params", {})
+        if isinstance(params, GCPParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        has_cred = bool(pdict.get("project_id") or
+                        pdict.get("credentials_file") or
                         __import__("os").environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
         if not has_cred:
             raise ModuleValidationError(
@@ -94,10 +119,46 @@ class GCPModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        findings, raw = await self.run(**ctx.params)
-        return ModuleResult(status="success" if (findings or raw) else "partial",
-                            findings=findings, raw=raw, module_id=self.MODULE_ID,
-                            execution_id=getattr(ctx, "execution_id", ""))
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, GCPParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        project_id = pdict.get("project_id") or ""
+        credentials_file = pdict.get("credentials_file")
+
+        findings, raw = await self.run(
+            project_id=project_id,
+            credentials_file=credentials_file,
+        )
+
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"gcp-{project_id[:8]}-{finding.mitre_technique}",
+                source_target=f"gcp:{project_id[:8]}",
+                collected_by=self.MODULE_ID,
+                data={
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                    "technique": finding.mitre_technique,
+                },
+                tags=["cloud", "gcp", "recon"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        return ModuleResult(
+            status="success" if (findings or raw) else "partial",
+            findings=findings, raw=raw, module_id=self.MODULE_ID,
+            execution_id=getattr(ctx, "execution_id", ""),
+        )
 
     @trace_module("cloud.gcp")
     async def run(self, project_id: str, credentials_file: str | None = None,
