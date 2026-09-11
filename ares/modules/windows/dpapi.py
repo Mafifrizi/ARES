@@ -28,11 +28,29 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, secure_mkstemp
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import DPAPIParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.windows.dpapi")
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=DPAPIParams,
+)
 class DPAPIModule(BaseModule):
     """
     windows.dpapi — Extract DPAPI-protected credentials: Chrome passwords, WiFi PSK, Windows Credential Manager, RDP
@@ -55,6 +73,7 @@ class DPAPIModule(BaseModule):
     OUTPUTS            = ["cleartext_credentials", "browser_passwords"]
     MITRE_TECHNIQUES   = ["T1555.004", "T1555.003"]
     MODULE_TIMEOUT_SECONDS: int | None = 180  # seconds
+    PARAMS_MODEL       = DPAPIParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -138,23 +157,32 @@ class DPAPIModule(BaseModule):
         )
 
     async def validate(self, ctx: "Any") -> None:
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 "windows.dpapi requires 'target' — IP of target Windows host.",
                 module_id=self.MODULE_ID, field="target",
             )
-        username = ctx.params.get("username", "")
+        username = (ctx.params.get("username", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "username", ""))
         if not username:
             raise ModuleValidationError(
                 "windows.dpapi requires 'username' — target user whose DPAPI blobs to decrypt.",
                 module_id=self.MODULE_ID, field="username",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -165,17 +193,40 @@ class DPAPIModule(BaseModule):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
 
-        target       = sanitize_hostname(
-            getattr(ctx, "target", "") or ctx.params.get("target", "")
-        )
-        username     = ctx.params.get("username", "")
-        password     = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        domain       = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
-        target_user  = ctx.params.get("target_user", username)   # whose blobs to decrypt
-        nt_hash      = ctx.params.get("nt_hash", "")             # for offline decryption
-        backup_key   = ctx.params.get("backup_key", "")          # domain backup key PEM
-        mode         = ctx.params.get("mode", "auto")            # auto|user|backup|offline
+        target       = getattr(ctx, "target", "")
+        username     = ""
+        password     = ""
+        domain       = getattr(ctx, "domain", "")
+        target_user  = ""
+        nt_hash      = ""
+        backup_key   = ""
+        mode         = "auto"
         campaign_id  = getattr(ctx, "campaign_id", "")
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, DPAPIParams):
+            target = params.target or target
+            username = params.username or ""
+            password = params.password.get_secret_value() if hasattr(params.password, "get_secret_value") else (params.password or "")
+            domain = params.domain or domain
+            target_user = getattr(params, "target_user", username) or username
+            nt_hash = getattr(params, "nt_hash", "") or ""
+            backup_key = getattr(params, "backup_key", "") or ""
+            mode = getattr(params, "mode", "auto") or "auto"
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            username = params.get("username", "")
+            raw_pass = params.get("password") or params.get("secret", "")
+            password = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
+            domain = params.get("domain") or domain
+            target_user = params.get("target_user", username) or username
+            nt_hash = params.get("nt_hash", "")
+            backup_key = params.get("backup_key", "")
+            mode = params.get("mode", "auto")
+
+        target = sanitize_hostname(target)
+        if not target_user:
+            target_user = username
 
         # Parse NTLM hash if password looks like one
         lmhash, nthash_login = "", ""
@@ -193,6 +244,26 @@ class DPAPIModule(BaseModule):
             target_user=target_user, nt_hash=nt_hash,
             backup_key=backup_key, mode=mode, campaign_id=campaign_id,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"windows-dpapi-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["windows", "dpapi"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

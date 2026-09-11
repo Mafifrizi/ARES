@@ -15,11 +15,29 @@ from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import TokenImpersonationParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.windows.token_impersonation")
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 445, 5985], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=TokenImpersonationParams,
+)
 class TokenImpersonationModule(BaseModule):
     """
     windows.token_impersonation — Detect SeImpersonatePrivilege on current session — prerequisite check for Potato-family privileg
@@ -41,6 +59,7 @@ class TokenImpersonationModule(BaseModule):
     REQUIRES           = ["lateral_session"]
     OUTPUTS            = ["privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1134.001", "T1134.002"]
+    PARAMS_MODEL       = TokenImpersonationParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
@@ -83,17 +102,26 @@ class TokenImpersonationModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 "windows.token_impersonation requires 'target'.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -102,17 +130,50 @@ class TokenImpersonationModule(BaseModule):
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
-        target   = getattr(ctx, "target", ctx.params.get("target", ""))
-        username = ctx.params.get("username", "")
-        password = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
-        params = dict(ctx.params)
-        for key in ("target", "username", "password", "domain"):
-            params.pop(key, None)
+        target   = getattr(ctx, "target", "")
+        username = ""
+        password = ""
+        domain   = getattr(ctx, "domain", "")
+        extra_params: dict[str, Any] = {}
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, TokenImpersonationParams):
+            target = params.target or target
+            username = params.username or ""
+            password = params.password.get_secret_value() if hasattr(params.password, "get_secret_value") else (params.password or "")
+            domain = params.domain or domain
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            username = params.get("username", "")
+            raw_pass = params.get("password") or params.get("secret", "")
+            password = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
+            domain = params.get("domain") or domain
+            extra_params = {k: v for k, v in params.items() if k not in ("target", "username", "password", "secret", "domain")}
+
         findings, raw = await self.run(
             target=target, username=username, password=password, domain=domain,
-            **params
+            **extra_params
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"windows-token-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["windows", "token_impersonation"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

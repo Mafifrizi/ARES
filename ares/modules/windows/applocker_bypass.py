@@ -25,7 +25,17 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
+from ares.modules.params import AppLockerBypassParams
 from ares.core.tracing import trace_module
+from ares.sdk import (
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.windows.applocker_bypass")
 
@@ -58,20 +68,26 @@ _LOLBINS: list[dict[str, str]] = [
 # Commonly writable paths inside trusted Windows locations
 _TRUSTED_WRITABLE_CANDIDATES: list[str] = [
     "%windir%\\Tasks",
-    "%windir%\\Tracing",
-    "%windir%\\System32\\spool\\drivers\\color",
+    "%windir%\\Temp",
+    "%windir%\\System32\\Spool\\Drivers\\Color",
+    "%windir%\\System32\\Microsoft\\Crypto\\RSA\\MachineKeys",
     "%windir%\\System32\\Tasks",
-    "%windir%\\SysWOW64\\Tasks",
-    "%temp%",
-    "%localappdata%\\Temp",
-    "%appdata%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
-    "%programdata%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup",
+    "%windir%\\Tracing",
+    "%windir%\\Registration\\CRMLog",
 ]
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[135, 139, 445, 5985], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=LockoutCircuitBreaker(),
+    params_model=AppLockerBypassParams,
+)
 class AppLockerBypassModule(BaseModule):
     """
-    windows.applocker_bypass — Enumerate AppLocker rules from registry, identify enforcement mode, and detect writable trusted 
+    windows.applocker_bypass — Enumerate AppLocker policy from registry, identify enforcement mode, and detect writable trusted 
 
     OPSEC: LOW
     MITRE: "T1218", "T1574.001", "T1082"
@@ -90,20 +106,30 @@ class AppLockerBypassModule(BaseModule):
     REQUIRES           = ["local_admin_creds"]
     OUTPUTS            = ["applocker_config", "privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1218", "T1574.001", "T1082"]
+    PARAMS_MODEL       = AppLockerBypassParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        if isinstance(ctx.params, dict):
+            if not ctx.params.get("target") and getattr(ctx, "target", None):
+                ctx.params["target"] = ctx.target
+            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
+                ctx.params["domain"] = ctx.domain
+            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
+                cred = ctx.best_credential()
+                if cred and cred.username:
+                    ctx.params["username"] = cred.username
+        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
                 f"{self.MODULE_ID} requires 'target' — IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -115,13 +141,47 @@ class AppLockerBypassModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True},
             )
-        target   = getattr(ctx, "target", ctx.params.get("target", ""))
-        username = ctx.params.get("username", "")
-        password = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
+        target   = getattr(ctx, "target", "")
+        username = ""
+        password = ""
+        domain   = getattr(ctx, "domain", "")
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AppLockerBypassParams):
+            target = params.target or target
+            username = params.username or ""
+            password = params.password.get_secret_value() if hasattr(params.password, "get_secret_value") else (params.password or "")
+            domain = params.domain or domain
+        elif isinstance(params, dict):
+            target = params.get("target") or target
+            username = params.get("username", "")
+            raw_pass = params.get("password") or params.get("secret", "")
+            password = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
+            domain = params.get("domain") or domain
+
         findings, raw = await self.run(
             target=target, username=username, password=password, domain=domain,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for finding in findings:
+            ev = EvidenceRecord(
+                artifact_id=f"windows-applocker-{target.replace('.', '-')}",
+                source_target=target,
+                collected_by=self.MODULE_ID,
+                data={
+                    "target": target,
+                    "title": finding.title,
+                    "severity": str(finding.severity),
+                },
+                tags=["windows", "applocker_bypass"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
