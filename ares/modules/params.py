@@ -265,7 +265,7 @@ class DCSyncParams(DomainAuthParams):
 class AWSParams(ModuleParams):
     profile: str | None = param("AWS named profile", required=False, default=None)
     access_key: str | None = param(
-        "AWS Access Key ID", required=False, default=None, min_length=16, max_length=128
+        "AWS Access Key ID", required=False, default=None, max_length=128
     )
     secret_key: SecretParam | None = param(
         "AWS Secret Key", required=False, default=None, secret=True
@@ -279,6 +279,22 @@ class AWSParams(ModuleParams):
         default="us-east-1",
         pattern=r"^[a-z]{2}-[a-z]+-\d$",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aws_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "aws_access_key" in data and not data.get("access_key"):
+                data["access_key"] = data["aws_access_key"]
+            if "aws_secret_key" in data and not data.get("secret_key"):
+                data["secret_key"] = data["aws_secret_key"]
+            if "aws_session_token" in data and not data.get("session_token"):
+                data["session_token"] = data["aws_session_token"]
+            if "aws_region" in data and not data.get("region"):
+                data["region"] = data["aws_region"]
+            if "aws_profile" in data and not data.get("profile"):
+                data["profile"] = data["aws_profile"]
+        return data
 
 
 class LinuxPrivescParams(ModuleParams):
@@ -417,7 +433,7 @@ class AWSPrivescParams(ModuleParams):
     """cloud.aws_privesc — AWS IAM privilege escalation."""
 
     access_key: str | None = param(
-        "AWS Access Key ID", required=False, default=None, min_length=16, max_length=128
+        "AWS Access Key ID", required=False, default=None, max_length=128
     )
     secret_key: SecretParam | None = param(
         "AWS Secret Key", required=False, default=None, secret=True
@@ -431,6 +447,20 @@ class AWSPrivescParams(ModuleParams):
         default="us-east-1",
         pattern=r"^[a-z]{2}-[a-z]+-\d+$",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aws_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "aws_access_key" in data and not data.get("access_key"):
+                data["access_key"] = data["aws_access_key"]
+            if "aws_secret_key" in data and not data.get("secret_key"):
+                data["secret_key"] = data["aws_secret_key"]
+            if "aws_session_token" in data and not data.get("session_token"):
+                data["session_token"] = data["aws_session_token"]
+            if "aws_region" in data and not data.get("region"):
+                data["region"] = data["aws_region"]
+        return data
 
 
 class AzureParams(ModuleParams):
