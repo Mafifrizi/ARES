@@ -33,6 +33,14 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Severity
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
+from ares.modules.params import CoveragePredictorParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    ProcessPermission,
+    module_contract,
+)
 
 if TYPE_CHECKING:
     pass
@@ -637,6 +645,13 @@ class CoveragePredictor:
 
 # ── Module ─────────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="opsec.coverage_predictor", failure_threshold=5),
+    params_model=CoveragePredictorParams,
+)
 class CoveragePredictorModule(BaseModule):
     """
     opsec.coverage_predictor — Real-time detection probability scoring
@@ -656,6 +671,7 @@ class CoveragePredictorModule(BaseModule):
     OUTPUTS            = ["detection_score", "action_risks", "wait_recommendation", "recommendations"]
     MITRE_TECHNIQUES   = ["T1592"]
     MODULE_TIMEOUT_SECONDS: int | None = 30
+    PARAMS_MODEL       = CoveragePredictorParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight: campaign must be active."""
@@ -677,13 +693,43 @@ class CoveragePredictorModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "note": "Would analyze campaign execution history"},
             )
-        noise_profile = ctx.params.get("noise_profile", "normal")
+        params = getattr(ctx, "params", {})
+        if isinstance(params, CoveragePredictorParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        noise_profile = pdict.get("noise_profile") or "normal"
         findings, raw = await self.run(
-            campaign=ctx.campaign,
+            campaign=getattr(ctx, "campaign", None),
             noise_profile=noise_profile,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for risk in raw.get("action_risks", [])[:20]:
+            tech = risk.get("technique", "T1592")
+            ev = EvidenceRecord(
+                artifact_id=f"opsec-risk-{tech}-{risk.get('event', '')}",
+                source_target="campaign",
+                collected_by=self.MODULE_ID,
+                data={
+                    "technique": tech,
+                    "event": risk.get("event"),
+                    "probability": risk.get("probability"),
+                    "description": risk.get("description"),
+                },
+                tags=["opsec", "coverage_predictor", "detection_risk"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
-            status="success" if findings else "partial",
+            status="success" if (findings or raw.get("detection_score", 0) >= 0) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

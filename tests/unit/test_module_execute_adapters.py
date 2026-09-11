@@ -22,6 +22,7 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
         dry_run=False,
         execution_id="adapter-test",
         vault=params.get("vault"),
+        campaign=params.get("campaign"),
         best_credential=lambda: None,
     )
 
@@ -272,6 +273,64 @@ def _ctx(params: dict[str, Any]) -> SimpleNamespace:
                 "destination": "/tmp/staged",
                 "platform": "linux",
                 "max_files": 100,
+            },
+        ),
+        (
+            "ares.modules.recon.fingerprint",
+            "FingerprintModule",
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "domain": "corp.local",
+                "secret": "Password1!",
+                "timeout": 5.0,
+            },
+            {
+                "target": "10.0.0.1",
+                "username": "admin",
+                "domain": "corp.local",
+                "secret": "Password1!",
+                "timeout": 5.0,
+            },
+        ),
+        (
+            "ares.modules.edr.bypass_adaptive",
+            "EDRAdaptiveBypassModule",
+            {
+                "target": "10.0.0.1",
+                "edr_vendor": "crowdstrike",
+                "os_version": "Windows Server 2022",
+            },
+            {
+                "target": "10.0.0.1",
+                "edr_vendor": "crowdstrike",
+                "os_version": "Windows Server 2022",
+            },
+        ),
+        (
+            "ares.modules.opsec.coverage_predictor",
+            "CoveragePredictorModule",
+            {
+                "noise_profile": "stealth",
+            },
+            {
+                "noise_profile": "stealth",
+            },
+        ),
+        (
+            "ares.modules.ai.autonomous_planner",
+            "AIAutonomousPlannerModule",
+            {
+                "goal": "domain_admin",
+                "llm_backend": "claude",
+                "llm_model": "claude-3-7-sonnet",
+                "auto_approve": False,
+            },
+            {
+                "goal": "domain_admin",
+                "llm_backend": "claude",
+                "llm_model": "claude-3-7-sonnet",
+                "auto_approve": False,
             },
         ),
     ],

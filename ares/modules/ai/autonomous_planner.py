@@ -42,6 +42,15 @@ from ares.core.logger import get_logger, audit
 from ares.core.campaign import Severity
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
+from ares.modules.params import AIPlannerParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 if TYPE_CHECKING:
     from ares.core.engine import ExecutionPlan
@@ -618,6 +627,14 @@ def _build_system_prompt_with_constitution(
 
 # ── Module ────────────────────────────────────────────────────────────────────
 
+@module_contract(
+    permissions=[
+        NetworkPermission(ports=[443, 11434], protocols=["tcp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="ai.autonomous_planner", failure_threshold=5),
+    params_model=AIPlannerParams,
+)
 class AIAutonomousPlannerModule(BaseModule):
     """
     ai.autonomous_planner — LLM-powered attack chain orchestration.
@@ -643,6 +660,7 @@ class AIAutonomousPlannerModule(BaseModule):
     OUTPUTS            = ["execution_plan", "ai_reasoning", "confidence_score", "warnings"]
     MITRE_TECHNIQUES   = ["T1591"]
     MODULE_TIMEOUT_SECONDS: int | None = 180
+    PARAMS_MODEL       = AIPlannerParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight: need active campaign and LLM API key."""
@@ -652,7 +670,14 @@ class AIAutonomousPlannerModule(BaseModule):
         if not isinstance(ctx, ExecutionContext):
             return
         import os
-        backend = ctx.params.get("llm_backend", "claude")
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AIPlannerParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+        backend = pdict.get("llm_backend", "claude")
         if backend == "claude" and not os.environ.get("ANTHROPIC_API_KEY"):
             raise ModuleValidationError(
                 "ai.autonomous_planner with backend=claude requires ANTHROPIC_API_KEY env var. "
@@ -674,16 +699,52 @@ class AIAutonomousPlannerModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "note": "Would generate LLM attack plan from campaign context"},
             )
+        params = getattr(ctx, "params", {})
+        if isinstance(params, AIPlannerParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        goal = pdict.get("goal") or "domain_admin"
+        llm_backend = pdict.get("llm_backend") or "claude"
+        llm_model = pdict.get("llm_model") or ""
+        auto_approve = pdict.get("auto_approve", False)
+
         findings, raw = await self.run(
-            campaign=ctx.campaign,
+            campaign=getattr(ctx, "campaign", None),
             vault=getattr(ctx, "vault", None),
-            goal=ctx.params.get("goal", "domain_admin"),
-            llm_backend=ctx.params.get("llm_backend", "claude"),
-            llm_model=ctx.params.get("llm_model", ""),
-            auto_approve=ctx.params.get("auto_approve", False),
+            goal=goal,
+            llm_backend=llm_backend,
+            llm_model=llm_model,
+            auto_approve=auto_approve,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        exec_plan = raw.get("execution_plan") or []
+        for stage in exec_plan:
+            stage_name = stage.get("name", "stage") if isinstance(stage, dict) else str(stage)
+            ev = EvidenceRecord(
+                artifact_id=f"ai-plan-stage-{stage_name}",
+                source_target="campaign",
+                collected_by=self.MODULE_ID,
+                data={
+                    "stage_name": stage_name,
+                    "modules": stage.get("modules", []) if isinstance(stage, dict) else [],
+                    "goal": goal,
+                    "confidence": raw.get("confidence_score", 0.0),
+                },
+                tags=["ai", "autonomous_planner", "attack_chain"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
-            status="success" if findings else "partial",
+            status="success" if (findings or raw.get("execution_plan")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

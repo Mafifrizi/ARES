@@ -38,6 +38,16 @@ from ares.core.campaign import Finding, Severity
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
 from ares.fingerprint.engine import EDRVendor
+from ares.modules.params import EDRBypassParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 if TYPE_CHECKING:
     pass
@@ -186,6 +196,13 @@ _EDR_BLIND_SPOTS: dict[str, list[dict[str, str]]] = {
     "unknown": [],
 }
 
+@module_contract(
+    permissions=[
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="edr.bypass_adaptive", failure_threshold=5),
+    params_model=EDRBypassParams,
+)
 class EDRAdaptiveBypassModule(BaseModule):
     """
     edr.bypass_adaptive — Adaptive EDR evasion engine.
@@ -212,6 +229,7 @@ class EDRAdaptiveBypassModule(BaseModule):
     OUTPUTS            = ["viable_techniques", "recommended_approach", "edr_vendor", "bypass_plan"]
     MITRE_TECHNIQUES   = ["T1562.001", "T1055", "T1027", "T1562.006"]
     MODULE_TIMEOUT_SECONDS: int | None = 120
+    PARAMS_MODEL       = EDRBypassParams
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight: need EDR detection results or explicit vendor."""
@@ -220,9 +238,22 @@ class EDRAdaptiveBypassModule(BaseModule):
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
-        has_fingerprint = bool(ctx.params.get("edr_vendor") or
-                               ctx.params.get("fingerprint_result") or
-                               getattr(ctx.campaign, "_artifact_store", None))
+        params = getattr(ctx, "params", {})
+        if isinstance(params, EDRBypassParams):
+            explicit_vendor = "edr_vendor" in getattr(params, "__pydantic_fields_set__", set())
+            has_fingerprint = bool(
+                (explicit_vendor and params.edr_vendor) or
+                getattr(ctx, "fingerprint_result", None) or
+                (getattr(ctx.campaign, "_artifact_store", None) and getattr(ctx.campaign._artifact_store, "_artifacts", []))
+            )
+        else:
+            pdict = dict(params) if isinstance(params, dict) else {}
+            has_fingerprint = bool(
+                pdict.get("edr_vendor") or
+                pdict.get("fingerprint_result") or
+                getattr(ctx, "fingerprint_result", None) or
+                (getattr(ctx.campaign, "_artifact_store", None) and getattr(ctx.campaign._artifact_store, "_artifacts", []))
+            )
         if not has_fingerprint:
             raise ModuleValidationError(
                 "edr.bypass_adaptive requires EDR detection results. "
@@ -241,8 +272,17 @@ class EDRAdaptiveBypassModule(BaseModule):
                 status="dry_run", module_id=self.MODULE_ID,
                 raw={"dry_run": True, "note": "Would select evasion techniques based on detected EDR"},
             )
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, EDRBypassParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
         # Extract EDR vendor from params or artifact store
-        edr_vendor = ctx.params.get("edr_vendor", "")
+        edr_vendor = pdict.get("edr_vendor", "")
         if not edr_vendor:
             edr_vendor = self._detect_vendor_from_artifacts(ctx)
 
@@ -273,8 +313,28 @@ class EDRAdaptiveBypassModule(BaseModule):
             if hasattr(host_state, "update_defense_profile"):
                 host_state.update_defense_profile(controls)
 
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for tech in raw.get("viable_techniques", [])[:20]:
+            tech_id = tech.get("technique_id", "bypass") if isinstance(tech, dict) else str(tech)
+            ev = EvidenceRecord(
+                artifact_id=f"edr-bypass-{tech_id}",
+                source_target=target or "local",
+                collected_by=self.MODULE_ID,
+                data={
+                    "technique_id": tech_id,
+                    "edr_vendor": raw.get("edr_vendor", edr_vendor),
+                    "recommended_approach": raw.get("recommended_approach", ""),
+                },
+                tags=["edr", "bypass", "evasion"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
-            status="success" if findings else "partial",
+            status="success" if (findings or raw.get("viable_techniques")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

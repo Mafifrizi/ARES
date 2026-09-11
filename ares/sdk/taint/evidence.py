@@ -67,19 +67,31 @@ class EvidenceRecord:
     to the preceding evidence hash to establish an unbroken audit trail.
     """
 
-    evidence_id: str
-    source_target: str
-    payload: Any
+    evidence_id: str = ""
+    source_target: str = ""
+    payload: Any = None
     timestamp_ns: int = field(default_factory=time.time_ns)
     parent_hash: str = ""
+    artifact_id: str = ""
+    collected_by: str = ""
+    data: Any = None
+    tags: list[str] = field(default_factory=list)
     sha256_hash: str = field(init=False)
     chain_hash: str = field(init=False)
 
     def __post_init__(self) -> None:
+        eff_id = self.evidence_id or self.artifact_id or "evidence"
+        object.__setattr__(self, "evidence_id", eff_id)
+        object.__setattr__(self, "artifact_id", eff_id)
+
+        eff_payload = self.payload if self.payload is not None else (self.data if self.data is not None else {})
+        object.__setattr__(self, "payload", eff_payload)
+        object.__setattr__(self, "data", eff_payload)
+
         # 1. Compute payload digest
-        serialized = json.dumps(self.payload, sort_keys=True, default=str)
+        serialized = json.dumps(eff_payload, sort_keys=True, default=str)
         payload_digest = hashlib.sha256(
-            f"{self.evidence_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
+            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
         ).hexdigest()
         object.__setattr__(self, "sha256_hash", payload_digest)
 
@@ -87,11 +99,17 @@ class EvidenceRecord:
         chain = hashlib.sha256(f"{self.parent_hash}:{payload_digest}".encode("utf-8")).hexdigest()
         object.__setattr__(self, "chain_hash", chain)
 
+    @property
+    def record_hash(self) -> str:
+        return self.sha256_hash
+
     def verify_integrity(self) -> bool:
         """Verify that the evidence payload matches its cryptographic digest."""
-        serialized = json.dumps(self.payload, sort_keys=True, default=str)
+        eff_id = self.evidence_id or self.artifact_id
+        eff_payload = self.payload if self.payload is not None else (self.data if self.data is not None else {})
+        serialized = json.dumps(eff_payload, sort_keys=True, default=str)
         recomputed = hashlib.sha256(
-            f"{self.evidence_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
+            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
         ).hexdigest()
         return hmac_equal(recomputed, self.sha256_hash)
 

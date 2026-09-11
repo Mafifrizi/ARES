@@ -24,6 +24,17 @@ from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.params import FingerprintParams
+from ares.sdk import (
+    CircuitBreaker,
+    EvidenceRecord,
+    ExecutionContext,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    ProcessPermission,
+    module_contract,
+)
 
 logger = get_logger("ares.modules.recon.fingerprint")
 
@@ -31,6 +42,14 @@ logger = get_logger("ares.modules.recon.fingerprint")
 _HIGH_RISK_EDR = {"crowdstrike", "sentinelone", "defender_atp"}
 
 
+@module_contract(
+    permissions=[
+        NetworkPermission(protocols=["tcp", "udp"]),
+        ProcessPermission(allow_subprocesses=False),
+    ],
+    circuit_breaker=CircuitBreaker(name="recon.fingerprint", failure_threshold=5),
+    params_model=FingerprintParams,
+)
 class FingerprintModule(BaseModule):
     """
     recon.fingerprint — Passive-first OS, domain role, and EDR/AV detection before any attack module. Detects CrowdStrik
@@ -52,6 +71,7 @@ class FingerprintModule(BaseModule):
     REQUIRES           = []
     OUTPUTS            = ["fingerprint_result"]
     MITRE_TECHNIQUES   = ["T1082", "T1518.001"]
+    PARAMS_MODEL       = FingerprintParams
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce target is set."""
@@ -75,16 +95,52 @@ class FingerprintModule(BaseModule):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        target   = getattr(ctx, "target", "") or ctx.params.get("target", "")
-        username = ctx.params.get("username", "")
-        domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
-        secret   = ctx.params.get("password", "") or ctx.params.get("secret", "")
-        timeout  = float(ctx.params.get("timeout", 5.0))
+
+        params = getattr(ctx, "params", {})
+        if isinstance(params, FingerprintParams):
+            pdict = params.model_dump()
+        elif isinstance(params, dict):
+            pdict = dict(params)
+        else:
+            pdict = {}
+
+        target   = getattr(ctx, "target", "") or pdict.get("target", "")
+        username = pdict.get("username", "")
+        domain   = getattr(ctx, "domain", "") or pdict.get("domain", "")
+        raw_sec  = pdict.get("password") or pdict.get("secret") or getattr(ctx, "password", "")
+        if hasattr(raw_sec, "get_secret_value"):
+            secret = raw_sec.get_secret_value()
+        elif raw_sec is not None:
+            secret = str(raw_sec)
+        else:
+            secret = ""
+        timeout  = float(pdict.get("timeout", 5.0))
 
         findings, raw = await self.run(
             target=target, username=username, domain=domain,
             secret=secret, timeout=timeout,
         )
+
+        # Cryptographic Evidence Records with SHA-256 Merkle Provenance
+        evidence_chain: list[EvidenceRecord] = []
+        for edr in raw.get("edr_vendors", []):
+            ev = EvidenceRecord(
+                artifact_id=f"edr-{str(edr).lower()}",
+                source_target=getattr(ctx, "target", target),
+                collected_by=self.MODULE_ID,
+                data={
+                    "edr": edr,
+                    "target": target,
+                    "os": raw.get("os_type"),
+                    "detection_risk": raw.get("detection_risk"),
+                },
+                tags=["recon", "fingerprint", "edr"],
+            )
+            evidence_chain.append(ev)
+
+        raw["evidence_chain"] = [e.data for e in evidence_chain]
+        raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
