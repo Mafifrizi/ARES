@@ -73,7 +73,8 @@ keys, bearer tokens, or sensitive report URLs.
 | Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
 | Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
-| Graph | `docs/assets/screenshots/dashboard-graph.png` | Interactive attack graph DAG with automated white patch cables, left-to-right hierarchy, and real-time safe metadata inspection. |
+| Graph | `docs/assets/screenshots/dashboard-graph.png` | Interactive attack graph DAG with automated white patch cables, left-to-right hierarchy, and top attack paths panel. |
+| Graph Inspector | `docs/assets/screenshots/dashboard-graph-inspector.png` | Interactive Safe Detail slide-out drawer with asset telemetry, open ports, and compromise status. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
 
 ## Dashboard Shell
@@ -335,15 +336,20 @@ Purpose: understand relationships and attack paths.
 
 ![Attack graph visualization](assets/screenshots/dashboard-graph.png)
 
-*Multi-Vector Attack Graph — Automated white patch cables connecting Domain Controllers, security findings, and discovered hosts with real-time metadata inspector.*
+*Multi-Vector Attack Graph — Automated white patch cables connecting Domain Controllers, security findings, and discovered hosts with top attack paths.*
+
+![Attack graph node inspector](assets/screenshots/dashboard-graph-inspector.png)
+
+*Safe Detail Node Inspector — Click any node on the canvas to open the slide-out drawer displaying live asset telemetry, open ports, and compromise status.*
 
 Use it for:
 
-- Campaign graph review.
-- Attack path review.
-- BloodHound JSON ingest.
+- Campaign graph review and entity relationship exploration.
+- Safe detail inspection (IP, hostname, open ports, DC flag, and ownership state).
+- Attack path review and shortest hop compromise analysis.
+- BloodHound JSON archive ingest.
 
-This is useful after enumeration modules create users, computers, groups, and
+This is useful after enumeration modules discover Active Directory entities, computers, groups, and
 relationships.
 
 ### Templates

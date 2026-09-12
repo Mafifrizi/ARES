@@ -257,21 +257,21 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ### 8. 🔍 Attack Graph Entity Deep-Dive & Node Inspector
 
-*In-depth Active Directory entity telemetry, relationship inspection, and real-time risk scoring directly inside the canvas.*
+*In-depth Active Directory entity telemetry, relationship inspection, and real-time safe detail auditing directly inside the canvas.*
 
 <div align="center">
 
 ![ARES Attack Graph Entity Deep-Dive & Node Inspector](docs/assets/screenshots/dashboard-graph-inspector.png)
 
-*Real-time Node Inspector displaying Domain Controller (DC01.CORP.LOCAL) attributes, open attack ports (88, 389, 445, 636), and risk ratings.*
+*Interactive Safe Detail Drawer displaying Domain Controller (DC01 10.10.10.2) telemetry, active compromise levels, open attack surface ports (53, 88, 135, 139, 389, 445, 636, 3268, 3389), and asset ownership states.*
 
 </div>
 
 - **The Problem Solved**: Eliminates context-switching between graph visualizers and CLI reconnaissance tools by providing live node telemetry in an interactive sidebar.
 - **Key Capabilities**:
-  - **Entity Attribute Inspection**: Instantly examine OS versions, functional levels, Kerberos SPNs, and high-risk group memberships upon clicking any graph node.
-  - **Attack Surface Port Mapping**: Live visibility into exposed services and potential pivot paths (LDAP, Kerberos, SMB, MSSQL, WinRM).
-  - **Privilege Chokepoint Identification**: Highlights critical path bottlenecks where compromise of a single intermediate principal leads directly to Domain Admin.
+  - **Entity Attribute Inspection**: Instantly examine IP address, hostname, OS telemetry, compromise levels, and domain controller flags (`is_dc`) upon selecting any graph node.
+  - **Attack Surface Port Mapping**: Real-time visibility into open infrastructure ports (DNS `53`, Kerberos `88`, RPC `135`, NetBIOS `139`, LDAP `389`, SMB `445`, LDAPS `636`, Global Catalog `3268`, RDP `3389`).
+  - **Safe Detail Auditing**: Audited slide-out drawer providing granular telemetry without cluttering the main DAG canvas, complete with quick dismissal.
 
 ---
 
@@ -535,14 +535,20 @@ ARES was designed for environments with the most stringent compliance and confid
 - **HMAC CSRF Barrier**: State-changing endpoints mandate valid `X-ARES-CSRF` headers matched against cryptographically secure cookie tokens.
 
 ### Role-Based Access Control (RBAC)
-ARES enforces strict RBAC permissions across all API endpoints and UI controls:
+ARES enforces strict RBAC permissions across all API endpoints, background jobs, and UI surfaces:
 
-| Role | Operational Scope | Administrative Authority |
-| :--- | :--- | :--- |
-| **`team_lead`** | Complete platform authority: campaign creation/deletion, user provisioning, security audits, high-noise module overrides. | Full |
-| **`operator`** | Day-to-day operations: execute authorized modules, review findings, explore attack graph, generate reports. | Operational Tier |
-| **`recon`** | Read-heavy reconnaissance: execute safe discovery and network fingerprinting modules. Execution of disruptive modules is blocked. | Read-Heavy |
-| **`reporter`** | Stakeholder review: read-only access to campaign analytics, findings, attack graphs, and generated deliverables. | Read-Only |
+| Role | API Value | Operational Scope | Administrative Authority |
+| :--- | :---: | :--- | :--- |
+| **Team Lead** | `team_lead` | Complete platform authority: campaign creation/deletion, user provisioning, security audits, high-noise module overrides. | Full System Admin |
+| **Operator** | `operator` | Day-to-day operations: execute authorized modules, review findings, explore attack graph, generate reports. Cannot register users. | Operational Tier |
+| **Recon** | `recon` | Read-heavy reconnaissance: execute safe discovery and network fingerprinting modules. Execution of disruptive modules is blocked. | Read-Heavy |
+| **Reporter** | `reporter` | Stakeholder review: read-only access to campaign analytics, findings, attack graphs, and generated deliverables. No execution rights. | Read-Only Audit |
+
+#### Role Provisioning & Anti-Privilege Escalation Guarantees
+- **Authoritative Database Identity**: Unlike systems that blindly trust client-side JWT role claims, ARES resolves user identity and role directly from the live database on every request (`row = await db.resolve_access_token_principal(...)`). Tampered JWT claims are mathematically discarded.
+- **Strict Role Gating at Account Creation**: New user roles are assigned exclusively by a `team_lead` via `POST /auth/register` (guarded by `require_team_lead()`) or automatically mapped from enterprise Identity Providers during SP-initiated SAML/OIDC SSO.
+- **Role Immutability**: Role assignments are immutable post-creation. No public endpoint exists to alter user roles (`PUT /users/{id}` does not exist), eliminating horizontal and vertical privilege escalation vectors (e.g., `recon` escalating to `team_lead` or `reporter` running offensive modules).
+- **Audited User Inventory**: The dashboard `Security` console provides a transparent inventory of all registered identities and active sessions for engagement accountability.
 
 ---
 
