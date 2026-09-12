@@ -73,6 +73,7 @@ keys, bearer tokens, or sensitive report URLs.
 | Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
 | Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
+| Graph | `docs/assets/screenshots/dashboard-graph.png` | Interactive attack graph DAG with automated white patch cables, left-to-right hierarchy, and real-time safe metadata inspection. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
 
 ## Dashboard Shell
@@ -331,6 +332,10 @@ the clean empty state: `No reports generated for this campaign yet.`
 ### Graph
 
 Purpose: understand relationships and attack paths.
+
+![Attack graph visualization](assets/screenshots/dashboard-graph.png)
+
+*Multi-Vector Attack Graph — Automated white patch cables connecting Domain Controllers, security findings, and discovered hosts with real-time metadata inspector.*
 
 Use it for:
 
