@@ -1966,11 +1966,88 @@ textarea.field {
   background: #09090b;
 }
 
-.graph-canvas .react-flow__controls,
-.graph-canvas .react-flow__minimap {
-  border: 1px solid #27272a;
-  border-radius: 6px;
-  background: #121215;
+.graph-canvas .react-flow__controls {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(18, 18, 21, 0.92);
+  backdrop-filter: blur(8px);
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.graph-canvas .react-flow__controls-button {
+  width: 28px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 6px !important;
+  color: #e4e4e7 !important;
+  fill: #e4e4e7 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  transition: background-color 120ms ease, color 120ms ease, transform 100ms ease;
+}
+
+.graph-canvas .react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+.graph-canvas .react-flow__controls-button:active {
+  transform: scale(0.95);
+}
+
+.graph-canvas .react-flow__controls-button svg {
+  max-width: 13px !important;
+  max-height: 13px !important;
+  fill: currentColor !important;
+}
+
+/* Cyber Patch Socket Handles */
+.graph-canvas .ares-flow-handle {
+  width: 7px !important;
+  height: 7px !important;
+  background: #ffffff !important;
+  border: 1.5px solid #09090b !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.9), 0 0 8px rgba(255, 255, 255, 0.45) !important;
+  pointer-events: none !important;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.graph-canvas .ares-flow-node:hover .ares-flow-handle {
+  box-shadow: 0 0 8px #ffffff, 0 0 14px rgba(255, 255, 255, 0.95) !important;
+  transform: scale(1.2);
+}
+
+/* Connecting White Cables */
+.graph-canvas .react-flow__edge-path {
+  stroke: #ffffff !important;
+  stroke-width: 2.2px !important;
+  stroke-linecap: round;
+  fill: none !important;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.9)) drop-shadow(0 0 8px rgba(255, 255, 255, 0.45));
+}
+
+.graph-canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6 4 !important;
+  animation: aresCableSignal 1.8s linear infinite !important;
+}
+
+@keyframes aresCableSignal {
+  from {
+    stroke-dashoffset: 20;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 .ares-flow-node {

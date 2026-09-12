@@ -195,7 +195,18 @@ class AttackGraph:
             if not ip:
                 continue
             node_id = f"host:{ip}"
-            host_ids[ip] = node_id
+            host_ids[ip.lower()] = node_id
+            hostname = str(host.get("hostname") or "").strip().lower()
+            if hostname:
+                host_ids[hostname] = node_id
+                if "." in hostname:
+                    host_ids[hostname.split(".")[0]] = node_id
+            fqdn = str(host.get("fqdn") or "").strip().lower()
+            if fqdn:
+                host_ids[fqdn] = node_id
+                if "." in fqdn:
+                    host_ids[fqdn.split(".")[0]] = node_id
+
             label = str(host.get("hostname") or ip)
             self._add_node(GraphNode(
                 node_id=node_id,
@@ -211,6 +222,32 @@ class AttackGraph:
                 risk_score=4.0 if host.get("is_dc") else 2.0,
                 is_target=bool(host.get("is_dc")),
             ))
+
+        # Lateral movement paths between hosts in the environment
+        dc_ids = [f"host:{h.get('ip_address')}" for h in hosts if h.get("is_dc")]
+        ws_ids = [
+            f"host:{h.get('ip_address')}" for h in hosts
+            if not h.get("is_dc") and any(w in str(h.get("hostname", "")).lower() for w in ("ws", "pc", "client", "workstation"))
+        ]
+        srv_ids = [
+            f"host:{h.get('ip_address')}" for h in hosts
+            if not h.get("is_dc") and any(s in str(h.get("hostname", "")).lower() for s in ("sql", "fs", "srv"))
+        ]
+        for ws_id in ws_ids:
+            for srv_id in srv_ids:
+                if ws_id in self._g and srv_id in self._g and ws_id != srv_id:
+                    self._add_edge(GraphEdge(
+                        source=ws_id, target=srv_id,
+                        edge_type="lateral", label="pivot", weight=1.5,
+                    ))
+        for srv_id in srv_ids:
+            for dc_id in dc_ids:
+                if srv_id in self._g and dc_id in self._g and srv_id != dc_id:
+                    self._add_edge(GraphEdge(
+                        source=srv_id, target=dc_id,
+                        edge_type="lateral", label="domain_admin", weight=2.0,
+                    ))
+
         for finding in findings:
             finding_id = str(finding.get("id") or "")
             title = str(finding.get("title") or "Finding")
@@ -228,10 +265,13 @@ class AttackGraph:
                 },
                 risk_score=float(finding.get("cvss_score") or 0.0),
             ))
-            host = str(finding.get("host") or "")
-            if host in host_ids:
+            host = str(finding.get("host") or "").strip().lower()
+            target_host_node = host_ids.get(host)
+            if not target_host_node and "." in host:
+                target_host_node = host_ids.get(host.split(".")[0])
+            if target_host_node and target_host_node in self._g:
                 self._add_edge(GraphEdge(
-                    source=host_ids[host], target=node_id,
+                    source=target_host_node, target=node_id,
                     edge_type="finding", label="finding", weight=1.0,
                 ))
         for credential in credentials:

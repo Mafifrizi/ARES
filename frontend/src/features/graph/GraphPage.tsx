@@ -3,7 +3,6 @@ import {
   Controls,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   ReactFlow,
   type Edge,
@@ -14,7 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, X } from "lucide-react";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../../api/client";
 import type { AttackPath, Campaign, SafeGraphValue } from "../../api/types";
 import {
@@ -54,32 +53,53 @@ function AresGraphNode({ data, selected }: NodeProps<CanvasNode>) {
       className={`ares-flow-node${selected ? " selected" : ""}${data.dimmed ? " dimmed" : ""}`}
       style={{ "--node-color": data.color } as CSSProperties}
     >
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Left} id="left-target" isConnectable={false} className="ares-flow-handle" />
+      <Handle type="source" position={Position.Left} id="left-source" isConnectable={false} className="ares-flow-handle" />
       <span className="ares-flow-node-type">{data.type}</span>
       <strong>{data.label}</strong>
       {data.severity && <small className={`status-${data.severity}`}>{data.severity}</small>}
-      <Handle type="source" position={Position.Right} />
+      <Handle type="target" position={Position.Right} id="right-target" isConnectable={false} className="ares-flow-handle" />
+      <Handle type="source" position={Position.Right} id="right-source" isConnectable={false} className="ares-flow-handle" />
     </div>
   );
 }
 
+const TYPE_COLUMN_ORDER: Record<string, number> = {
+  dc: 0,
+  domain: 0,
+  finding: 1,
+  host: 2,
+  user: 3,
+  group: 3,
+};
+
 function graphLayout(graph: SafeGraph, highlightedNodeIds: Set<string>, highlightedEdgeIds: Set<string>) {
-  const ordered = [...graph.nodes].sort((left, right) => (
-    left.type.localeCompare(right.type) || left.label.localeCompare(right.label)
-  ));
-  const rowsByType = new Map<string, number>();
-  const columnByType = new Map<string, number>();
-  [...new Set(ordered.map((node) => node.type))].forEach((type, index) => columnByType.set(type, index));
+  const ordered = [...graph.nodes].sort((left, right) => {
+    const colA = TYPE_COLUMN_ORDER[left.type.toLowerCase()] ?? 4;
+    const colB = TYPE_COLUMN_ORDER[right.type.toLowerCase()] ?? 4;
+    if (colA !== colB) return colA - colB;
+    return left.type.localeCompare(right.type) || left.label.localeCompare(right.label);
+  });
+
+  const nodeColMap = new Map<string, number>();
+  ordered.forEach((node) => {
+    nodeColMap.set(node.id, TYPE_COLUMN_ORDER[node.type.toLowerCase()] ?? 4);
+  });
+
+  const rowsByColumn = new Map<number, number>();
   const shouldDim = highlightedNodeIds.size > 0;
+
   const nodes: CanvasNode[] = ordered.map((node) => {
-    const row = rowsByType.get(node.type) ?? 0;
-    rowsByType.set(node.type, row + 1);
+    const colIndex = TYPE_COLUMN_ORDER[node.type.toLowerCase()] ?? 4;
+    const row = rowsByColumn.get(colIndex) ?? 0;
+    rowsByColumn.set(colIndex, row + 1);
+
     return {
       id: node.id,
       type: "ares",
       position: {
-        x: (columnByType.get(node.type) ?? 0) * 255,
-        y: (row % 8) * 118 + Math.floor(row / 8) * 36
+        x: colIndex * 310,
+        y: row * 105
       },
       data: {
         label: node.label,
@@ -90,23 +110,42 @@ function graphLayout(graph: SafeGraph, highlightedNodeIds: Set<string>, highligh
       }
     };
   });
-  const edges: CanvasEdge[] = graph.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label || edge.type,
-    animated: highlightedEdgeIds.has(edge.id),
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: {
-      stroke: edge.color || "#52525b",
-      strokeWidth: highlightedEdgeIds.has(edge.id) ? 3 : 1.5,
-      opacity: highlightedEdgeIds.size > 0 && !highlightedEdgeIds.has(edge.id) ? 0.18 : 1,
-      strokeDasharray: edge.dashed ? "5 4" : undefined
-    },
-    labelStyle: { fill: "#d4d4d8", fontSize: 11, fontWeight: 600 },
-    labelBgStyle: { fill: "#18181b", fillOpacity: 0.95 },
-    labelBgPadding: [4, 3]
-  }));
+
+  const edges: CanvasEdge[] = graph.edges.map((edge) => {
+    const isHighlighted = highlightedEdgeIds.has(edge.id);
+    const hasAnyHighlight = highlightedEdgeIds.size > 0;
+    const colSource = nodeColMap.get(edge.source) ?? 0;
+    const colTarget = nodeColMap.get(edge.target) ?? 0;
+
+    let sourceHandle = "right-source";
+    let targetHandle = "left-target";
+
+    if (colSource < colTarget) {
+      sourceHandle = "right-source";
+      targetHandle = "left-target";
+    } else if (colSource > colTarget) {
+      sourceHandle = "left-source";
+      targetHandle = "right-target";
+    } else {
+      sourceHandle = "right-source";
+      targetHandle = "right-target";
+    }
+
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle,
+      targetHandle,
+      type: "default",
+      animated: isHighlighted,
+      style: {
+        stroke: "#ffffff",
+        strokeWidth: isHighlighted ? 3 : 2.2,
+        opacity: hasAnyHighlight && !isHighlighted ? 0.2 : 0.95
+      }
+    };
+  });
   return { nodes, edges };
 }
 
@@ -292,8 +331,7 @@ function GraphCanvas({ graph, highlightedNodeIds, highlightedEdgeIds, onSelect }
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#27272a" gap={18} />
-        <Controls showInteractive={false} />
-        <MiniMap pannable zoomable />
+        <Controls position="bottom-left" showFitView={false} showInteractive={false} />
       </ReactFlow>
     </div>
   );
@@ -354,6 +392,13 @@ export default function GraphPage({ campaignId, onCampaignIdChange }: {
 }) {
   const queryClient = useQueryClient();
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
+
+  useEffect(() => {
+    if (!campaignId && campaigns.data && campaigns.data.length > 0) {
+      onCampaignIdChange(campaigns.data[0].id);
+    }
+  }, [campaignId, campaigns.data, onCampaignIdChange]);
+
   const graphQuery = useQuery({ queryKey: ["graph", campaignId], queryFn: () => api.graph(campaignId), enabled: Boolean(campaignId) });
   const pathsQuery = useQuery({ queryKey: ["attack-paths", campaignId], queryFn: () => api.attackPaths(campaignId), enabled: Boolean(campaignId) });
   const [activeTab, setActiveTab] = useState<"Entities" | "Attack Paths" | "Ingest">("Entities");
