@@ -20,7 +20,7 @@
 
 <br>
 
-[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Visual Gallery**](#-platform-visual-gallery) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
@@ -83,32 +83,6 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 ## 🖥️ Platform Showcase & Control Surfaces
 
 The ARES Platform features a high-performance, responsive operator dashboard engineered with dark-tech aesthetics, low cognitive load, and audited operational control.
-
-### 📸 Platform Visual Gallery
-
-| # | Feature Surface | Screenshot Evidence | Verified Technical Capabilities |
-|---|---|---|---|
-| **01** | **Operator Enclave & Auth Gateway** | [`login-enclave.png`](docs/assets/screenshots/login-enclave.png) | Dragon particle physics canvas, SSO tabs, memory-only JWT barrier |
-| **02** | **Executive Cockpit & Telemetry** | [`dashboard-overview.png`](docs/assets/screenshots/dashboard-overview.png) | 10 module runs (100% success), 8 confirmed findings, 6 targets, monthly telemetry |
-| **03** | **Scoped Campaign Operations** | [`dashboard-campaigns.png`](docs/assets/screenshots/dashboard-campaigns.png) | `camp_titan_shield`, CIDR socket whitelisting, encrypted credential vault |
-| **04** | **Attack Graph (BloodHound DAG)** | [`dashboard-graph.png`](docs/assets/screenshots/dashboard-graph.png) | 25 connected DAG nodes, shortest path to Domain Admin, crown jewel mapping |
-| **05** | **Attack Graph Node Inspector** | [`dashboard-graph-inspector.png`](docs/assets/screenshots/dashboard-graph-inspector.png) | DC01.CORP.LOCAL live attributes, exposed ports (88, 389, 445, 636) |
-| **06** | **Adversary Module Catalog** | [`dashboard-modules-catalog.png`](docs/assets/screenshots/dashboard-modules-catalog.png) | 62 modernized modules across 9 waves with MITRE ATT&CK tactic tags |
-| **07** | **Interactive Module Drawer** | [`dashboard-module-drawer.png`](docs/assets/screenshots/dashboard-module-drawer.png) | Dynamic parameter schema & OPSEC noise rating (`low`, `high_noise`) |
-| **08** | **Multi-Stage Execution Chains** | [`dashboard-modules-chains.png`](docs/assets/screenshots/dashboard-modules-chains.png) | AD Kerberos Exposure Chain & AD Domain Enumeration Chain |
-| **09** | **Module Run Console** | [`dashboard-modules-run-panel.png`](docs/assets/screenshots/dashboard-modules-run-panel.png) | Scoped campaign targeting, parameter tuning, and execution panel |
-| **10** | **Autonomous Strategy Engine** | [`dashboard-strategy.png`](docs/assets/screenshots/dashboard-strategy.png) | Goal planner (`domain_admin`, `full_compromise`) with AI agent support |
-| **11** | **EDR & OPSEC Bypass Matrix** | [`dashboard-edr.png`](docs/assets/screenshots/dashboard-edr.png) | CrowdStrike, SentinelOne, Defender evasion tracking & knowledge base |
-| **12** | **Compliance Deliverables Generator** | [`dashboard-reports.png`](docs/assets/screenshots/dashboard-reports.png) | Executive PDF, Markdown, and JSON report builder with headless Edge engine |
-| **13** | **Zero-Trust Security Governance** | [`dashboard-security.png`](docs/assets/screenshots/dashboard-security.png) | RBAC roles, scoped API key lifecycle, automated dependency audit |
-| **14** | **Live Operations WebSocket Stream** | [`dashboard-live.png`](docs/assets/screenshots/dashboard-live.png) | Real-time event streaming console with sub-second event delivery |
-| **15** | **Campaign Playbook Templates** | [`dashboard-templates.png`](docs/assets/screenshots/dashboard-templates.png) | Turnkey playbooks (`internal_pentest`, `ad_full_compromise`, `cloud_assessment`) |
-| **16** | **Interactive OpenAPI 3.1 Docs** | [`api-docs-swagger.png`](docs/assets/screenshots/api-docs-swagger.png) | Swagger UI exposing 70+ authenticated operational REST endpoints |
-
-```powershell
-# Launch local development environment
-.\.venv\Scripts\ares.exe dashboard dev --no-reload
-```
 
 ---
 
