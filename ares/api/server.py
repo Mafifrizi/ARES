@@ -114,13 +114,26 @@ logger = get_logger("ares.api.server")
 
 def _campaign_from_db_row(row: dict[str, Any]) -> Campaign:
     data = {k: v for k, v in row.items() if k in Campaign.model_fields}
+    if data.get("status") == "active":
+        data["status"] = "running"
     if "scope" not in data and row.get("scope_json"):
         import json as _json
 
         try:
             scope = _json.loads(str(row["scope_json"]))
             if isinstance(scope, list):
-                data["scope"] = scope
+                coerced_scope = []
+                for s in scope:
+                    if isinstance(s, str):
+                        try:
+                            from netaddr import IPNetwork
+                            IPNetwork(s)
+                            coerced_scope.append({"cidr": s, "description": ""})
+                        except Exception:
+                            continue
+                    elif isinstance(s, dict):
+                        coerced_scope.append(s)
+                data["scope"] = coerced_scope
         except (TypeError, ValueError):
             data["scope"] = []
     if "targets" not in data and row.get("targets_json"):
@@ -635,16 +648,29 @@ async def security_headers(request: Request, call_next: Any) -> Any:
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self'; "
-        "img-src 'self' data:; "
-        "connect-src 'self' ws: wss:; "
-        "object-src 'none'; "
-        "base-uri 'self'; "
-        "frame-ancestors 'none'"
-    )
+    is_debug = os.environ.get("ARES_DEBUG", "").lower() in ("true", "1", "yes")
+    if is_debug and request.url.path in ("/docs", "/redoc", "/openapi.json"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; "
+            "connect-src 'self' ws: wss:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self'; "
+            "img-src 'self' data:; "
+            "connect-src 'self' ws: wss:; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'"
+        )
     # HSTS is only meaningful on HTTPS — don't send on plain HTTP
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = (

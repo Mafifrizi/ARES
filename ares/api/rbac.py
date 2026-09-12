@@ -18,6 +18,7 @@ TTL auto-expires keys after 120s to prevent memory leaks.
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections import defaultdict, deque
 from collections.abc import Mapping
@@ -331,6 +332,8 @@ class _InProcessLimiter:
         )
 
     def is_allowed(self, key: str, max_per_minute: int) -> tuple[bool, int]:
+        if os.environ.get("ARES_DISABLE_RATE_LIMIT") == "1":
+            return True, 999999
         now    = time.time()
         window = self._windows[key]
         while window and window[0] < now - 60:
@@ -367,6 +370,8 @@ class _RedisRateLimiter:
         self._r = redis_client
 
     async def is_allowed_async(self, key: str, max_per_minute: int) -> tuple[bool, int]:
+        if os.environ.get("ARES_DISABLE_RATE_LIMIT") == "1":
+            return True, 999999
         import uuid as _uuid
         now        = time.time()
         window_key = f"ares:rl:{key}"

@@ -20,7 +20,7 @@
 
 <br>
 
-[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Visual Gallery**](#-platform-visual-gallery) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
@@ -83,6 +83,27 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 ## 🖥️ Platform Showcase & Control Surfaces
 
 The ARES Platform features a high-performance, responsive operator dashboard engineered with dark-tech aesthetics, low cognitive load, and audited operational control.
+
+### 📸 Platform Visual Gallery
+
+| # | Feature Surface | Screenshot Evidence | Verified Technical Capabilities |
+|---|---|---|---|
+| **01** | **Operator Enclave & Auth Gateway** | [`login-enclave.png`](docs/assets/screenshots/login-enclave.png) | Dragon particle physics canvas, SSO tabs, memory-only JWT barrier |
+| **02** | **Executive Cockpit & Telemetry** | [`dashboard-overview.png`](docs/assets/screenshots/dashboard-overview.png) | 10 module runs (100% success), 8 confirmed findings, 6 targets, monthly telemetry |
+| **03** | **Scoped Campaign Operations** | [`dashboard-campaigns.png`](docs/assets/screenshots/dashboard-campaigns.png) | `camp_titan_shield`, CIDR socket whitelisting, encrypted credential vault |
+| **04** | **Attack Graph (BloodHound DAG)** | [`dashboard-graph.png`](docs/assets/screenshots/dashboard-graph.png) | 25 connected DAG nodes, shortest path to Domain Admin, crown jewel mapping |
+| **05** | **Attack Graph Node Inspector** | [`dashboard-graph-inspector.png`](docs/assets/screenshots/dashboard-graph-inspector.png) | DC01.CORP.LOCAL live attributes, exposed ports (88, 389, 445, 636) |
+| **06** | **Adversary Module Catalog** | [`dashboard-modules-catalog.png`](docs/assets/screenshots/dashboard-modules-catalog.png) | 62 modernized modules across 9 waves with MITRE ATT&CK tactic tags |
+| **07** | **Interactive Module Drawer** | [`dashboard-module-drawer.png`](docs/assets/screenshots/dashboard-module-drawer.png) | Dynamic parameter schema & OPSEC noise rating (`low`, `high_noise`) |
+| **08** | **Multi-Stage Execution Chains** | [`dashboard-modules-chains.png`](docs/assets/screenshots/dashboard-modules-chains.png) | AD Kerberos Exposure Chain & AD Domain Enumeration Chain |
+| **09** | **Module Run Console** | [`dashboard-modules-run-panel.png`](docs/assets/screenshots/dashboard-modules-run-panel.png) | Scoped campaign targeting, parameter tuning, and execution panel |
+| **10** | **Autonomous Strategy Engine** | [`dashboard-strategy.png`](docs/assets/screenshots/dashboard-strategy.png) | Goal planner (`domain_admin`, `full_compromise`) with AI agent support |
+| **11** | **EDR & OPSEC Bypass Matrix** | [`dashboard-edr.png`](docs/assets/screenshots/dashboard-edr.png) | CrowdStrike, SentinelOne, Defender evasion tracking & knowledge base |
+| **12** | **Compliance Deliverables Generator** | [`dashboard-reports.png`](docs/assets/screenshots/dashboard-reports.png) | Executive PDF, Markdown, and JSON report builder with headless Edge engine |
+| **13** | **Zero-Trust Security Governance** | [`dashboard-security.png`](docs/assets/screenshots/dashboard-security.png) | RBAC roles, scoped API key lifecycle, automated dependency audit |
+| **14** | **Live Operations WebSocket Stream** | [`dashboard-live.png`](docs/assets/screenshots/dashboard-live.png) | Real-time event streaming console with sub-second event delivery |
+| **15** | **Campaign Playbook Templates** | [`dashboard-templates.png`](docs/assets/screenshots/dashboard-templates.png) | Turnkey playbooks (`internal_pentest`, `ad_full_compromise`, `cloud_assessment`) |
+| **16** | **Interactive OpenAPI 3.1 Docs** | [`api-docs-swagger.png`](docs/assets/screenshots/api-docs-swagger.png) | Swagger UI exposing 70+ authenticated operational REST endpoints |
 
 ```powershell
 # Launch local development environment
@@ -250,6 +271,146 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
   - **Clean Operator-Centric Design**: Persistent field labels (`Target Campaign`, `Strategic Objective`, `AI Planning Engine`, `Explicit Authorizations`), human-readable goal descriptions, and complete elimination of server environment variable leakage in UI labels.
   - **Focused On-Submit Validation**: Warning boxes removed from default page render; validation errors display inline beneath target fields only upon execution attempt.
   - **Adaptive Containment Governor**: Continuously evaluates defensive telemetry and noise thresholds, automatically slowing down or aborting aggressive actions when detection risk peaks.
+
+---
+
+### 8. 🔍 Attack Graph Entity Deep-Dive & Node Inspector
+
+*In-depth Active Directory entity telemetry, relationship inspection, and real-time risk scoring directly inside the canvas.*
+
+<div align="center">
+
+![ARES Attack Graph Entity Deep-Dive & Node Inspector](docs/assets/screenshots/dashboard-graph-inspector.png)
+
+*Real-time Node Inspector displaying Domain Controller (DC01.CORP.LOCAL) attributes, open attack ports (88, 389, 445, 636), and risk ratings.*
+
+</div>
+
+- **The Problem Solved**: Eliminates context-switching between graph visualizers and CLI reconnaissance tools by providing live node telemetry in an interactive sidebar.
+- **Key Capabilities**:
+  - **Entity Attribute Inspection**: Instantly examine OS versions, functional levels, Kerberos SPNs, and high-risk group memberships upon clicking any graph node.
+  - **Attack Surface Port Mapping**: Live visibility into exposed services and potential pivot paths (LDAP, Kerberos, SMB, MSSQL, WinRM).
+  - **Privilege Chokepoint Identification**: Highlights critical path bottlenecks where compromise of a single intermediate principal leads directly to Domain Admin.
+
+---
+
+### 9. 🔗 Multi-Stage Adversary Execution Chains
+
+*Deterministic, multi-step kill chains orchestrating reconnaissance, credential harvesting, and lateral movement in sequence.*
+
+<div align="center">
+
+![ARES Multi-Stage Adversary Execution Chains](docs/assets/screenshots/dashboard-modules-chains.png)
+
+*Automated execution chains including AD Kerberos Exposure Chain and AD Domain Enumeration Chain.*
+
+</div>
+
+- **The Problem Solved**: Replaces manual step-by-step tool invocation with pre-verified, coordinated attack chains that pass outputs automatically to downstream modules.
+- **Key Capabilities**:
+  - **Pre-Built Attack Sequences**: Out-of-the-box chains for Kerberos exposure (`asreproast` -> `kerberoast` -> `hashcat`), domain enumeration, and cloud privilege escalation.
+  - **Dynamic Context Passing**: Credentials and hashes harvested in step 1 are automatically populated into target arguments for subsequent steps.
+  - **Integrated OPSEC Budgeting**: Tracks cumulative noise and detection likelihood across the entire chain before initiating execution.
+
+---
+
+### 10. 🛡️ EDR / OPSEC Evasion & Bypass Knowledge Base
+
+*Empirical tracking of evasion efficacy across enterprise endpoint detection and response (EDR) platforms.*
+
+<div align="center">
+
+![ARES EDR and OPSEC Evasion Matrix](docs/assets/screenshots/dashboard-edr.png)
+
+*Bypass Knowledge Base tracking technique success rates across CrowdStrike Falcon, SentinelOne, and Microsoft Defender.*
+
+</div>
+
+- **The Problem Solved**: Prevents offensive operators from blindly deploying burned or detected payloads against monitored customer infrastructure.
+- **Key Capabilities**:
+  - **Empirical Success Rates**: Historical success rates categorized by specific evasion techniques (AMSI patching, syscall unhooking, process hollowing) and EDR vendor.
+  - **Cross-Session Evasion Memory**: Engagement outcomes update a unified knowledge base, warning operators before they execute techniques with low success probabilities.
+  - **Defensive Jitter Controls**: Granular delay distributions and packet spacing to evade behavioral heuristics and SIEM correlation rules.
+
+---
+
+### 11. 🔐 Zero-Trust Security Governance & Audit Trail
+
+*Audited multi-role access control, cryptographic API key lifecycle, and continuous platform integrity verification.*
+
+<div align="center">
+
+![ARES Zero-Trust Security Governance](docs/assets/screenshots/dashboard-security.png)
+
+*Operator profile management, scoped API key provisioning, and automated system security audits.*
+
+</div>
+
+- **The Problem Solved**: Guarantees non-repudiation, role-based boundary separation, and compliance assurance for offensive security operations.
+- **Key Capabilities**:
+  - **Role-Based Access Control (RBAC)**: Strictly enforced permission tiers (`Team Lead`, `Operator`, `Recon`, `Reporter`) governing module execution and evidence viewing.
+  - **Scoped API Keys**: Cryptographically generated bearer tokens with configurable expiration and fine-grained permissions for CI/CD integration.
+  - **Live Audit Trail**: Continuous append-only logging of every operator action, target scan, and credential retrieval for post-engagement review.
+
+---
+
+### 12. 📡 Live Operations & Real-Time Event Stream
+
+*High-frequency WebSocket event bus streaming operational telemetry, module output, and pipeline status.*
+
+<div align="center">
+
+![ARES Live Operations Stream](docs/assets/screenshots/dashboard-live.png)
+
+*Live operational event console with buffered telemetry and high-throughput WebSocket streaming.*
+
+</div>
+
+- **The Problem Solved**: Gives engagement commanders instant, unified situational awareness of all distributed agents and background tasks.
+- **Key Capabilities**:
+  - **Sub-Second Event Delivery**: Asynchronous WebSocket bus streaming live stdout/stderr, module completion events, and defensive alerts.
+  - **Buffered Log Telemetry**: Reconnection-resilient event buffering ensuring zero lost log lines during network fluctuations.
+  - **Multi-Operator Collaboration**: Simultaneous operators see shared campaign execution events in real time.
+
+---
+
+### 13. 📋 Enterprise Playbooks & Campaign Templates
+
+*Standardized engagement architectures for recurring red team exercises, compliance audits, and purple team drills.*
+
+<div align="center">
+
+![ARES Enterprise Campaign Templates](docs/assets/screenshots/dashboard-templates.png)
+
+*Built-in engagement templates including Internal Pentest, AD Full Compromise, Cloud Assessment, and Assumed Breach.*
+
+</div>
+
+- **The Problem Solved**: Eliminates manual scope configuration for standardized assessments and ensures consistent testing methodology across enterprise engagements.
+- **Key Capabilities**:
+  - **Turnkey Playbooks**: Ready-to-deploy campaign templates with pre-configured target profiles, module sets, and report requirements.
+  - **Custom Template Authoring**: Export successful custom engagements as reusable templates for internal teams and MSSP clients.
+  - **Safety Pre-Flights**: Automated scope and permission validation before any template-based campaign goes live.
+
+---
+
+### 14. 🔌 Interactive OpenAPI 3.1 & Developer Integration
+
+*Fully documented, interactive REST API surface for custom tooling, SOC orchestration, and CI/CD pipeline integration.*
+
+<div align="center">
+
+![ARES Interactive OpenAPI Documentation](docs/assets/screenshots/api-docs-swagger.png)
+
+*Interactive Swagger UI documentation exposing 70+ operational endpoints for enterprise automation.*
+
+</div>
+
+- **The Problem Solved**: Enables seamless programmatic integration with existing enterprise SOAR platforms, custom reporting pipelines, and CI/CD security gates.
+- **Key Capabilities**:
+  - **70+ Documented Endpoints**: Complete REST coverage across authentication, campaigns, module execution, attack graphs, and deliverables.
+  - **OpenAPI 3.1 Conformance**: Strictly validated request/response schemas generated directly from Python Pydantic models.
+  - **Interactive Sandbox**: In-browser API testing with Bearer token authentication and CSRF token support.
 
 ---
 

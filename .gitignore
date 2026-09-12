@@ -59,6 +59,7 @@ evidence/
 logs/
 frontend/*.tsbuildinfo
 .cursor/
+docs/MARKETING_EVIDENCE_SHOWCASE.md
 file
 scratch/
 .agents/
