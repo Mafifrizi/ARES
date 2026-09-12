@@ -447,3 +447,78 @@ async def test_saml_acs_replay_and_in_response_to_validation(tmp_path, test_sett
         await db.close()
 
 
+@pytest.mark.asyncio
+async def test_saml_acs_open_redirect_prevention(tmp_path, test_settings) -> None:
+    import base64
+
+    from ares.api.server import app, get_db
+
+    db = AresDatabase(str(tmp_path / "test_redirect.db"))
+    await db.connect()
+    org = await db.get_organization("default")
+    await db.save_sso_config(
+        org_id=org["id"],
+        protocol="saml",
+        issuer_or_entity_id="https://saml-idp.example.com",
+        sso_url="https://saml-idp.example.com/sso",
+        sp_entity_id="https://ares.local/auth/sso/saml/metadata",
+        acs_url="http://localhost/auth/sso/saml/acs",
+    )
+
+    req_id = "REQ-" + secrets.token_hex(16)
+    await db.create_sso_flow_state(org["id"], "saml", req_id, ttl_minutes=5)
+    app.dependency_overrides[get_db] = lambda: db
+
+    xml_raw = (
+        f'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" '
+        f'InResponseTo="{req_id}"></samlp:Response>'
+    )
+    valid_xml = base64.b64encode(xml_raw.encode("ascii")).decode("ascii")
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://localhost") as client:
+            with patch("ares.api.server.process_saml_response") as mock_saml:
+                mock_saml.return_value = {
+                    "in_response_to": req_id,
+                    "name_id": "operator@corp.local",
+                    "username": "operator_sso",
+                    "role": "operator",
+                    "external_id": "sub-123",
+                    "attributes": {},
+                }
+                # 1. Attempt protocol-relative open redirect //attacker.com
+                resp1 = await client.post(
+                    "/auth/sso/saml/acs",
+                    data={"SAMLResponse": valid_xml, "RelayState": "//attacker.com/phish"},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    follow_redirects=False,
+                )
+                assert resp1.status_code == 303
+                assert resp1.headers["location"] == "/dashboard/"
+
+                # Fresh flow state for second test
+                req_id2 = "REQ-" + secrets.token_hex(16)
+                await db.create_sso_flow_state(org["id"], "saml", req_id2, ttl_minutes=5)
+                xml_raw2 = (
+                    f'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" '
+                    f'InResponseTo="{req_id2}"></samlp:Response>'
+                )
+                valid_xml2 = base64.b64encode(xml_raw2.encode("ascii")).decode("ascii")
+                mock_saml.return_value["in_response_to"] = req_id2
+
+                # 2. Attempt backslash open redirect /\\attacker.com
+                resp2 = await client.post(
+                    "/auth/sso/saml/acs",
+                    data={"SAMLResponse": valid_xml2, "RelayState": "/\\attacker.com/phish"},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    follow_redirects=False,
+                )
+                assert resp2.status_code == 303
+                assert resp2.headers["location"] == "/dashboard/"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        await db.close()
+
+
+

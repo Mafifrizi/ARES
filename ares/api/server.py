@@ -1570,7 +1570,12 @@ async def sso_saml_acs(
         )
 
     session = result.session
-    target_path = RelayState if (RelayState and RelayState.startswith("/")) else "/dashboard/"
+    is_safe_redirect = bool(
+        RelayState
+        and RelayState.startswith("/")
+        and not RelayState.startswith(("//", "/\\"))
+    )
+    target_path = RelayState if is_safe_redirect else "/dashboard/"
     response = RedirectResponse(target_path, status_code=303)
     publish_session_cookies(
         response,

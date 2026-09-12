@@ -162,10 +162,11 @@ class McpScopeGate:
             # Wildcard or Domain Suffix Match (*.corp.local or corp.local)
             if rule.startswith("*."):
                 domain_suffix = rule[2:]
-                if target.endswith(domain_suffix) or target == domain_suffix:
+                if target == domain_suffix or target.endswith("." + domain_suffix):
                     return True
             elif rule.startswith("."):
-                if target.endswith(rule):
+                domain_suffix = rule[1:]
+                if target == domain_suffix or target.endswith(rule):
                     return True
 
         return False
@@ -207,7 +208,10 @@ class McpTaintSanitizer:
             return sanitized
 
         if isinstance(data, dict):
-            return {k: cls.sanitize(v) for k, v in data.items()}
+            return {
+                (cls.sanitize(k) if isinstance(k, str) else k): cls.sanitize(v)
+                for k, v in data.items()
+            }
 
         if isinstance(data, (list, tuple, set)):
             return [cls.sanitize(item) for item in data]
@@ -220,7 +224,8 @@ class SecretMasker:
 
     _SENSITIVE_KEYS = {
         "password", "secret", "hash", "ntlm", "ticket",
-        "private_key", "api_key", "kerberos_key", "token"
+        "private_key", "api_key", "kerberos_key", "token",
+        "credential", "creds", "session_key", "masterkey", "privatekey",
     }
 
     @classmethod
