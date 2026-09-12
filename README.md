@@ -197,15 +197,17 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Multi-Vector Attack Graph & Objective Replay](docs/assets/screenshots/dashboard-graph.png)
 
-*Multi-Vector Attack Graph mapping enterprise entities, sessions, and deterministic paths to Domain Admin.*
+*Multi-Vector Attack Graph with automated luminous white patch cables, left-to-right hierarchy (Domain Controller → Findings → Hosts), and real-time safe metadata inspection.*
 
 </div>
 
 - **The Problem Solved**: Translates raw vulnerability data into actionable, visual compromise paths that executives and engineers can understand immediately.
 - **Key Capabilities**:
+  - **Automated Cyber Patch Cable Routing**: Real-time rendering of automated luminous white cables (`#ffffff`) connecting Domain Controllers, security findings, and discovered hosts without manual dragging.
+  - **Deterministic Left-to-Right Hierarchy**: Clean, collision-free column layout originating from the Domain Controller (`DC01`) on the left, through active security findings, to target member hosts.
   - **Shortest Path Algorithms**: Deterministically calculates the fewest hops required to compromise Domain Controllers or cloud root credentials.
   - **Native BloodHound / SharpHound Ingest**: Directly import BloodHound JSON archives into the ARES graph engine for unified analysis.
-  - **Interactive Entity Inspection**: Explore relationships between users, groups, computers, ACLs, and active Kerberos sessions with fluid navigation.
+  - **Interactive Entity Inspection**: Explore relationships between users, groups, computers, ACLs, and active Kerberos sessions with fluid navigation and real-time safe detail inspector.
   - **Objective Replay**: Re-simulate historical attack chains to verify defensive patch efficacy.
 
 ---
