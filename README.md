@@ -84,6 +84,11 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 The ARES Platform features a high-performance, responsive operator dashboard engineered with dark-tech aesthetics, low cognitive load, and audited operational control.
 
+```powershell
+# Launch local development environment
+.\.venv\Scripts\ares.exe dashboard dev --no-reload
+```
+
 ---
 
 ### 1. 🛡️ Operator Enclave & Zero-Trust Gateway
