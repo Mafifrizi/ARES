@@ -1,5 +1,4 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Zap } from "lucide-react";
 import { memo, type ReactNode } from "react";
 
 export interface PivotNodeData extends Record<string, unknown> {
@@ -89,37 +88,6 @@ function LinuxTuxEmblem() {
   );
 }
 
-/**
- * Jagged Red Lightning Electric Wireframe Frame for SYSTEM elevated nodes
- * Authentic Cobalt Strike wireframe lightning frame
- */
-function CobaltRedLightningFrame() {
-  return (
-    <svg className="cobalt-lightning-svg" viewBox="0 0 136 106" fill="none">
-      {/* Top Left Jagged Bolt */}
-      <path d="M-8 -8 L6 2 L1 10 L16 12 L9 20 L22 22" stroke="#ff1111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M-6 -6 L3 0 L-1 6 L12 8" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Top Right Jagged Bolt */}
-      <path d="M144 -8 L130 2 L135 10 L120 12 L127 20 L114 22" stroke="#ff1111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M142 -6 L133 0 L137 6 L124 8" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Bottom Left Jagged Bolt */}
-      <path d="M-8 102 L8 92 L2 84 L18 82 L10 74 L24 72" stroke="#ff1111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M-5 100 L4 94 L0 88 L14 84" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Bottom Right Jagged Bolt */}
-      <path d="M144 102 L128 92 L134 84 L118 82 L126 74 L112 72" stroke="#ff1111" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M141 100 L132 94 L136 88 L122 84" stroke="#ffffff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-
-      {/* Perimeter jagged red spark wireframe */}
-      <path d="M18 2 L38 -2 L54 2 L82 -2 L102 2 L118 0" stroke="#ff2222" strokeWidth="1.8" />
-      <path d="M3 18 L-2 42 L4 56 L-2 78 L4 90" stroke="#ff2222" strokeWidth="1.8" />
-      <path d="M133 18 L138 42 L132 56 L138 78 L132 90" stroke="#ff2222" strokeWidth="1.8" />
-      <path d="M18 104 L42 107 L68 104 L94 107 L118 104" stroke="#ff2222" strokeWidth="1.8" />
-    </svg>
-  );
-}
 
 /**
  * Brick Wall + Flames (Cobalt Strike Gateway / Firewall Node)
@@ -201,12 +169,22 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
     screenContent = <WindowsModernFlag />;
   }
 
-  const privilegeText =
+  let privilegeText =
     isElevated ? "SYSTEM *" :
     privilege === "user" ? (nodeData.process || (nodeData.metadata?.user ? String(nodeData.metadata.user) : "BEACON")) :
     (nodeData.label || "TARGET");
 
-  const subText = nodeData.subLabel || nodeData.ip || nodeData.label || "10.0.0.1";
+  if (privilegeText.length > 20) {
+    privilegeText = privilegeText.slice(0, 18) + "…";
+  }
+
+  let subText = nodeData.subLabel || nodeData.ip || nodeData.label || "10.0.0.1";
+  if (subText.includes("\n")) {
+    subText = subText.split("\n")[1] || subText.split("\n")[0];
+  }
+  if (subText.length > 24) {
+    subText = subText.slice(0, 22) + "…";
+  }
 
   return (
     <div className={`cobalt-node-wrapper ${auraClass}${selected ? " selected" : ""}${nodeData.dimmed ? " opacity-30" : ""}`}>
@@ -215,9 +193,6 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
       <Handle type="source" position={Position.Left} id="left-source" className="opacity-0" isConnectable={false} />
       <Handle type="target" position={Position.Top} id="top-target" className="opacity-0" isConnectable={false} />
       <Handle type="source" position={Position.Top} id="top-source" className="opacity-0" isConnectable={false} />
-
-      {/* Jagged electric lightning halo around elevated SYSTEM beacons */}
-      {isElevated && <CobaltRedLightningFrame />}
 
       {/* Monitor Display Unit */}
       <div className="cobalt-monitor-housing">
@@ -240,7 +215,7 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
           {privilegeText}
         </span>
         {subText && (
-          <span className="cobalt-node-subtext" title={subText}>
+          <span className="cobalt-node-subtext" title={nodeData.subLabel || nodeData.label || subText}>
             {subText}
           </span>
         )}

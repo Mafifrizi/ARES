@@ -481,21 +481,9 @@ ARES implements 60+ modular adversary techniques natively mapped to the MITRE AT
 └─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┴──────────────────────────┘
 ```
 
-- **Active Directory Lab Suites**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse (ESC1 through ESC8), DCSync account replication, and BloodHound data generation.
+- **Active Directory Lab Suites**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
 - **Endpoint Posture Checkers**: Windows UAC Bypass methods, registry key persistence inspection, Linux container breakouts, and Sudo privilege enumeration.
-- **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, and GCP IAM bindings.
-
-### ⚡ In the Forge: Two Next-Gen Offensive Vectors Dropping Soon
-
-Red teams don't lose engagements to passwords anymore—they lose them to token boundaries and cryptographic trust. We are finalizing local verification for two high-impact modules engineered to break modern hybrid architectures:
-
-- **`cloud.phantom_token` — Hybrid Entra ID & Primary Refresh Token (PRT) Hijack**
-  - **The Attack Vector**: Bypasses MFA and Conditional Access by hijacking native Windows session token brokers directly into Microsoft 365 and Azure AD. One compromised workstation now proves full cloud tenant breach.
-  - **MITRE ATT&CK**: `T1528` (Steal Application Access Token) • `T1606` (Forge Web Credentials)
-
-- **`ad.ghost_forge` — ADCS Cryptographic Identity & Kerberos PKINIT Takeover**
-  - **The Attack Vector**: Weaponizes misconfigured Active Directory Certificate templates into automated, passwordless Domain Admin persistence. Generates in-memory CSRs, enrolls certificates via MS-WCCE, and converts them to Kerberos TGTs via PKINIT (UnPAC-the-hash).
-  - **MITRE ATT&CK**: `T1649` (Steal/Forge Authentication Certificates) • `T1558` (Steal/Forge Kerberos Tickets)
+- **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token hijacking (`cloud.phantom_token`).
 
 ---
 

@@ -270,7 +270,20 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
   const ip = typeof meta.ip === "string" ? meta.ip : typeof meta.host === "string" ? meta.host : undefined;
   const process = typeof meta.process === "string" ? meta.process : typeof meta.binary === "string" ? meta.binary : undefined;
   const pid = typeof meta.pid === "number" || typeof meta.pid === "string" ? meta.pid : undefined;
-  const explicitSubLabel = typeof meta.subLabel === "string" ? meta.subLabel : undefined;
+  let explicitSubLabel = typeof meta.subLabel === "string" ? meta.subLabel : undefined;
+  if (explicitSubLabel) {
+    if (explicitSubLabel.includes("\n")) {
+      explicitSubLabel = explicitSubLabel.split("\n")[1] || explicitSubLabel.split("\n")[0];
+    }
+    if (explicitSubLabel.length > 24) {
+      explicitSubLabel = explicitSubLabel.slice(0, 22) + "…";
+    }
+  }
+
+  let finalSubLabel = explicitSubLabel !== undefined ? explicitSubLabel : (ip || (pid ? `PID: ${pid}` : undefined));
+  if (finalSubLabel && finalSubLabel.length > 24) {
+    finalSubLabel = finalSubLabel.slice(0, 22) + "…";
+  }
 
   return {
     os,
@@ -279,7 +292,7 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     ip,
     process,
     pid,
-    subLabel: explicitSubLabel !== undefined ? explicitSubLabel : (ip || (pid ? `PID: ${pid}` : undefined))
+    subLabel: finalSubLabel
   };
 }
 

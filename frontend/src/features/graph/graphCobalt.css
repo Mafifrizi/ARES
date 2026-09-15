@@ -305,17 +305,6 @@
   outline-offset: 4px;
 }
 
-/* Jagged Red Lightning Frame SVG Overlay */
-.cobalt-lightning-svg {
-  position: absolute;
-  top: -16px;
-  left: -18px;
-  width: 132px;
-  height: 104px;
-  pointer-events: none;
-  z-index: 6;
-}
-
 /* Inside CRT / LCD Screen Glass */
 .cobalt-monitor-screen {
   flex: 1;
@@ -387,19 +376,25 @@
   font-size: 11px;
   line-height: 1.25;
   color: #ffffff;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-shadow:
     1px 1px 0 #000,
     -1px -1px 0 #000,
     1px -1px 0 #000,
     -1px 1px 0 #000,
     0 2px 4px #000;
-  white-space: nowrap;
 }
 
 .cobalt-node-privilege {
   display: block;
   font-weight: 700;
   letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cobalt-node-privilege.system {
@@ -418,6 +413,9 @@
   display: block;
   font-size: 11px;
   color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Cobalt Firewall / Ingress Gateway Node ──────────────────────────────── */

@@ -132,25 +132,26 @@ function cobaltPivotLayout(
 
   // Count items per column to space vertically
   const colRows = new Map<number, number>();
+  const isDemoTopology = nodes.length <= 9 && nodes.every((n) => Boolean(FIXED_COORDINATES[n.id]));
 
   const canvasNodes: CanvasNode[] = nodes.map((node, index) => {
     const inferred = inferCobaltNodeData(node);
     let x: number;
     let y: number;
 
-    if (FIXED_COORDINATES[node.id]) {
+    if (isDemoTopology && FIXED_COORDINATES[node.id]) {
       x = FIXED_COORDINATES[node.id].x;
       y = FIXED_COORDINATES[node.id].y;
     } else {
       const col = columnLevels.get(node.id) ?? (index % 4);
       const row = colRows.get(col) ?? 0;
       colRows.set(col, row + 1);
-      x = 40 + col * 200;
-      y = 40 + row * 130;
+      x = 50 + col * 220;
+      y = 50 + row * 140;
     }
 
     const nodeType = inferred.os === "firewall" ? "pivotFirewall" : "pivotComputer";
-    const isNodeSelected = selectedNodeId ? node.id === selectedNodeId : node.id === "node:dev-child";
+    const isNodeSelected = selectedNodeId ? node.id === selectedNodeId : false;
 
     return {
       id: node.id,
@@ -218,15 +219,6 @@ function cobaltPivotLayout(
       }
     }
 
-    // Derive edge label from type/label metadata for protocol annotation
-    let edgeLabelText = edge.label || "";
-    if (!edgeLabelText) {
-      if (edgeClass === "cobalt-edge-smb") edgeLabelText = "\\pipe\\browser";
-      else if (edgeClass === "cobalt-edge-egress") edgeLabelText = "HTTPS 443";
-      else if (edgeClass === "cobalt-edge-session") edgeLabelText = "SSH 22";
-      else if (edgeClass === "cobalt-edge-reverse") edgeLabelText = "reverse";
-    }
-
     return {
       id: edge.id,
       source: edge.source,
@@ -236,20 +228,8 @@ function cobaltPivotLayout(
       type: "smoothstep",
       animated: isAnimated || isHighlighted,
       className: edgeClass,
-      label: edgeLabelText || undefined,
-      labelStyle: {
-        fill: edgeColor,
-        fontSize: 9,
-        fontFamily: "Consolas, monospace",
-        fontWeight: 600,
-        letterSpacing: "0.03em"
-      },
-      labelBgStyle: {
-        fill: "#0a0c10",
-        fillOpacity: 0.85
-      },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 1,
+      // Edge labels removed per operator instructions: avoids clutter, overlaps, and unreadable thick text
+      label: undefined,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 14,
