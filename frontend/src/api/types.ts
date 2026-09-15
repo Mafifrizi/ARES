@@ -51,6 +51,7 @@ export interface Finding {
   host?: string;
   mitre_technique?: string;
   confidence?: number;
+  validated?: boolean;
   [key: string]: unknown;
 }
 

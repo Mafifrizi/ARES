@@ -330,6 +330,38 @@ class ADCSParams(DomainAuthParams):
     )
 
 
+class GhostForgeParams(DomainAuthParams):
+    """ad.ghost_forge — Autonomous ADCS Cryptographic Identity & Kerberos PKINIT Takeover."""
+
+    ca_server: str = param(
+        "Certificate Authority (CA) server hostname or IP",
+        min_length=3,
+        max_length=253,
+    )
+    ca_name: str = param(
+        "Target Enterprise CA name (e.g. CORP-ENTERPRISE-CA)",
+        min_length=2,
+        max_length=253,
+    )
+    template: str = param(
+        "Vulnerable Certificate Template name with enrollee-supplied SAN",
+        required=False,
+        default="ESC1-Template",
+        max_length=128,
+    )
+    impersonate_user: str = param(
+        "Target privileged account to impersonate via SAN injection",
+        required=False,
+        default="Administrator",
+        max_length=256,
+    )
+    perform_pkinit: bool = param(
+        "Execute Kerberos PKINIT exchange and UnPAC-the-hash to extract TGT and NTLM hash",
+        required=False,
+        default=True,
+    )
+
+
 class CoerceParams(DomainAuthParams):
     """ad.coerce — PetitPotam/PrinterBug/DFSCoerce NTLM coercion."""
 
@@ -1091,6 +1123,39 @@ class CloudFederationParams(ModuleParams):
     )
 
 
+class PhantomTokenParams(ModuleParams):
+    """cloud.phantom_token — Hybrid Entra ID & Primary Refresh Token (PRT) Hijack."""
+
+    tenant_id: str = param(
+        "Target Azure AD / Entra ID Tenant ID or domain name (e.g. corp.onmicrosoft.com)",
+        min_length=3,
+        max_length=253,
+    )
+    client_id: str = param(
+        "OAuth2 Client ID for application context (default: Microsoft Office / Teams client)",
+        required=False,
+        default="1fec8e78-bce4-4aaf-abb1-b1b232c79215",
+        max_length=128,
+    )
+    scope: str = param(
+        "Target OAuth2 resource scope",
+        required=False,
+        default="https://graph.microsoft.com/.default",
+        max_length=256,
+    )
+    session_cookie: SecretParam | None = param(
+        "Harvested x-ms-RefreshTokenCredential or ESTSAUTHPERSISTENT cookie context",
+        required=False,
+        default=None,
+        secret=True,
+    )
+    evaluate_cap_bypass: bool = param(
+        "Evaluate Conditional Access Policy (CAP) and MFA bypass feasibility",
+        required=False,
+        default=True,
+    )
+
+
 class EDRBypassParams(ModuleParams):
     """edr.bypass_adaptive — Adaptive EDR evasion."""
 
@@ -1180,6 +1245,7 @@ MODULE_PARAMS: dict[str, type[ModuleParams]] = {
     "ad.asreproast": ASREPRoastParams,
     "ad.dcsync": DCSyncParams,
     "ad.adcs": ADCSParams,
+    "ad.ghost_forge": GhostForgeParams,
     "ad.coerce": CoerceParams,
     "ad.delegation_abuse": DelegationAbuseParams,
     "ad.laps_enum": LAPSEnumParams,
@@ -1190,6 +1256,7 @@ MODULE_PARAMS: dict[str, type[ModuleParams]] = {
     "cloud.azure": AzureParams,
     "cloud.azure_ad": AzureADParams,
     "cloud.gcp": GCPParams,
+    "cloud.phantom_token": PhantomTokenParams,
     # ── Credential ────────────────────────────────────────────────────────────
     "credential.crack": CredentialCrackParams,
     "credential.golden_ticket": GoldenTicketParams,

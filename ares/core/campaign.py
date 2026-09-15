@@ -50,6 +50,13 @@ class Finding(BaseModel):
     false_positive: bool = False
     validated: bool = False
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("discovered_at", mode="after")
+    @classmethod
+    def _ensure_tz_aware(cls, v: datetime) -> datetime:
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
     host:        str | None = None
     module_id:   str = ""
     cvss_score:  float = Field(default=0.0, ge=0.0, le=10.0,

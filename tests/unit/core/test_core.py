@@ -15,7 +15,7 @@ from ares.core.security import (
     create_access_token,
     decode_access_token,
 )
-from ares.core.validator import FindingValidator, ValidationCheck, ValidationStage
+from ares.core.validator import FindingValidator, ValidationCheck, ValidationStage, build_default_validator
 
 
 # ── Campaign tests ────────────────────────────────────────────────────────────
@@ -253,3 +253,21 @@ class TestValidator:
         assert captured_result.passed is True
         assert candidate_result.passed is True
         assert tgs_result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_network_confidence_uses_module_evidence(self):
+        validator = build_default_validator()
+        port_scan_finding = Finding(
+            title="High-Value Service Open: Kerberos KDC Tier-0 DC (port 88)",
+            description="Active TCP socket handshake confirmed open on port 88",
+            severity=Severity.HIGH,
+            module_id="network.port_scan",
+            host="10.10.10.20",
+            evidence={"port": 88, "open": True, "service": "kerberos"},
+        )
+        result = await validator.validate(port_scan_finding, {})
+        assert result.confidence == 1.0
+        assert result.passed is True
+        assert port_scan_finding.confidence == 1.0
+        assert port_scan_finding.validated is True
+

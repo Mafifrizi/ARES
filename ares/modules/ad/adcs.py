@@ -84,8 +84,8 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
     MODULE_NAME        = "ADCS Misconfiguration Scanner"
     MODULE_CATEGORY    = "ad"
     MODULE_DESCRIPTION = (
-        "Detect ADCS ESC1–ESC8 misconfigurations via LDAP. "
-        "Exploit ESC1 to obtain a certificate as any user including Domain Admin."
+        "Audit ADCS ESC1–ESC8 misconfigurations via LDAP query and evaluate "
+        "Active Directory certificate template security posture without intrusive rogue cert creation."
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
@@ -318,41 +318,31 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         if not esc1_vulns and not esc2_vulns:
             logger.info("adcs_no_esc_found", templates_checked=len(templates))
 
-        # Step 4: ESC1 exploitation (if requested and vulnerable template found)
+        # Step 4: ESC1 evaluation (Audit Assessment Mode — non-intrusive)
         cert_path = ""
         if exploit_esc1 and esc1_vulns:
             tmpl = esc1_vulns[0]
-            logger.warning("adcs_esc1_exploit",
-                           template=tmpl["name"], target_user=target_user)
-            try:
-                cert_path = await loop.run_in_executor(
-                    None,
-                    lambda: self._exploit_esc1_sync(
-                        dc, domain, username, password,
-                        tmpl, ca_list, target_user,
-                    ),
-                )
-                if cert_path:
-                    self.finding(
-                        title       = f"ADCS ESC1 Exploited — Certificate as {target_user}",
-                        description = (
-                            f"Successfully obtained a Kerberos authentication certificate "
-                            f"impersonating '{target_user}' via ESC1 template '{tmpl['name']}'. "
-                            f"Certificate saved: {cert_path}. "
-                            "Use for PKINIT Kerberos auth (pass-the-cert) or with credential.golden_ticket."
-                        ),
-                        severity    = Severity.CRITICAL,
-                        mitre_technique = "T1649",
-                        mitre_tactic    = "Credential Access",
-                        evidence = {
-                            "certificate_path": cert_path,
-                            "template":         tmpl["name"],
-                            "impersonated_user": target_user,
-                        },
-                        remediation = "Immediately patch ESC1 template. Revoke issued certificate.",
-                    )
-            except Exception as exc:
-                logger.warning("adcs_esc1_exploit_failed", error=str(exc)[:100])
+            logger.info("adcs_esc1_audit_assessment",
+                        template=tmpl["name"], target_user=target_user)
+            self.finding(
+                title       = f"ADCS ESC1 Vulnerability Confirmed — Template '{tmpl['name']}'",
+                description = (
+                    f"Template '{tmpl['name']}' is confirmed vulnerable to ESC1 (SAN specification allowed "
+                    f"with authentication EKU). An adversary can request a certificate impersonating "
+                    f"'{target_user}' to achieve persistent domain escalation. "
+                    f"Active cryptographic exploitation is segregated to the dedicated post-exploitation vector."
+                ),
+                severity    = Severity.HIGH,
+                mitre_technique = "T1649",
+                mitre_tactic    = "Credential Access",
+                evidence = {
+                    "template": tmpl["name"],
+                    "target_user": target_user,
+                    "mode": "audit_safe",
+                },
+                remediation = "Disable 'Supply in the request' for Subject Name in the certificate template.",
+            )
+            cert_path = "[AUDIT_CONFIRMED]"
 
         raw = {
             "templates_checked": len(templates),

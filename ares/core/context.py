@@ -111,6 +111,7 @@ class ExecutionContext(Generic[P]):
     tags:     list[str] = field(default_factory=list)
     extra:    dict[str, Any] = field(default_factory=dict)
     findings: list[Any] = field(default_factory=list)
+    collected_loot: list[Any] = field(default_factory=list)
 
     # ── Validation ────────────────────────────────────────────────────────
 
@@ -215,6 +216,35 @@ class ExecutionContext(Generic[P]):
             except Exception:
                 pass
         return None
+
+    def record_loot(
+        self,
+        name: str,
+        content: Any,
+        loot_type: str = "artifact",
+        description: str = "",
+        path_on_target: str = "",
+        tags: list[str] | None = None,
+    ) -> Any:
+        """Record harvested loot artifact to be persisted durably."""
+        import uuid
+        from ares.db.database import Loot
+
+        campaign_id = getattr(getattr(self, "campaign", None), "id", "")
+        item = Loot(
+            id=f"loot_{uuid.uuid4().hex[:12]}",
+            campaign_id=campaign_id,
+            host_id=getattr(self, "target", "") or None,
+            loot_type=loot_type,
+            name=name,
+            description=description,
+            content=content,
+            path_on_target=path_on_target,
+            source_module=getattr(self, "module_id", ""),
+            tags=tags or [],
+        )
+        self.collected_loot.append(item)
+        return item
 
     # ── Accessors ─────────────────────────────────────────────────────────
 

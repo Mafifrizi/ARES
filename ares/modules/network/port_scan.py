@@ -59,19 +59,193 @@ _PORT_NAMES: dict[int, str] = {
 }
 
 # Services that suggest high-value attack paths
+_SERVICE_INTELLIGENCE: dict[int, dict[str, Any]] = {
+    88: {
+        "title": "Active Directory KDC (Kerberos) Detected on Port 88",
+        "service": "kerberos",
+        "role": "Tier-0 Domain Controller",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "Kerberos Key Distribution Center (KDC) is active on {target}:88. "
+            "Confirms host functions as an Active Directory Domain Controller (Tier-0 asset). "
+            "Exposes pre-authentication attack surfaces including AS-REP Roasting (ad.asreproast), "
+            "Kerberoasting (ad.kerberoast), and Kerberos PKINIT certificate exchange."
+        ),
+        "remediation": (
+            "Enforce AES-256 Kerberos encryption types, disable legacy RC4-HMAC, audit SPN assignments, "
+            "and monitor Event ID 4769 for anomalous ticket-granting service requests."
+        ),
+        "next_modules": ["ad.asreproast", "ad.kerberoast", "ad.enum_spn"],
+    },
+    636: {
+        "title": "Secure Directory Service (LDAPS) Active on Port 636",
+        "service": "ldaps",
+        "role": "Active Directory Domain Controller (TLS)",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "LDAP over TLS (LDAPS) is listening on {target}:636. Indicates a Domain Controller supporting "
+            "encrypted directory queries and ADCS certificate enrollment. "
+            "Target for AD enumeration (ad.enum_users, ad.enum_computers) and ADCS escalation (ad.adcs, ad.ghost_forge)."
+        ),
+        "remediation": (
+            "Enforce LDAP channel binding (LdapEnforceChannelBinding=2), require LDAP signing, "
+            "and restrict LDAPS inbound traffic to authorized administrative jump hosts."
+        ),
+        "next_modules": ["ad.enum_users", "ad.adcs", "ad.ghost_forge"],
+    },
+    389: {
+        "title": "Active Directory LDAP Directory Service Exposed on Port 389",
+        "service": "ldap",
+        "role": "Active Directory Directory Service",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "Standard LDAP is open on {target}:389. Enables unauthenticated or low-privilege AD enumeration "
+            "(users, groups, domain controllers, and ACLs). Susceptible to NTLM relay if LDAP signing is disabled."
+        ),
+        "remediation": (
+            "Enforce LDAP server integrity (LDAPServerIntegrity=2), disable unauthenticated LDAP binds, "
+            "and transition all directory clients to LDAPS (port 636)."
+        ),
+        "next_modules": ["ad.enum_users", "ad.enum_spn", "ad.enum_acl"],
+    },
+    445: {
+        "title": "Windows Server Message Block (SMB) Service Open on Port 445",
+        "service": "smb",
+        "role": "Windows Core Transport & Remote Administration",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "SMB port 445 is reachable on {target}. Primary vector for Windows lateral movement, "
+            "named pipe RPC access, password spraying, and NTLM relay coercion (PetitPotam / ad.coerce). "
+            "If credentials are authenticated, facilitates remote command execution via SMB/WMI."
+        ),
+        "remediation": (
+            "Require SMB signing (RequireSecuritySignature=1), disable legacy SMBv1, and apply network "
+            "segmentation to block inbound port 445 from untrusted user subnets."
+        ),
+        "next_modules": ["ad.coerce", "credential.spray", "windows.secretsdump"],
+    },
+    5985: {
+        "title": "WinRM HTTP Remote Management Service Accessible on Port 5985",
+        "service": "winrm-http",
+        "role": "PowerShell Remoting Endpoint",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "Windows Remote Management (WinRM HTTP) is active on {target}:5985. "
+            "Provides an immediate PowerShell remoting execution path if valid local administrator "
+            "or domain credentials are acquired."
+        ),
+        "remediation": (
+            "Disable unencrypted WinRM HTTP listeners, enforce WinRM HTTPS (port 5986), "
+            "and restrict WinRM access via host-based Windows Firewall rules."
+        ),
+        "next_modules": ["lateral.winrm", "windows.service_hijack"],
+    },
+    5986: {
+        "title": "WinRM HTTPS Remote Management Service Accessible on Port 5986",
+        "service": "winrm-https",
+        "role": "Encrypted PowerShell Remoting Endpoint",
+        "severity": Severity.LOW,
+        "description": (
+            "Windows Remote Management over HTTPS is listening on {target}:5986. "
+            "Enables encrypted PowerShell remoting. Target for lateral movement using valid credentials."
+        ),
+        "remediation": (
+            "Restrict WinRM access to dedicated administrative management subnets using IP whitelisting."
+        ),
+        "next_modules": ["lateral.winrm"],
+    },
+    3389: {
+        "title": "Remote Desktop Protocol (RDP) Service Reachable on Port 3389",
+        "service": "rdp",
+        "role": "Windows Terminal Server",
+        "severity": Severity.LOW,
+        "description": (
+            "RDP port 3389 is open on {target}. Allows graphical interactive logon. "
+            "Target for credential spray attacks, session hijacking, and sticky keys exploitation."
+        ),
+        "remediation": (
+            "Enforce Network Level Authentication (NLA), mandate multi-factor authentication (MFA) for RDP, "
+            "and restrict RDP access to VPN/management gateways."
+        ),
+        "next_modules": ["credential.spray"],
+    },
+    1433: {
+        "title": "Microsoft SQL Server Database Instance Detected on Port 1433",
+        "service": "mssql",
+        "role": "Enterprise Database Server",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "MSSQL Server is listening on {target}:1433. Potential vector for SQL authentication brute-forcing, "
+            "database credential harvesting, linked server privilege escalation, and xp_cmdshell command execution."
+        ),
+        "remediation": (
+            "Disable the 'sa' account, enforce Windows Integrated Authentication only, "
+            "and keep xp_cmdshell disabled in database engine configuration."
+        ),
+        "next_modules": ["credential.spray"],
+    },
+    2375: {
+        "title": "Unauthenticated Docker Daemon API Exposed on Port 2375",
+        "service": "docker-http",
+        "role": "Container Management Engine",
+        "severity": Severity.HIGH,
+        "description": (
+            "Unencrypted, unauthenticated Docker daemon HTTP API is exposed on {target}:2375. "
+            "Allows arbitrary container creation, host filesystem mounting, and root host takeover."
+        ),
+        "remediation": (
+            "Disable plaintext Docker TCP socket. Enable TLS mutual authentication on port 2376 "
+            "or bind Docker daemon to local Unix domain socket only."
+        ),
+        "next_modules": ["linux.container"],
+    },
+    6379: {
+        "title": "Redis In-Memory Data Store Accessible on Port 6379",
+        "service": "redis",
+        "role": "In-Memory Cache / Database",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "Redis port 6379 is open on {target}. Frequently lacks authentication. "
+            "Attack vectors include unauthenticated data exfiltration, writing SSH authorized_keys, "
+            "and remote code execution via custom module loading."
+        ),
+        "remediation": (
+            "Enable 'requirepass' in redis.conf, bind Redis to 127.0.0.1, and rename dangerous commands (CONFIG, EVAL)."
+        ),
+        "next_modules": ["linux.service_hijack"],
+    },
+    27017: {
+        "title": "MongoDB NoSQL Database Service Exposed on Port 27017",
+        "service": "mongodb",
+        "role": "Document Database Server",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "MongoDB is listening on {target}:27017. Target for unauthenticated database enumeration, "
+            "credential discovery, and sensitive customer data extraction."
+        ),
+        "remediation": (
+            "Enable MongoDB authorization (security.authorization: enabled) and bind to private loopback interface."
+        ),
+        "next_modules": ["network.service_detect"],
+    },
+    9200: {
+        "title": "Elasticsearch REST API Open on Port 9200",
+        "service": "elasticsearch",
+        "role": "Distributed Search & Analytics Cluster",
+        "severity": Severity.MEDIUM,
+        "description": (
+            "Elasticsearch REST API is accessible on {target}:9200. Inspect indices for unencrypted credentials, "
+            "API keys, and system log data exfiltration."
+        ),
+        "remediation": (
+            "Enable Elasticsearch X-Pack security, require TLS, and mandate HTTP basic authentication."
+        ),
+        "next_modules": ["network.service_detect"],
+    },
+}
+
 _HIGH_VALUE_SERVICES: dict[int, str] = {
-    88:   "Kerberos — DC present, AD attack surface",
-    389:  "LDAP — AD enumeration (enum_users, enum_spn, dcsync)",
-    445:  "SMB — lateral movement (psexec, wmiexec) + credential access",
-    636:  "LDAPS — secure AD enumeration",
-    1433: "MSSQL — credential reuse + potential xp_cmdshell RCE",
-    3389: "RDP — lateral movement target",
-    5985: "WinRM HTTP — lateral movement (winrm module)",
-    5986: "WinRM HTTPS — lateral movement (winrm module)",
-    27017: "MongoDB — likely unauthenticated, data exfil opportunity",
-    9200: "Elasticsearch — likely unauthenticated, data exfil opportunity",
-    6379: "Redis — likely unauthenticated, potential RCE via module loading",
-    2375: "Docker daemon HTTP — unauthenticated container escape",
+    p: info["title"] for p, info in _SERVICE_INTELLIGENCE.items()
 }
 
 
@@ -270,23 +444,37 @@ class PortScanModule(BaseModule):
 
         # Finding for each high-value port
         for port in open_ports:
-            if port in _HIGH_VALUE_SERVICES:
+            intel = _SERVICE_INTELLIGENCE.get(port)
+            if intel:
+                svc = intel["service"]
+                self.finding(
+                    title=intel["title"],
+                    description=intel["description"].format(target=target),
+                    severity=intel["severity"],
+                    mitre_technique="T1046",
+                    mitre_tactic="Discovery",
+                    evidence={
+                        "host": target,
+                        "port": port,
+                        "service": svc,
+                        "role": intel["role"],
+                        "next_modules": intel.get("next_modules", []),
+                    },
+                    remediation=intel["remediation"],
+                    host=target,
+                    confidence=1.0,
+                )
+            elif port in _HIGH_VALUE_SERVICES:
                 svc = _PORT_NAMES.get(port, str(port))
                 hint = _HIGH_VALUE_SERVICES[port]
                 self.finding(
-                    title=f"High-Value Service Open: {svc.upper()} (port {port})",
-                    description=(
-                        f"Port {port}/{svc} is open on {target}. {hint}. "
-                        "This service should be targeted for further enumeration."
-                    ),
+                    title=f"Service Open: {svc.upper()} (port {port})",
+                    description=f"Port {port}/{svc} is open on {target}. {hint}.",
                     severity=Severity.INFO,
                     mitre_technique="T1046",
                     mitre_tactic="Discovery",
                     evidence={"host": target, "port": port, "service": svc},
-                    remediation=(
-                        "Ensure this service is intended to be accessible from the "
-                        "operator's position. Apply least-privilege network segmentation."
-                    ),
+                    remediation="Ensure this service is intended to be accessible from the operator's position. Apply least-privilege network segmentation.",
                     host=target,
                     confidence=1.0,
                 )

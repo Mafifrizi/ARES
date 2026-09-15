@@ -6,7 +6,7 @@
   color: #f4f4f5;
   background: #09090b;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -20,7 +20,13 @@ body {
   min-width: 320px;
   background: #09090b;
   color: #f4f4f5;
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.012em;
   -webkit-font-smoothing: antialiased;
+}
+
+code, kbd, samp, pre, .font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 button,
@@ -1236,28 +1242,46 @@ textarea.field {
   font-weight: 500;
 }
 
+.notice-warning {
+  border-color: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fcd34d;
+}
+
 .notice-danger {
   border-color: rgba(244, 63, 94, 0.25);
   background: rgba(244, 63, 94, 0.08);
   color: #fda4af;
 }
 
+.notice-optimal,
+.notice-success {
+  border-color: rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.08);
+  color: #34d399;
+}
+
 .defense-feasibility-card {
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  background: linear-gradient(180deg, rgba(28, 25, 23, 0.95) 0%, rgba(20, 20, 24, 0.95) 100%);
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  margin-top: 0.5rem;
+  border: 1px solid #27272a;
+  background: #121215;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-top: 0.75rem;
 }
 
 .defense-feasibility-card.danger {
-  border-color: rgba(244, 63, 94, 0.45);
-  background: linear-gradient(180deg, rgba(40, 16, 24, 0.9) 0%, rgba(24, 24, 27, 0.95) 100%);
+  border-color: rgba(244, 63, 94, 0.3);
+  background: #150f12;
+}
+
+.defense-feasibility-card.warning {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: #15130f;
 }
 
 .defense-feasibility-card.optimal {
-  border-color: rgba(16, 185, 129, 0.35);
-  background: linear-gradient(180deg, rgba(16, 36, 28, 0.85) 0%, rgba(24, 24, 27, 0.95) 100%);
+  border-color: rgba(16, 185, 129, 0.25);
+  background: #0f1512;
 }
 
 .loading-row {
@@ -1304,21 +1328,34 @@ textarea.field {
 }
 
 .badge-high,
-.status-high {
+.badge-critical,
+.status-high,
+.status-critical,
+.status-danger {
   border-color: rgba(244, 63, 94, 0.25);
   background: rgba(244, 63, 94, 0.08);
   color: #fb7185;
 }
 
 .badge-medium,
-.status-medium {
+.badge-warn,
+.badge-warning,
+.status-medium,
+.status-warn,
+.status-warning {
   border-color: rgba(245, 158, 11, 0.25);
   background: rgba(245, 158, 11, 0.08);
   color: #fbbf24;
 }
 
 .badge-low,
-.status-low {
+.badge-optimal,
+.badge-safe,
+.badge-info,
+.status-low,
+.status-optimal,
+.status-safe,
+.status-info {
   border-color: rgba(16, 185, 129, 0.25);
   background: rgba(16, 185, 129, 0.08);
   color: #34d399;

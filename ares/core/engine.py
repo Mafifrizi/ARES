@@ -1193,7 +1193,7 @@ class AresEngine:
 
         if self.db and runtime_state.vault is not None:
             try:
-                await self._persist_vault_credentials(campaign)
+                await self._persist_vault_credentials(campaign, runtime_state.vault)
             except Exception as exc:
                 logger.warning(
                     "engine_vault_persist_failed",
@@ -1221,6 +1221,30 @@ class AresEngine:
         if self.db:
             await self._persist_runtime_hosts(campaign, runtime_state)
             await self._persist_runtime_graph(campaign, runtime_state)
+            raw = getattr(result, "raw_output", {}) or {}
+            loot_list = raw.get("loot") if isinstance(raw, dict) else None
+            if isinstance(loot_list, list):
+                from ares.db.database import Loot
+                for item in loot_list:
+                    try:
+                        if isinstance(item, Loot):
+                            await self.db.save_loot(item)
+                        elif isinstance(item, dict):
+                            loot_obj = Loot(
+                                id=str(item.get("id") or f"loot_{uuid.uuid4().hex[:12]}"),
+                                campaign_id=campaign.id,
+                                host_id=item.get("host_id") or None,
+                                loot_type=str(item.get("loot_type", "artifact")),
+                                name=str(item.get("name", "Harvested Artifact")),
+                                description=str(item.get("description", "")),
+                                content=item.get("content", {}),
+                                path_on_target=str(item.get("path_on_target", "")),
+                                source_module=module_id,
+                                tags=list(item.get("tags") or []),
+                            )
+                            await self.db.save_loot(loot_obj)
+                    except Exception as exc:
+                        logger.warning("engine_loot_persist_failed", module=module_id, error=str(exc)[:80])
         return await self._finalize_module_result(campaign, module_id, result)
 
     async def _finalize_module_result(
@@ -1358,7 +1382,9 @@ class AresEngine:
                 error=str(exc)[:120],
             )
 
-    async def _persist_vault_credentials(self, campaign: "Campaign") -> int:
+    async def _persist_vault_credentials(
+        self, campaign: "Campaign", vault: Any = None
+    ) -> int:
         """
         Sync in-memory CredentialVault to the DB after each module run.
         Uses save_credential_preencrypted() to avoid double-encrypting secrets
@@ -1366,7 +1392,8 @@ class AresEngine:
 
         Returns: number of credentials saved/updated.
         """
-        vault = getattr(campaign, "_vault", None)
+        if vault is None:
+            vault = getattr(campaign, "_vault", None)
         if not vault or not hasattr(vault, "_store") or not vault._store:
             return 0
 

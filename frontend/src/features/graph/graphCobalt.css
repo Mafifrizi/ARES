@@ -1,0 +1,770 @@
+/* ==========================================================================
+   ARES Tactical Telemetry & Cobalt Strike C2 Console Architecture
+   Industrial-Brutalist & Anti-Slop Discipline: True 1:1 Cobalt Strike Fidelity
+   ========================================================================== */
+
+.cobalt-graph-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 84px);
+  min-height: 680px;
+  background: #020305;
+  border: 1px solid #3c434f;
+  border-radius: 0px; /* Zero border-radius: mechanical rigidity */
+  overflow: hidden;
+  position: relative;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+}
+
+/* ── Authentic Desktop Window Title Bar ──────────────────────────────────── */
+.cobalt-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(180deg, #3c4046 0%, #292c31 100%);
+  border-bottom: 1px solid #1a1c20;
+  padding: 2px 6px;
+  color: #ffffff;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  font-size: 11px;
+  user-select: none;
+  z-index: 10;
+}
+
+.cobalt-window-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: bold;
+  color: #e4e4e7;
+  letter-spacing: 0.02em;
+}
+
+.cobalt-window-title svg {
+  color: #ef4444;
+}
+
+.cobalt-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cobalt-win-btn {
+  width: 18px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: #3e4248;
+  border-top: 1px solid #5a5f68;
+  border-left: 1px solid #5a5f68;
+  border-right: 1px solid #202226;
+  border-bottom: 1px solid #202226;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+.cobalt-win-btn:hover {
+  background: #50555e;
+  color: #ffffff;
+}
+
+.cobalt-win-btn.close:hover {
+  background: #cc2222;
+  color: #ffffff;
+}
+
+/* ── Cobalt Strike Classic Desktop Window Menu Bar ────────────────────────── */
+.cobalt-menubar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #d4d0c8;
+  border-bottom: 1px solid #808080;
+  color: #000000;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  font-size: 11px;
+  padding: 1px 6px;
+  user-select: none;
+  z-index: 10;
+}
+
+.cobalt-menubar-items {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cobalt-menu-item {
+  padding: 2px 6px;
+  cursor: pointer;
+  color: #000000;
+  font-weight: 500;
+}
+
+.cobalt-menu-item:hover {
+  background: #316ac5;
+  color: #ffffff;
+}
+
+.cobalt-menubar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+
+/* ── Cobalt Strike Action Icon Toolbar ────────────────────────────────────── */
+.cobalt-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ece9d8;
+  border-bottom: 2px groove #ffffff;
+  padding: 2px 6px;
+  color: #000000;
+  user-select: none;
+  z-index: 10;
+}
+
+.cobalt-toolbar-left,
+.cobalt-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.cobalt-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 1px 5px;
+  background: #ece9d8;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #707070;
+  border-bottom: 1px solid #707070;
+  border-radius: 0px;
+  color: #000000;
+  font-size: 11px;
+  font-family: Tahoma, sans-serif;
+  cursor: pointer;
+}
+
+.cobalt-tool-btn:hover {
+  background: #f5f3e9;
+}
+
+.cobalt-tool-btn:active,
+.cobalt-tool-btn.active {
+  background: #dedad0;
+  border-top: 1px solid #707070;
+  border-left: 1px solid #707070;
+  border-right: 1px solid #ffffff;
+  border-bottom: 1px solid #ffffff;
+}
+
+.cobalt-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: #aca899;
+  border-right: 1px solid #ffffff;
+  margin: 0 3px;
+}
+
+.cobalt-badge-legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  color: #333333;
+}
+
+.cobalt-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cobalt-legend-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.cobalt-legend-dot.system {
+  background: #ff2222;
+  box-shadow: 0 0 5px #ff2222;
+}
+
+.cobalt-legend-dot.beacon {
+  background: #00d4ff;
+  box-shadow: 0 0 5px #00d4ff;
+}
+
+.cobalt-legend-dot.pivot {
+  background: #ff9900;
+  box-shadow: 0 0 5px #ff9900;
+}
+
+.cobalt-legend-dot.gateway {
+  background: #e11d48;
+}
+
+/* ── Split Canvas & Terminal Area ────────────────────────────────────────── */
+.cobalt-split-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.cobalt-canvas-area {
+  flex: 1;
+  min-height: 350px;
+  background:
+    radial-gradient(circle, #1a1e26 0.6px, transparent 0.6px)
+    0 0 / 18px 18px,
+    #020305;
+  position: relative;
+  overflow: hidden;
+}
+
+/* CRT Scanline Overlay — Industrial-Brutalist requirement */
+.cobalt-canvas-area::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Cobalt Strike Custom Node: Monitor & Firewall ──────────────────────── */
+.cobalt-node-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Authentic CRT Desktop Monitor Housing */
+.cobalt-monitor-housing {
+  position: relative;
+  width: 92px;
+  height: 68px;
+  background: #282d35;
+  border-top: 2px solid #505866;
+  border-left: 2px solid #505866;
+  border-right: 2px solid #101216;
+  border-bottom: 2px solid #101216;
+  border-radius: 1px;
+  padding: 4px 5px 5px 5px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cobalt-node-wrapper:hover .cobalt-monitor-housing {
+  transform: translateY(-1px);
+}
+
+/* Halo & Aura Variations (Pure Crisp Vectors, No Blurry AI-Slop Glows) */
+/* Elevated / SYSTEM */
+.cobalt-node-wrapper.elevated .cobalt-monitor-housing {
+  border-color: #ff1111;
+  background: #2a1f22;
+}
+
+/* Active User Beacon */
+.cobalt-node-wrapper.active-beacon .cobalt-monitor-housing {
+  border-color: #00d4ff;
+}
+
+/* Mapped Target / Discovery */
+.cobalt-node-wrapper.mapped .cobalt-monitor-housing {
+  border-color: #ff9900;
+}
+
+/* Selected State: Authentic Cobalt Strike Green Dashed Border */
+.cobalt-node-wrapper.selected .cobalt-monitor-housing {
+  outline: 2px dashed #00ff00 !important;
+  outline-offset: 4px;
+}
+
+/* Jagged Red Lightning Frame SVG Overlay */
+.cobalt-lightning-svg {
+  position: absolute;
+  top: -16px;
+  left: -18px;
+  width: 132px;
+  height: 104px;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Inside CRT / LCD Screen Glass */
+.cobalt-monitor-screen {
+  flex: 1;
+  background: #010204;
+  border: 1px solid #181d24;
+  border-radius: 1px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Phosphor green CRT glow on screen content */
+.cobalt-monitor-screen > svg {
+  filter: drop-shadow(0 0 3px rgba(0, 255, 65, 0.25));
+}
+
+/* Glass reflection shine */
+.cobalt-monitor-screen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+}
+
+/* Monitor Chin & Stand */
+.cobalt-monitor-chin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 3px;
+  height: 5px;
+}
+
+.cobalt-monitor-logo-dot {
+  width: 3px;
+  height: 3px;
+  background: #606874;
+  border-radius: 50%;
+}
+
+.cobalt-monitor-stand {
+  width: 16px;
+  height: 7px;
+  background: #252930;
+  border-left: 1px solid #424854;
+  border-right: 1px solid #14161a;
+}
+
+.cobalt-monitor-base {
+  width: 40px;
+  height: 4px;
+  background: #353b44;
+  border-top: 1px solid #505866;
+  border-bottom: 1px solid #14161a;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.8);
+}
+
+/* Under-Monitor Monospace Telemetry */
+.cobalt-node-caption {
+  margin-top: 4px;
+  text-align: center;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.25;
+  color: #ffffff;
+  text-shadow:
+    1px 1px 0 #000,
+    -1px -1px 0 #000,
+    1px -1px 0 #000,
+    -1px 1px 0 #000,
+    0 2px 4px #000;
+  white-space: nowrap;
+}
+
+.cobalt-node-privilege {
+  display: block;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cobalt-node-privilege.system {
+  color: #ff3333;
+}
+
+.cobalt-node-privilege.user {
+  color: #ffffff;
+}
+
+.cobalt-node-privilege.neutral {
+  color: #ffffff;
+}
+
+.cobalt-node-subtext {
+  display: block;
+  font-size: 11px;
+  color: #ffffff;
+}
+
+/* ── Cobalt Firewall / Ingress Gateway Node ──────────────────────────────── */
+.cobalt-firewall-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cobalt-firewall-brick {
+  width: 90px;
+  height: 74px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Directed Edge Styling (Crisp Solid and Dashed Vector Lines) ────────── */
+.cobalt-edge-smb {
+  stroke: #ff9900 !important;
+  stroke-width: 2px !important;
+}
+
+.cobalt-edge-egress {
+  stroke: #00cc44 !important;
+  stroke-width: 2px !important;
+}
+
+.cobalt-edge-session {
+  stroke: #00d4ff !important;
+  stroke-width: 2px !important;
+}
+
+.cobalt-edge-reverse {
+  stroke: #eab308 !important;
+  stroke-width: 2px !important;
+  stroke-dasharray: 6 4 !important;
+}
+
+/* ── Bottom Half: Classic Java Swing / Cobalt Strike Tabbed Terminal Dock ── */
+.cobalt-terminal-dock {
+  height: 290px;
+  display: flex;
+  flex-direction: column;
+  background: #000000;
+  border-top: 1px solid #11141a;
+  z-index: 5;
+}
+
+/* Authentic Draggable Splitter Bar with Ripple Grip */
+.cobalt-splitter-bar {
+  height: 7px;
+  background: #7a8898;
+  border-top: 1px solid #9fb0c0;
+  border-bottom: 1px solid #4a5460;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  user-select: none;
+}
+
+.cobalt-splitter-grip {
+  display: flex;
+  gap: 3px;
+}
+
+.cobalt-splitter-grip span {
+  width: 14px;
+  height: 2px;
+  background: #2b3440;
+  box-shadow: 0 1px 0 #b0c0d0;
+}
+
+/* Authentic Multi-Row Java Swing Metal Tab Bar */
+.cobalt-tab-strip-wrapper {
+  display: flex;
+  flex-direction: column;
+  background: #9ea8b4;
+  border-bottom: 2px solid #4a5666;
+}
+
+.cobalt-tab-bar {
+  display: flex;
+  align-items: center;
+  padding: 2px 6px 0 6px;
+  gap: 3px;
+  overflow-x: auto;
+  user-select: none;
+}
+
+.cobalt-tab-bar.row-1 {
+  border-bottom: 1px solid #8899aa;
+  padding-bottom: 1px;
+}
+
+.cobalt-tab-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  font-size: 11px;
+  color: #101824;
+  background: #a8b0bc;
+  border-top: 1px solid #d0d4da;
+  border-left: 1px solid #d0d4da;
+  border-right: 1px solid #5a6272;
+  border-bottom: none;
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms ease;
+}
+
+.cobalt-tab-item:hover {
+  background: #d8e4f0;
+}
+
+.cobalt-tab-item.active {
+  background: #d6dae0;
+  border-top: 2px solid #3b6ea8;
+  border-left: 1px solid #d0d4da;
+  border-right: 1px solid #4a5a6a;
+  border-bottom: 2px solid #d6dae0;
+  color: #000000;
+  font-weight: 700;
+  margin-bottom: -2px;
+}
+
+.cobalt-tab-beacon-dot {
+  width: 7px;
+  height: 7px;
+  background: #00dd00;
+  border: 1px solid #007700;
+}
+
+.cobalt-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  color: #333333;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.cobalt-tab-close:hover {
+  color: #ffffff;
+  background: #cc2222;
+}
+
+/* Status Bar Directly Above Terminal Console */
+.cobalt-terminal-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 10px;
+  background: #b0aead;
+  border-top: 1px solid #c8c6c4;
+  border-bottom: 1px solid #6e6c6a;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #000000;
+  font-weight: 600;
+  user-select: none;
+}
+
+.cobalt-terminal-statusbar .cobalt-status-left {
+  color: #000000;
+}
+
+.cobalt-terminal-statusbar .cobalt-status-right {
+  color: #222222;
+}
+
+/* Terminal Console Body */
+.cobalt-terminal-body {
+  flex: 1;
+  padding: 6px 10px;
+  overflow-y: auto;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+  background: #000000;
+  color: #ffffff;
+}
+
+.cobalt-log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.cobalt-log-success {
+  color: #00ff41;
+}
+
+.cobalt-log-info {
+  color: #00d4ff;
+}
+
+.cobalt-log-warn {
+  color: #ffb703;
+}
+
+.cobalt-log-cmd {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+/* Prompt Line */
+.cobalt-terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: #000000;
+  border-top: 1px solid #1a1e24;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.cobalt-prompt-label {
+  color: #ffffff;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.cobalt-terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ffffff;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+/* Custom Classic Scrollbars */
+.cobalt-terminal-body::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+  background: #d4d0c8;
+}
+
+.cobalt-terminal-body::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #707070;
+  border-bottom: 1px solid #707070;
+}
+
+/* ── Cobalt Strike Java Swing Modal Dialogs ─────────────────────────────── */
+.cobalt-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.cobalt-dialog-window {
+  width: 600px;
+  max-width: 92vw;
+  background: #ece9d8;
+  border-top: 2px solid #ffffff;
+  border-left: 2px solid #ffffff;
+  border-right: 2px solid #505050;
+  border-bottom: 2px solid #505050;
+  box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.85);
+  font-family: Tahoma, "Segoe UI", sans-serif;
+  color: #000000;
+  user-select: none;
+}
+
+.cobalt-dialog-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #0a246a 0%, #3a6ea5 100%);
+  padding: 3px 6px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: bold;
+  border-bottom: 1px solid #04163c;
+}
+
+.cobalt-dialog-titlebar .cobalt-win-btn {
+  background: #ece9d8;
+  color: #000000;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #707070;
+  border-bottom: 1px solid #707070;
+  font-weight: bold;
+}
+
+.cobalt-dialog-body {
+  padding: 14px;
+  font-size: 11px;
+}
+
+.cobalt-btn-swing {
+  min-width: 75px;
+  height: 23px;
+  padding: 2px 12px;
+  background: #ece9d8;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #ffffff;
+  border-right: 1px solid #707070;
+  border-bottom: 1px solid #707070;
+  font-family: Tahoma, sans-serif;
+  font-size: 11px;
+  color: #000000;
+  cursor: pointer;
+}
+
+.cobalt-btn-swing:hover {
+  background: #f5f3e9;
+}
+
+.cobalt-btn-swing:active {
+  border-top: 1px solid #707070;
+  border-left: 1px solid #707070;
+  border-right: 1px solid #ffffff;
+  border-bottom: 1px solid #ffffff;
+}
+
+.cobalt-swing-input {
+  width: 100%;
+  background: #ffffff;
+  border-top: 1px solid #707070;
+  border-left: 1px solid #707070;
+  border-right: 1px solid #ffffff;
+  border-bottom: 1px solid #ffffff;
+  padding: 4px 6px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #000000;
+  outline: none;
+}
+

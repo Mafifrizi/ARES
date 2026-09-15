@@ -227,3 +227,347 @@ export function attackPathSummary(path: AttackPath): string {
   const end = path.end || path.steps[path.steps.length - 1]?.to || "Unknown target";
   return `${start} → ${end}`;
 }
+
+export interface CobaltNodeInference {
+  os: "windows" | "windows-server" | "linux" | "firewall";
+  privilege: "system" | "admin" | "user" | "uncompromised";
+  status: "active" | "dormant" | "mapped";
+  process?: string;
+  ip?: string;
+  pid?: number | string;
+  subLabel?: string;
+}
+
+export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
+  const labelLower = (node.label || "").toLowerCase();
+  const typeLower = (node.type || "").toLowerCase();
+  const meta = node.metadata || {};
+
+  let os: "windows" | "windows-server" | "linux" | "firewall" = "windows";
+  if (meta.os === "firewall" || meta.os === "windows-server" || meta.os === "windows" || meta.os === "linux") {
+    os = meta.os;
+  } else if (typeLower.includes("firewall") || labelLower.includes("firewall") || labelLower.includes("gateway")) {
+    os = "firewall";
+  } else if (typeLower.includes("dc") || labelLower.includes("dc") || labelLower.includes("server") || typeLower.includes("domain")) {
+    os = "windows-server";
+  } else if (labelLower.includes("linux") || labelLower.includes("ubuntu") || labelLower.includes("kali")) {
+    os = "linux";
+  }
+
+  let privilege: "system" | "admin" | "user" | "uncompromised" = "user";
+  if (meta.privilege === "system" || meta.privilege === "admin" || meta.privilege === "user" || meta.privilege === "uncompromised") {
+    privilege = meta.privilege;
+  } else if (node.severity === "critical" || labelLower.includes("system") || labelLower.includes("admin") || labelLower.includes("root")) {
+    privilege = "system";
+  } else if (node.severity === "high") {
+    privilege = "admin";
+  } else if (typeLower === "finding" || typeLower === "host") {
+    privilege = "user";
+  } else if (typeLower === "domain" || typeLower === "group") {
+    privilege = "uncompromised";
+  }
+
+  const ip = typeof meta.ip === "string" ? meta.ip : typeof meta.host === "string" ? meta.host : undefined;
+  const process = typeof meta.process === "string" ? meta.process : typeof meta.binary === "string" ? meta.binary : undefined;
+  const pid = typeof meta.pid === "number" || typeof meta.pid === "string" ? meta.pid : undefined;
+  const explicitSubLabel = typeof meta.subLabel === "string" ? meta.subLabel : undefined;
+
+  return {
+    os,
+    privilege,
+    status: "active",
+    ip,
+    process,
+    pid,
+    subLabel: explicitSubLabel !== undefined ? explicitSubLabel : (ip || (pid ? `PID: ${pid}` : undefined))
+  };
+}
+
+/**
+ * Adapts real API graph and Campaign into Cobalt Strike Pivot Topology.
+ * - If API graph has nodes, it maps them with Cobalt node inference (OS, privilege, status, protocol).
+ * - If API graph has no session nodes yet, but campaign has defined targets,
+ *   it synthesizes target host nodes so the operator sees the campaign attack surface.
+ * - If completely empty, returns empty graph so operator sees true campaign status.
+ */
+export function adaptApiGraphToCobalt(
+  apiGraph: SafeGraph,
+  campaign?: { name?: string; targets?: string[]; scope_cidrs?: string[] } | null
+): SafeGraph {
+  if (apiGraph.nodes.length > 0) {
+    const nodes: SafeGraphNode[] = apiGraph.nodes.map((n) => {
+      const inference = inferCobaltNodeData(n);
+      return {
+        ...n,
+        metadata: {
+          ...n.metadata,
+          os: inference.os,
+          privilege: inference.privilege,
+          status: inference.status,
+          ip: inference.ip || (n.label.includes(".") ? n.label : null),
+          process: inference.process || null,
+          pid: inference.pid !== undefined ? inference.pid : null,
+          subLabel: inference.subLabel || null
+        }
+      };
+    });
+
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const edges: SafeGraphEdge[] = apiGraph.edges
+      .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e) => {
+        let label = e.label || "";
+        const typeLower = (e.type || "").toLowerCase();
+        if (!label) {
+          if (typeLower.includes("egress") || typeLower.includes("web") || typeLower.includes("http")) {
+            label = "HTTPS 443";
+          } else if (typeLower.includes("lateral") || typeLower.includes("smb") || typeLower.includes("pivot")) {
+            label = "\\pipe\\browser";
+          } else if (typeLower.includes("session") || typeLower.includes("ssh")) {
+            label = "SSH 22";
+          } else if (typeLower.includes("discovery")) {
+            label = "discovered";
+          } else {
+            label = "link";
+          }
+        }
+        return {
+          ...e,
+          label
+        };
+      });
+
+    return { nodes, edges };
+  }
+
+  // Fallback: If campaign has targets but no modules have run yet, display the target hosts
+  if (campaign && Array.isArray(campaign.targets) && campaign.targets.length > 0) {
+    const firewallNode: SafeGraphNode = {
+      id: "node:ingress-fw",
+      type: "firewall",
+      label: "INGRESS / SCOPE",
+      color: "#06b6d4",
+      metadata: {
+        os: "firewall",
+        privilege: "user",
+        ip: campaign.scope_cidrs?.[0] || "10.0.0.0/24",
+        subLabel: `${campaign.name || "Target Scope"}`
+      }
+    };
+
+    const targetNodes: SafeGraphNode[] = campaign.targets.slice(0, 12).map((tgt, idx) => {
+      const tgtLower = tgt.toLowerCase();
+      const isDc = tgtLower.includes("dc") || tgtLower.includes("server") || idx === campaign.targets!.length - 1;
+      const isLinux = tgtLower.includes("linux") || tgtLower.includes("ubuntu") || tgtLower.includes("deb");
+      return {
+        id: `node:target-${idx}`,
+        type: isDc ? "dc" : "host",
+        label: tgt,
+        color: isDc ? "#e11d48" : "#f59e0b",
+        severity: isDc ? "high" : "low",
+        metadata: {
+          os: isDc ? "windows-server" : (isLinux ? "linux" : "windows"),
+          privilege: "uncompromised",
+          status: "mapped",
+          ip: tgt,
+          subLabel: isDc ? "TARGET DC (UNPWNED)" : "TARGET HOST"
+        }
+      };
+    });
+
+    const edges: SafeGraphEdge[] = targetNodes.map((tgtNode, idx) => ({
+      id: `edge:fw-tgt-${idx}`,
+      source: firewallNode.id,
+      target: tgtNode.id,
+      type: "discovery",
+      label: "in-scope",
+      weight: 1,
+      color: "#f59e0b",
+      dashed: true,
+      metadata: { protocol: "TCP/SCAN" }
+    }));
+
+    return { nodes: [firewallNode, ...targetNodes], edges };
+  }
+
+  return { nodes: [], edges: [] };
+}
+
+export function generateCobaltPivotTopology(): SafeGraph {
+  const nodes: SafeGraphNode[] = [
+    {
+      id: "node:firewall",
+      type: "firewall",
+      label: "FIREWALL",
+      color: "#e11d48",
+      severity: "critical",
+      metadata: { os: "firewall", privilege: "system", ip: "10.10.10.1", subLabel: "" }
+    },
+    {
+      id: "node:entry-ws",
+      type: "host",
+      label: "10.10.10.191",
+      color: "#06b6d4",
+      metadata: { os: "windows", privilege: "user", user: "10.10.10.191", pid: 4844, subLabel: "4844" }
+    },
+    {
+      id: "node:parent-198",
+      type: "host",
+      label: "SYSTEM *",
+      color: "#ef4444",
+      severity: "critical",
+      metadata: { os: "windows", privilege: "system", user: "SYSTEM *", pid: 2000, subLabel: "10.10.10.198 @ 2000" }
+    },
+    {
+      id: "node:mimikatz",
+      type: "host",
+      label: "SYSTEM *",
+      color: "#ef4444",
+      severity: "critical",
+      metadata: { os: "windows", privilege: "system", user: "SYSTEM *", pid: 2956, subLabel: "PENGREC @ 2956" }
+    },
+    {
+      id: "node:engineer",
+      type: "host",
+      label: "SYSTEM *",
+      color: "#ef4444",
+      severity: "critical",
+      metadata: { os: "windows", privilege: "system", user: "SYSTEM *", pid: 1512, subLabel: "ENGINEER @ 1512" }
+    },
+    {
+      id: "node:dc01",
+      type: "dc",
+      label: "SYSTEM *",
+      color: "#ef4444",
+      severity: "critical",
+      metadata: { os: "windows-server", privilege: "system", user: "SYSTEM *", pid: 2308, subLabel: "DC @ 2308" }
+    },
+    {
+      id: "node:dev45",
+      type: "host",
+      label: "SYSTEM *",
+      color: "#ef4444",
+      severity: "critical",
+      metadata: { os: "windows", privilege: "system", user: "SYSTEM *", pid: 8040, subLabel: "DEVELOPER45 @ 8040" }
+    },
+    {
+      id: "node:dev-child",
+      type: "host",
+      label: "Jamie.Grins",
+      color: "#06b6d4",
+      metadata: { os: "windows", privilege: "user", user: "Jamie.Grins", pid: 6984, subLabel: "DEVELOPER45 @ 6984" }
+    },
+    {
+      id: "node:ubuntu",
+      type: "host",
+      label: "jgrins",
+      color: "#f59e0b",
+      metadata: { os: "linux", privilege: "user", user: "jgrins", subLabel: "ubuntu" }
+    }
+  ];
+
+  const edges: SafeGraphEdge[] = [
+    {
+      id: "edge:fw-entry",
+      source: "node:firewall",
+      target: "node:entry-ws",
+      type: "egress",
+      label: "Egress",
+      weight: 1,
+      color: "#00cc44",
+      dashed: false,
+      metadata: { protocol: "HTTPS", port: 443 }
+    },
+    {
+      id: "edge:entry-parent",
+      source: "node:entry-ws",
+      target: "node:parent-198",
+      type: "pivot",
+      label: "SMB Pipe",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { pipe: "\\pipe\\spoolss" }
+    },
+    {
+      id: "edge:parent-mimikatz",
+      source: "node:parent-198",
+      target: "node:mimikatz",
+      type: "pivot",
+      label: "SMB Pipe",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { pipe: "\\pipe\\samr" }
+    },
+    {
+      id: "edge:mimikatz-engineer",
+      source: "node:mimikatz",
+      target: "node:engineer",
+      type: "pivot",
+      label: "SMB Pipe",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { pipe: "\\pipe\\srvsvc" }
+    },
+    {
+      id: "edge:parent-dc01",
+      source: "node:parent-198",
+      target: "node:dc01",
+      type: "pivot",
+      label: "SMB Pipe",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { pipe: "\\pipe\\netlogon" }
+    },
+    {
+      id: "edge:entry-dev45",
+      source: "node:entry-ws",
+      target: "node:dev45",
+      type: "pivot",
+      label: "SMB Pipe",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { pipe: "\\pipe\\browser" }
+    },
+    {
+      id: "edge:dev45-child",
+      source: "node:dev45",
+      target: "node:dev-child",
+      type: "session",
+      label: "Interactive Link",
+      weight: 1,
+      color: "#00d4ff",
+      dashed: false,
+      metadata: { channel: "staged_tcp" }
+    },
+    {
+      id: "edge:child-ubuntu",
+      source: "node:dev-child",
+      target: "node:ubuntu",
+      type: "pivot",
+      label: "SSH Pivot",
+      weight: 1,
+      color: "#ff9900",
+      dashed: false,
+      metadata: { protocol: "SSH", port: 22 }
+    },
+    {
+      id: "edge:fw-reverse",
+      source: "node:dev-child",
+      target: "node:firewall",
+      type: "reverse",
+      label: "Reverse Route",
+      weight: 1,
+      color: "#ffff00",
+      dashed: true,
+      metadata: { listener: "TCP Reverse" }
+    }
+  ];
+
+  return { nodes, edges };
+}
+

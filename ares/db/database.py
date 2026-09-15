@@ -1769,31 +1769,58 @@ class AresDatabase:
             stats["total"] += r["n"]
         return stats
 
-    async def get_monthly_confirmed_finding_stats(self) -> dict[str, Any]:
+    async def get_monthly_confirmed_finding_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Return confirmed findings grouped by day in the current UTC month."""
         period = datetime.now(timezone.utc).strftime("%Y-%m")
-        async with self._conn.execute(
-            """
-            SELECT COUNT(*) AS n
-            FROM findings
-            WHERE validated=1
-              AND false_positive=0
-            """
-        ) as cur:
-            confirmed_findings = int((await cur.fetchone())["n"])
-        async with self._conn.execute(
-            """
-            SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
-            FROM findings
-            WHERE validated=1
-              AND false_positive=0
-              AND substr(discovered_at, 1, 7)=?
-            GROUP BY substr(discovered_at, 1, 10)
-            ORDER BY finding_date
-            """,
-            (period,),
-        ) as cur:
-            rows = await cur.fetchall()
+        if campaign_id:
+            async with self._conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                  AND campaign_id=?
+                """,
+                (campaign_id,),
+            ) as cur:
+                confirmed_findings = int((await cur.fetchone())["n"])
+            async with self._conn.execute(
+                """
+                SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                  AND substr(discovered_at, 1, 7)=?
+                  AND campaign_id=?
+                GROUP BY substr(discovered_at, 1, 10)
+                ORDER BY finding_date
+                """,
+                (period, campaign_id),
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with self._conn.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                """
+            ) as cur:
+                confirmed_findings = int((await cur.fetchone())["n"])
+            async with self._conn.execute(
+                """
+                SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
+                FROM findings
+                WHERE validated=1
+                  AND false_positive=0
+                  AND substr(discovered_at, 1, 7)=?
+                GROUP BY substr(discovered_at, 1, 10)
+                ORDER BY finding_date
+                """,
+                (period,),
+            ) as cur:
+                rows = await cur.fetchall()
         series = [{"date": str(row["finding_date"]), "count": int(row["n"])} for row in rows]
         return {
             "period": period,
@@ -1830,11 +1857,32 @@ class AresDatabase:
         )
         await self._conn.commit()
 
-    async def get_telemetry_stats(self) -> dict[str, Any]:
+    async def get_telemetry_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Aggregate persisted execution, finding, and discovered-host telemetry."""
-        async with self._conn.execute(
-            "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
-        ) as cur:
+        if campaign_id:
+            run_sql = "SELECT success, duration_ms, completed_at FROM module_runs WHERE campaign_id = ? ORDER BY completed_at"
+            run_params: tuple[Any, ...] = (campaign_id,)
+            findings_sql = """
+                SELECT COUNT(*) AS n
+                FROM findings
+                WHERE validated=1 AND false_positive=0 AND campaign_id = ?
+            """
+            findings_params: tuple[Any, ...] = (campaign_id,)
+            hosts_sql = "SELECT COUNT(*) AS n FROM hosts WHERE campaign_id = ?"
+            hosts_params: tuple[Any, ...] = (campaign_id,)
+        else:
+            run_sql = "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
+            run_params = ()
+            findings_sql = """
+                SELECT COUNT(*) AS n
+                FROM findings
+                WHERE validated=1 AND false_positive=0
+            """
+            findings_params = ()
+            hosts_sql = "SELECT COUNT(*) AS n FROM hosts"
+            hosts_params = ()
+
+        async with self._conn.execute(run_sql, run_params) as cur:
             run_rows = await cur.fetchall()
 
         total = len(run_rows)
@@ -1851,18 +1899,13 @@ class AresDatabase:
         recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
         recent_runs = sum(1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff)
 
-        async with self._conn.execute(
-            """
-            SELECT COUNT(*) AS n
-            FROM findings
-            WHERE validated=1 AND false_positive=0
-            """
-        ) as cur:
+        async with self._conn.execute(findings_sql, findings_params) as cur:
             confirmed_findings = int((await cur.fetchone())["n"])
-        async with self._conn.execute("SELECT COUNT(*) AS n FROM hosts") as cur:
+        async with self._conn.execute(hosts_sql, hosts_params) as cur:
             discovered_hosts = int((await cur.fetchone())["n"])
 
         return {
+            "campaign_id": campaign_id,
             "modules": {
                 "total": total,
                 "success": success,
@@ -2126,7 +2169,11 @@ class AresDatabase:
         if not row or not row["content_enc"]:
             return None
         try:
-            decoded = self._dec_val(row["content_enc"])
+            raw_content = str(row["content_enc"])
+            if raw_content.startswith("{") or raw_content.startswith("["):
+                decoded = raw_content
+            else:
+                decoded = self._dec_val(raw_content)
             parsed = json.loads(decoded) if decoded else None
             return parsed if isinstance(parsed, dict) else None
         except (TypeError, ValueError):

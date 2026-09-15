@@ -331,9 +331,46 @@ class CredentialVault:
         )
         return cred.id
 
-    def add(self, cred: "Credential", secret: str = "") -> str:
-        """Alias for store() — used by tests and external callers."""
-        return self.store(cred, secret)
+    def add(self, cred: "Any" = None, secret: str = "", **kwargs: Any) -> str:
+        """Alias for store() — supports both Credential model and kwargs."""
+        if isinstance(cred, Credential):
+            return self.store(cred, secret)
+        username = str(kwargs.get("username") or (cred if isinstance(cred, str) else ""))
+        cred_type_raw = kwargs.get("cred_type", CredentialType.CLEARTEXT)
+        type_map = {
+            "cleartext": CredentialType.CLEARTEXT,
+            "password": CredentialType.CLEARTEXT,
+            "ntlm": CredentialType.NTLM,
+            "hash": CredentialType.NTLM,
+            "token": CredentialType.JWT,
+            "jwt": CredentialType.JWT,
+            "api_key": CredentialType.API_KEY,
+            "ticket": CredentialType.KRB5_TGT,
+            "tgt": CredentialType.KRB5_TGT,
+            "tgs": CredentialType.KRB5_TGS,
+            "certificate": CredentialType.CERTIFICATE,
+            "cert": CredentialType.CERTIFICATE,
+            "cookie": CredentialType.COOKIE,
+        }
+        if isinstance(cred_type_raw, str):
+            cred_type = type_map.get(cred_type_raw.lower(), CredentialType.CLEARTEXT)
+        elif isinstance(cred_type_raw, CredentialType):
+            cred_type = cred_type_raw
+        else:
+            cred_type = CredentialType.CLEARTEXT
+
+        c = Credential(
+            campaign_id=str(kwargs.get("campaign_id", getattr(self, "campaign_id", ""))),
+            username=username,
+            domain=str(kwargs.get("domain", "")),
+            target_host=str(kwargs.get("host") or kwargs.get("target_host", "")),
+            cred_type=cred_type,
+            privilege=kwargs.get("privilege", PrivilegeLevel.LOCAL_USER),
+            source_module=str(kwargs.get("source_module", "")),
+            source_host=str(kwargs.get("source_host", "")),
+            tags=list(kwargs.get("tags") or []),
+        )
+        return self.store(c, secret or str(kwargs.get("secret", "")))
 
     def reveal(self, cred_id: str) -> str:
         """Decrypt and return the secret for a credential. Audit-logged."""

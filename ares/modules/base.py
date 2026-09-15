@@ -73,7 +73,7 @@ def normalize_module_metadata(
     """Return the stable metadata contract exposed by the registry and API."""
     metadata = dict(base or {})
 
-    if param_schema is None:
+    if not param_schema:
         params_model = getattr(cls, "PARAMS_MODEL", None)
         if params_model is not None and hasattr(params_model, "schema_for_api"):
             param_schema = params_model.schema_for_api()

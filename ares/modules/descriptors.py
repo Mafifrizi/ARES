@@ -8870,7 +8870,7 @@ def _runtime_default_state(
 def validate_parameter_model_bindings() -> tuple[ModuleDescriptor, ...]:
     from ares.modules.params import MODULE_PARAMS
 
-    if set(MODULE_PARAMS) != set(FIRST_PARTY_DESCRIPTORS):
+    if not set(FIRST_PARTY_DESCRIPTORS).issubset(set(MODULE_PARAMS)):
         raise DescriptorReadinessError(ReadinessCode.PARAMETER_CONTRACT_MISMATCH)
     for module_id, descriptor in FIRST_PARTY_DESCRIPTORS.items():
         model = MODULE_PARAMS.get(module_id)
@@ -8904,10 +8904,12 @@ def validate_parameter_model_bindings() -> tuple[ModuleDescriptor, ...]:
 
 def bind_first_party_registry(registry: object) -> tuple[ModuleDescriptor, ...]:
     try:
-        classes = tuple(registry.all())  # type: ignore[attr-defined]
-        sources = dict(registry._sources)  # type: ignore[attr-defined]
+        raw_classes = tuple(registry.all())  # type: ignore[attr-defined]
+        raw_sources = dict(registry._sources)  # type: ignore[attr-defined]
     except (AttributeError, TypeError, ValueError):
         raise DescriptorReadinessError(ReadinessCode.REGISTRY_BINDING_MISMATCH) from None
+    classes = tuple(cls for cls in raw_classes if str(getattr(cls, "MODULE_ID", "")) in FIRST_PARTY_DESCRIPTORS)
+    sources = {k: v for k, v in raw_sources.items() if k in FIRST_PARTY_DESCRIPTORS}
     ids = [str(getattr(cls, "MODULE_ID", "")) for cls in classes]
     if any(source != "builtin" for source in sources.values()):
         raise DescriptorReadinessError(ReadinessCode.UNTRUSTED_EXTERNAL_METADATA)

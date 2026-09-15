@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, beginIdentityTransition, clearTokens, setAccessToken } from "../../api/client";
 import { installTokenPairIfCurrent } from "../../api/session";
-import { CampaignEventSocketController } from "./DashboardPages";
+import { CampaignEventSocketController, NoiseProfileBadge, opsecBadge } from "./DashboardPages";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -293,3 +293,53 @@ describe("campaign WebSocket ticket barrier", () => {
     );
   });
 });
+
+describe("defense and OPSEC badge token consistency", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("maps opsec levels to consistent CSS badge tokens without color clashes", () => {
+    // High / Critical / Alarm -> badge-high (Rose/Red)
+    expect(opsecBadge("high")).toBe("badge badge-high");
+    expect(opsecBadge("critical")).toBe("badge badge-high");
+    expect(opsecBadge("critical_alarm")).toBe("badge badge-high");
+    expect(opsecBadge("alarm")).toBe("badge badge-high");
+
+    // Medium / Moderate / Warn -> badge-medium (Amber/Orange)
+    expect(opsecBadge("medium")).toBe("badge badge-medium");
+    expect(opsecBadge("moderate")).toBe("badge badge-medium");
+    expect(opsecBadge("warn")).toBe("badge badge-medium");
+
+    // Low / Safe / Stealth / Info -> badge-low (Emerald/Green)
+    expect(opsecBadge("low")).toBe("badge badge-low");
+    expect(opsecBadge("safe")).toBe("badge badge-low");
+    expect(opsecBadge("stealth")).toBe("badge badge-low");
+    expect(opsecBadge("info")).toBe("badge badge-low");
+
+    // Empty / n/a / unknown -> neutral badge
+    expect(opsecBadge("")).toBe("badge");
+    expect(opsecBadge("n/a")).toBe("badge");
+    expect(opsecBadge("unknown")).toBe("badge");
+    expect(opsecBadge(undefined)).toBe("badge");
+  });
+
+  it("renders noise profile badge consistently with tactical color tokens", () => {
+    const noisyRender = render(<NoiseProfileBadge noise="noisy" />);
+    expect(noisyRender.container.querySelector(".badge-high")).not.toBeNull();
+    cleanup();
+
+    const evasiveRender = render(<NoiseProfileBadge noise="evasive" />);
+    expect(evasiveRender.container.querySelector(".badge-medium")).not.toBeNull();
+    cleanup();
+
+    const stealthRender = render(<NoiseProfileBadge noise="stealth" />);
+    expect(stealthRender.container.querySelector(".badge-low")).not.toBeNull();
+    cleanup();
+
+    const lowRender = render(<NoiseProfileBadge noise="low" />);
+    expect(lowRender.container.querySelector(".badge-low")).not.toBeNull();
+    cleanup();
+  });
+});
+

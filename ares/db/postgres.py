@@ -5157,39 +5157,69 @@ class PostgresDatabase:
             stats["total"] += r["n"]
         return stats
 
-    async def get_monthly_confirmed_finding_stats(self) -> dict[str, Any]:
+    async def get_monthly_confirmed_finding_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Return confirmed findings grouped by day in the current UTC month."""
-        now = datetime.now(timezone.utc)
-        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        period_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
         if period_start.month == 12:
             next_month = period_start.replace(year=period_start.year + 1, month=1)
         else:
             next_month = period_start.replace(month=period_start.month + 1)
         period = period_start.strftime("%Y-%m")
         async with self._pool.acquire() as conn:
-            confirmed_findings = await conn.fetchval(
-                """
-                SELECT COUNT(*)
-                FROM findings
-                WHERE validated=1
-                  AND false_positive=0
-                """
-            )
-            rows = await conn.fetch(
-                """
-                SELECT (discovered_at AT TIME ZONE 'UTC')::date AS finding_date,
-                       COUNT(*) AS n
-                FROM findings
-                WHERE validated=1
-                  AND false_positive=0
-                  AND discovered_at >= $1
-                  AND discovered_at < $2
-                GROUP BY 1
-                ORDER BY 1
-                """,
-                period_start,
-                next_month,
-            )
+            if campaign_id:
+                confirmed_findings = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM findings
+                    WHERE validated=1
+                      AND false_positive=0
+                      AND campaign_id=$1
+                    """,
+                    campaign_id,
+                )
+                rows = await conn.fetch(
+                    """
+                    SELECT (discovered_at AT TIME ZONE 'UTC')::date AS finding_date,
+                           COUNT(*) AS n
+                    FROM findings
+                    WHERE validated=1
+                      AND false_positive=0
+                      AND discovered_at >= $1
+                      AND discovered_at < $2
+                      AND campaign_id=$3
+                    GROUP BY 1
+                    ORDER BY 1
+                    """,
+                    period_start,
+                    next_month,
+                    campaign_id,
+                )
+            else:
+                confirmed_findings = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM findings
+                    WHERE validated=1
+                      AND false_positive=0
+                    """
+                )
+                rows = await conn.fetch(
+                    """
+                    SELECT (discovered_at AT TIME ZONE 'UTC')::date AS finding_date,
+                           COUNT(*) AS n
+                    FROM findings
+                    WHERE validated=1
+                      AND false_positive=0
+                      AND discovered_at >= $1
+                      AND discovered_at < $2
+                    GROUP BY 1
+                    ORDER BY 1
+                    """,
+                    period_start,
+                    next_month,
+                )
         series = [{"date": row["finding_date"].isoformat(), "count": int(row["n"])} for row in rows]
         return {
             "period": period,
@@ -5226,23 +5256,41 @@ class PostgresDatabase:
                 datetime.now(timezone.utc),
             )
 
-    async def get_telemetry_stats(self) -> dict[str, Any]:
+    async def get_telemetry_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Aggregate persisted execution, finding, and discovered-host telemetry."""
         async with self._pool.acquire() as conn:
-            run_rows = await conn.fetch(
-                "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
-            )
-            confirmed_findings = int(
-                await conn.fetchval(
-                    """
-                    SELECT COUNT(*)
-                    FROM findings
-                    WHERE validated=1 AND false_positive=0
-                    """
+            if campaign_id:
+                run_rows = await conn.fetch(
+                    "SELECT success, duration_ms, completed_at FROM module_runs WHERE campaign_id=$1 ORDER BY completed_at",
+                    campaign_id,
                 )
-                or 0
-            )
-            discovered_hosts = int(await conn.fetchval("SELECT COUNT(*) FROM hosts") or 0)
+                confirmed_findings = int(
+                    await conn.fetchval(
+                        """
+                        SELECT COUNT(*)
+                        FROM findings
+                        WHERE validated=1 AND false_positive=0 AND campaign_id=$1
+                        """,
+                        campaign_id,
+                    )
+                    or 0
+                )
+                discovered_hosts = int(await conn.fetchval("SELECT COUNT(*) FROM hosts WHERE campaign_id=$1", campaign_id) or 0)
+            else:
+                run_rows = await conn.fetch(
+                    "SELECT success, duration_ms, completed_at FROM module_runs ORDER BY completed_at"
+                )
+                confirmed_findings = int(
+                    await conn.fetchval(
+                        """
+                        SELECT COUNT(*)
+                        FROM findings
+                        WHERE validated=1 AND false_positive=0
+                        """
+                    )
+                    or 0
+                )
+                discovered_hosts = int(await conn.fetchval("SELECT COUNT(*) FROM hosts") or 0)
 
         total = len(run_rows)
         success = sum(int(row["success"]) for row in run_rows)
@@ -5262,6 +5310,7 @@ class PostgresDatabase:
             if row["completed_at"] is not None and row["completed_at"] >= recent_cutoff
         )
         return {
+            "campaign_id": campaign_id,
             "modules": {
                 "total": total,
                 "success": success,
@@ -5489,7 +5538,11 @@ class PostgresDatabase:
         if not row or not row["content_enc"]:
             return None
         try:
-            decoded = self._dec_val(row["content_enc"])
+            raw_content = str(row["content_enc"])
+            if raw_content.startswith("{") or raw_content.startswith("["):
+                decoded = raw_content
+            else:
+                decoded = self._dec_val(raw_content)
             parsed = json.loads(decoded) if decoded else None
             return parsed if isinstance(parsed, dict) else None
         except (TypeError, ValueError):

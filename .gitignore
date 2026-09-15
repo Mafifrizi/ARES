@@ -65,3 +65,5 @@ scratch/
 skills-lock.json
 docs/assets/*.mp4
 docs/assets/*.gif
+tools/
+test*.png

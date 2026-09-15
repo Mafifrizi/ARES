@@ -97,7 +97,17 @@ _SENSITIVE_EVIDENCE_KEYS = {
     "ccache",
     "ticket",
 }
-_SAFE_HASH_METADATA_KEYS = {"hash_count", "hashcat_cmd", "hashcat_mode"}
+_SAFE_HASH_METADATA_KEYS = {
+    "hash_count",
+    "hashcat_cmd",
+    "hashcat_mode",
+    "provenance_hash",
+    "evidence_hash",
+    "audit_hash",
+    "integrity_hash",
+    "record_hash",
+    "sha256",
+}
 _KERBEROS_HASH_RE = re.compile(r"\$krb5(?:asrep|tgs)\$", re.IGNORECASE)
 _NTLM_HASH_RE = re.compile(r"\b[a-fA-F0-9]{32}\b")
 
@@ -138,7 +148,19 @@ def build_report_context(
     sorted_finds = sorted(
         findings, key=lambda f: -(f.cvss_score or _sev_score(f.severity.value))
     )
-    timeline = sorted(findings, key=lambda f: f.discovered_at)
+    def _finding_time_key(f: Any) -> datetime:
+        ts = getattr(f, "discovered_at", None)
+        if isinstance(ts, datetime):
+            return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts.astimezone(timezone.utc)
+        if isinstance(ts, str):
+            try:
+                parsed = datetime.fromisoformat(ts)
+                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+            except Exception:
+                pass
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    timeline = sorted(findings, key=_finding_time_key)
     mitre_map = _build_mitre_map(findings)
     attack_path = _build_attack_path_narrative(graph_json) if graph_json else []
     exec_summary = _build_exec_summary(campaign, findings)
@@ -337,6 +359,8 @@ def _redact_sensitive_evidence(
     key: Any = "",
 ) -> Any:
     if include_sensitive_evidence:
+        return value
+    if str(key).strip().lower() in _SAFE_HASH_METADATA_KEYS:
         return value
     if _is_sensitive_evidence_key(key):
         return _REDACTED_EVIDENCE

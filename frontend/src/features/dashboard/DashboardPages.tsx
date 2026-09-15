@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRight,
   Bell,
   CheckCircle2,
   ChevronDown,
@@ -12,8 +13,10 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Terminal,
   Trash2,
-  X
+  X,
+  Zap
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -307,8 +310,36 @@ function formatRole(role?: string): string {
   return labels[role] ?? role.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+const NOTIFICATIONS_DELETED_KEY = "ares.dashboard.notifications.deleted";
+const NOTIFICATIONS_READ_KEY = "ares.dashboard.notifications.read";
+
+function getStoredNotificationIds(key: string, username?: string): string[] {
+  try {
+    const userKey = username ? `${key}.${username}` : key;
+    const raw = window.localStorage.getItem(userKey) || window.localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function setStoredNotificationIds(key: string, username: string | undefined, ids: string[]): void {
+  try {
+    const serialized = JSON.stringify(ids);
+    if (username) {
+      window.localStorage.setItem(`${key}.${username}`, serialized);
+    }
+    window.localStorage.setItem(key, serialized);
+  } catch {
+    // Storage sandbox fallback
+  }
+}
+
 export function DashboardShell({ children }: { children: ReactNode }) {
   const { user, loading, logout, logoutAll } = useAuth();
+  const username = user?.username;
   const navigate = useNavigate();
   const writeDashboardSession = useDashboardSessionWriter();
   const [selectedCampaignId, setSelectedCampaignId] = useSessionState("ares.dashboard.selectedCampaignId", "");
@@ -321,10 +352,53 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [operatorMenuOpen, setOperatorMenuOpen] = useState(false);
   const [telemetryOpen, setTelemetryOpen] = useState(false);
-  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
-  const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() =>
+    getStoredNotificationIds(NOTIFICATIONS_READ_KEY, username)
+  );
+  const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>(() =>
+    getStoredNotificationIds(NOTIFICATIONS_DELETED_KEY, username)
+  );
+
+  useEffect(() => {
+    if (username) {
+      const storedDeleted = getStoredNotificationIds(NOTIFICATIONS_DELETED_KEY, username);
+      if (storedDeleted.length > 0) {
+        setDeletedNotificationIds((current) => unique([...current, ...storedDeleted]));
+      }
+      const storedRead = getStoredNotificationIds(NOTIFICATIONS_READ_KEY, username);
+      if (storedRead.length > 0) {
+        setReadNotificationIds((current) => unique([...current, ...storedRead]));
+      }
+    }
+  }, [username]);
+
+  useEffect(() => {
+    if (!notificationsOpen && !operatorMenuOpen && !telemetryOpen) {
+      return;
+    }
+    function handleDocumentClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (
+        !target.closest(".operator-menu-wrap") &&
+        !target.closest(".telemetry-popover") &&
+        !target.closest(".topbar-status-btn") &&
+        !target.closest(".notification-drawer") &&
+        !target.closest(".icon-button.has-badge")
+      ) {
+        setNotificationsOpen(false);
+        setOperatorMenuOpen(false);
+        setTelemetryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, [notificationsOpen, operatorMenuOpen, telemetryOpen]);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
-  const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
+  const telemetry = useQuery({
+    queryKey: ["telemetry", selectedCampaignId],
+    queryFn: () => api.telemetry(selectedCampaignId || undefined)
+  });
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns });
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
   const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates });
@@ -563,37 +637,80 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
     const queueDepth = metricNumber(snapshot?.queue, "depth");
     if (failedRuns > 0) {
-      items.push({ id: `telemetry:failed-runs:${failedRuns}`, title: "Failed module runs", detail: `${failedRuns} failed module run(s) reported by telemetry.`, tone: "warn" });
+      items.push({
+        id: "telemetry:failed-runs",
+        title: "Failed module runs",
+        detail: `${failedRuns} failed module run(s) reported by telemetry.`,
+        tone: "warn"
+      });
     }
     if (errorRate > 0) {
-      items.push({ id: `telemetry:error-rate:${errorRate}`, title: "Runtime error rate above zero", detail: `${formatRate(errorRate)} module error rate.`, tone: "warn" });
+      items.push({
+        id: "telemetry:error-rate",
+        title: "Runtime error rate above zero",
+        detail: `${formatRate(errorRate)} module error rate.`,
+        tone: "warn"
+      });
     }
     if (unhealthyWorkers > 0) {
-      items.push({ id: `telemetry:workers:${unhealthyWorkers}`, title: "Unhealthy worker detected", detail: `${unhealthyWorkers} worker(s) unhealthy.`, tone: "danger" });
+      items.push({
+        id: "telemetry:workers",
+        title: "Unhealthy worker detected",
+        detail: `${unhealthyWorkers} worker(s) unhealthy.`,
+        tone: "danger"
+      });
     }
     if (queueDepth > 0) {
-      items.push({ id: `telemetry:queue:${queueDepth}`, title: "Queue has pending work", detail: `${queueDepth} queued task(s).`, tone: "info" });
+      items.push({
+        id: "telemetry:queue",
+        title: "Queue has pending work",
+        detail: `${queueDepth} queued task(s).`,
+        tone: "info"
+      });
     }
     return items;
   }, [campaigns.isError, health.data, health.isError, health.isSuccess, modules.isError, reports.isError, selectedCampaignId, telemetry.data, telemetry.isError]);
 
-  const activeNotificationKey = useMemo(() => notifications.map((item) => item.id).join("|"), [notifications]);
-  const visibleNotifications = useMemo(
-    () => notifications.filter((item) => !deletedNotificationIds.includes(item.id)),
-    [deletedNotificationIds, notifications]
+  const isNotificationDeleted = useCallback(
+    (id: string): boolean => {
+      return (
+        deletedNotificationIds.includes(id) ||
+        deletedNotificationIds.some(
+          (deletedId) => deletedId.startsWith(`${id}:`) || id.startsWith(`${deletedId}:`)
+        )
+      );
+    },
+    [deletedNotificationIds]
   );
-  const unreadNotificationCount = visibleNotifications.filter((item) => !readNotificationIds.includes(item.id)).length;
 
-  useEffect(() => {
-    const activeIds = activeNotificationKey ? activeNotificationKey.split("|") : [];
-    setReadNotificationIds((current) => current.filter((id) => activeIds.includes(id)));
-    setDeletedNotificationIds((current) => current.filter((id) => activeIds.includes(id)));
-  }, [activeNotificationKey]);
+  const isNotificationRead = useCallback(
+    (id: string): boolean => {
+      return (
+        readNotificationIds.includes(id) ||
+        readNotificationIds.some(
+          (readId) => readId.startsWith(`${id}:`) || id.startsWith(`${readId}:`)
+        )
+      );
+    },
+    [readNotificationIds]
+  );
+
+  const visibleNotifications = useMemo(
+    () => notifications.filter((item) => !isNotificationDeleted(item.id)),
+    [isNotificationDeleted, notifications]
+  );
+  const unreadNotificationCount = visibleNotifications.filter(
+    (item) => !isNotificationRead(item.id)
+  ).length;
 
   function markVisibleNotificationsRead(): void {
     const visibleIds = visibleNotifications.map((item) => item.id);
     if (visibleIds.length === 0) return;
-    setReadNotificationIds((current) => unique([...current, ...visibleIds]));
+    setReadNotificationIds((current) => {
+      const next = unique([...current, ...visibleIds]).slice(-200);
+      setStoredNotificationIds(NOTIFICATIONS_READ_KEY, username, next);
+      return next;
+    });
   }
 
   function toggleNotifications(): void {
@@ -605,14 +722,30 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }
 
   function deleteNotification(id: string): void {
-    setDeletedNotificationIds((current) => unique([...current, id]));
-    setReadNotificationIds((current) => unique([...current, id]));
+    setDeletedNotificationIds((current) => {
+      const next = unique([...current, id]).slice(-200);
+      setStoredNotificationIds(NOTIFICATIONS_DELETED_KEY, username, next);
+      return next;
+    });
+    setReadNotificationIds((current) => {
+      const next = unique([...current, id]).slice(-200);
+      setStoredNotificationIds(NOTIFICATIONS_READ_KEY, username, next);
+      return next;
+    });
   }
 
   function clearNotifications(): void {
     const visibleIds = visibleNotifications.map((item) => item.id);
-    setDeletedNotificationIds((current) => unique([...current, ...visibleIds]));
-    setReadNotificationIds((current) => unique([...current, ...visibleIds]));
+    setDeletedNotificationIds((current) => {
+      const next = unique([...current, ...visibleIds]).slice(-200);
+      setStoredNotificationIds(NOTIFICATIONS_DELETED_KEY, username, next);
+      return next;
+    });
+    setReadNotificationIds((current) => {
+      const next = unique([...current, ...visibleIds]).slice(-200);
+      setStoredNotificationIds(NOTIFICATIONS_READ_KEY, username, next);
+      return next;
+    });
   }
 
   function selectSearchResult(result: SearchResult): void {
@@ -926,12 +1059,23 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 export function OverviewPage() {
   const navigate = useNavigate();
   const writeDashboardSession = useDashboardSessionWriter();
-  const { campaigns: campaignList, campaignsLoading } = useDashboardUi();
-  const telemetry = useQuery({ queryKey: ["telemetry"], queryFn: api.telemetry });
-  const monthlyStats = useQuery({ queryKey: ["monthlyStats"], queryFn: api.monthlyStats });
+  const { campaigns: campaignList, campaignsLoading, selectedCampaignId, setSelectedCampaignId } = useDashboardUi();
+  const telemetry = useQuery({
+    queryKey: ["telemetry", selectedCampaignId],
+    queryFn: () => api.telemetry(selectedCampaignId || undefined)
+  });
+  const monthlyStats = useQuery({
+    queryKey: ["monthlyStats", selectedCampaignId],
+    queryFn: () => api.monthlyStats(selectedCampaignId || undefined)
+  });
   const snapshot = telemetry.data as TelemetrySnapshot | undefined;
   const monthlyData = monthlyStats.data as MonthlyFindingStats | undefined;
-  const nonDeletedCampaigns = campaignList.filter(
+
+  const selectedCampaign = selectedCampaignId
+    ? campaignList.find((campaign) => campaign.id === selectedCampaignId)
+    : undefined;
+
+  const nonDeletedCampaigns = (selectedCampaign ? [selectedCampaign] : campaignList).filter(
     (campaign) => String(campaign.status ?? "").toLowerCase() !== "deleted"
   );
   const runningCampaigns = nonDeletedCampaigns.filter((campaign) =>
@@ -946,7 +1090,10 @@ export function OverviewPage() {
 
   // Dynamic header status subtitle (strictly distinguish running execution vs in-scope campaigns)
   let overviewSubtitle: string;
-  if (trackedCount === 0) {
+  if (selectedCampaign) {
+    const scopeStr = selectedCampaign.scope_cidrs?.length ? selectedCampaign.scope_cidrs.join(", ") : "Single target";
+    overviewSubtitle = `Active Scope: ${selectedCampaign.name} (${selectedCampaign.id.slice(0, 8)}) · CIDRs: ${scopeStr} · Telemetry Scoped`;
+  } else if (trackedCount === 0) {
     overviewSubtitle = "Enclave standby · No campaigns in scope · Ready for campaign deployment";
   } else if (runningCount > 0) {
     overviewSubtitle = `${runningCount} active execution${runningCount === 1 ? "" : "s"} · ${trackedCount} in scope · Enclave telemetry streaming`;
@@ -1023,7 +1170,14 @@ export function OverviewPage() {
                   label="Engagement Posture"
                   value={`${runningCount} Running`}
                   tone="low"
-                  detail={`${runningCount} engagement${runningCount === 1 ? "" : "s"} actively executing validation modules`}
+                  detail={selectedCampaign ? `${selectedCampaign.name} actively executing validation modules` : `${runningCount} engagement${runningCount === 1 ? "" : "s"} actively executing validation modules`}
+                />
+              ) : selectedCampaign ? (
+                <HighlightRow
+                  label="Engagement Posture"
+                  value={selectedCampaign.status ? selectedCampaign.status.toUpperCase() : "STAGED"}
+                  tone="neutral"
+                  detail={`Isolated campaign: ${selectedCampaign.name} (${selectedCampaign.targets?.length ?? 0} targets)`}
                 />
               ) : trackedCount > 0 ? (
                 <HighlightRow
@@ -1032,8 +1186,8 @@ export function OverviewPage() {
                   tone="neutral"
                   detail={
                     trackedCount === 1
-                      ? "1 campaign in scope — awaiting execution run"
-                      : `${trackedCount} campaigns in scope — awaiting execution run`
+                      ? "1 campaign in scope - awaiting execution run"
+                      : `${trackedCount} campaigns in scope - awaiting execution run`
                   }
                 />
               ) : (
@@ -1103,7 +1257,12 @@ export function OverviewPage() {
           </section>
         </div>
       </div>
-      <CampaignTable campaigns={campaignList} />
+      <CampaignTable
+        campaigns={selectedCampaign ? [selectedCampaign] : campaignList}
+        scopedCampaignId={selectedCampaignId}
+        onClearScope={() => setSelectedCampaignId("")}
+        onSelectCampaign={(id) => setSelectedCampaignId(id)}
+      />
     </Page>
   );
 }
@@ -1457,15 +1616,27 @@ export function ModulesPage() {
     );
   });
   const sensitive = isSensitiveModule(selected);
+  const [debouncedParams, setDebouncedParams] = useState(params);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedParams(params);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [params]);
+
+  const targetStr = typeof debouncedParams.target === "string" ? debouncedParams.target.trim() : "";
+  const targetRequired = Boolean(selected?.param_schema && "target" in selected.param_schema);
+  const targetReadyForFeasibility = !targetRequired || (targetStr.length >= 3 && (isIpv4Address(targetStr) || targetStr.includes(".") || targetStr === "localhost"));
+
   const feasibility = useQuery({
-    queryKey: ["moduleFeasibility", selectedId, campaignId, params],
+    queryKey: ["moduleFeasibility", selectedId, campaignId, debouncedParams],
     queryFn: () =>
       api.moduleFeasibility(selectedId, {
         campaign_id: campaignId,
-        params,
-        target: typeof params.target === "string" ? params.target : undefined
+        params: debouncedParams,
+        target: targetStr || undefined
       }),
-    enabled: Boolean(selectedId && campaignId),
+    enabled: Boolean(selectedId && campaignId && targetReadyForFeasibility),
     staleTime: 10_000
   });
   const feasibilityReport = feasibility.data?.report;
@@ -1591,8 +1762,8 @@ export function ModulesPage() {
               <span>Dry-run preview is unavailable for this module.</span>
             </p>
           )}
-          <div className="mt-3">
-            <label htmlFor="module-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+          <div className="mt-3 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30">
+            <label htmlFor="module-campaign-select" className="block text-xs font-mono text-zinc-300 mb-1.5 font-medium">
               Target Campaign
             </label>
             <CampaignPicker
@@ -1613,184 +1784,237 @@ export function ModulesPage() {
                 Select a scoped campaign before executing this module.
               </p>
             )}
+            {campaignId && campaignDetail.isFetching && (
+              <div className="notice mt-3 text-xs">
+                <Loader2 className="spin" size={14} /> Loading campaign scope...
+              </div>
+            )}
+            <DataPanel title="Campaign Scope Error" data={campaignDetail.error} />
           </div>
-          {campaignId && campaignDetail.isFetching && (
-            <div className="notice mt-3">
-              <Loader2 className="spin" size={16} /> Loading campaign scope...
-            </div>
-          )}
-          <DataPanel title="Campaign Scope Error" data={campaignDetail.error} />
+
           {selected ? (
-            <form
-              aria-busy={run.isPending}
-              className="mt-4 grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!campaignId) {
-                  setAttemptedRun(true);
-                  return;
-                }
-                if (!executionConditionBlocked) {
-                  return;
-                }
-                setAttemptedRun(false);
-                run.mutate();
-              }}
-            >
-              <ParamForm
-                schema={selected.param_schema}
-                values={params}
-                onChange={setParams}
-                requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
-              />
-              {feasibility.isFetching && !feasibilityReport && (
-                <div className="notice text-xs">
-                  <Loader2 className="spin shrink-0" size={14} /> Assessing target defensive posture...
-                </div>
-              )}
-              {feasibilityReport && (
-                <div
-                  className={`defense-feasibility-card ${
-                    !feasibilityReport.feasible || feasibilityReport.risk_level === "critical_alarm"
-                      ? "danger"
-                      : feasibilityReport.score >= 0.8
-                      ? "optimal"
-                      : ""
-                  }`}
+            <div className="mt-4 grid gap-6 lg:grid-cols-[1.1fr_0.9fr] items-start">
+              {/* Left Column: Parameters and Execution Controls */}
+              <div className="space-y-4">
+
+                <form
+                  aria-busy={run.isPending}
+                  className="grid gap-4 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!campaignId) {
+                      setAttemptedRun(true);
+                      return;
+                    }
+                    if (!executionConditionBlocked) {
+                      return;
+                    }
+                    setAttemptedRun(false);
+                    run.mutate();
+                  }}
                 >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      {!feasibilityReport.feasible || feasibilityReport.risk_level === "critical_alarm" ? (
-                        <ShieldAlert size={18} className="text-rose-400 shrink-0" />
-                      ) : feasibilityReport.risk_level === "high_noise" ? (
-                        <AlertTriangle size={18} className="text-amber-400 shrink-0" />
-                      ) : (
-                        <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
-                      )}
-                      <div>
-                        <div className="font-semibold text-sm flex items-center gap-2 flex-wrap">
-                          <span>Pre-Flight Defense Feasibility</span>
-                          <span
-                            className={
-                              !feasibilityReport.feasible
-                                ? "badge badge-high"
-                                : feasibilityReport.score >= 0.8
-                                ? "badge badge-low"
-                                : "badge badge-medium"
-                            }
-                          >
-                            {Math.round(feasibilityReport.score * 100)}% Feasible
-                          </span>
-                          <span
-                            className={
-                              feasibilityReport.risk_level === "critical_alarm" || feasibilityReport.risk_level === "high_noise"
-                                ? "badge badge-high"
-                                : feasibilityReport.risk_level === "medium"
-                                ? "badge badge-medium"
-                                : "badge badge-low"
-                            }
-                          >
-                            Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
-                          </span>
+                  <div className="text-xs font-mono text-zinc-400 font-medium pb-2 border-b border-zinc-800/60 flex items-center justify-between">
+                    <span>Module Parameters</span>
+                    <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
+                  </div>
+                  <ParamForm
+                    schema={selected.param_schema}
+                    values={params}
+                    onChange={setParams}
+                    requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
+                  />
+
+                  {/* Execution Mode Controls */}
+                  <div className="pt-2 border-t border-zinc-800/60 space-y-2.5">
+                    <label className="toggle-row text-xs text-zinc-300">
+                      <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+                      {dryRunSupported ? "Dry run (simulate without live network execution)" : "Dry run unavailable"}
+                    </label>
+
+                    {requiresConfirmation && (() => {
+                      const normRisk = (feasibilityReport?.risk_level || selected?.opsec_level || "").toLowerCase();
+                      const isRiskHigh = normRisk.includes("high") || normRisk.includes("critical") || normRisk.includes("alarm");
+                      return (
+                        <div className={`text-xs flex items-center gap-2.5 p-2.5 rounded border ${
+                          isRiskHigh ? "notice notice-danger" : "notice"
+                        }`}>
+                          <input
+                            id="confirm-override-checkbox"
+                            className="cursor-pointer shrink-0"
+                            type="checkbox"
+                            checked={confirmed}
+                            onChange={(e) => setConfirmed(e.target.checked)}
+                          />
+                          <label htmlFor="confirm-override-checkbox" className="cursor-pointer select-none">
+                            {isFeasibilityBlocked
+                              ? "Override pre-flight defense blocker and confirm authorized execution"
+                              : "Confirm authorized high-noise or sensitive execution"}
+                          </label>
                         </div>
-                      </div>
+                      );
+                    })()}
+
+                    {runHint && runHint !== "Select a campaign before running a module." && (
+                      <p className="notice text-xs">{runHint}</p>
+                    )}
+                    {scopeWarning && (
+                      <p className="notice notice-danger text-xs">{scopeWarning}</p>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        className="btn btn-primary w-full py-2.5 text-xs font-mono font-medium tracking-wide flex items-center justify-center gap-2"
+                        type="submit"
+                        disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
+                      >
+                        {run.isPending ? (
+                          <>
+                            <Loader2 className="spin shrink-0" size={14} /> Running {selectedId}...
+                          </>
+                        ) : (
+                          `Execute ${selected.id}`
+                        )}
+                      </button>
                     </div>
+
+                    {run.isPending && (
+                      <div className="notice notice-danger text-xs" role="status" aria-live="polite">
+                        <Loader2 className="spin shrink-0" size={15} />
+                        Module execution in progress. Keep this page open while ARES validates the target and collects results.
+                      </div>
+                    )}
+                  </div>
+                </form>
+              </div>
+
+              {/* Right Column: Pre-Flight Defense Feasibility & Target Telemetry Dock */}
+              <div className="space-y-4">
+                <div className="p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30 min-h-[300px] flex flex-col justify-start">
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 mb-3">
+                    <div className="flex items-center gap-2 font-mono text-xs font-medium text-zinc-300">
+                      <ShieldAlert size={14} className="text-zinc-400" />
+                      <span>Pre-Flight Defense Posture</span>
+                    </div>
+                    {feasibilityReport && (
+                      <span className={opsecBadge(feasibilityReport.risk_level)}>
+                        Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
+                      </span>
+                    )}
                   </div>
 
-                  {feasibilityReport.blockers.length > 0 && (
-                    <div className="mt-2.5 p-2 rounded bg-rose-950/40 border border-rose-800/40 text-rose-300 text-xs space-y-1">
-                      <div className="font-medium text-rose-200 flex items-center gap-1.5">
-                        <AlertTriangle size={14} className="shrink-0" />
-                        <span>Defensive Telemetry & Policy Blockers:</span>
-                      </div>
-                      <ul className="list-disc list-inside space-y-0.5 text-zinc-300">
-                        {feasibilityReport.blockers.map((blocker, idx) => (
-                          <li key={idx}>{blocker}</li>
-                        ))}
-                      </ul>
+                  {feasibility.isFetching && !feasibilityReport && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-400 space-y-2.5">
+                      <Loader2 className="spin text-cyan-400" size={24} />
+                      <p className="text-xs font-mono">Assessing target defensive posture and telemetry blockers...</p>
                     </div>
                   )}
 
-                  {Object.keys(feasibilityReport.opsec_tuning || {}).length > 0 && (
-                    <div className="mt-2 text-xs text-zinc-400 space-y-1 bg-zinc-900/60 p-2 rounded border border-zinc-800">
-                      <span className="font-medium text-zinc-300">OPSEC Tuning Guidance:</span>
-                      {Object.entries(feasibilityReport.opsec_tuning).map(([k, v]) => (
-                        <div key={k} className="text-zinc-400">
-                          <span className="text-amber-400 font-mono text-[11px]">{k}:</span> {String(v)}
+                  {!feasibility.isFetching && !feasibilityReport && (
+                    <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500 space-y-2.5">
+                      <ShieldCheck size={32} className="text-zinc-600" />
+                      <p className="text-xs font-mono max-w-[280px]">
+                        {targetStr
+                          ? "Target configured. Evaluating defense posture telemetry..."
+                          : "Specify target IP or host to evaluate defensive telemetry, EDR rules, and evasion recommendations."}
+                      </p>
+                    </div>
+                  )}
+
+                  {feasibilityReport && (() => {
+                    const normRisk = (feasibilityReport.risk_level || "").toLowerCase();
+                    const isRiskHigh = normRisk.includes("high") || normRisk.includes("critical") || normRisk.includes("alarm");
+                    const isRiskMedium = normRisk.includes("medium") || normRisk.includes("moderate") || normRisk.includes("warn");
+                    const cardTone = isRiskHigh ? "danger" : isRiskMedium || !feasibilityReport.feasible ? "warning" : "optimal";
+                    const HeaderIcon = isRiskHigh ? ShieldAlert : isRiskMedium ? AlertTriangle : ShieldCheck;
+                    const iconColorClass = isRiskHigh ? "text-rose-400" : isRiskMedium ? "text-amber-400" : "text-emerald-400";
+                    const scoreBadgeClass = !feasibilityReport.feasible || feasibilityReport.score < 0.5
+                      ? "badge badge-high"
+                      : feasibilityReport.score >= 0.8
+                      ? "badge badge-low"
+                      : "badge badge-medium";
+                    const riskBadgeClass = opsecBadge(feasibilityReport.risk_level);
+
+                    return (
+                      <div className={`defense-feasibility-card ${cardTone} !mt-0`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-zinc-800/60">
+                          <div className="flex items-center gap-2">
+                            <HeaderIcon size={15} className={`${iconColorClass} shrink-0`} />
+                            <span className="font-mono text-xs text-zinc-200 font-medium">
+                              Defense Feasibility Analysis
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span className={scoreBadgeClass}>
+                              {Math.round(feasibilityReport.score * 100)}% Feasible
+                            </span>
+                            <span className={riskBadgeClass}>
+                              Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
+                            </span>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
 
-                  {feasibilityReport.recommended_alternatives.length > 0 && (
-                    <div className="mt-3 pt-2.5 border-t border-zinc-800">
-                      <div className="text-xs font-semibold text-zinc-200 mb-1.5 flex items-center gap-1.5">
-                        <ShieldCheck size={14} className="text-amber-400" />
-                        <span>Recommended Defense Evasion Alternatives:</span>
+                        {feasibilityReport.blockers.length > 0 && (
+                          <div className={`mt-2.5 p-2.5 rounded border text-xs space-y-1 ${
+                            isRiskHigh
+                              ? "border-rose-900/30 bg-rose-950/20 text-rose-300"
+                              : "border-amber-900/30 bg-amber-950/20 text-amber-300"
+                          }`}>
+                            <div className={`font-mono text-[11px] font-medium flex items-center gap-1.5 ${
+                              isRiskHigh ? "text-rose-300" : "text-amber-300"
+                            }`}>
+                              <AlertTriangle size={13} className="shrink-0" />
+                              <span>Defensive Telemetry & Policy Blockers:</span>
+                            </div>
+                            <ul className="list-disc list-inside space-y-0.5 text-zinc-400 text-[11px]">
+                              {feasibilityReport.blockers.map((blocker, idx) => (
+                                <li key={idx}>{blocker}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {Object.keys(feasibilityReport.opsec_tuning || {}).length > 0 && (
+                          <div className="mt-2 text-xs space-y-1 p-2 rounded border border-zinc-800 bg-zinc-900/40">
+                            <span className="font-mono text-[11px] text-zinc-300">OPSEC Tuning:</span>
+                            {Object.entries(feasibilityReport.opsec_tuning).map(([k, v]) => (
+                              <div key={k} className="text-zinc-400 text-[11px] font-mono">
+                                <span className="text-zinc-500">{k}:</span> {String(v)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {feasibilityReport.recommended_alternatives.length > 0 && (
+                          <div className="mt-2.5 pt-2 border-t border-zinc-800/60 flex items-center gap-2 font-mono text-[11px] text-zinc-400 flex-wrap">
+                            <span>Suggested alternative:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {feasibilityReport.recommended_alternatives.map((altId) => (
+                                <button
+                                  key={altId}
+                                  type="button"
+                                  className="btn btn-secondary text-xs py-0.5 px-2 font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800"
+                                  onClick={() => {
+                                    setSelectedId(altId);
+                                  }}
+                                  title={`Switch module to ${altId}`}
+                                >
+                                  <span>Switch to <strong>{altId}</strong></span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {feasibilityReport.recommended_alternatives.map((altId) => (
-                          <button
-                            key={altId}
-                            type="button"
-                            className="btn btn-secondary flex items-center gap-1.5 text-xs py-1 px-2.5 border border-amber-500/40 hover:border-amber-400 text-amber-200 hover:bg-amber-950/30 transition-colors"
-                            onClick={() => {
-                              setSelectedId(altId);
-                            }}
-                            title={`Switch module to ${altId}`}
-                          >
-                            <span>Switch to <strong>{altId}</strong> →</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
-              )}
-              {runHint && runHint !== "Select a campaign before running a module." && (
-                <p className="notice">
-                  {runHint}
-                </p>
-              )}
-              {scopeWarning && (
-                <p className="notice notice-danger">
-                  {scopeWarning}
-                </p>
-              )}
-              <label className="toggle-row">
-                <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-                {dryRunSupported ? "Dry run" : "Dry run unavailable"}
-              </label>
-              {requiresConfirmation && (
-                <label className="notice notice-danger">
-                  <input className="mr-2" type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-                  {isFeasibilityBlocked
-                    ? "Override pre-flight defense blocker and confirm authorized execution"
-                    : "Confirm authorized high-noise or sensitive execution"}
-                </label>
-              )}
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
-              >
-                {run.isPending ? (
-                  <>
-                    <Loader2 className="spin" size={16} /> Running...
-                  </>
-                ) : (
-                  "Execute Module"
-                )}
-              </button>
-              {run.isPending && (
-                <div className="notice notice-danger" role="status" aria-live="polite">
-                  <Loader2 className="spin shrink-0" size={18} />
-                  Module execution in progress. Keep this page open while ARES validates the target and collects results.
-                </div>
-              )}
-            </form>
+              </div>
+            </div>
           ) : (
-            <EmptyState text="Select a module" />
+            <EmptyState text="Select a module from the catalog to configure and execute." />
           )}
         </section>
       )}
@@ -1803,7 +2027,17 @@ export function ModulesPage() {
           />
           {runResult || runError ? (
             <>
-              <ModuleRunSummary result={runResult} error={runError} />
+              <ModuleRunSummary
+                result={runResult}
+                error={runError}
+                onSelectModule={(modId, targetParams) => {
+                  setSelectedId(modId);
+                  if (targetParams) {
+                    setParams((prev) => ({ ...prev, ...targetParams }));
+                  }
+                  setActiveTab("Run Panel");
+                }}
+              />
               <DataPanel title={runError ? "Run Error" : "Run Result"} data={runError ?? runResult} />
             </>
           ) : (
@@ -2155,18 +2389,23 @@ export function TemplatesPage() {
           ) : (
             <EmptyState text="Select a template from the left panel." />
           )}
-          <label className="mt-3 block text-sm font-semibold">
-            Global parameters
+          <div className="mt-3 block">
+            <label htmlFor="template-global-params" className="block text-sm font-semibold mb-1 cursor-pointer">
+              Global parameters
+            </label>
             <textarea
-              className="field mt-1 min-h-32"
+              id="template-global-params"
+              className="field min-h-32"
               value={params}
               placeholder={'{"target":"127.0.0.1","domain":"corp.local","dc":"10.0.0.5"}'}
+              autoComplete="off"
+              spellCheck={false}
               onChange={(e) => {
                 setParams(e.target.value);
                 setWarning("");
               }}
             />
-          </label>
+          </div>
           <p className="mt-1 text-xs text-zinc-400">JSON object. Leave {"{}"} for defaults.</p>
           {(warning || !paramsValid) && (
             <p className="notice notice-danger mt-2">
@@ -2614,10 +2853,13 @@ export function SecurityPage() {
             <p className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-200">
               This secret key is shown only once. After you close this dialog, ARES will not show the full key again.
             </p>
-            <label className="block text-sm font-semibold text-zinc-300">
-              Secret key
+            <div className="block">
+              <label htmlFor="generated-api-key-secret" className="block text-sm font-semibold text-zinc-300 mb-1 cursor-pointer">
+                Secret key
+              </label>
               <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
                 <input
+                  id="generated-api-key-secret"
                   aria-label="Generated API key secret"
                   className="field font-mono text-sm"
                   onFocus={(event) => event.currentTarget.select()}
@@ -2630,7 +2872,7 @@ export function SecurityPage() {
                   {copyStatus === "copied" ? "Copied" : "Copy"}
                 </button>
               </div>
-            </label>
+            </div>
             {copyStatus === "manual" && (
               <p className="mt-2 rounded-md border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-300">
                 Clipboard access was blocked. The key field is selected; press Ctrl+C to copy it manually.
@@ -2715,30 +2957,40 @@ export function EdrPage() {
           report.mutate();
         }}>
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="block text-sm font-semibold">
-              Technique ID <span className="text-red-700">*</span>
-              <input className="field mt-1" required placeholder="edr.bypass_adaptive / amsi-patch-reflection" value={techniqueId} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setTechniqueId(e.target.value); }} />
-            </label>
-            <label className="block text-sm font-semibold">
-              EDR vendor <span className="text-red-700">*</span>
-              <input className="field mt-1" required placeholder="crowdstrike, defender_atp, sentinelone" value={vendor} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setVendor(e.target.value); }} />
-            </label>
-            <label className="block text-sm font-semibold">
-              EDR version
-              <input className="field mt-1" placeholder="optional" value={version} onChange={(e) => setVersion(e.target.value)} />
-            </label>
-            <label className="block text-sm font-semibold">
-              Outcome
-              <select className="field mt-1" value={success ? "success" : "blocked"} onChange={(e) => setSuccess(e.target.value === "success")}>
+            <div className="block">
+              <label htmlFor="edr-technique-id" className="block text-sm font-semibold mb-1 cursor-pointer">
+                Technique ID <span className="text-red-700">*</span>
+              </label>
+              <input id="edr-technique-id" className="field" required autoComplete="off" spellCheck={false} placeholder="edr.bypass_adaptive / amsi-patch-reflection" value={techniqueId} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setTechniqueId(e.target.value); }} />
+            </div>
+            <div className="block">
+              <label htmlFor="edr-vendor-name" className="block text-sm font-semibold mb-1 cursor-pointer">
+                EDR vendor <span className="text-red-700">*</span>
+              </label>
+              <input id="edr-vendor-name" className="field" required autoComplete="off" spellCheck={false} placeholder="crowdstrike, defender_atp, sentinelone" value={vendor} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setVendor(e.target.value); }} />
+            </div>
+            <div className="block">
+              <label htmlFor="edr-version-field" className="block text-sm font-semibold mb-1 cursor-pointer">
+                EDR version
+              </label>
+              <input id="edr-version-field" className="field" autoComplete="off" spellCheck={false} placeholder="optional" value={version} onChange={(e) => setVersion(e.target.value)} />
+            </div>
+            <div className="block">
+              <label htmlFor="edr-outcome-field" className="block text-sm font-semibold mb-1 cursor-pointer">
+                Outcome
+              </label>
+              <select id="edr-outcome-field" className="field" value={success ? "success" : "blocked"} onChange={(e) => setSuccess(e.target.value === "success")}>
                 <option value="blocked">Blocked / detected</option>
                 <option value="success">Successful</option>
               </select>
-            </label>
+            </div>
           </div>
-          <label className="block text-sm font-semibold">
-            Notes
-            <textarea className="field mt-1 min-h-24" placeholder="Signal observed, lab context, or detection notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </label>
+          <div className="block">
+            <label htmlFor="edr-notes-field" className="block text-sm font-semibold mb-1 cursor-pointer">
+              Notes
+            </label>
+            <textarea id="edr-notes-field" className="field min-h-24" autoComplete="off" spellCheck={false} placeholder="Signal observed, lab context, or detection notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
           <button className="btn btn-primary" disabled={report.isPending} type="submit">
             {report.isPending ? (
               <>
@@ -2875,7 +3127,13 @@ function Page({
     description: "Security dashboard workspace."
   };
   const selectedTab = activeTab ?? fallbackTab;
-  const setTab = onTabChange ?? setFallbackTab;
+  const setTab = useCallback((tab: string) => {
+    if (onTabChange) {
+      onTabChange(tab);
+    } else {
+      setFallbackTab(tab);
+    }
+  }, [onTabChange]);
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (!tabs || tabs.length === 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
@@ -3179,7 +3437,7 @@ function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
           <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Risk Assessment</div>
           <h3 className="text-base font-semibold text-white">CVSS Metrics</h3>
         </div>
-        <span className={`badge status-${severity} font-semibold uppercase text-xs px-2.5 py-1`}>
+        <span className={`${opsecBadge(severity)} font-semibold uppercase text-xs px-2.5 py-1`}>
           {severity}
         </span>
       </div>
@@ -3306,19 +3564,131 @@ function DataPanel({
   );
 }
 
-function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>; error?: unknown }) {
+function getTailoredFindingDetails(finding: Finding) {
+  const title = String(finding.title ?? "").toUpperCase();
+  const desc = String(finding.description ?? "");
+  const evidence = (finding.evidence ?? {}) as Record<string, unknown>;
+  const rawPort = evidence.port ?? desc.match(/port\s+(\d+)/i)?.[1];
+  const port = rawPort ? Number(rawPort) : null;
+  const isKerberos = title.includes("KERBEROS") || port === 88;
+  const isLdaps = title.includes("LDAPS") || port === 636;
+  const isLdap = !isLdaps && (title.includes("LDAP") || port === 389);
+  const isSmb = title.includes("SMB") || port === 445;
+  const isWinrm = title.includes("WINRM") || port === 5985 || port === 5986;
+  const isDns = title.includes("DNS") || port === 53;
+  const isRpc = title.includes("RPC") || port === 135;
+  const isMssql = title.includes("MSSQL") || port === 1433;
+  const isRdp = title.includes("RDP") || port === 3389;
+  const isDocker = title.includes("DOCKER") || port === 2375;
+  const isRedis = title.includes("REDIS") || port === 6379;
+  const isAttackSurface = title.includes("ATTACK SURFACE");
+
+  let serviceTag = typeof evidence.role === "string" && evidence.role ? evidence.role : "";
+  let serviceCategory = typeof evidence.service === "string" && evidence.service ? String(evidence.service).toUpperCase() : "";
+  let tailoredRemediation = String(finding.remediation ?? "");
+
+  if (isKerberos) {
+    serviceTag = serviceTag || "PORT 88 / KERBEROS KDC / TIER-0 DC";
+    serviceCategory = serviceCategory || "Active Directory Authentication";
+    tailoredRemediation = tailoredRemediation || "Enforce AES-256 Kerberos encryption (disable RC4-HMAC), audit service accounts for SPNs to mitigate Kerberoasting, and monitor Event ID 4769 for abnormal TGS requests.";
+  } else if (isLdaps) {
+    serviceTag = serviceTag || "PORT 636 / LDAPS SECURE / TIER-0 DC";
+    serviceCategory = serviceCategory || "Encrypted Directory Service";
+    tailoredRemediation = tailoredRemediation || "Enforce strong TLS cipher suites, validate CA trust chains, and ensure LDAP channel binding is strictly enforced (LdapEnforceChannelBinding=2).";
+  } else if (isLdap) {
+    serviceTag = serviceTag || "PORT 389 / LDAP DIRECTORY";
+    serviceCategory = serviceCategory || "Active Directory Service";
+    tailoredRemediation = tailoredRemediation || "Require LDAP signing (LDAPServerIntegrity=2) and upgrade clients to LDAPS (port 636) to prevent NTLM relay and credential harvesting.";
+  } else if (isSmb) {
+    serviceTag = serviceTag || "PORT 445 / SMB SERVICE";
+    serviceCategory = serviceCategory || "Core Windows File Sharing & Remote Admin";
+    tailoredRemediation = tailoredRemediation || "Require SMB signing (RequireSecuritySignature=1), disable legacy SMBv1, and restrict port 445 inbound access to management subnets.";
+  } else if (isWinrm) {
+    serviceTag = serviceTag || `PORT ${port || 5985} / WINRM REMOTE MGMT`;
+    serviceCategory = serviceCategory || "Windows Remote Management (PowerShell Remoting)";
+    tailoredRemediation = tailoredRemediation || "Disable WinRM plaintext HTTP listeners, transition management traffic to WinRM HTTPS (port 5986), and enforce GPO firewall restrictions.";
+  } else if (isMssql) {
+    serviceTag = serviceTag || "PORT 1433 / MSSQL DATABASE";
+    serviceCategory = serviceCategory || "Enterprise Relational Database";
+    tailoredRemediation = tailoredRemediation || "Disable 'sa' account, enforce Windows Authentication only, and keep xp_cmdshell disabled in configuration.";
+  } else if (isRdp) {
+    serviceTag = serviceTag || "PORT 3389 / RDP REMOTE DESKTOP";
+    serviceCategory = serviceCategory || "Interactive Terminal Services";
+    tailoredRemediation = tailoredRemediation || "Enforce Network Level Authentication (NLA) and restrict RDP access to management VPN jump hosts.";
+  } else if (isDocker) {
+    serviceTag = serviceTag || "PORT 2375 / DOCKER DAEMON API";
+    serviceCategory = serviceCategory || "Unauthenticated Container Engine";
+    tailoredRemediation = tailoredRemediation || "Disable unauthenticated TCP socket; bind to local Unix socket or require mutual TLS authentication on port 2376.";
+  } else if (isRedis) {
+    serviceTag = serviceTag || "PORT 6379 / REDIS MEMORY STORE";
+    serviceCategory = serviceCategory || "In-Memory Cache & Key-Value Store";
+    tailoredRemediation = tailoredRemediation || "Enable requirepass authentication and bind Redis listener strictly to 127.0.0.1.";
+  } else if (isDns) {
+    serviceTag = serviceTag || "PORT 53 / MICROSOFT DNS";
+    serviceCategory = serviceCategory || "Domain Name Resolution";
+    tailoredRemediation = tailoredRemediation || "Restrict DNS zone transfers (AXFR) to designated secondary nameservers only, and enable DNSSEC validation.";
+  } else if (isRpc) {
+    serviceTag = serviceTag || "PORT 135 / MSRPC ENDPOINT";
+    serviceCategory = serviceCategory || "RPC Endpoint Mapper";
+    tailoredRemediation = tailoredRemediation || "Restrict RPC endpoint mapper via host-based firewall to prevent unauthenticated RPC enumeration and coercions.";
+  } else if (isAttackSurface) {
+    serviceTag = "HOST ATTACK SURFACE SUMMARY";
+    serviceCategory = "Exposed Network Services";
+    tailoredRemediation = tailoredRemediation || "Audit all listening ports against the enterprise baseline and enforce host-based micro-segmentation with Windows Defender Firewall.";
+  }
+
+  const rawConf = typeof finding.confidence === "number" ? finding.confidence : 1.0;
+  const isHighConf = rawConf >= 0.85 || finding.validated === true;
+  const confidenceText = rawConf >= 0.95
+    ? "100% Confirmed"
+    : formatRate(rawConf);
+
+  const nextModules = Array.isArray(evidence.next_modules)
+    ? (evidence.next_modules as string[])
+    : isKerberos
+    ? ["ad.asreproast", "ad.kerberoast", "ad.enum_spn"]
+    : isLdaps
+    ? ["ad.enum_users", "ad.adcs", "ad.ghost_forge"]
+    : isLdap
+    ? ["ad.enum_users", "ad.enum_spn", "ad.enum_acl"]
+    : isSmb
+    ? ["ad.coerce", "windows.secretsdump"]
+    : isWinrm
+    ? ["lateral.winrm"]
+    : [];
+
+  return {
+    port,
+    serviceTag,
+    serviceCategory,
+    tailoredRemediation,
+    isHighConf,
+    confidenceText,
+    nextModules
+  };
+}
+
+function ModuleRunSummary({
+  result,
+  error,
+  onSelectModule
+}: {
+  result?: Record<string, unknown>;
+  error?: unknown;
+  onSelectModule?: (moduleId: string, params?: Record<string, unknown>) => void;
+}) {
   if (!result && !error) {
     return null;
   }
   if (error) {
     return (
-      <section className="inline-summary mt-4">
-        <SectionHeader title="Execution Summary" action={<span className="badge badge-high">failed</span>} />
-        <p className="notice notice-danger">
-          <AlertTriangle size={16} />
-          {error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}
-        </p>
-      </section>
+      <div className="border border-rose-900/60 bg-rose-950/20 p-3.5 rounded mt-4 font-mono text-xs text-rose-300" role="alert">
+        <div className="flex items-center gap-2 font-semibold text-rose-400 mb-1">
+          <AlertTriangle size={15} />
+          <span>[EXECUTION_FAILED]</span>
+        </div>
+        <p>{error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}</p>
+      </div>
     );
   }
 
@@ -3327,6 +3697,12 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
   const duration = typeof result?.duration_ms === "number" ? formatMetric(result.duration_ms, " ms") : "n/a";
   const status = String(result?.status ?? "unknown");
   const moduleId = String(result?.module_id ?? "module");
+  const rawOutput = (result?.raw_output ?? result?.raw) as Record<string, unknown> | undefined;
+  const rawError = typeof rawOutput?.error === "string" ? rawOutput.error : "";
+  const rawHint = typeof rawOutput?.hint === "string" ? rawOutput.hint : "";
+  const auditProv = rawOutput?._audit_provenance as Record<string, unknown> | undefined;
+  const provenanceHash = typeof auditProv?.provenance_hash === "string" ? auditProv.provenance_hash : "";
+
   const runError = typeof result?.error === "string" ? result.error : "";
   const outcome = String(result?.outcome ?? "");
   const outcomeMessage = String(result?.outcome_message ?? "");
@@ -3337,70 +3713,194 @@ function ModuleRunSummary({ result, error }: { result?: Record<string, unknown>;
   const hasOutcomeError = ["operator_error", "dependency_error", "network_error", "unsupported", "module_error", "failed", "timeout"].includes(displayOutcome);
   const emptyText = dryRun
     ? "No live execution was performed."
-    : outcome === "completed_no_findings"
-      ? "No confirmed findings. The module completed without observing an exploitable condition."
-      : runError
-        ? "No findings recorded because execution failed."
-        : "No findings returned.";
+    : rawError
+      ? `Module halted with status '${rawError}'. See execution notice above.`
+      : outcome === "completed_no_findings"
+        ? "No confirmed findings. The module completed without observing an exploitable condition."
+        : runError
+          ? "No findings recorded because execution failed."
+          : "No findings returned.";
 
   return (
-    <section className="inline-summary mt-4">
-      <SectionHeader
-        title="Execution Summary"
-        action={(
-          <div className="flex flex-wrap gap-2">
-            <span className="badge">{moduleId}</span>
-            <span className={hasOutcomeError ? "badge badge-high" : displayOutcome === "confirmed_findings" || displayOutcome === "completed_no_findings" || displayOutcome === "dry_run_ok" || displayOutcome === "done" ? "badge badge-low" : "badge badge-medium"}>{displayOutcome}</span>
-            <span className="badge">{duration}</span>
-          </div>
-        )}
-      />
-      {(outcomeMessage || runError) && (
-        <p className={`notice mb-3 ${hasOutcomeError || runError ? "notice-danger" : ""}`}>
-          {hasOutcomeError || runError ? <AlertTriangle size={16} /> : null}
-          {outcomeMessage || runError}
-        </p>
-      )}
-      {warnings.length > 0 && (
-        <div className="notice mb-3">
-          <strong>{dryRun ? "Dry-run notes" : "Notes"}</strong>
-          <ul className="mt-1 list-disc pl-5">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+    <section className="mt-4 space-y-3 font-sans">
+      {/* Tactical Telemetry Strip (Replacing bulky cards & notice clutter) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/80 border border-zinc-800 rounded-sm overflow-hidden text-xs font-mono">
+        <div className="bg-zinc-950 p-2.5">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">MODULE / OPERATION</span>
+          <span className="font-semibold text-zinc-200">{moduleId}</span>
         </div>
-      )}
-      {nextSteps.length > 0 && (
-        <div className="notice mb-3">
-          <strong>Next steps</strong>
-          <ul className="mt-1 list-disc pl-5">{nextSteps.map((step) => <li key={step}>{step}</li>)}</ul>
+        <div className="bg-zinc-950 p-2.5">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">EXECUTION OUTCOME</span>
+          <span className={hasOutcomeError ? "text-rose-400 font-semibold" : "text-emerald-400 font-semibold"}>
+            {displayOutcome}
+          </span>
         </div>
-      )}
-      <div className="mini-stat-grid mb-3">
-        <MiniStat title="Findings" value={String(findings.length)} detail="returned observations" />
-        <MiniStat title="Validation" value={String(validationCount)} detail="post-run checks" />
-        <MiniStat title="Duration" value={duration} detail="server execution" />
+        <div className="bg-zinc-950 p-2.5">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">OBSERVATIONS / AUDIT</span>
+          <span className="font-semibold text-zinc-100">
+            {findings.length} findings <span className="text-zinc-500 text-[11px]">({validationCount} verified)</span>
+          </span>
+        </div>
+        <div className="bg-zinc-950 p-2.5">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">DURATION</span>
+          <span className="font-semibold text-zinc-300">{duration}</span>
+        </div>
       </div>
+
+      {provenanceHash && (
+        <div className="px-3 py-1.5 rounded-sm border border-zinc-800/80 bg-zinc-950/80 flex items-center justify-between gap-3 text-xs font-mono">
+          <div className="flex items-center gap-2 text-zinc-400 truncate">
+            <ShieldCheck size={13} className="text-emerald-400 shrink-0" />
+            <span className="text-zinc-500 font-semibold">AUDIT PROVENANCE:</span>
+            <code className="text-zinc-300 truncate text-[11px] select-all">{provenanceHash}</code>
+          </div>
+          <span className="text-[10px] text-emerald-400/90 uppercase tracking-wider shrink-0 font-semibold">[IMMUTABLE RECORD]</span>
+        </div>
+      )}
+
+      {rawError && (
+        <div className="p-3 rounded-sm border border-amber-900/50 bg-amber-950/20 text-xs font-mono text-amber-300 flex items-start gap-2" role="alert">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-400" />
+          <div>
+            <span className="font-semibold">[EXECUTION NOTICE: {rawError.replace(/_/g, " ").toUpperCase()}]</span>
+            {rawHint && <p className="mt-0.5 text-zinc-400">{rawHint}</p>}
+          </div>
+        </div>
+      )}
+
+      {(outcomeMessage || runError) && !rawError && hasOutcomeError && (
+        <div className="p-3 rounded-sm border border-rose-900/60 bg-rose-950/20 text-xs font-mono text-rose-300 flex items-center gap-2" role="alert">
+          <AlertTriangle size={14} className="shrink-0 text-rose-400" />
+          <span>{outcomeMessage || runError}</span>
+        </div>
+      )}
+
+      {warnings.length > 0 && (
+        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
+          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
+            [{dryRun ? "SIMULATION NOTES" : "OPERATION NOTES"}]
+          </span>
+          <ul className="list-disc pl-4 space-y-0.5">
+            {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {nextSteps.length > 0 && (
+        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
+          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
+            [OPERATOR NEXT STEPS]
+          </span>
+          <ul className="list-disc pl-4 space-y-0.5">
+            {nextSteps.map((step) => <li key={step}>{step}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Findings Telemetry Stream (High-Density Tactical Matrix) */}
       {findings.length > 0 ? (
-        <div className="compact-list">
-          {findings.map((finding, index) => (
-            <div className="compact-row" key={finding.id ?? index}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <div className="font-bold">{finding.title ?? `Finding ${index + 1}`}</div>
-                  <div className="mt-1 text-sm text-zinc-400">{String(finding.description ?? "")}</div>
+        <div className="space-y-2 mt-2">
+          {findings.map((finding, index) => {
+            const details = getTailoredFindingDetails(finding);
+            const normSev = String(finding.severity ?? "info").toLowerCase();
+            const borderAccent =
+              normSev.includes("high") || normSev.includes("crit")
+                ? "border-l-rose-500"
+                : normSev.includes("med")
+                ? "border-l-amber-500"
+                : "border-l-zinc-700";
+
+            return (
+              <div
+                className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-3.5 space-y-2.5 rounded-sm`}
+                key={finding.id ?? index}
+              >
+                {/* Header Row: Endpoint Port, Mitre, Host, Severity & Confidence */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono pb-2 border-b border-zinc-800/50">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {details.port ? (
+                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
+                        PORT {details.port}/TCP
+                      </span>
+                    ) : details.serviceTag ? (
+                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
+                        {details.serviceTag}
+                      </span>
+                    ) : null}
+                    {details.serviceCategory && (
+                      <span className="text-[11px] text-zinc-400 font-sans">
+                        {details.serviceCategory}
+                      </span>
+                    )}
+                    {finding.host && (
+                      <span className="text-[11px] text-zinc-500">
+                        TARGET: <strong className="text-zinc-300 font-mono">{finding.host}</strong>
+                      </span>
+                    )}
+                    {finding.mitre_technique && (
+                      <span className="text-[10px] text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded-sm">
+                        {finding.mitre_technique}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <span className={details.isHighConf ? "text-emerald-400 font-mono text-[11px] flex items-center gap-1 font-medium" : "text-zinc-400 font-mono text-[11px]"}>
+                      {details.isHighConf && <CheckCircle2 size={12} className="text-emerald-400" />}
+                      {details.confidenceText}
+                    </span>
+                    <span className={opsecBadge(finding.severity)}>
+                      {finding.severity ? String(finding.severity).toUpperCase() : "INFO"}
+                    </span>
+                  </div>
                 </div>
-                <span className={opsecBadge(finding.severity)}>{finding.severity ?? "info"}</span>
+
+                {/* Finding Title & Concise Narrative */}
+                <div>
+                  <h3 className="font-sans font-semibold text-sm text-zinc-100 tracking-tight">
+                    {finding.title ?? `Observation #${index + 1}`}
+                  </h3>
+                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans">
+                    {String(finding.description ?? "")}
+                  </p>
+                </div>
+
+                {/* Technical Remediation */}
+                {details.tailoredRemediation && (
+                  <div className="pt-2 border-t border-zinc-800/50 text-xs font-mono text-zinc-400 flex items-start gap-2">
+                    <span className="text-zinc-500 shrink-0 text-[10px] uppercase font-semibold">[MITIGATION]</span>
+                    <span className="font-sans text-xs text-zinc-300 leading-relaxed">
+                      {details.tailoredRemediation}
+                    </span>
+                  </div>
+                )}
+
+                {/* Tactical Pivot Pathways (No emojis, sleek mono buttons) */}
+                {details.nextModules.length > 0 && onSelectModule && (
+                  <div className="pt-2 border-t border-zinc-800/50 flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider shrink-0">
+                      PIVOT PATHWAYS:
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {details.nextModules.map((nextMod) => (
+                        <button
+                          key={nextMod}
+                          type="button"
+                          onClick={() => onSelectModule(nextMod, { target: finding.host })}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700/80 bg-zinc-900/90 hover:border-zinc-500 hover:bg-zinc-800 text-zinc-200 font-mono text-[11px] transition-colors"
+                          title={`Arm and execute ${nextMod} on ${finding.host}`}
+                        >
+                          <Terminal size={11} className="text-zinc-400" />
+                          <span>RUN: <strong className="text-zinc-100">{nextMod}</strong></span>
+                          <ArrowRight size={11} className="text-zinc-400" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {finding.host && <span className="badge">Host: {finding.host}</span>}
-                {finding.mitre_technique && <span className="badge">{finding.mitre_technique}</span>}
-                {typeof finding.confidence === "number" && <span className="badge">Confidence: {formatRate(finding.confidence)}</span>}
-              </div>
-              {finding.remediation ? (
-                <p className="mt-2 text-sm text-zinc-300">
-                  <strong>Remediation:</strong> {String(finding.remediation)}
-                </p>
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <EmptyState text={emptyText} />
@@ -3550,11 +4050,12 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-function NoiseProfileBadge({ noise }: { noise?: string }) {
+export function NoiseProfileBadge({ noise }: { noise?: string }) {
   const normalized = String(noise ?? "stealth").toLowerCase();
-  const isNoisy = normalized.includes("noisy") || normalized.includes("critical");
+  const isNoisy = normalized.includes("noisy") || normalized.includes("critical") || normalized.includes("high");
   const isEvasive = normalized.includes("evasive") || normalized.includes("medium");
-  const badgeClass = isNoisy ? "badge badge-high" : isEvasive ? "badge badge-medium" : "badge";
+  const isStealth = normalized.includes("stealth") || normalized.includes("low");
+  const badgeClass = isNoisy ? "badge badge-high" : isEvasive ? "badge badge-medium" : isStealth ? "badge badge-low" : "badge";
   return (
     <span className={`${badgeClass} font-mono text-[11px] uppercase tracking-wider`}>
       {noise ?? "stealth"}
@@ -3562,12 +4063,36 @@ function NoiseProfileBadge({ noise }: { noise?: string }) {
   );
 }
 
-function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
+function CampaignTable({
+  campaigns,
+  scopedCampaignId,
+  onClearScope,
+  onSelectCampaign
+}: {
+  campaigns: Campaign[];
+  scopedCampaignId?: string;
+  onClearScope?: () => void;
+  onSelectCampaign?: (id: string) => void;
+}) {
   return (
     <section className="panel table-panel">
       <SectionHeader
-        title="Campaign Activity"
-        action={<span className="badge">{campaigns.length} records</span>}
+        title={scopedCampaignId ? "Scoped Campaign Activity" : "Campaign Activity"}
+        action={
+          <div className="flex items-center gap-2">
+            {scopedCampaignId && onClearScope ? (
+              <button
+                type="button"
+                onClick={onClearScope}
+                className="btn btn-compact text-xs font-mono"
+                title="Reset scope filter to display all campaigns"
+              >
+                Show All Campaigns
+              </button>
+            ) : null}
+            <span className="badge">{campaigns.length} record{campaigns.length === 1 ? "" : "s"}</span>
+          </div>
+        }
       />
       {campaigns.length > 0 ? (
         <div className="table-scroll">
@@ -3575,7 +4100,12 @@ function CampaignTable({ campaigns }: { campaigns: Campaign[] }) {
             <thead><tr><th>#</th><th>Name</th><th>Client</th><th>Status</th><th>Noise</th><th>Operator</th></tr></thead>
             <tbody>
               {campaigns.map((campaign, index) => (
-                <tr key={campaign.id}>
+                <tr
+                  key={campaign.id}
+                  className={onSelectCampaign ? "cursor-pointer hover:bg-zinc-900/60 transition-colors" : ""}
+                  onClick={() => onSelectCampaign?.(campaign.id)}
+                  title={onSelectCampaign ? `Filter dashboard to ${campaign.name}` : undefined}
+                >
                   <td className="muted-cell">#{String(index + 1).padStart(2, "0")}</td>
                   <td>
                     <div className="font-semibold text-zinc-100 text-sm tracking-tight">{campaign.name}</div>
@@ -3685,16 +4215,41 @@ function ParamForm({
         const required = requiredOverrides?.[name] ?? field.required;
         const inputField = required === field.required ? field : { ...field, required };
         const description = fieldDescription(name, field);
-        return (
-          <label className="block text-sm font-semibold" key={name}>
-            <span className="flex items-center gap-2">
-              <span>
+        const isBool = field.type === "boolean";
+
+        const inputId = `param_${name}`;
+        if (isBool) {
+          return (
+            <div className="flex items-center gap-2.5 py-1 text-xs text-zinc-300" key={name}>
+              <input
+                id={inputId}
+                name={inputId}
+                type="checkbox"
+                checked={Boolean(values[name] ?? field.default)}
+                onChange={(event) => {
+                  onChange({ ...values, [name]: event.target.checked });
+                }}
+              />
+              <label htmlFor={inputId} className="font-mono text-xs text-zinc-200 cursor-pointer select-none">
                 {name}
-                {required && <span className="text-red-700"> *</span>}
-              </span>
-              {!required && <span className="badge">optional</span>}
-            </span>
+              </label>
+              {!required && <span className="text-[10px] font-mono text-zinc-500">(optional)</span>}
+              {description && <span className="text-[11px] text-zinc-500">({description})</span>}
+            </div>
+          );
+        }
+
+        return (
+          <div className="block" key={name}>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label htmlFor={inputId} className="font-mono text-xs text-zinc-300 cursor-pointer select-none">
+                {name}
+                {required && <span className="text-rose-500 font-sans ml-1">*</span>}
+              </label>
+              {!required && <span className="text-[10px] font-mono text-zinc-500">optional</span>}
+            </div>
             <ParamInput
+              id={inputId}
               name={name}
               field={inputField}
               value={values[name]}
@@ -3708,11 +4263,12 @@ function ParamForm({
                 onChange(next);
               }}
             />
-            {description && <span className="mt-1 block text-xs text-zinc-400">{description}</span>}
-            {fieldDefaultHint(field) && (
-              <span className="mt-1 block text-xs font-medium text-zinc-400">{fieldDefaultHint(field)}</span>
+            {description && (
+              <span className="mt-1 block text-[11px] text-zinc-500 leading-snug">
+                {description}
+              </span>
             )}
-          </label>
+          </div>
         );
       })}
     </div>
@@ -3720,20 +4276,25 @@ function ParamForm({
 }
 
 function ParamInput({
+  id,
   name,
   field,
   value,
   onChange
 }: {
+  id?: string;
   name: string;
   field: ParamField;
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
+  const inputId = id ?? `param_${name}`;
   if (field.type === "boolean") {
     return (
       <input
-        className="ml-2"
+        id={inputId}
+        name={inputId}
+        className="ml-2 cursor-pointer"
         type="checkbox"
         checked={Boolean(value)}
         required={field.required}
@@ -3744,10 +4305,14 @@ function ParamInput({
   if (field.type === "array") {
     return (
       <textarea
+        id={inputId}
+        name={inputId}
         className="field mt-1 min-h-20"
         value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
         placeholder={paramPlaceholder(name, field)}
         required={field.required}
+        autoComplete="off"
+        spellCheck={false}
         onInvalid={setRequiredMessage}
         onChange={(event) => {
           clearValidationMessage(event);
@@ -3759,6 +4324,8 @@ function ParamInput({
   const type = field.secret ? "password" : field.type === "integer" || field.type === "number" ? "number" : "text";
   return (
     <input
+      id={inputId}
+      name={inputId}
       className="field mt-1"
       type={type}
       value={String(value ?? "")}
@@ -3766,6 +4333,12 @@ function ParamInput({
       max={field.max}
       placeholder={paramPlaceholder(name, field)}
       required={field.required}
+      autoComplete={field.secret ? "new-password" : "off"}
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      data-lpignore="true"
+      data-form-type="other"
       onInvalid={setRequiredMessage}
       onChange={(event) => {
         clearValidationMessage(event);
@@ -3813,6 +4386,12 @@ function paramPlaceholder(name: string, field: ParamField): string {
 function fieldDescription(name: string, field: ParamField): string | undefined {
   if (name === "target_user" && field.description === "Required target user or SPN; run ad.enum_spn first") {
     return "Required target user or SPN; run ad.enum_spn first.";
+  }
+  if (name === "timeout") {
+    return (field.description ? `${field.description}. ` : "") + "Recommendation: use 2.5s - 3.0s for virtual lab / VM targets.";
+  }
+  if (name === "ports" && (!field.description || field.description.includes("Port spec"))) {
+    return "Comma-separated ports (e.g. 88, 389, 445) or presets (top1000). Required for service detection.";
   }
   return field.description;
 }
@@ -4089,15 +4668,21 @@ function statusBadge(status?: string): string {
   return "badge";
 }
 
-function opsecBadge(level?: string): string {
-  const normalized = String(level ?? "").toLowerCase();
-  if (normalized.includes("high") || normalized.includes("critical")) {
+export function opsecBadge(level?: string): string {
+  const normalized = String(level ?? "").toLowerCase().trim();
+  if (!normalized || normalized === "n/a" || normalized === "none" || normalized === "unknown") {
+    return "badge";
+  }
+  if (normalized.includes("high") || normalized.includes("critical") || normalized.includes("alarm")) {
     return "badge badge-high";
   }
-  if (normalized.includes("medium") || normalized.includes("moderate")) {
+  if (normalized.includes("medium") || normalized.includes("moderate") || normalized.includes("warn")) {
     return "badge badge-medium";
   }
-  return "badge badge-low";
+  if (normalized.includes("low") || normalized.includes("safe") || normalized.includes("info") || normalized.includes("stealth") || normalized.includes("minimal")) {
+    return "badge badge-low";
+  }
+  return "badge";
 }
 
 function serializeError(value: unknown): unknown {

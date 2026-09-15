@@ -579,6 +579,30 @@ class TestMonthlyStatsEndpoint:
         assert response.json() == expected
         db.get_monthly_confirmed_finding_stats.assert_awaited_once_with()
 
+    @pytest.mark.asyncio
+    async def test_monthly_stats_filters_by_campaign_id(self, aclient):
+        c, db, _ = aclient
+        db.get_monthly_confirmed_finding_stats.reset_mock()
+        expected = {
+            "period": "2026-07",
+            "label": "Security signals this cycle",
+            "total": 1,
+            "confirmed_findings": 1,
+            "series": [{"date": "2026-07-18", "count": 1}],
+        }
+        db.get_monthly_confirmed_finding_stats.return_value = expected
+
+        response = await c.get(
+            "/stats/monthly?campaign_id=camp-target-123",
+            headers=_auth("admin", "team_lead"),
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected
+        db.get_monthly_confirmed_finding_stats.assert_awaited_once_with(
+            campaign_id="camp-target-123"
+        )
+
 
 # ── Security headers ──────────────────────────────────────────────────────────
 

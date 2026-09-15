@@ -179,8 +179,10 @@ export function buildModuleRunPayload(
 export const api = {
   me: () => apiRequest<UserProfile>("/auth/me"),
   health: () => apiRequest<Record<string, unknown>>("/health"),
-  telemetry: () => apiRequest<Record<string, unknown>>("/telemetry"),
-  monthlyStats: () => apiRequest<MonthlyFindingStats>("/stats/monthly"),
+  telemetry: (campaignId?: string | unknown) =>
+    apiRequest<Record<string, unknown>>(typeof campaignId === "string" && campaignId ? `/telemetry?campaign_id=${encodeURIComponent(campaignId)}` : "/telemetry"),
+  monthlyStats: (campaignId?: string | unknown) =>
+    apiRequest<MonthlyFindingStats>(typeof campaignId === "string" && campaignId ? `/stats/monthly?campaign_id=${encodeURIComponent(campaignId)}` : "/stats/monthly"),
   campaigns: () => apiRequest<Campaign[]>("/campaigns"),
   createCampaign: (body: { name: string; client: string; targets: string[]; scope_cidrs: string[]; noise_profile: string }) =>
     apiRequest<Campaign>("/campaigns", {
