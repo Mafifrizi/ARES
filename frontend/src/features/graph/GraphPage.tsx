@@ -692,6 +692,17 @@ export default function GraphPage({
   const [sleepSeconds, setSleepSeconds] = useState("5");
   const [sleepJitter, setSleepJitter] = useState("20");
   const [sleepNotice, setSleepNotice] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hudToast, setHudToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function triggerHudToast(msg: string): void {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setHudToast(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setHudToast(null);
+    }, 3500);
+  }
 
   const [filters, setFilters] = useState<GraphFilters>({ nodeTypes: [], severity: "all", activePathOnly: false });
   const [selection, setSelection] = useState<GraphSelection>(null);
@@ -777,8 +788,50 @@ export default function GraphPage({
     setIngestNotice("");
   }
 
+  async function handleRefresh(): Promise<void> {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        graphQuery.refetch(),
+        pathsQuery.refetch(),
+        campaigns.refetch()
+      ]);
+      flowControls?.fitView();
+      triggerHudToast(`✓ Graph Synced & Realigned (${filteredGraph.nodes.length} Hosts / ${filteredGraph.edges.length} Links)`);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  }
+
+  function togglePivotFocus(): void {
+    const nextState = !filters.activePathOnly;
+    setFilters((f) => ({ ...f, activePathOnly: nextState }));
+    triggerHudToast(
+      nextState
+        ? "• Pivot Focus: ACTIVE (Showing confirmed lateral compromise routes only)"
+        : "• Pivot Focus: OFF (Showing full scoped infrastructure)"
+    );
+  }
+
   return (
     <div className="cobalt-graph-container" aria-label="Cobalt Strike C2 Console">
+      {/* Tactical Floating HUD Toast for Actions */}
+      {hudToast && (
+        <div className="cobalt-hud-toast" role="status" aria-live="polite">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+            <span className="font-mono text-[11px] text-cyan-300 font-semibold">{hudToast}</span>
+          </div>
+          <button
+            type="button"
+            className="text-zinc-400 hover:text-white text-xs ml-3"
+            onClick={() => setHudToast(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Authentic Cobalt Strike Desktop Window Title Bar */}
       <div className="cobalt-window-titlebar">
         <div className="cobalt-window-title">
@@ -932,20 +985,21 @@ export default function GraphPage({
             ▦
           </button>
           <button
-            className="cobalt-tool-btn active font-bold"
+            className={`cobalt-tool-btn ${filters.activePathOnly ? "active font-bold text-blue-900 border-blue-600 bg-blue-100" : ""}`}
             type="button"
-            title="Pivot Graph Mode [P]"
-            onClick={() => setUseSampleTopology(false)}
+            title="Toggle Lateral Pivot Route Focus [P]"
+            onClick={togglePivotFocus}
           >
             [P]
           </button>
           <button
-            className="cobalt-tool-btn"
-            onClick={() => void graphQuery.refetch()}
+            className={`cobalt-tool-btn ${isRefreshing ? "active font-bold text-emerald-800" : ""}`}
+            onClick={handleRefresh}
             type="button"
-            title="Refresh / Sync Graph [R]"
+            title="Refresh & Relayout Graph [R]"
+            disabled={isRefreshing}
           >
-            [R]
+            {isRefreshing ? "⟳" : "[R]"}
           </button>
           <div className="cobalt-toolbar-sep" />
           <button

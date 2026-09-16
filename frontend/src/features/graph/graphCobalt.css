@@ -955,3 +955,33 @@
   background: #ffffff;
 }
 
+/* ── Tactical Action HUD Toast ───────────────────────────────────────────── */
+.cobalt-hud-toast {
+  position: absolute;
+  top: 72px;
+  right: 18px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #18181b;
+  border: 1px solid #38bdf8;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-family: Consolas, monospace;
+  animation: cobaltToastSlide 0.22s ease-out;
+}
+
+@keyframes cobaltToastSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
