@@ -60,7 +60,8 @@ function cobaltPivotLayout(
   graph: SafeGraph,
   highlightedNodeIds: Set<string>,
   highlightedEdgeIds: Set<string>,
-  selectedNodeId?: string | null
+  selectedNodeId?: string | null,
+  hoverActive?: { connectedNodeIds: Set<string>; connectedEdgeIds: Set<string> } | null
 ) {
   // Pre-configured coordinate map for canonical Cobalt Strike Pivot nodes matching reference screenshot
   const FIXED_COORDINATES: Record<string, { x: number; y: number }> = {
@@ -219,6 +220,8 @@ function cobaltPivotLayout(
     });
   }
 
+  const hasHover = Boolean(hoverActive && hoverActive.connectedNodeIds.size > 0);
+
   const canvasNodes: CanvasNode[] = nodes.map((node) => {
     const inferred = inferCobaltNodeData(node);
     let x: number;
@@ -235,6 +238,8 @@ function cobaltPivotLayout(
 
     const nodeType = inferred.os === "firewall" ? "pivotFirewall" : "pivotComputer";
     const isNodeSelected = selectedNodeId ? node.id === selectedNodeId : false;
+    const isNodeHoverConnected = hoverActive ? hoverActive.connectedNodeIds.has(node.id) : true;
+    const isDimmed = (shouldDim && !highlightedNodeIds.has(node.id)) || (hasHover && !isNodeHoverConnected);
 
     return {
       id: node.id,
@@ -250,7 +255,7 @@ function cobaltPivotLayout(
         process: inferred.process,
         pid: inferred.pid,
         ip: inferred.ip,
-        dimmed: shouldDim && !highlightedNodeIds.has(node.id)
+        dimmed: isDimmed
       }
     };
   });
@@ -260,27 +265,33 @@ function cobaltPivotLayout(
   const canvasEdges: CanvasEdge[] = edges.map((edge) => {
     const isHighlighted = highlightedEdgeIds.has(edge.id);
     const hasAnyHighlight = highlightedEdgeIds.size > 0;
+    const isDirectHovered = hoverActive ? hoverActive.connectedEdgeIds.has(edge.id) : false;
     const sourceNode = nodeMap.get(edge.source);
     const targetNode = nodeMap.get(edge.target);
 
-    // Protocol color mapping
-    let edgeColor = "#f59e0b"; // Gold SMB pipe default
+    // Protocol color mapping with clear visual semantics
+    let edgeColor = "#f59e0b"; // Warm Amber Gold (SMB Named Pipe default)
     let edgeClass = "cobalt-edge-smb";
-    let isAnimated = false;
 
     const edgeTypeLower = (edge.type || "").toLowerCase();
     const labelLower = (edge.label || "").toLowerCase();
+    const isTargetDc =
+      targetNode?.data.os === "windows-server" ||
+      (targetNode?.id || "").toLowerCase().includes("dc") ||
+      (targetNode?.data.label || "").toLowerCase().includes("dc");
 
     if (edgeTypeLower.includes("egress") || labelLower.includes("https") || labelLower.includes("http")) {
       edgeColor = "#10b981"; // Emerald green egress
       edgeClass = "cobalt-edge-egress";
     } else if (edgeTypeLower.includes("session") || labelLower.includes("ssh") || labelLower.includes("interactive")) {
-      edgeColor = "#06b6d4"; // Cyan session
+      edgeColor = "#06b6d4"; // Electric Cyan interactive session
       edgeClass = "cobalt-edge-session";
+    } else if (isTargetDc) {
+      edgeColor = "#ef4444"; // Crimson Red high-value attack link to Domain Controller
+      edgeClass = "cobalt-edge-crown";
     } else if (edgeTypeLower.includes("reverse") || edge.dashed) {
       edgeColor = "#eab308"; // Yellow dashed reverse
       edgeClass = "cobalt-edge-reverse";
-      isAnimated = true;
     }
 
     let sourceHandle = "right-source";
@@ -297,10 +308,19 @@ function cobaltPivotLayout(
         sourceHandle = "left-source";
         targetHandle = "right-target";
       } else {
-        sourceHandle = "bottom-source";
-        targetHandle = "top-target";
+        sourceHandle = sourceNode.position.y < targetNode.position.y ? "bottom-source" : "top-source";
+        targetHandle = sourceNode.position.y < targetNode.position.y ? "top-target" : "bottom-target";
       }
     }
+
+    // Interactive focus state:
+    // When hovering a node: connected edges pop with 4.0px thickness & neon glow, unrelated edges dim to 0.08
+    const strokeWidth = isDirectHovered ? 4.0 : isHighlighted ? 3.2 : 2.2;
+    const opacity = hasHover
+      ? (isDirectHovered ? 1.0 : 0.08)
+      : (hasAnyHighlight && !isHighlighted ? 0.2 : 0.90);
+
+    const markerColor = isDirectHovered ? (isTargetDc ? "#ff3333" : edgeColor) : edgeColor;
 
     return {
       id: edge.id,
@@ -308,21 +328,22 @@ function cobaltPivotLayout(
       target: edge.target,
       sourceHandle,
       targetHandle,
-      type: "smoothstep",
-      animated: isAnimated || isHighlighted,
-      className: edgeClass,
-      // Edge labels removed per operator instructions: avoids clutter, overlaps, and unreadable thick text
+      type: "default", // Smooth curved Bezier eliminating overlapping 90-degree rail tracks
+      animated: true,  // Flowing dash stream communicates directional movement instantly
+      className: `${edgeClass}${isDirectHovered ? " edge-hover-pulse" : ""}`,
       label: undefined,
+      zIndex: isDirectHovered ? 100 : (isHighlighted ? 50 : 1),
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 14,
-        height: 14,
-        color: edgeColor
+        width: 22,
+        height: 22,
+        color: markerColor
       },
       style: {
         stroke: edgeColor,
-        strokeWidth: isHighlighted ? 3 : 2.2,
-        opacity: hasAnyHighlight && !isHighlighted ? 0.2 : 0.95
+        strokeWidth,
+        opacity,
+        filter: isDirectHovered ? `drop-shadow(0 0 8px ${edgeColor})` : undefined
       }
     };
   });
@@ -390,6 +411,7 @@ function CobaltGraphInner({
 }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const controlsBound = useRef(false);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     if (bindControls && !controlsBound.current) {
@@ -397,10 +419,27 @@ function CobaltGraphInner({
       bindControls({
         zoomIn: () => zoomIn({ duration: 250 }),
         zoomOut: () => zoomOut({ duration: 250 }),
-        fitView: () => fitView({ padding: 0.18, duration: 300 })
+        fitView: () => fitView({ padding: 0.14, duration: 300 })
       });
     }
   }, [bindControls, zoomIn, zoomOut, fitView]);
+
+  // Hover pathway isolation: immediate parents and children of hovered node
+  const hoverActive = useMemo(() => {
+    if (!hoveredNodeId) return null;
+    const connectedNodeIds = new Set<string>([hoveredNodeId]);
+    const connectedEdgeIds = new Set<string>();
+
+    graph.edges.forEach((edge) => {
+      if (edge.source === hoveredNodeId || edge.target === hoveredNodeId) {
+        connectedEdgeIds.add(edge.id);
+        connectedNodeIds.add(edge.source);
+        connectedNodeIds.add(edge.target);
+      }
+    });
+
+    return { connectedNodeIds, connectedEdgeIds };
+  }, [graph.edges, hoveredNodeId]);
 
   const canvas = useMemo(
     () =>
@@ -408,9 +447,10 @@ function CobaltGraphInner({
         graph,
         highlightedNodeIds,
         highlightedEdgeIds,
-        selection?.kind === "node" ? selection.value.id : null
+        selection?.kind === "node" ? selection.value.id : null,
+        hoverActive
       ),
-    [graph, highlightedEdgeIds, highlightedNodeIds, selection]
+    [graph, highlightedEdgeIds, highlightedNodeIds, selection, hoverActive]
   );
 
   const nodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
@@ -423,9 +463,11 @@ function CobaltGraphInner({
         edges={canvas.edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.18 }}
+        fitViewOptions={{ padding: 0.14 }}
         minZoom={0.25}
         maxZoom={2.0}
+        onNodeMouseEnter={(_event, node) => setHoveredNodeId(node.id)}
+        onNodeMouseLeave={() => setHoveredNodeId(null)}
         onNodeClick={(_event, node) => {
           const selectedNode = nodeById.get(node.id);
           if (selectedNode) onSelect({ kind: "node", value: selectedNode });

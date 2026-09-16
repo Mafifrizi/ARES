@@ -278,8 +278,20 @@
   flex-direction: column;
 }
 
+.cobalt-node-wrapper,
+.cobalt-firewall-node {
+  transition: opacity 0.25s ease, transform 0.2s ease, filter 0.25s ease;
+}
+
+.cobalt-node-wrapper.dimmed,
+.cobalt-firewall-node.dimmed {
+  opacity: 0.18 !important;
+  filter: grayscale(0.7) brightness(0.6);
+}
+
 .cobalt-node-wrapper:hover .cobalt-monitor-housing {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.45);
 }
 
 /* Halo & Aura Variations (Pure Crisp Vectors, No Blurry AI-Slop Glows) */
@@ -441,26 +453,56 @@
   justify-content: center;
 }
 
-/* ── Directed Edge Styling (Crisp Solid and Dashed Vector Lines) ────────── */
+/* ── Directed Edge Styling (Curved Bezier Paths & Directional Flow) ──────── */
+.cobalt-canvas-area .react-flow__edge-path {
+  stroke-linecap: round;
+  transition: stroke-width 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+}
+
+.cobalt-canvas-area .cobalt-edge-smb .react-flow__edge-path,
 .cobalt-edge-smb {
-  stroke: #ff9900 !important;
-  stroke-width: 2px !important;
+  stroke: #f59e0b;
 }
 
+.cobalt-canvas-area .cobalt-edge-egress .react-flow__edge-path,
 .cobalt-edge-egress {
-  stroke: #00cc44 !important;
-  stroke-width: 2px !important;
+  stroke: #10b981;
 }
 
+.cobalt-canvas-area .cobalt-edge-session .react-flow__edge-path,
 .cobalt-edge-session {
-  stroke: #00d4ff !important;
-  stroke-width: 2px !important;
+  stroke: #06b6d4;
 }
 
+.cobalt-canvas-area .cobalt-edge-crown .react-flow__edge-path,
+.cobalt-edge-crown {
+  stroke: #ef4444;
+}
+
+.cobalt-canvas-area .cobalt-edge-reverse .react-flow__edge-path,
 .cobalt-edge-reverse {
-  stroke: #eab308 !important;
-  stroke-width: 2px !important;
-  stroke-dasharray: 6 4 !important;
+  stroke: #eab308;
+  stroke-dasharray: 6 4;
+}
+
+/* Directional Forward-Flowing Stream for Active Pivots */
+.cobalt-canvas-area .react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 8 6;
+  animation: cobaltFlowStream 1.25s linear infinite;
+}
+
+@keyframes cobaltFlowStream {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Hover Focus Pulse: Speeds up flow & intensifies path contrast */
+.cobalt-canvas-area .react-flow__edge.edge-hover-pulse .react-flow__edge-path {
+  animation: cobaltFlowStream 0.6s linear infinite;
 }
 
 /* ── Bottom Half: Classic Java Swing / Cobalt Strike Tabbed Terminal Dock ── */
