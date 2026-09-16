@@ -96,10 +96,10 @@ export const PivotFirewallNode = memo(function PivotFirewallNode({ data, selecte
   const nodeData = data as unknown as PivotNodeData;
   return (
     <div className={`cobalt-firewall-node${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}`}>
-      <Handle type="target" position={Position.Left} id="left-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Left} id="left-source" className="opacity-0" isConnectable={false} />
-      <Handle type="target" position={Position.Top} id="top-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Top} id="top-source" className="opacity-0" isConnectable={false} />
+      <Handle type="target" position={Position.Left} id="left-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Left} id="left-source" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="target" position={Position.Top} id="top-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Top} id="top-source" className="opacity-0 pointer-events-none" isConnectable={false} />
 
       <div className="cobalt-firewall-brick">
         {/* Stylized Flames and Brickwork */}
@@ -136,10 +136,10 @@ export const PivotFirewallNode = memo(function PivotFirewallNode({ data, selecte
         <span className="cobalt-node-subtext">{nodeData.subLabel || "Ingress / Egress"}</span>
       </div>
 
-      <Handle type="target" position={Position.Right} id="right-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Right} id="right-source" className="opacity-0" isConnectable={false} />
-      <Handle type="target" position={Position.Bottom} id="bottom-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} id="bottom-source" className="opacity-0" isConnectable={false} />
+      <Handle type="target" position={Position.Right} id="right-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Right} id="right-source" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="target" position={Position.Bottom} id="bottom-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="bottom-source" className="opacity-0 pointer-events-none" isConnectable={false} />
     </div>
   );
 });
@@ -191,10 +191,10 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
   return (
     <div className={`cobalt-node-wrapper ${auraClass}${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}`}>
       {/* Handles on all 4 directions for clean directional pivot routing */}
-      <Handle type="target" position={Position.Left} id="left-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Left} id="left-source" className="opacity-0" isConnectable={false} />
-      <Handle type="target" position={Position.Top} id="top-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Top} id="top-source" className="opacity-0" isConnectable={false} />
+      <Handle type="target" position={Position.Left} id="left-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Left} id="left-source" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="target" position={Position.Top} id="top-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Top} id="top-source" className="opacity-0 pointer-events-none" isConnectable={false} />
 
       {/* Monitor Display Unit */}
       <div className="cobalt-monitor-housing">
@@ -223,10 +223,10 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
         )}
       </div>
 
-      <Handle type="target" position={Position.Right} id="right-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Right} id="right-source" className="opacity-0" isConnectable={false} />
-      <Handle type="target" position={Position.Bottom} id="bottom-target" className="opacity-0" isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} id="bottom-source" className="opacity-0" isConnectable={false} />
+      <Handle type="target" position={Position.Right} id="right-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Right} id="right-source" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="target" position={Position.Bottom} id="bottom-target" className="opacity-0 pointer-events-none" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="bottom-source" className="opacity-0 pointer-events-none" isConnectable={false} />
     </div>
   );
 });

@@ -246,6 +246,7 @@ function cobaltPivotLayout(
       type: nodeType,
       position: { x, y },
       selected: isNodeSelected,
+      zIndex: isNodeSelected ? 30 : (hoverActive && isNodeHoverConnected ? 25 : 10),
       data: {
         label: node.label,
         subLabel: inferred.subLabel,
@@ -332,11 +333,11 @@ function cobaltPivotLayout(
       animated: true,  // Flowing dash stream communicates directional movement instantly
       className: `${edgeClass}${isDirectHovered ? " edge-hover-pulse" : ""}`,
       label: undefined,
-      zIndex: isDirectHovered ? 100 : (isHighlighted ? 50 : 1),
+      zIndex: isDirectHovered ? 5 : (isHighlighted ? 4 : 1),
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 22,
-        height: 22,
+        width: 20,
+        height: 20,
         color: markerColor
       },
       style: {
@@ -466,8 +467,13 @@ function CobaltGraphInner({
         fitViewOptions={{ padding: 0.14 }}
         minZoom={0.25}
         maxZoom={2.0}
-        onNodeMouseEnter={(_event, node) => setHoveredNodeId(node.id)}
-        onNodeMouseLeave={() => setHoveredNodeId(null)}
+        onPaneMouseEnter={() => setHoveredNodeId(null)}
+        onNodeMouseEnter={(_event, node) => {
+          setHoveredNodeId((curr) => (curr === node.id ? curr : node.id));
+        }}
+        onNodeMouseLeave={(_event, node) => {
+          setHoveredNodeId((curr) => (curr === node.id ? null : curr));
+        }}
         onNodeClick={(_event, node) => {
           const selectedNode = nodeById.get(node.id);
           if (selectedNode) onSelect({ kind: "node", value: selectedNode });

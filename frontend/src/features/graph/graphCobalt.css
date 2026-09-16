@@ -280,7 +280,8 @@
 
 .cobalt-node-wrapper,
 .cobalt-firewall-node {
-  transition: opacity 0.25s ease, transform 0.2s ease, filter 0.25s ease;
+  transition: opacity 0.18s ease, filter 0.18s ease;
+  pointer-events: auto;
 }
 
 .cobalt-node-wrapper.dimmed,
@@ -290,8 +291,8 @@
 }
 
 .cobalt-node-wrapper:hover .cobalt-monitor-housing {
-  transform: translateY(-2px);
-  box-shadow: 0 0 14px rgba(0, 212, 255, 0.45);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.65), inset 0 0 4px rgba(0, 212, 255, 0.3);
+  border-color: #38bdf8;
 }
 
 /* Halo & Aura Variations (Pure Crisp Vectors, No Blurry AI-Slop Glows) */
@@ -456,7 +457,12 @@
 /* ── Directed Edge Styling (Curved Bezier Paths & Directional Flow) ──────── */
 .cobalt-canvas-area .react-flow__edge-path {
   stroke-linecap: round;
-  transition: stroke-width 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+  transition: opacity 0.15s ease;
+}
+
+.cobalt-canvas-area .react-flow__edge marker,
+.cobalt-canvas-area marker {
+  pointer-events: none !important;
 }
 
 .cobalt-canvas-area .cobalt-edge-smb .react-flow__edge-path,
