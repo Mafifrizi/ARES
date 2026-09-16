@@ -583,6 +583,11 @@ function CobaltGraphInner({
         fitViewOptions={{ padding: 0.14 }}
         minZoom={0.25}
         maxZoom={2.0}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={true}
+        nodeClickDistance={8}
+        paneClickDistance={8}
         onPaneClick={() => {
           if (selection) onSelect(null);
         }}
@@ -601,7 +606,13 @@ function CobaltGraphInner({
         }}
         onNodeClick={(_event, node) => {
           const selectedNode = nodeById.get(node.id);
-          if (selectedNode) onSelect({ kind: "node", value: selectedNode });
+          if (selectedNode) {
+            if (selection?.kind === "node" && selection.value.id === node.id) {
+              onSelect(null);
+            } else {
+              onSelect({ kind: "node", value: selectedNode });
+            }
+          }
         }}
         onEdgeClick={(_event, edge) => {
           const selectedEdge = edgeById.get(edge.id);
