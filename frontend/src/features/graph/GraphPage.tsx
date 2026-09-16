@@ -76,65 +76,150 @@ function cobaltPivotLayout(
   };
 
   const shouldDim = highlightedNodeIds.size > 0;
-
-  // Build adjacency for dynamic positioning if nodes are not in FIXED_COORDINATES
-  const columnLevels = new Map<string, number>();
   const nodes = graph.nodes;
   const edges = graph.edges;
 
-  // Assign column levels via safe BFS with cycle detection
-  const inDegree = new Map<string, number>();
-  nodes.forEach((n) => inDegree.set(n.id, 0));
-  edges.forEach((e) => {
-    if (inDegree.has(e.target)) {
-      inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+  const isDemoTopology = nodes.length <= 9 && nodes.every((n) => Boolean(FIXED_COORDINATES[n.id]));
+  const dynamicCoords = new Map<string, { x: number; y: number }>();
+
+  if (!isDemoTopology) {
+    // 1. Build adjacency graph for safe BFS and stage derivation
+    const inDegree = new Map<string, number>();
+    const outgoingEdges = new Map<string, string[]>();
+    nodes.forEach((n) => {
+      inDegree.set(n.id, 0);
+      outgoingEdges.set(n.id, []);
+    });
+    edges.forEach((e) => {
+      if (inDegree.has(e.target)) {
+        inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+      }
+      outgoingEdges.get(e.source)?.push(e.target);
+    });
+
+    // 2. Identify roots: firewall / perimeter ingress or nodes with in-degree 0
+    const depthMap = new Map<string, number>();
+    const visited = new Set<string>();
+    const queue: string[] = [];
+
+    nodes.forEach((n) => {
+      const isFw = n.type === "firewall" || n.id.includes("firewall") || n.id.includes("ingress");
+      if (isFw || (inDegree.get(n.id) ?? 0) === 0) {
+        depthMap.set(n.id, 0);
+        visited.add(n.id);
+        queue.push(n.id);
+      }
+    });
+
+    if (queue.length === 0 && nodes.length > 0) {
+      depthMap.set(nodes[0].id, 0);
+      visited.add(nodes[0].id);
+      queue.push(nodes[0].id);
     }
-  });
 
-  const queue: string[] = [];
-  const visited = new Set<string>();
-
-  nodes.forEach((n) => {
-    if ((inDegree.get(n.id) ?? 0) === 0 || n.type === "firewall") {
-      columnLevels.set(n.id, 0);
-      visited.add(n.id);
-      queue.push(n.id);
-    }
-  });
-
-  if (queue.length === 0 && nodes.length > 0) {
-    columnLevels.set(nodes[0].id, 0);
-    visited.add(nodes[0].id);
-    queue.push(nodes[0].id);
-  }
-
-  // Guaranteed termination: Each node visited at most once, depth capped at 6 columns
-  while (queue.length > 0) {
-    const currId = queue.shift()!;
-    const currCol = columnLevels.get(currId) ?? 0;
-    const outgoing = edges.filter((e) => e.source === currId);
-    for (const edge of outgoing) {
-      const nextId = edge.target;
-      if (!visited.has(nextId)) {
-        visited.add(nextId);
-        columnLevels.set(nextId, Math.min(currCol + 1, 6));
-        queue.push(nextId);
+    // 3. BFS traversal to calculate horizontal progression depth
+    while (queue.length > 0) {
+      const currId = queue.shift()!;
+      const currDepth = depthMap.get(currId) ?? 0;
+      const targets = outgoingEdges.get(currId) ?? [];
+      for (const targetId of targets) {
+        if (!visited.has(targetId)) {
+          visited.add(targetId);
+          depthMap.set(targetId, currDepth + 1);
+          queue.push(targetId);
+        }
       }
     }
+
+    // 4. Assign semantic depths for any disconnected or isolated target nodes
+    nodes.forEach((n) => {
+      if (!depthMap.has(n.id)) {
+        const inf = inferCobaltNodeData(n);
+        const isDc = n.type === "dc" || n.label.toLowerCase().includes("dc") || inf.os === "windows-server";
+        const isElevated = inf.privilege === "system" || inf.privilege === "admin";
+        if (isDc) {
+          depthMap.set(n.id, 4); // Far right: Crown Jewels / Domain Controllers
+        } else if (isElevated) {
+          depthMap.set(n.id, 3); // Internal Servers & Footholds
+        } else if (inf.status === "active") {
+          depthMap.set(n.id, 2); // Lateral Workstations
+        } else {
+          depthMap.set(n.id, 1); // DMZ / Perimeter targets
+        }
+      }
+    });
+
+    // 5. Ensure Crown Jewels and Domain Controllers always sit on the far-right tier
+    const calculatedMaxDepth = Math.max(...Array.from(depthMap.values()), 1);
+    nodes.forEach((n) => {
+      const inf = inferCobaltNodeData(n);
+      const isDc = n.type === "dc" || n.label.toLowerCase().includes("dc") || inf.os === "windows-server";
+      if (isDc) {
+        depthMap.set(n.id, Math.max(depthMap.get(n.id) ?? 0, calculatedMaxDepth));
+      }
+    });
+
+    // 6. Group nodes by horizontal depth tiers
+    const stageBuckets = new Map<number, SafeGraphNode[]>();
+    nodes.forEach((n) => {
+      const d = depthMap.get(n.id) ?? 0;
+      if (!stageBuckets.has(d)) stageBuckets.set(d, []);
+      stageBuckets.get(d)!.push(n);
+    });
+
+    const sortedDepths = Array.from(stageBuckets.keys()).sort((a, b) => a - b);
+
+    // 7. Horizontal Layout Discipline (Menyamping):
+    // Vertical height is strictly capped at MAX_ROWS (3 rows) so nodes NEVER cascade downwards!
+    // Additional nodes in the same stage expand horizontally into sub-columns side-by-side.
+    const MAX_ROWS = 3;
+    const COL_PITCH = 240; // Horizontal spacing between adjacent node centers
+    const ROW_PITCH = 150; // Vertical pitch allowing room for monitor + stand + 2-line badge
+    const STAGE_GAP = 55;  // Visual breathing gap between major architectural stages
+    const START_X = 50;
+    const START_Y = 50;
+
+    let cursorX = START_X;
+
+    sortedDepths.forEach((d) => {
+      const stageNodes = stageBuckets.get(d)!;
+
+      // Sort within stage for visual hierarchy and consistent lateral alignment:
+      // Firewalls first, then SYSTEM/Admin elevations, then user beacons, then mapped targets
+      stageNodes.sort((a, b) => {
+        if (a.type === "firewall") return -1;
+        if (b.type === "firewall") return 1;
+        const aInf = inferCobaltNodeData(a);
+        const bInf = inferCobaltNodeData(b);
+        const prio = (priv?: string) => (priv === "system" ? 3 : priv === "admin" ? 2 : priv === "user" ? 1 : 0);
+        const diff = prio(bInf.privilege) - prio(aInf.privilege);
+        if (diff !== 0) return diff;
+        return a.label.localeCompare(b.label);
+      });
+
+      const count = stageNodes.length;
+      const numSubCols = Math.max(1, Math.ceil(count / MAX_ROWS));
+
+      for (let i = 0; i < count; i++) {
+        const node = stageNodes[i];
+        const subCol = Math.floor(i / MAX_ROWS);
+        const row = i % MAX_ROWS;
+
+        // Vertically center columns that have fewer than MAX_ROWS items
+        const itemsInThisSubCol = Math.min(MAX_ROWS, count - subCol * MAX_ROWS);
+        const verticalCenterOffset = ((MAX_ROWS - itemsInThisSubCol) * ROW_PITCH) / 2;
+
+        const x = cursorX + subCol * COL_PITCH;
+        const y = START_Y + row * ROW_PITCH + verticalCenterOffset;
+
+        dynamicCoords.set(node.id, { x, y });
+      }
+
+      cursorX += numSubCols * COL_PITCH + STAGE_GAP;
+    });
   }
 
-  // Any remaining nodes not reachable from root get assigned columns gracefully
-  nodes.forEach((n, idx) => {
-    if (!columnLevels.has(n.id)) {
-      columnLevels.set(n.id, (idx % 3) + 1);
-    }
-  });
-
-  // Count items per column to space vertically
-  const colRows = new Map<number, number>();
-  const isDemoTopology = nodes.length <= 9 && nodes.every((n) => Boolean(FIXED_COORDINATES[n.id]));
-
-  const canvasNodes: CanvasNode[] = nodes.map((node, index) => {
+  const canvasNodes: CanvasNode[] = nodes.map((node) => {
     const inferred = inferCobaltNodeData(node);
     let x: number;
     let y: number;
@@ -143,11 +228,9 @@ function cobaltPivotLayout(
       x = FIXED_COORDINATES[node.id].x;
       y = FIXED_COORDINATES[node.id].y;
     } else {
-      const col = columnLevels.get(node.id) ?? (index % 4);
-      const row = colRows.get(col) ?? 0;
-      colRows.set(col, row + 1);
-      x = 50 + col * 220;
-      y = 50 + row * 140;
+      const coord = dynamicCoords.get(node.id) ?? { x: 50, y: 150 };
+      x = coord.x;
+      y = coord.y;
     }
 
     const nodeType = inferred.os === "firewall" ? "pivotFirewall" : "pivotComputer";

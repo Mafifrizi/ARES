@@ -370,28 +370,28 @@
 
 /* Under-Monitor Monospace Telemetry */
 .cobalt-node-caption {
-  margin-top: 4px;
+  margin-top: 5px;
   text-align: center;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: Consolas, "Cascadia Code", "Courier New", monospace;
   font-size: 11px;
-  line-height: 1.25;
+  line-height: 1.35;
   color: #ffffff;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-shadow:
-    1px 1px 0 #000,
-    -1px -1px 0 #000,
-    1px -1px 0 #000,
-    -1px 1px 0 #000,
-    0 2px 4px #000;
+  min-width: 115px;
+  max-width: 185px;
+  background: rgba(12, 16, 22, 0.92);
+  border: 1px solid rgba(80, 88, 102, 0.5);
+  border-radius: 4px;
+  padding: 3px 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(4px);
+  user-select: none;
+  pointer-events: none;
 }
 
 .cobalt-node-privilege {
   display: block;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -399,23 +399,27 @@
 
 .cobalt-node-privilege.system {
   color: #ff3333;
+  text-shadow: 0 0 6px rgba(255, 51, 51, 0.45);
 }
 
 .cobalt-node-privilege.user {
-  color: #ffffff;
+  color: #00d4ff;
+  text-shadow: 0 0 6px rgba(0, 212, 255, 0.35);
 }
 
 .cobalt-node-privilege.neutral {
-  color: #ffffff;
+  color: #f59e0b;
+  text-shadow: 0 0 6px rgba(245, 158, 11, 0.35);
 }
 
 .cobalt-node-subtext {
   display: block;
-  font-size: 11px;
-  color: #ffffff;
+  font-size: 10.5px;
+  color: #e2e8f0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 
 /* ── Cobalt Firewall / Ingress Gateway Node ──────────────────────────────── */

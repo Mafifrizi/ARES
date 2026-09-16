@@ -171,19 +171,21 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
 
   let privilegeText =
     isElevated ? "SYSTEM *" :
-    privilege === "user" ? (nodeData.process || (nodeData.metadata?.user ? String(nodeData.metadata.user) : "BEACON")) :
+    privilege === "user" ? (nodeData.metadata?.user ? String(nodeData.metadata.user) : (nodeData.process || "BEACON")) :
     (nodeData.label || "TARGET");
 
-  if (privilegeText.length > 20) {
-    privilegeText = privilegeText.slice(0, 18) + "…";
+  if (privilegeText.length > 26) {
+    privilegeText = privilegeText.slice(0, 24) + "…";
   }
 
   let subText = nodeData.subLabel || nodeData.ip || nodeData.label || "10.0.0.1";
   if (subText.includes("\n")) {
     subText = subText.split("\n")[1] || subText.split("\n")[0];
   }
-  if (subText.length > 24) {
-    subText = subText.slice(0, 22) + "…";
+  // Clean noisy prefixes like 'Exploit-Target: ' so meaningful hostnames/IPs are visible
+  subText = subText.replace(/^(?:Exploit-Target|Target):\s*/i, "");
+  if (subText.length > 28) {
+    subText = subText.slice(0, 26) + "…";
   }
 
   return (

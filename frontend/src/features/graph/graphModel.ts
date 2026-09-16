@@ -275,14 +275,14 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     if (explicitSubLabel.includes("\n")) {
       explicitSubLabel = explicitSubLabel.split("\n")[1] || explicitSubLabel.split("\n")[0];
     }
-    if (explicitSubLabel.length > 24) {
-      explicitSubLabel = explicitSubLabel.slice(0, 22) + "…";
+    if (explicitSubLabel.length > 28) {
+      explicitSubLabel = explicitSubLabel.slice(0, 26) + "…";
     }
   }
 
   let finalSubLabel = explicitSubLabel !== undefined ? explicitSubLabel : (ip || (pid ? `PID: ${pid}` : undefined));
-  if (finalSubLabel && finalSubLabel.length > 24) {
-    finalSubLabel = finalSubLabel.slice(0, 22) + "…";
+  if (finalSubLabel && finalSubLabel.length > 28) {
+    finalSubLabel = finalSubLabel.slice(0, 26) + "…";
   }
 
   return {
