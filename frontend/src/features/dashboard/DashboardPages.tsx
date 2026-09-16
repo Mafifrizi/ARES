@@ -1354,37 +1354,7 @@ export function CampaignsPage() {
   });
   const restore = useMutation({ mutationFn: () => api.restoreVault(selected) });
   const run = useMutation({
-    mutationFn: () => {
-      const selectedCampaign = detail.data ?? campaignList.find((item) => item.id === selected);
-      const targetHost = selectedCampaign?.targets?.[0] || "10.0.0.1";
-      const planPayload = {
-        plan: {
-          stages: [
-            {
-              name: "Stage 1: Perimeter Recon & Fingerprint",
-              modules: ["recon.fingerprint", "network.service_detect"],
-              params: {
-                "recon.fingerprint": { target: targetHost },
-                "network.service_detect": { target: targetHost }
-              }
-            },
-            {
-              name: "Stage 2: Defense Feasibility & Coverage",
-              modules: ["opsec.coverage_predictor"],
-              params: {
-                "opsec.coverage_predictor": { target: targetHost }
-              }
-            }
-          ]
-        },
-        global_params: {
-          target: targetHost,
-          noise_profile: selectedCampaign?.noise_profile || "stealth"
-        },
-        dry_run: true
-      };
-      return api.runCampaign(selected, planPayload);
-    }
+    mutationFn: () => api.runCampaign(selected, { plan: { stages: [] }, global_params: {}, dry_run: true })
   });
 
   const handleDelete = async (targetId: string) => {
@@ -1465,22 +1435,12 @@ export function CampaignsPage() {
               <CampaignPicker id="scope-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
             </div>
             <CampaignScopeSummary campaign={detail.data ?? campaignList.find((item) => item.id === selected)} loading={detail.isFetching} />
-            <div className="mt-3 flex flex-wrap gap-2 items-center">
-              <button
-                className="btn"
-                disabled={!selected || restore.isPending}
-                onClick={() => restore.mutate()}
-                type="button"
-              >
-                {restore.isPending ? "Restoring Vault…" : "Restore Vault"}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
+                Restore Vault
               </button>
-              <button
-                className="btn"
-                disabled={!selected || run.isPending}
-                onClick={() => run.mutate()}
-                type="button"
-              >
-                {run.isPending ? "Simulating Dry Run…" : "Dry Run Plan"}
+              <button className="btn" disabled={!selected} onClick={() => run.mutate()}>
+                Dry Run Plan
               </button>
               <button
                 className="btn btn-danger"
@@ -1492,110 +1452,6 @@ export function CampaignsPage() {
               <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
             </div>
           </section>
-
-          {/* Vault Restore Real-Time Feedback */}
-          {restore.data && (
-            <div className="panel p-4 border-l-4 border-emerald-500 bg-zinc-900/90 text-xs">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="font-bold text-emerald-400 flex items-center gap-1.5 text-sm">
-                  ✓ Vault Synchronized & Restored
-                </span>
-                <button
-                  type="button"
-                  className="text-zinc-400 hover:text-white text-xs px-1"
-                  onClick={() => restore.reset()}
-                >
-                  ✕
-                </button>
-              </div>
-              <div className="text-zinc-200">
-                {String((restore.data as any).message || "Vault restored into the active campaign runtime state")}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-mono">
-                <span className="badge">Restored Credentials: {String((restore.data as any).restored ?? 0)}</span>
-                <span className="badge">Campaign: {String((restore.data as any).campaign_id ?? selected)}</span>
-                <span className="badge bg-emerald-950 text-emerald-300 border-emerald-800">
-                  In-Memory CredentialVault Active
-                </span>
-              </div>
-            </div>
-          )}
-          <DataPanel title="Vault Restore Error" data={restore.error} />
-
-          {/* Dry Run Plan Pre-Flight Report */}
-          {run.data && (
-            <div className="panel p-4 border-l-4 border-cyan-500 bg-zinc-900/90 text-xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="font-bold text-cyan-400 flex items-center gap-1.5 text-sm">
-                  <span>⚡ Campaign Execution Plan — Pre-Flight Dry Run Report</span>
-                </div>
-                <button
-                  type="button"
-                  className="text-zinc-400 hover:text-white text-xs px-1"
-                  onClick={() => run.reset()}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="flex flex-wrap gap-2 font-mono text-[11px]">
-                <span className={`badge ${(run.data as any).summary?.ready_to_run !== false ? "bg-emerald-950 text-emerald-300 border-emerald-800" : "bg-amber-950 text-amber-300 border-amber-800"}`}>
-                  Status: {(run.data as any).summary?.ready_to_run !== false ? "✓ READY TO RUN" : "⚠ VALIDATION WARNINGS"}
-                </span>
-                <span className="badge">
-                  Stages: {Array.isArray((run.data as any).plan) ? (run.data as any).plan.length : ((run.data as any).summary?.total_stages ?? 0)}
-                </span>
-                <span className="badge">
-                  Modules: {(run.data as any).summary?.total_modules ?? 0}
-                </span>
-                <span className="badge">
-                  Params Valid: {(run.data as any).param_validation?.ok !== false ? "100% OK" : "Has Errors"}
-                </span>
-                <span className="badge">
-                  Dependencies: {(run.data as any).dependency_check?.ok !== false ? "100% Satisfied" : "Missing Requires"}
-                </span>
-              </div>
-
-              {Array.isArray((run.data as any).plan) && (run.data as any).plan.length > 0 && (
-                <div className="space-y-2 mt-2">
-                  <div className="text-zinc-300 font-medium">Stage-by-Stage Plan Simulation:</div>
-                  <div className="grid gap-2">
-                    {(run.data as any).plan.map((stg: any, sIdx: number) => (
-                      <div key={sIdx} className="bg-zinc-950 border border-zinc-800 p-2.5 rounded">
-                        <div className="flex items-center justify-between mb-1.5 font-semibold text-zinc-200">
-                          <span>{stg.stage || `Stage ${sIdx + 1}`}</span>
-                          <span className="text-[10px] text-zinc-400 font-mono">
-                            Est. Duration: {stg.estimated_duration || "Fast"}
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {Array.isArray(stg.modules) && stg.modules.map((m: any, mIdx: number) => (
-                            <div key={mIdx} className="flex items-center justify-between text-[11px] font-mono bg-zinc-900/60 px-2 py-1 rounded">
-                              <span className="text-cyan-300 font-bold">{m.module_id}</span>
-                              <span className="text-emerald-400">
-                                {m.would_execute !== false ? "✓ Would Execute (Simulated)" : "Skipped"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {Array.isArray((run.data as any).param_validation?.errors) && (run.data as any).param_validation.errors.length > 0 && (
-                <div className="p-2 bg-red-950/60 border border-red-800 text-red-300 text-[11px] font-mono">
-                  <div className="font-bold mb-1">Parameter Validation Issues:</div>
-                  {(run.data as any).param_validation.errors.map((err: any, idx: number) => (
-                    <div key={idx}>• [{err.module_id}] {err.field}: {err.error}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <DataPanel title="Dry Run Plan Error" data={run.error} />
-
           <DataPanel title="Delete Error" data={deleteError} />
           <DataPanel title="Campaign Detail Error" data={detail.error} />
           <DataPanel title="CVSS Error" data={cvss.error} />
