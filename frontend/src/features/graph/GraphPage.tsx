@@ -51,6 +51,78 @@ const nodeTypes: NodeTypes = {
   ares: PivotComputerNode
 };
 
+export interface TrackedPathway {
+  activeNodeId: string;
+  isLocked: boolean;
+  nodeIds: Set<string>;
+  edgeIds: Set<string>;
+  hopCount: number;
+}
+
+/**
+ * Computes the full attack chain lineage (upstream ancestors + downstream lateral pivots)
+ * for a target focus node.
+ */
+function computeRelevantPathway(
+  targetNodeId: string,
+  edges: SafeGraphEdge[],
+  isLocked: boolean
+): TrackedPathway {
+  const nodeIds = new Set<string>([targetNodeId]);
+  const edgeIds = new Set<string>();
+
+  const incomingMap = new Map<string, SafeGraphEdge[]>();
+  const outgoingMap = new Map<string, SafeGraphEdge[]>();
+
+  edges.forEach((edge) => {
+    if (!incomingMap.has(edge.target)) incomingMap.set(edge.target, []);
+    incomingMap.get(edge.target)!.push(edge);
+
+    if (!outgoingMap.has(edge.source)) outgoingMap.set(edge.source, []);
+    outgoingMap.get(edge.source)!.push(edge);
+  });
+
+  // Upstream Ancestry Traversal: trace backward along incoming edges all the way to roots (Firewall/Ingress)
+  const upQueue = [targetNodeId];
+  const upVisited = new Set<string>([targetNodeId]);
+  while (upQueue.length > 0) {
+    const curr = upQueue.shift()!;
+    const inEdges = incomingMap.get(curr) || [];
+    for (const edge of inEdges) {
+      edgeIds.add(edge.id);
+      nodeIds.add(edge.source);
+      if (!upVisited.has(edge.source)) {
+        upVisited.add(edge.source);
+        upQueue.push(edge.source);
+      }
+    }
+  }
+
+  // Downstream Branch Traversal: trace forward along outgoing edges to all lateral pivot targets
+  const downQueue = [targetNodeId];
+  const downVisited = new Set<string>([targetNodeId]);
+  while (downQueue.length > 0) {
+    const curr = downQueue.shift()!;
+    const outEdges = outgoingMap.get(curr) || [];
+    for (const edge of outEdges) {
+      edgeIds.add(edge.id);
+      nodeIds.add(edge.target);
+      if (!downVisited.has(edge.target)) {
+        downVisited.add(edge.target);
+        downQueue.push(edge.target);
+      }
+    }
+  }
+
+  return {
+    activeNodeId: targetNodeId,
+    isLocked,
+    nodeIds,
+    edgeIds,
+    hopCount: edgeIds.size
+  };
+}
+
 /**
  * Cobalt Strike Hierarchical Pivot Graph Layout Generator
  * Positions Firewall/Ingress on the left, Pivot Workstations in the center,
@@ -61,7 +133,7 @@ function cobaltPivotLayout(
   highlightedNodeIds: Set<string>,
   highlightedEdgeIds: Set<string>,
   selectedNodeId?: string | null,
-  hoverActive?: { connectedNodeIds: Set<string>; connectedEdgeIds: Set<string> } | null
+  trackedPathway?: TrackedPathway | null
 ) {
   // Pre-configured coordinate map for canonical Cobalt Strike Pivot nodes matching reference screenshot
   const FIXED_COORDINATES: Record<string, { x: number; y: number }> = {
@@ -220,7 +292,7 @@ function cobaltPivotLayout(
     });
   }
 
-  const hasHover = Boolean(hoverActive && hoverActive.connectedNodeIds.size > 0);
+  const hasTrackedPathway = Boolean(trackedPathway && trackedPathway.nodeIds.size > 0);
 
   const canvasNodes: CanvasNode[] = nodes.map((node) => {
     const inferred = inferCobaltNodeData(node);
@@ -238,15 +310,15 @@ function cobaltPivotLayout(
 
     const nodeType = inferred.os === "firewall" ? "pivotFirewall" : "pivotComputer";
     const isNodeSelected = selectedNodeId ? node.id === selectedNodeId : false;
-    const isNodeHoverConnected = hoverActive ? hoverActive.connectedNodeIds.has(node.id) : true;
-    const isDimmed = (shouldDim && !highlightedNodeIds.has(node.id)) || (hasHover && !isNodeHoverConnected);
+    const isNodeInPathway = trackedPathway ? trackedPathway.nodeIds.has(node.id) : true;
+    const isDimmed = (shouldDim && !highlightedNodeIds.has(node.id)) || (hasTrackedPathway && !isNodeInPathway);
 
     return {
       id: node.id,
       type: nodeType,
       position: { x, y },
       selected: isNodeSelected,
-      zIndex: isNodeSelected ? 30 : (hoverActive && isNodeHoverConnected ? 25 : 10),
+      zIndex: isNodeSelected ? 35 : (hasTrackedPathway && isNodeInPathway ? 25 : 10),
       data: {
         label: node.label,
         subLabel: inferred.subLabel,
@@ -256,7 +328,8 @@ function cobaltPivotLayout(
         process: inferred.process,
         pid: inferred.pid,
         ip: inferred.ip,
-        dimmed: isDimmed
+        dimmed: isDimmed,
+        isTracked: hasTrackedPathway && isNodeInPathway
       }
     };
   });
@@ -266,7 +339,7 @@ function cobaltPivotLayout(
   const canvasEdges: CanvasEdge[] = edges.map((edge) => {
     const isHighlighted = highlightedEdgeIds.has(edge.id);
     const hasAnyHighlight = highlightedEdgeIds.size > 0;
-    const isDirectHovered = hoverActive ? hoverActive.connectedEdgeIds.has(edge.id) : false;
+    const isTrackedEdge = trackedPathway ? trackedPathway.edgeIds.has(edge.id) : false;
     const sourceNode = nodeMap.get(edge.source);
     const targetNode = nodeMap.get(edge.target);
 
@@ -315,13 +388,15 @@ function cobaltPivotLayout(
     }
 
     // Interactive focus state:
-    // When hovering a node: connected edges pop with 4.0px thickness & neon glow, unrelated edges dim to 0.08
-    const strokeWidth = isDirectHovered ? 4.0 : isHighlighted ? 3.2 : 2.2;
-    const opacity = hasHover
-      ? (isDirectHovered ? 1.0 : 0.08)
+    // When pathway tracking is active (locked via click or previewed via hover):
+    // Edges in the pathway pop with 4.0px thickness, flowing pulse stream, and glowing drop-shadow.
+    // Unrelated edges dim to 0.08 opacity.
+    const strokeWidth = isTrackedEdge ? 4.0 : isHighlighted ? 3.0 : 2.0;
+    const opacity = hasTrackedPathway
+      ? (isTrackedEdge ? 1.0 : 0.08)
       : (hasAnyHighlight && !isHighlighted ? 0.2 : 0.90);
 
-    const markerColor = isDirectHovered ? (isTargetDc ? "#ff3333" : edgeColor) : edgeColor;
+    const markerColor = isTrackedEdge ? (isTargetDc ? "#ff3333" : edgeColor) : edgeColor;
 
     return {
       id: edge.id,
@@ -331,20 +406,20 @@ function cobaltPivotLayout(
       targetHandle,
       type: "default", // Smooth curved Bezier eliminating overlapping 90-degree rail tracks
       animated: true,  // Flowing dash stream communicates directional movement instantly
-      className: `${edgeClass}${isDirectHovered ? " edge-hover-pulse" : ""}`,
+      className: `${edgeClass}${isTrackedEdge ? " edge-hover-pulse" : ""}`,
       label: undefined,
-      zIndex: isDirectHovered ? 5 : (isHighlighted ? 4 : 1),
+      zIndex: isTrackedEdge ? 6 : (isHighlighted ? 4 : 1),
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: 20,
-        height: 20,
+        width: isTrackedEdge ? 22 : 18,
+        height: isTrackedEdge ? 22 : 18,
         color: markerColor
       },
       style: {
         stroke: edgeColor,
         strokeWidth,
         opacity,
-        filter: isDirectHovered ? `drop-shadow(0 0 8px ${edgeColor})` : undefined
+        filter: isTrackedEdge ? `drop-shadow(0 0 10px ${edgeColor})` : undefined
       }
     };
   });
@@ -425,22 +500,14 @@ function CobaltGraphInner({
     }
   }, [bindControls, zoomIn, zoomOut, fitView]);
 
-  // Hover pathway isolation: immediate parents and children of hovered node
-  const hoverActive = useMemo(() => {
-    if (!hoveredNodeId) return null;
-    const connectedNodeIds = new Set<string>([hoveredNodeId]);
-    const connectedEdgeIds = new Set<string>();
+  // Priority: Clicked Selected Node > Hovered Node (preview when nothing is selected)
+  const isLocked = selection?.kind === "node";
+  const activeFocusNodeId = isLocked ? selection.value.id : hoveredNodeId;
 
-    graph.edges.forEach((edge) => {
-      if (edge.source === hoveredNodeId || edge.target === hoveredNodeId) {
-        connectedEdgeIds.add(edge.id);
-        connectedNodeIds.add(edge.source);
-        connectedNodeIds.add(edge.target);
-      }
-    });
-
-    return { connectedNodeIds, connectedEdgeIds };
-  }, [graph.edges, hoveredNodeId]);
+  const trackedPathway = useMemo(() => {
+    if (!activeFocusNodeId) return null;
+    return computeRelevantPathway(activeFocusNodeId, graph.edges, isLocked);
+  }, [activeFocusNodeId, graph.edges, isLocked]);
 
   const canvas = useMemo(
     () =>
@@ -449,16 +516,65 @@ function CobaltGraphInner({
         highlightedNodeIds,
         highlightedEdgeIds,
         selection?.kind === "node" ? selection.value.id : null,
-        hoverActive
+        trackedPathway
       ),
-    [graph, highlightedEdgeIds, highlightedNodeIds, selection, hoverActive]
+    [graph, highlightedEdgeIds, highlightedNodeIds, selection, trackedPathway]
   );
 
   const nodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const edgeById = useMemo(() => new Map(graph.edges.map((edge) => [edge.id, edge])), [graph.edges]);
 
+  // Keyboard shortcut: ESC to clear selection and unlock pathway
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && selection) {
+        onSelect(null);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selection, onSelect]);
+
+  const activeNodeData = selection?.kind === "node" ? selection.value : null;
+
   return (
     <div className="cobalt-canvas-area" aria-label="Cobalt Strike Pivot Graph">
+      {/* Tactical Locked Pathway Tracking HUD Banner */}
+      {isLocked && trackedPathway && (
+        <div className="cobalt-track-hud" role="status" aria-live="polite">
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-amber-300 font-bold uppercase tracking-wider">
+              PATHWAY LOCKED:
+            </span>
+            <span className="text-white font-semibold">
+              {activeNodeData?.label || activeFocusNodeId}
+            </span>
+            <span className="text-zinc-600">|</span>
+            <span className="text-emerald-400 font-mono font-medium">
+              {trackedPathway.nodeIds.size} NODES
+            </span>
+            <span className="text-zinc-600">|</span>
+            <span className="text-cyan-400 font-mono font-medium">
+              {trackedPathway.hopCount} HOPS
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-zinc-400 font-mono hidden sm:inline">
+              [Zoom/Pan freely · Click canvas or ESC to unlock]
+            </span>
+            <button
+              type="button"
+              className="cobalt-hud-unlock-btn"
+              onClick={() => onSelect(null)}
+              title="Unlock and return to full topology"
+            >
+              CLEAR TRACK [ESC]
+            </button>
+          </div>
+        </div>
+      )}
+
       <ReactFlow
         nodes={canvas.nodes}
         edges={canvas.edges}
@@ -467,12 +583,21 @@ function CobaltGraphInner({
         fitViewOptions={{ padding: 0.14 }}
         minZoom={0.25}
         maxZoom={2.0}
-        onPaneMouseEnter={() => setHoveredNodeId(null)}
+        onPaneClick={() => {
+          if (selection) onSelect(null);
+        }}
+        onPaneMouseEnter={() => {
+          if (!isLocked) setHoveredNodeId(null);
+        }}
         onNodeMouseEnter={(_event, node) => {
-          setHoveredNodeId((curr) => (curr === node.id ? curr : node.id));
+          if (!isLocked) {
+            setHoveredNodeId((curr) => (curr === node.id ? curr : node.id));
+          }
         }}
         onNodeMouseLeave={(_event, node) => {
-          setHoveredNodeId((curr) => (curr === node.id ? null : curr));
+          if (!isLocked) {
+            setHoveredNodeId((curr) => (curr === node.id ? null : curr));
+          }
         }}
         onNodeClick={(_event, node) => {
           const selectedNode = nodeById.get(node.id);

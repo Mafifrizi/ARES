@@ -11,6 +11,7 @@ export interface PivotNodeData extends Record<string, unknown> {
   pid?: number | string;
   process?: string;
   dimmed?: boolean;
+  isTracked?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -95,7 +96,7 @@ function LinuxTuxEmblem() {
 export const PivotFirewallNode = memo(function PivotFirewallNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PivotNodeData;
   return (
-    <div className={`cobalt-firewall-node${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}`}>
+    <div className={`cobalt-firewall-node${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}${nodeData.isTracked ? " in-pathway" : ""}`}>
       <Handle type="target" position={Position.Left} id="left-target" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="source" position={Position.Left} id="left-source" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="target" position={Position.Top} id="top-target" className="opacity-0 pointer-events-none" isConnectable={false} />
@@ -189,7 +190,7 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
   }
 
   return (
-    <div className={`cobalt-node-wrapper ${auraClass}${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}`}>
+    <div className={`cobalt-node-wrapper ${auraClass}${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}${nodeData.isTracked ? " in-pathway" : ""}`}>
       {/* Handles on all 4 directions for clean directional pivot routing */}
       <Handle type="target" position={Position.Left} id="left-target" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="source" position={Position.Left} id="left-source" className="opacity-0 pointer-events-none" isConnectable={false} />

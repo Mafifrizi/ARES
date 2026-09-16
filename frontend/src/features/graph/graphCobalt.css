@@ -312,6 +312,16 @@
   border-color: #ff9900;
 }
 
+/* In-Pathway Attack Chain Highlight */
+.cobalt-node-wrapper.in-pathway:not(.selected) .cobalt-monitor-housing {
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.45);
+  border-color: rgba(245, 158, 11, 0.75);
+}
+
+.cobalt-firewall-node.in-pathway .cobalt-firewall-brick {
+  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.5));
+}
+
 /* Selected State: Authentic Cobalt Strike Green Dashed Border */
 .cobalt-node-wrapper.selected .cobalt-monitor-housing {
   outline: 2px dashed #00ff00 !important;
@@ -509,6 +519,57 @@
 /* Hover Focus Pulse: Speeds up flow & intensifies path contrast */
 .cobalt-canvas-area .react-flow__edge.edge-hover-pulse .react-flow__edge-path {
   animation: cobaltFlowStream 0.6s linear infinite;
+}
+
+/* ── Tactical Pathway Tracking HUD Banner ────────────────────────────────── */
+.cobalt-track-hud {
+  position: absolute;
+  top: 14px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(10, 12, 16, 0.94);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85), 0 0 14px rgba(245, 158, 11, 0.25);
+  border-radius: 4px;
+  padding: 6px 14px;
+  z-index: 50;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  animation: cobaltHudFadeIn 0.2s ease-out;
+}
+
+@keyframes cobaltHudFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cobalt-hud-unlock-btn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cobalt-hud-unlock-btn:hover {
+  background: rgba(245, 158, 11, 0.25);
+  color: #ffffff;
+  border-color: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
 }
 
 /* ── Bottom Half: Classic Java Swing / Cobalt Strike Tabbed Terminal Dock ── */
