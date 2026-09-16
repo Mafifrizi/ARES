@@ -296,7 +296,6 @@ class PortScanModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
-        from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
@@ -440,7 +439,6 @@ class PortScanModule(BaseModule):
         service_map: dict[int, str] = {
             p: _PORT_NAMES.get(p, f"unknown-{p}") for p in open_ports
         }
-        findings: list[Finding] = []
 
         # Finding for each high-value port
         for port in open_ports:

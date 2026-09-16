@@ -117,12 +117,12 @@ def _campaign_from_db_row(row: Any) -> Campaign:
     if isinstance(row, Campaign):
         return row
     if not isinstance(row, dict):
-        if hasattr(row, "items"):
-            pass
+        if hasattr(row, "model_dump"):
+            row = row.model_dump()
+        elif hasattr(row, "items"):
+            row = dict(row.items())
         elif hasattr(row, "__dict__"):
             row = row.__dict__
-        elif hasattr(row, "model_dump"):
-            row = row.model_dump()
         else:
             return Campaign.model_validate(row)
     data = {k: v for k, v in row.items() if k in Campaign.model_fields}
@@ -164,12 +164,12 @@ def _finding_from_db_row(row: Any, *, report_confirmed: bool = False) -> Finding
     if isinstance(row, Finding):
         return row
     if not isinstance(row, dict):
-        if hasattr(row, "items"):
-            pass
+        if hasattr(row, "model_dump"):
+            row = row.model_dump()
+        elif hasattr(row, "items"):
+            row = dict(row.items())
         elif hasattr(row, "__dict__"):
             row = row.__dict__
-        elif hasattr(row, "model_dump"):
-            row = row.model_dump()
         else:
             return Finding.model_validate(row)
     import json as _json

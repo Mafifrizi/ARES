@@ -81,3 +81,43 @@ class TestGhostForgeModule:
         assert len(res.findings) >= 1
         assert res.findings[0].mitre_technique == "T1649"
         assert res.raw.get("pkinit_success") is True
+
+    @pytest.mark.asyncio
+    async def test_engine_persists_loot_from_module_output(self, tmp_path):
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.engine import AresEngine
+        from ares.db.database import AresDatabase
+        db_path = str(tmp_path / "loot_test.db")
+        db = AresDatabase(db_path)
+        await db.connect()
+        campaign = Campaign(name="Loot Test", client="Client", scope=[ScopeEntry(cidr="10.10.10.0/24")], operator="operator")
+        await db.save_campaign(campaign)
+
+        from ares.core.execution_admission import _mint_test_dispatch_context, mark_terminal_committed
+
+        engine = AresEngine(db=db)
+        mod, _ = _make_module(GhostForgeModule)
+        engine.registry.register(mod)
+
+        dispatch_ctx = _mint_test_dispatch_context(engine, campaign.id, "ad.ghost_forge")
+        result = await engine.run_module(
+            "ad.ghost_forge",
+            campaign,
+            {
+                "dc": "10.10.10.1",
+                "domain": "CORP.LOCAL",
+                "ca_server": "ca.corp.local",
+                "ca_name": "CORP-CA",
+                "username": "audit_operator",
+                "password": "SecretPassword123!",
+            },
+            dispatch_context=dispatch_ctx,
+        )
+        assert str(result.status) in ("success", "done", "ModuleStatus.DONE")
+        mark_terminal_committed(dispatch_ctx)
+        await engine._finalize_committed_module_result(campaign, "ad.ghost_forge", result, dispatch_ctx)
+        loots = await db.get_loot(campaign.id)
+        assert len(loots) >= 1
+        assert any("TGT" in l["name"] for l in loots)
+        await db.close()
+
