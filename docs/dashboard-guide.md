@@ -73,9 +73,7 @@ keys, bearer tokens, or sensitive report URLs.
 | Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
 | Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
-| Graph | `docs/assets/screenshots/dashboard-graph.png` | Cobalt Strike Hierarchical Pivot Graph with organic Bezier curves, animated telemetry particles, persistent pathway tracking, and Beacon session dock. |
-| Beacon Terminal | `docs/assets/screenshots/dashboard-beacon-terminal.png` | Authentic Cobalt Strike dual-row tabbed Beacon console dock with real-time command execution and status bar. |
-| Graph Inspector | `docs/assets/screenshots/dashboard-graph-inspector.png` | Interactive Safe Detail slide-out drawer with asset telemetry, open ports, and compromise status. |
+| Graph & Beacon Console | `docs/assets/screenshots/dashboard-graph.png` | Cobalt Strike Hierarchical Pivot Graph & docked dual-row Beacon session terminal with real-time command execution and privilege status. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
 
 ## Dashboard Shell
@@ -335,13 +333,9 @@ the clean empty state: `No reports generated for this campaign yet.`
 
 Purpose: understand lateral pivot relationships, trace multi-hop compromise routes, and interact with compromised hosts directly from a docked Beacon terminal console.
 
-![Cobalt Strike Hierarchical Pivot Graph](assets/screenshots/dashboard-graph.png)
+![Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal](assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph — Organic curved Bezier cables with forward-flowing animated telemetry particles, persistent click-to-lock pathway tracking, and docked multi-tabbed Beacon session terminal.*
-
-![Cobalt Strike Beacon Session Terminal Console](assets/screenshots/dashboard-beacon-terminal.png)
-
-*Cobalt Strike Beacon Terminal Console Dock — Authentic Java Swing dual-row tabs, real-time command dispatch (`whoami`, `hashdump`, `ps`, `ppid`), privilege telemetry status bar, and target host synchronization.*
+*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal Console — Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege styling, and interactive command execution.*
 
 #### Graph Topology & Navigation
 

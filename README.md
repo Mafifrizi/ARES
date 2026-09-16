@@ -197,24 +197,19 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph with organic curved Bezier routes, animated forward-flowing telemetry particles, persistent click-to-lock pathway tracking, and docked multi-tabbed Beacon session terminal.*
-
-<br>
-
-![ARES Cobalt Strike Beacon Session Terminal Console](docs/assets/screenshots/dashboard-beacon-terminal.png)
-
-*Docked Beacon Terminal Console — Authentic Java Swing dual-row tabs, real-time command dispatch (`whoami`, `hashdump`, `ps`, `ppid`), privilege telemetry status bar, and target host synchronization.*
+*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Terminal Console — Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege borders (SYSTEM * / ADMIN / BEACON), and real-time interactive command terminal.*
 
 </div>
 
 - **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
 - **Key Capabilities**:
-  - **Hierarchical Pivot Graph Visualization**: Positions network perimeters (Firewalls/Ingress) on the left, compromised pivot workstations in the center, and Domain Controllers/Crown Jewels on the right.
-  - **Organic Cubic Bezier Routing**: Eliminates overlapping 90-degree lines with smooth curvature, 22px vector directional arrowheads, and real-time animated glowing particles flowing downstream.
-  - **Persistent Click-to-Lock Pathway Tracking**: Click any node to freeze upstream ancestry and downstream lateral routes with glowing highlights and a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan around the topology without losing context.
-  - **Integrated Multi-Row Beacon Terminal Dock**:
-    - **Dual-Row Metal Tabs**: Automatically synchronizes and focuses the active session tab when clicking hosts on the canvas.
-    - **Authentic Cobalt Strike Status Bar**: Displays target privilege context (`[HOST] SYSTEM *`) and real-time heartbeat latency (`last: 2s`).
+  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`K8S-INGRESS-01`), initial foothold workstations (`WS-FIN-042`, `AWS-IMDS-GW`), internal database and file servers (`SQL01`, `FS01`), and high-value Active Directory Domain Controllers (`DC01`).
+  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers — Crimson `SYSTEM *` for Tier-0 Domain Controllers, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
+  - **Organic Cubic Bezier Routing & Telemetry Stream**: Fluid vector curves with directional arrowheads and animated glowing particle pulses visualizing live command-and-control and pivot traffic.
+  - **Persistent Click-to-Lock Pathway Tracking**: Click any node to instantly freeze its upstream compromise lineage and downstream lateral reachability, complete with a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan across complex topologies without losing situational focus.
+  - **Docked Multi-Row Beacon Terminal Console (`CobaltSessionDock`)**:
+    - **Dual-Row Java Swing Session Tabs**: Automatic focus and session switching when clicking nodes on the canvas.
+    - **Cobalt Strike Status Bar**: Real-time privilege context (`[HOST] operator` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
     - **Interactive Command Prompt (`beacon>`)**:
       - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *`).
       - `hashdump` / `creds`: Harvests and displays cached NTLM SAM/LSA hashes.
@@ -225,7 +220,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
       - `clear`: Clears current session terminal scrollback buffer.
       - `help`: Quick reference of supported beacon tasking commands.
   - **Operational Modes**:
-    - `Mode: LIVE CAMPAIGN`: Renders live scoped engagement targets and findings discovered during reconnaissance. Use the `[Active Pivots Only]` filter to focus exclusively on active compromise routes.
+    - `Mode: LIVE CAMPAIGN`: Renders live scoped engagement targets and findings discovered during reconnaissance. Use the `[Active Pivots Only]` filter to focus exclusively on confirmed lateral compromise routes.
     - `Mode: DEMO SAMPLE`: Instant reference 9-node interconnected lateral pivot topology demonstrating enterprise multi-hop infiltration chains.
 
 ---
@@ -273,27 +268,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 8. 🔍 Attack Graph Entity Deep-Dive & Node Inspector
-
-*In-depth Active Directory entity telemetry, relationship inspection, and real-time safe detail auditing directly inside the canvas.*
-
-<div align="center">
-
-![ARES Attack Graph Entity Deep-Dive & Node Inspector](docs/assets/screenshots/dashboard-graph-inspector.png)
-
-*Interactive Safe Detail Drawer displaying Domain Controller (DC01 10.10.10.2) telemetry, active compromise levels, open attack surface ports (53, 88, 135, 139, 389, 445, 636, 3268, 3389), and asset ownership states.*
-
-</div>
-
-- **The Problem Solved**: Eliminates context-switching between graph visualizers and CLI reconnaissance tools by providing live node telemetry in an interactive sidebar.
-- **Key Capabilities**:
-  - **Entity Attribute Inspection**: Instantly examine IP address, hostname, OS telemetry, compromise levels, and domain controller flags (`is_dc`) upon selecting any graph node.
-  - **Attack Surface Port Mapping**: Real-time visibility into open infrastructure ports (DNS `53`, Kerberos `88`, RPC `135`, NetBIOS `139`, LDAP `389`, SMB `445`, LDAPS `636`, Global Catalog `3268`, RDP `3389`).
-  - **Safe Detail Auditing**: Audited slide-out drawer providing granular telemetry without cluttering the main DAG canvas, complete with quick dismissal.
-
----
-
-### 9. 🔗 Multi-Stage Adversary Execution Chains
+### 8. 🔗 Multi-Stage Adversary Execution Chains
 
 *Deterministic, multi-step kill chains orchestrating reconnaissance, credential harvesting, and lateral movement in sequence.*
 
@@ -313,7 +288,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 10. 🛡️ EDR / OPSEC Evasion & Bypass Knowledge Base
+### 9. 🛡️ EDR / OPSEC Evasion & Bypass Knowledge Base
 
 *Empirical tracking of evasion efficacy across enterprise endpoint detection and response (EDR) platforms.*
 
@@ -333,7 +308,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 11. 🔐 Zero-Trust Security Governance & Audit Trail
+### 10. 🔐 Zero-Trust Security Governance & Audit Trail
 
 *Audited multi-role access control, cryptographic API key lifecycle, and continuous platform integrity verification.*
 
@@ -353,7 +328,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 12. 📡 Live Operations & Real-Time Event Stream
+### 11. 📡 Live Operations & Real-Time Event Stream
 
 *High-frequency WebSocket event bus streaming operational telemetry, module output, and pipeline status.*
 
@@ -373,7 +348,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 13. 📋 Enterprise Playbooks & Campaign Templates
+### 12. 📋 Enterprise Playbooks & Campaign Templates
 
 *Standardized engagement architectures for recurring red team exercises, compliance audits, and purple team drills.*
 
@@ -393,7 +368,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 14. 🔌 Interactive OpenAPI 3.1 & Developer Integration
+### 13. 🔌 Interactive OpenAPI 3.1 & Developer Integration
 
 *Fully documented, interactive REST API surface for custom tooling, SOC orchestration, and CI/CD pipeline integration.*
 
@@ -421,7 +396,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 | **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
 | **Modules** | 60+ module catalog, parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
 | **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
-| **Graph** | DAG entity exploration, shortest attack paths, BloodHound ingest. | `Entities`, `Attack Paths`, `Ingest` | Operator, Recon |
+| **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
 | **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
 | **Strategy** | Goal-directed autonomous engine, AI planner integration. | `Objective`, `Active`, `Result` | Team Lead, Operator |
 | **Security** | Operator credentials, API key lifecycle, dependency audit checks. | `Account`, `API Keys`, `Audit` | Team Lead |
