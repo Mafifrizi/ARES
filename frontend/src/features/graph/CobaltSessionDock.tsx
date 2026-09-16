@@ -195,7 +195,7 @@ export function CobaltSessionDock({
 
   // Scroll to bottom when logs update
   useEffect(() => {
-    terminalBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    terminalBottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [sessions, activeSessionId]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? sessions[0];

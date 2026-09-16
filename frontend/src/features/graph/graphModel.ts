@@ -307,6 +307,7 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
   if (meta.privilege === "system" || meta.privilege === "admin" || meta.privilege === "user" || meta.privilege === "uncompromised") {
     privilege = meta.privilege;
   } else if (
+    os === "firewall" ||
     isDc ||
     cLevel === "system" ||
     cLevel === "domain_admin" ||
@@ -314,7 +315,7 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     labelLower.includes("root") ||
     node.severity === "critical"
   ) {
-    // Tier-0 Domain Controller or root/system compromise -> Crimson SYSTEM *
+    // Firewall / Tier-0 Domain Controller or root/system compromise -> Crimson SYSTEM *
     privilege = "system";
   } else if (
     isServer ||
