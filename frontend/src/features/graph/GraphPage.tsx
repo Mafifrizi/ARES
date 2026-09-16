@@ -15,8 +15,21 @@ import {
 import "@xyflow/react/dist/style.css";
 import "./graphCobalt.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Shield } from "lucide-react";
+import {
+  Shield,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  HelpCircle,
+  Info,
+  ExternalLink,
+  Sliders,
+  Moon,
+  Link as LinkIcon,
+  Check
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import type { AttackPath, Campaign, SafeGraphValue } from "../../api/types";
 import {
@@ -665,13 +678,57 @@ export default function GraphPage({
     enabled: Boolean(campaignId)
   });
 
+  const navigate = useNavigate();
   const [showAttackPathsDialog, setShowAttackPathsDialog] = useState(false);
   const [showIngestDialog, setShowIngestDialog] = useState(false);
+  const [showReportingDialog, setShowReportingDialog] = useState(false);
+  const [showHelpDialog, setShowHelpDialog] = useState(false);
+  const [showAboutDialog, setShowAboutDialog] = useState(false);
+  const [showSessionPrefsDialog, setShowSessionPrefsDialog] = useState(false);
+  const [showSleepDialog, setShowSleepDialog] = useState(false);
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [reportingNotice, setReportingNotice] = useState("");
+  const [helpTab, setHelpTab] = useState<"shortcuts" | "legend" | "commands">("shortcuts");
+  const [sleepSeconds, setSleepSeconds] = useState("5");
+  const [sleepJitter, setSleepJitter] = useState("20");
+  const [sleepNotice, setSleepNotice] = useState("");
+
   const [filters, setFilters] = useState<GraphFilters>({ nodeTypes: [], severity: "all", activePathOnly: false });
   const [selection, setSelection] = useState<GraphSelection>(null);
   const [selectedPathIndex, setSelectedPathIndex] = useState<number | null>(null);
   const [jsonPath, setJsonPath] = useState("");
   const [ingestNotice, setIngestNotice] = useState("");
+
+  function exportTopologyJson(): void {
+    const dataStr = JSON.stringify(filteredGraph, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ares-topology-${campaignId || "campaign"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setReportingNotice("Topology JSON file downloaded successfully.");
+  }
+
+  function exportHostsCsv(): void {
+    const headers = "ID,Hostname,Type,IP,OS,Privilege,Status\n";
+    const rows = filteredGraph.nodes
+      .map((node) => {
+        const inf = inferCobaltNodeData(node);
+        const isCompromised = inf.status === "active" || inf.privilege !== "uncompromised" || Boolean(node.metadata?.owned);
+        return `"${node.id}","${node.label}","${node.type}","${inf.ip || ""}","${inf.os}","${inf.privilege}","${isCompromised ? "Compromised" : "Target"}"`;
+      })
+      .join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ares-hosts-${campaignId || "campaign"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setReportingNotice("Host inventory CSV downloaded successfully.");
+  }
 
   // Ingest Mutation
   const ingest = useMutation({
@@ -729,20 +786,84 @@ export default function GraphPage({
           <span>Cobalt Strike</span>
         </div>
         <div className="cobalt-window-controls">
-          <button className="cobalt-win-btn" type="button" title="Minimize">─</button>
-          <button className="cobalt-win-btn" type="button" title="Maximize">▢</button>
-          <button className="cobalt-win-btn close" type="button" title="Close">✕</button>
+          <button
+            className="cobalt-win-btn"
+            type="button"
+            title="Reset Zoom & Pan"
+            onClick={() => flowControls?.fitView()}
+          >
+            ─
+          </button>
+          <button
+            className="cobalt-win-btn"
+            type="button"
+            title="Fit View to Screen"
+            onClick={() => flowControls?.fitView()}
+          >
+            ▢
+          </button>
+          <button
+            className="cobalt-win-btn close"
+            type="button"
+            title="Clear Selection"
+            onClick={() => setSelection(null)}
+          >
+            ✕
+          </button>
         </div>
       </div>
 
       {/* Classic Cobalt Strike Desktop Window Menu Bar */}
       <div className="cobalt-menubar">
         <div className="cobalt-menubar-items">
-          <span className="cobalt-menu-item font-bold">Cobalt Strike</span>
-          <span className="cobalt-menu-item" onClick={() => setShowAttackPathsDialog(true)} title="View Attack Paths">View</span>
-          <span className="cobalt-menu-item" onClick={() => setShowIngestDialog(true)} title="Ingest BloodHound Graph Dump">Attacks</span>
-          <span className="cobalt-menu-item">Reporting</span>
-          <span className="cobalt-menu-item">Help</span>
+          <span
+            className="cobalt-menu-item font-bold"
+            onClick={() => setShowAboutDialog(true)}
+            title="About Cobalt Strike C2 Visualizer Engine"
+            role="button"
+            tabIndex={0}
+          >
+            Cobalt Strike
+          </span>
+          <span
+            className="cobalt-menu-item"
+            onClick={() => setShowAttackPathsDialog(true)}
+            title="View Attack Paths"
+            role="button"
+            tabIndex={0}
+          >
+            View
+          </span>
+          <span
+            className="cobalt-menu-item"
+            onClick={() => setShowIngestDialog(true)}
+            title="Ingest BloodHound Graph Dump"
+            role="button"
+            tabIndex={0}
+          >
+            Attacks
+          </span>
+          <span
+            className="cobalt-menu-item"
+            onClick={() => {
+              setReportingNotice("");
+              setShowReportingDialog(true);
+            }}
+            title="Reporting, Data Exports & Deliverables"
+            role="button"
+            tabIndex={0}
+          >
+            Reporting
+          </span>
+          <span
+            className="cobalt-menu-item"
+            onClick={() => setShowHelpDialog(true)}
+            title="Operator Help, Shortcuts & Command Reference"
+            role="button"
+            tabIndex={0}
+          >
+            Help
+          </span>
         </div>
 
         <div className="cobalt-menubar-right">
@@ -810,23 +931,54 @@ export default function GraphPage({
           >
             ▦
           </button>
-          <button className="cobalt-tool-btn active" type="button" title="Pivot Graph">[P]</button>
+          <button
+            className="cobalt-tool-btn active font-bold"
+            type="button"
+            title="Pivot Graph Mode [P]"
+            onClick={() => setUseSampleTopology(false)}
+          >
+            [P]
+          </button>
           <button
             className="cobalt-tool-btn"
             onClick={() => void graphQuery.refetch()}
             type="button"
-            title="Refresh / Sync"
+            title="Refresh / Sync Graph [R]"
           >
             [R]
           </button>
           <div className="cobalt-toolbar-sep" />
-          <button className="cobalt-tool-btn" type="button" title="Session Preferences">[S]</button>
-          <button className="cobalt-tool-btn" type="button" title="Beacon Sleep Delay">[Z]</button>
-          <button className="cobalt-tool-btn" type="button" title="Link / Unlink Session">[L]</button>
           <button
             className="cobalt-tool-btn"
             type="button"
-            title="Import BloodHound AD Graph Dump"
+            title="Session Display Preferences [S]"
+            onClick={() => setShowSessionPrefsDialog(true)}
+          >
+            [S]
+          </button>
+          <button
+            className="cobalt-tool-btn"
+            type="button"
+            title="Beacon Sleep Delay [Z]"
+            onClick={() => {
+              setSleepNotice("");
+              setShowSleepDialog(true);
+            }}
+          >
+            [Z]
+          </button>
+          <button
+            className="cobalt-tool-btn"
+            type="button"
+            title="Active Pivot Links [L]"
+            onClick={() => setShowLinkDialog(true)}
+          >
+            [L]
+          </button>
+          <button
+            className="cobalt-tool-btn"
+            type="button"
+            title="Import BloodHound AD Graph Dump [I]"
             onClick={() => setShowIngestDialog(true)}
           >
             [I]
@@ -836,6 +988,7 @@ export default function GraphPage({
             className={`cobalt-tool-btn ${filters.activePathOnly ? "active font-bold" : ""}`}
             onClick={() => setFilters((f) => ({ ...f, activePathOnly: !f.activePathOnly }))}
             type="button"
+            title="Toggle Active Pivots Only Filter"
           >
             Active Pivots Only
           </button>
@@ -1024,6 +1177,506 @@ export default function GraphPage({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: Reporting & Evidence Exports */}
+      {showReportingDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowReportingDialog(false)}>
+          <div className="cobalt-dialog-window" onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>Reporting & Evidence Exports</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowReportingDialog(false)} type="button">✕</button>
+            </div>
+            <div className="cobalt-dialog-body">
+              <div className="mb-3 text-[11px] text-zinc-800">
+                Generate and export offensive campaign evidence or access official deliverables:
+              </div>
+
+              {reportingNotice && (
+                <div className="mb-3 p-2 bg-green-100 border border-green-600 text-green-900 font-mono text-[11px] flex items-center gap-2">
+                  <Check size={14} className="text-green-700" />
+                  <span>{reportingNotice}</span>
+                </div>
+              )}
+
+              <div className="cobalt-dialog-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                      <Download size={13} className="text-blue-700" />
+                      <span>Export Attack Graph Topology (JSON)</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-600">
+                      Download complete node coordinates, lateral movement routes, credentials, and severity metadata as a machine-readable JSON dump.
+                    </div>
+                  </div>
+                  <button
+                    className="cobalt-btn-swing font-bold shrink-0 mt-1"
+                    type="button"
+                    onClick={exportTopologyJson}
+                  >
+                    Export JSON
+                  </button>
+                </div>
+              </div>
+
+              <div className="cobalt-dialog-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                      <FileSpreadsheet size={13} className="text-emerald-700" />
+                      <span>Export Host Inventory (CSV)</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-600">
+                      Export flat tabular spreadsheet containing Hostname, IP address, OS type, privilege level, and compromise state for all {filteredGraph.nodes.length} hosts.
+                    </div>
+                  </div>
+                  <button
+                    className="cobalt-btn-swing font-bold shrink-0 mt-1"
+                    type="button"
+                    onClick={exportHostsCsv}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+              </div>
+
+              <div className="cobalt-dialog-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                      <FileText size={13} className="text-purple-700" />
+                      <span>Engagement Deliverables Engine</span>
+                    </div>
+                    <div className="text-[11px] text-zinc-600">
+                      Navigate directly to the ARES Report Generator to compile executive PDF, Technical Markdown, or Defect JSON reports.
+                    </div>
+                  </div>
+                  <button
+                    className="cobalt-btn-swing font-bold shrink-0 mt-1"
+                    type="button"
+                    onClick={() => {
+                      setShowReportingDialog(false);
+                      navigate("/dashboard/reports");
+                    }}
+                  >
+                    Open Reports ↗
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end mt-4">
+                <button
+                  className="cobalt-btn-swing"
+                  type="button"
+                  onClick={() => setShowReportingDialog(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: Operator Help & Reference Manual */}
+      {showHelpDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowHelpDialog(false)}>
+          <div className="cobalt-dialog-window" style={{ width: "680px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>Cobalt Strike C2 — Operator Reference & Help Manual</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowHelpDialog(false)} type="button">✕</button>
+            </div>
+            <div className="cobalt-dialog-body">
+              {/* Tabs */}
+              <div className="cobalt-dialog-tabs">
+                <button
+                  type="button"
+                  className={`cobalt-dialog-tab ${helpTab === "shortcuts" ? "active" : ""}`}
+                  onClick={() => setHelpTab("shortcuts")}
+                >
+                  Navigation & Shortcuts
+                </button>
+                <button
+                  type="button"
+                  className={`cobalt-dialog-tab ${helpTab === "legend" ? "active" : ""}`}
+                  onClick={() => setHelpTab("legend")}
+                >
+                  Privilege Legend & Colors
+                </button>
+                <button
+                  type="button"
+                  className={`cobalt-dialog-tab ${helpTab === "commands" ? "active" : ""}`}
+                  onClick={() => setHelpTab("commands")}
+                >
+                  Beacon Console Commands
+                </button>
+              </div>
+
+              {/* Tab Content: Shortcuts */}
+              {helpTab === "shortcuts" && (
+                <div>
+                  <div className="mb-2 text-[11px] text-zinc-700 font-semibold">
+                    Interactive Canvas Controls:
+                  </div>
+                  <div className="cobalt-dialog-card divide-y divide-zinc-200">
+                    <div className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold text-blue-900">[ESC] Key</span>
+                      <span className="text-zinc-700">Clear locked pathway highlight and unlock topology view.</span>
+                    </div>
+                    <div className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold text-blue-900">Click on Host Node</span>
+                      <span className="text-zinc-700">Lock upstream compromise lineage and downstream lateral reachability.</span>
+                    </div>
+                    <div className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold text-blue-900">[+] / [-] Buttons</span>
+                      <span className="text-zinc-700">Zoom in and zoom out of the pivot canvas smoothly.</span>
+                    </div>
+                    <div className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold text-blue-900">[⛶] Reset View</span>
+                      <span className="text-zinc-700">Fit entire network topology into view with calibrated padding.</span>
+                    </div>
+                    <div className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold text-blue-900">Active Pivots Only</span>
+                      <span className="text-zinc-700">Filter out unlinked discovery assets to focus strictly on confirmed compromise routes.</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab Content: Legend */}
+              {helpTab === "legend" && (
+                <div>
+                  <div className="mb-2 text-[11px] text-zinc-700 font-semibold">
+                    Host Visual Privilege & Role Classification:
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <div className="cobalt-dialog-card flex items-start gap-2.5">
+                      <span className="w-3.5 h-3.5 rounded-sm bg-red-600 border border-red-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-red-900">SYSTEM * (Crimson Border)</div>
+                        <div className="text-[10px] text-zinc-600">Tier-0 Domain Controller (`DC01`) or NT AUTHORITY\SYSTEM / root integrity token.</div>
+                      </div>
+                    </div>
+                    <div className="cobalt-dialog-card flex items-start gap-2.5">
+                      <span className="w-3.5 h-3.5 rounded-sm bg-amber-500 border border-amber-300 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-amber-900">ADMIN (Amber Border)</div>
+                        <div className="text-[10px] text-zinc-600">High-value internal server (`SQL01`, `FS01`) or local administrator compromise.</div>
+                      </div>
+                    </div>
+                    <div className="cobalt-dialog-card flex items-start gap-2.5">
+                      <span className="w-3.5 h-3.5 rounded-sm bg-cyan-400 border border-cyan-200 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-cyan-900">BEACON (Cyan Border)</div>
+                        <div className="text-[10px] text-zinc-600">Active compromised user workstation foothold (`WS-FIN-042`) or Linux bridge.</div>
+                      </div>
+                    </div>
+                    <div className="cobalt-dialog-card flex items-start gap-2.5">
+                      <span className="w-3.5 h-3.5 rounded-sm bg-red-800 border border-orange-500 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-orange-900">FIREWALL (Red Brick)</div>
+                        <div className="text-[10px] text-zinc-600">Perimeter network ingress gateway (`K8S-INGRESS-01`) or boundary egress firewall.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab Content: Beacon Commands */}
+              {helpTab === "commands" && (
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="cobalt-table-swing">
+                    <thead>
+                      <tr>
+                        <th style={{ width: "120px" }}>Command</th>
+                        <th>Syntax / Example</th>
+                        <th>Description</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">whoami</td>
+                        <td className="font-mono text-[10px]">whoami</td>
+                        <td>Displays target host, user token, and integrity level (High vs Medium).</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">hashdump</td>
+                        <td className="font-mono text-[10px]">hashdump | creds</td>
+                        <td>Dumps harvested NTLM SAM and LSA hashes from LSASS memory.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">ps</td>
+                        <td className="font-mono text-[10px]">ps | process</td>
+                        <td>Lists running processes with PID, PPID, and session architecture.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">ppid</td>
+                        <td className="font-mono text-[10px]">ppid &lt;pid&gt;</td>
+                        <td>Tasks beacon to spoof parent process ID for defense evasion.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">ssh</td>
+                        <td className="font-mono text-[10px]">ssh &lt;host&gt; &lt;user&gt; &lt;pass&gt;</td>
+                        <td>Tasks beacon to establish an interactive lateral SSH pivot session.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">net view</td>
+                        <td className="font-mono text-[10px]">net view | hosts</td>
+                        <td>Lists active scoped network nodes and discovered domain computers.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">clear</td>
+                        <td className="font-mono text-[10px]">clear</td>
+                        <td>Clears the terminal scrollback buffer for the active session.</td>
+                      </tr>
+                      <tr>
+                        <td className="font-mono font-bold text-blue-900">help</td>
+                        <td className="font-mono text-[10px]">help</td>
+                        <td>Displays command usage summary inside the active session terminal.</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="flex justify-end mt-4">
+                <button
+                  className="cobalt-btn-swing"
+                  type="button"
+                  onClick={() => setShowHelpDialog(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: About Cobalt Strike Visualizer */}
+      {showAboutDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowAboutDialog(false)}>
+          <div className="cobalt-dialog-window" style={{ width: "480px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>About ARES Cobalt Strike Visualizer Engine</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowAboutDialog(false)} type="button">✕</button>
+            </div>
+            <div className="cobalt-dialog-body">
+              <div className="flex items-center gap-3 mb-3 p-2.5 bg-zinc-900 text-white border border-zinc-700">
+                <div className="p-2 rounded bg-red-950 border border-red-700 text-red-400">
+                  <Shield size={24} />
+                </div>
+                <div>
+                  <div className="font-bold text-sm tracking-wide">ARES Cobalt Strike C2 Visualizer</div>
+                  <div className="text-[10px] text-zinc-400 font-mono">v6.0 Enterprise Edition · Automated Red Team Engine</div>
+                </div>
+              </div>
+
+              <div className="cobalt-dialog-card mb-3 text-[11px] leading-relaxed">
+                <div className="grid grid-cols-2 gap-y-1.5">
+                  <span className="text-zinc-600 font-medium">Target Campaign:</span>
+                  <span className="font-bold text-zinc-900">{currentCampaign?.name || campaignId || "Standby"}</span>
+                  <span className="text-zinc-600 font-medium">Scoped Hosts:</span>
+                  <span className="font-mono text-zinc-900">{filteredGraph.nodes.length} Nodes</span>
+                  <span className="text-zinc-600 font-medium">Active Pivot Links:</span>
+                  <span className="font-mono text-zinc-900">{filteredGraph.edges.length} Connections</span>
+                  <span className="text-zinc-600 font-medium">C2 Transport:</span>
+                  <span className="font-mono text-emerald-800 font-bold">AES-256-GCM / Named Pipe</span>
+                  <span className="text-zinc-600 font-medium">Execution Engine:</span>
+                  <span className="font-mono text-zinc-900">Python 3.12+ Async / React 19</span>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-zinc-600 text-center mb-3">
+                Authorized offensive security validation platform. Strictly compliant with engagement boundary rules.
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  className="cobalt-btn-swing font-bold"
+                  type="button"
+                  onClick={() => setShowAboutDialog(false)}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: Session Display Preferences [S] */}
+      {showSessionPrefsDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowSessionPrefsDialog(false)}>
+          <div className="cobalt-dialog-window" style={{ width: "460px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>Session Display Preferences [S]</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowSessionPrefsDialog(false)} type="button">✕</button>
+            </div>
+            <div className="cobalt-dialog-body">
+              <div className="mb-2 text-[11px] text-zinc-800">
+                Configure lateral movement visualization and telemetry parameters:
+              </div>
+
+              <div className="cobalt-dialog-card space-y-2.5">
+                <label className="flex items-center gap-2 cursor-pointer text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={filters.activePathOnly}
+                    onChange={(e) => setFilters((f) => ({ ...f, activePathOnly: e.target.checked }))}
+                  />
+                  <span>Active Pivots Only (Hide unlinked target findings)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-[11px]">
+                  <input
+                    type="checkbox"
+                    checked={useSampleTopology}
+                    onChange={(e) => setUseSampleTopology(e.target.checked)}
+                  />
+                  <span>Display 9-Node Demo Topology Sample</span>
+                </label>
+              </div>
+
+              <div className="flex justify-between items-center mt-3">
+                <button
+                  className="cobalt-btn-swing"
+                  type="button"
+                  onClick={() => flowControls?.fitView()}
+                >
+                  Reset View
+                </button>
+                <button
+                  className="cobalt-btn-swing font-bold"
+                  type="button"
+                  onClick={() => setShowSessionPrefsDialog(false)}
+                >
+                  Apply & Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: Beacon Sleep Delay [Z] */}
+      {showSleepDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowSleepDialog(false)}>
+          <div className="cobalt-dialog-window" style={{ width: "420px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>Beacon Sleep Delay [Z]</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowSleepDialog(false)} type="button">✕</button>
+            </div>
+            <form
+              className="cobalt-dialog-body"
+              onSubmit={(e) => {
+                e.preventDefault();
+                setSleepNotice(`Tasked active beacon session to sleep ${sleepSeconds}s (${sleepJitter}% jitter).`);
+              }}
+            >
+              <div className="mb-2 text-[11px] text-zinc-800">
+                Configure check-in beacon interval and randomized jitter percentage:
+              </div>
+
+              <div className="cobalt-dialog-card space-y-2 mb-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium">Sleep Interval (seconds):</label>
+                  <input
+                    className="cobalt-swing-input"
+                    style={{ width: "80px" }}
+                    type="number"
+                    min="1"
+                    max="3600"
+                    value={sleepSeconds}
+                    onChange={(e) => setSleepSeconds(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium">Jitter Distribution (%):</label>
+                  <input
+                    className="cobalt-swing-input"
+                    style={{ width: "80px" }}
+                    type="number"
+                    min="0"
+                    max="99"
+                    value={sleepJitter}
+                    onChange={(e) => setSleepJitter(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {sleepNotice && (
+                <div className="mb-3 p-2 bg-green-100 border border-green-600 text-green-900 font-mono text-[10px]">
+                  {sleepNotice}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button className="cobalt-btn-swing font-bold" type="submit">
+                  Task Sleep
+                </button>
+                <button
+                  className="cobalt-btn-swing"
+                  type="button"
+                  onClick={() => setShowSleepDialog(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Java Swing Modal Dialog: Active Pivot Links [L] */}
+      {showLinkDialog && (
+        <div className="cobalt-dialog-overlay" onClick={() => setShowLinkDialog(false)}>
+          <div className="cobalt-dialog-window" style={{ width: "520px" }} onClick={(e) => e.stopPropagation()}>
+            <div className="cobalt-dialog-titlebar">
+              <span>Active Lateral Pivot Links [L]</span>
+              <button className="cobalt-win-btn close" onClick={() => setShowLinkDialog(false)} type="button">✕</button>
+            </div>
+            <div className="cobalt-dialog-body">
+              <div className="mb-2 text-[11px] text-zinc-800">
+                Active lateral communication tunnels and established pivot channels:
+              </div>
+
+              <div className="max-h-56 overflow-y-auto border border-zinc-500 bg-white mb-3 divide-y divide-zinc-200">
+                {filteredGraph.edges.length === 0 ? (
+                  <div className="p-3 text-center text-zinc-500 text-[11px]">
+                    No active pivot connections.
+                  </div>
+                ) : (
+                  filteredGraph.edges.map((edge, idx) => (
+                    <div key={edge.id || idx} className="p-2 text-[11px] flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className="text-zinc-600">#{idx + 1}</span>
+                        <span className="text-blue-900 font-bold">{edge.source}</span>
+                        <span className="text-amber-600 font-bold">──▶</span>
+                        <span className="text-emerald-900 font-bold">{edge.target}</span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 font-mono">
+                        {edge.label || "Named Pipe / SMB"}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  className="cobalt-btn-swing font-bold"
+                  type="button"
+                  onClick={() => setShowLinkDialog(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
