@@ -200,16 +200,33 @@ export function getPathHighlight(path: AttackPath | null | undefined, graph: Saf
 export function filterGraph(graph: SafeGraph, filters: GraphFilters, highlight: GraphHighlight): SafeGraph {
   const selectedTypes = new Set(filters.nodeTypes);
   const hasTypeFilter = selectedTypes.size > 0;
+
+  // Track node degree to identify which nodes participate in active lateral movement/pivot edges
+  const connectedNodeIds = new Set<string>();
+  graph.edges.forEach((e) => {
+    connectedNodeIds.add(e.source);
+    connectedNodeIds.add(e.target);
+  });
+
   const nodes = graph.nodes.filter((node) => {
     if (hasTypeFilter && !selectedTypes.has(node.type)) return false;
     if (filters.severity !== "all" && node.type === "finding" && node.severity !== filters.severity) return false;
-    if (filters.activePathOnly && !highlight.nodeIds.has(node.id)) return false;
+    if (filters.activePathOnly) {
+      if (highlight.nodeIds.size > 0) {
+        if (!highlight.nodeIds.has(node.id)) return false;
+      } else {
+        // When Active Pivots Only is active without a pre-selected attack path,
+        // show exclusively nodes that participate in active pivot / lateral edges or perimeter firewalls
+        const isFw = node.type === "firewall" || node.id.includes("firewall") || node.id.includes("ingress");
+        if (!connectedNodeIds.has(node.id) && !isFw) return false;
+      }
+    }
     return true;
   });
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = graph.edges.filter((edge) => {
     if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return false;
-    return !filters.activePathOnly || highlight.edgeIds.has(edge.id);
+    return !filters.activePathOnly || highlight.edgeIds.size === 0 || highlight.edgeIds.has(edge.id);
   });
   return { nodes, edges };
 }
@@ -243,27 +260,81 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
   const typeLower = (node.type || "").toLowerCase();
   const meta = node.metadata || {};
 
+  // 1. Detect Operating System & Housing Form
   let os: "windows" | "windows-server" | "linux" | "firewall" = "windows";
+  const osInfoLower = String(meta.os || meta.os_info || "").toLowerCase();
+
   if (meta.os === "firewall" || meta.os === "windows-server" || meta.os === "windows" || meta.os === "linux") {
     os = meta.os;
-  } else if (typeLower.includes("firewall") || labelLower.includes("firewall") || labelLower.includes("gateway")) {
+  } else if (
+    typeLower.includes("firewall") ||
+    labelLower.includes("firewall") ||
+    labelLower.includes("ingress") ||
+    labelLower.includes("gateway") ||
+    labelLower.includes("k8s-ingress") ||
+    osInfoLower.includes("firewall")
+  ) {
     os = "firewall";
-  } else if (typeLower.includes("dc") || labelLower.includes("dc") || labelLower.includes("server") || typeLower.includes("domain")) {
+  } else if (
+    typeLower.includes("dc") ||
+    Boolean(meta.is_dc) ||
+    labelLower.includes("dc01") ||
+    labelLower.includes("domain controller") ||
+    labelLower.includes("server") ||
+    labelLower.includes("sql") ||
+    labelLower.includes("fs01") ||
+    osInfoLower.includes("server")
+  ) {
     os = "windows-server";
-  } else if (labelLower.includes("linux") || labelLower.includes("ubuntu") || labelLower.includes("kali")) {
+  } else if (
+    labelLower.includes("linux") ||
+    labelLower.includes("ubuntu") ||
+    labelLower.includes("kali") ||
+    labelLower.includes("aws") ||
+    labelLower.includes("imds") ||
+    osInfoLower.includes("linux") ||
+    osInfoLower.includes("ubuntu")
+  ) {
     os = "linux";
   }
 
+  // 2. Detect Accurate Privilege Tier (SYSTEM * vs ADMIN vs USER / BEACON vs TARGET)
   let privilege: "system" | "admin" | "user" | "uncompromised" = "user";
+  const cLevel = String(meta.compromise_level || "").toLowerCase();
+  const isDc = typeLower.includes("dc") || Boolean(meta.is_dc) || labelLower.includes("dc01") || labelLower.includes("domain controller");
+  const isServer = os === "windows-server" || labelLower.includes("sql") || labelLower.includes("fs01");
+
   if (meta.privilege === "system" || meta.privilege === "admin" || meta.privilege === "user" || meta.privilege === "uncompromised") {
     privilege = meta.privilege;
-  } else if (node.severity === "critical" || labelLower.includes("system") || labelLower.includes("admin") || labelLower.includes("root")) {
+  } else if (
+    isDc ||
+    cLevel === "system" ||
+    cLevel === "domain_admin" ||
+    labelLower.includes("system") ||
+    labelLower.includes("root") ||
+    node.severity === "critical"
+  ) {
+    // Tier-0 Domain Controller or root/system compromise -> Crimson SYSTEM *
     privilege = "system";
-  } else if (node.severity === "high") {
+  } else if (
+    isServer ||
+    cLevel === "local_admin" ||
+    cLevel === "admin" ||
+    labelLower.includes("admin") ||
+    node.severity === "high"
+  ) {
+    // High-value internal server (SQL, File Server) -> Amber ADMIN
     privilege = "admin";
-  } else if (typeLower === "finding" || typeLower === "host") {
+  } else if (
+    cLevel === "user" ||
+    Boolean(meta.owned || meta.is_owned) ||
+    meta.status === "active" ||
+    labelLower.includes("ws") ||
+    labelLower.includes("workstation")
+  ) {
+    // Foothold workstation or compromised user session -> Cyan BEACON
     privilege = "user";
-  } else if (typeLower === "domain" || typeLower === "group") {
+  } else if (cLevel === "none" || typeLower === "domain" || typeLower === "group") {
     privilege = "uncompromised";
   }
 
@@ -308,7 +379,33 @@ export function adaptApiGraphToCobalt(
   campaign?: { name?: string; targets?: string[]; scope_cidrs?: string[] } | null
 ): SafeGraph {
   if (apiGraph.nodes.length > 0) {
-    const nodes: SafeGraphNode[] = apiGraph.nodes.map((n) => {
+    // 1. Identify which nodes participate in edges
+    const connectedNodeIds = new Set<string>();
+    apiGraph.edges.forEach((e) => {
+      connectedNodeIds.add(e.source);
+      connectedNodeIds.add(e.target);
+    });
+
+    // In Cobalt Strike Pivot Topology, the canvas strictly models network infrastructure
+    // (hosts, servers, domain controllers, firewalls, gateways, and active pivot channels).
+    // Findings (vulnerabilities like Kerberoastable SPN, Open Ports, PRT compromise) and
+    // user/group AD objects are attributes of hosts, NOT separate physical computer workstations!
+    // This prevents fake computer monitors from crowding the canvas and colliding with real hosts.
+    const candidateNodes = apiGraph.nodes.filter((n) => {
+      const typeLower = (n.type || "").toLowerCase();
+      if (
+        typeLower === "finding" ||
+        typeLower === "credential" ||
+        typeLower === "user" ||
+        typeLower === "group" ||
+        typeLower === "domain"
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const nodes: SafeGraphNode[] = candidateNodes.map((n) => {
       const inference = inferCobaltNodeData(n);
       return {
         ...n,

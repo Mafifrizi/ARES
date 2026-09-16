@@ -280,7 +280,7 @@
 
 .cobalt-node-wrapper,
 .cobalt-firewall-node {
-  transition: opacity 0.18s ease, filter 0.18s ease;
+  transition: opacity 0.15s ease;
   pointer-events: auto;
 }
 
@@ -290,9 +290,14 @@
   filter: grayscale(0.7) brightness(0.6);
 }
 
+.cobalt-node-wrapper:hover {
+  z-index: 50 !important;
+}
+
 .cobalt-node-wrapper:hover .cobalt-monitor-housing {
-  box-shadow: 0 0 16px rgba(0, 212, 255, 0.65), inset 0 0 4px rgba(0, 212, 255, 0.3);
-  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.75), inset 0 0 4px rgba(0, 212, 255, 0.4);
+  border-color: #38bdf8 !important;
+  cursor: pointer;
 }
 
 /* Halo & Aura Variations (Pure Crisp Vectors, No Blurry AI-Slop Glows) */
@@ -305,6 +310,13 @@
 /* Active User Beacon */
 .cobalt-node-wrapper.active-beacon .cobalt-monitor-housing {
   border-color: #00d4ff;
+}
+
+/* Administrative / Server */
+.cobalt-node-wrapper.admin .cobalt-monitor-housing {
+  border-color: #f59e0b;
+  background: #27221b;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.45);
 }
 
 /* Mapped Target / Discovery */
@@ -423,6 +435,11 @@
 .cobalt-node-privilege.system {
   color: #ff3333;
   text-shadow: 0 0 6px rgba(255, 51, 51, 0.45);
+}
+
+.cobalt-node-privilege.admin {
+  color: #fbbf24;
+  text-shadow: 0 0 6px rgba(251, 191, 36, 0.45);
 }
 
 .cobalt-node-privilege.user {

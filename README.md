@@ -189,26 +189,44 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 5. 🕸️ Multi-Vector Attack Graph & Objective Replay
+### 5. 🕸️ Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Dock
 
-*Interactive directed acyclic graph (DAG) solver visualizing enterprise attack paths and privilege escalation chains.*
+*Interactive Cobalt Strike-styled hierarchical lateral pivot topology graph paired with a real-time multi-tabbed Beacon session terminal console.*
 
 <div align="center">
 
-![ARES Multi-Vector Attack Graph & Objective Replay](docs/assets/screenshots/dashboard-graph.png)
+![ARES Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
 
-*Multi-Vector Attack Graph with automated luminous white patch cables, left-to-right hierarchy (Domain Controller → Findings → Hosts), and real-time safe metadata inspection.*
+*Cobalt Strike Hierarchical Pivot Graph with organic curved Bezier routes, animated forward-flowing telemetry particles, persistent click-to-lock pathway tracking, and docked multi-tabbed Beacon session terminal.*
+
+<br>
+
+![ARES Cobalt Strike Beacon Session Terminal Console](docs/assets/screenshots/dashboard-beacon-terminal.png)
+
+*Docked Beacon Terminal Console — Authentic Java Swing dual-row tabs, real-time command dispatch (`whoami`, `hashdump`, `ps`, `ppid`), privilege telemetry status bar, and target host synchronization.*
 
 </div>
 
-- **The Problem Solved**: Translates raw vulnerability data into actionable, visual compromise paths that executives and engineers can understand immediately.
+- **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
 - **Key Capabilities**:
-  - **Automated Cyber Patch Cable Routing**: Real-time rendering of automated luminous white cables (`#ffffff`) connecting Domain Controllers, security findings, and discovered hosts without manual dragging.
-  - **Deterministic Left-to-Right Hierarchy**: Clean, collision-free column layout originating from the Domain Controller (`DC01`) on the left, through active security findings, to target member hosts.
-  - **Shortest Path Algorithms**: Deterministically calculates the fewest hops required to compromise Domain Controllers or cloud root credentials.
-  - **Native BloodHound / SharpHound Ingest**: Directly import BloodHound JSON archives into the ARES graph engine for unified analysis.
-  - **Interactive Entity Inspection**: Explore relationships between users, groups, computers, ACLs, and active Kerberos sessions with fluid navigation and real-time safe detail inspector.
-  - **Objective Replay**: Re-simulate historical attack chains to verify defensive patch efficacy.
+  - **Hierarchical Pivot Graph Visualization**: Positions network perimeters (Firewalls/Ingress) on the left, compromised pivot workstations in the center, and Domain Controllers/Crown Jewels on the right.
+  - **Organic Cubic Bezier Routing**: Eliminates overlapping 90-degree lines with smooth curvature, 22px vector directional arrowheads, and real-time animated glowing particles flowing downstream.
+  - **Persistent Click-to-Lock Pathway Tracking**: Click any node to freeze upstream ancestry and downstream lateral routes with glowing highlights and a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan around the topology without losing context.
+  - **Integrated Multi-Row Beacon Terminal Dock**:
+    - **Dual-Row Metal Tabs**: Automatically synchronizes and focuses the active session tab when clicking hosts on the canvas.
+    - **Authentic Cobalt Strike Status Bar**: Displays target privilege context (`[HOST] SYSTEM *`) and real-time heartbeat latency (`last: 2s`).
+    - **Interactive Command Prompt (`beacon>`)**:
+      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *`).
+      - `hashdump` / `creds`: Harvests and displays cached NTLM SAM/LSA hashes.
+      - `ps` / `process`: Enumerates active process trees and resolves parent PIDs.
+      - `ppid <pid>`: Tasks beacon to spoof parent process IDs for EDR evasion.
+      - `ssh <host> <user> <pass>`: Tasks interactive lateral SSH traversal.
+      - `net view` / `hosts` / `recon`: Lists discovered network scope and adjacent nodes.
+      - `clear`: Clears current session terminal scrollback buffer.
+      - `help`: Quick reference of supported beacon tasking commands.
+  - **Operational Modes**:
+    - `Mode: LIVE CAMPAIGN`: Renders live scoped engagement targets and findings discovered during reconnaissance. Use the `[Active Pivots Only]` filter to focus exclusively on active compromise routes.
+    - `Mode: DEMO SAMPLE`: Instant reference 9-node interconnected lateral pivot topology demonstrating enterprise multi-hop infiltration chains.
 
 ---
 

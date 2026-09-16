@@ -73,7 +73,8 @@ keys, bearer tokens, or sensitive report URLs.
 | Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
 | Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
-| Graph | `docs/assets/screenshots/dashboard-graph.png` | Interactive attack graph DAG with automated white patch cables, left-to-right hierarchy, and top attack paths panel. |
+| Graph | `docs/assets/screenshots/dashboard-graph.png` | Cobalt Strike Hierarchical Pivot Graph with organic Bezier curves, animated telemetry particles, persistent pathway tracking, and Beacon session dock. |
+| Beacon Terminal | `docs/assets/screenshots/dashboard-beacon-terminal.png` | Authentic Cobalt Strike dual-row tabbed Beacon console dock with real-time command execution and status bar. |
 | Graph Inspector | `docs/assets/screenshots/dashboard-graph-inspector.png` | Interactive Safe Detail slide-out drawer with asset telemetry, open ports, and compromise status. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
 
@@ -330,27 +331,62 @@ artifact count without a full page reload. If deletion fails, the page keeps
 the row and shows an error notice. When no reports remain, the Library shows
 the clean empty state: `No reports generated for this campaign yet.`
 
-### Graph
+### Graph & Cobalt Strike Beacon Terminal Dock
 
-Purpose: understand relationships and attack paths.
+Purpose: understand lateral pivot relationships, trace multi-hop compromise routes, and interact with compromised hosts directly from a docked Beacon terminal console.
 
-![Attack graph visualization](assets/screenshots/dashboard-graph.png)
+![Cobalt Strike Hierarchical Pivot Graph](assets/screenshots/dashboard-graph.png)
 
-*Multi-Vector Attack Graph — Automated white patch cables connecting Domain Controllers, security findings, and discovered hosts with top attack paths.*
+*Cobalt Strike Hierarchical Pivot Graph — Organic curved Bezier cables with forward-flowing animated telemetry particles, persistent click-to-lock pathway tracking, and docked multi-tabbed Beacon session terminal.*
 
-![Attack graph node inspector](assets/screenshots/dashboard-graph-inspector.png)
+![Cobalt Strike Beacon Session Terminal Console](assets/screenshots/dashboard-beacon-terminal.png)
 
-*Safe Detail Node Inspector — Click any node on the canvas to open the slide-out drawer displaying live asset telemetry, open ports, and compromise status.*
+*Cobalt Strike Beacon Terminal Console Dock — Authentic Java Swing dual-row tabs, real-time command dispatch (`whoami`, `hashdump`, `ps`, `ppid`), privilege telemetry status bar, and target host synchronization.*
 
-Use it for:
+#### Graph Topology & Navigation
 
-- Campaign graph review and entity relationship exploration.
-- Safe detail inspection (IP, hostname, open ports, DC flag, and ownership state).
-- Attack path review and shortest hop compromise analysis.
-- BloodHound JSON archive ingest.
+- **Hierarchical Column Layout**:
+  - **Left**: Perimeter gateways and uncompromised target findings (assets and services identified during initial reconnaissance).
+  - **Center**: Active compromise footholds and intermediate pivot workstations (`10.10.10.198`, `DEVELOPER45`, etc.).
+  - **Right**: High-value internal infrastructure, Active Directory Domain Controllers (`DC01`), and Crown Jewels.
+- **Organic Bezier Connections & Particle Streams**: Replaces rigid 90-degree lines with fluid cubic curves, 22px vector directional arrowheads, and real-time streaming particle pulses indicating live C2/pivot communications.
+- **Persistent Click-to-Lock Pathway Tracking**:
+  - Clicking any host locks its upstream compromise lineage (how the host was reached) and downstream lateral reachability (what other hosts can be compromised from it).
+  - A top HUD banner displays: `• PATHWAY LOCKED: [HOST] | N NODES | N HOPS` with quick pan/zoom persistence.
+  - To release the lock, click on the empty canvas, press `ESC`, or click the `[CLEAR TRACK [ESC]]` button on the banner.
+- **Operational Mode Toggle**:
+  - `Mode: LIVE CAMPAIGN`: Visualizes real-time scoped targets and discovered findings from the active engagement. Targets that have not yet been pivoted appear on the left with in-degree 0; active footholds with live pivot tunnels appear connected. Click `[Active Pivots Only]` on the toolbar to filter out unpivoted targets.
+  - `Mode: DEMO SAMPLE`: Loads the reference 9-node interconnected enterprise pivot topology showing multi-hop infiltration chains.
 
-This is useful after enumeration modules discover Active Directory entities, computers, groups, and
-relationships.
+#### Cobalt Strike Beacon Terminal Console (`CobaltSessionDock`)
+
+Located directly below the graph canvas, the Beacon Terminal Dock provides a full operator console synchronized with the graph:
+
+1. **Dual-Row Java Swing Session Tabs**:
+   - Organized in dual rows matching classic Cobalt Strike UI ergonomics.
+   - Clicking any host on the graph automatically switches to or spawns its dedicated Beacon session tab.
+   - Individual tabs can be closed via the `×` button without terminating underlying backend state.
+2. **Real-Time Telemetry Logs**:
+   - `[+]` Green: Successful operations, credential harvests, and established pivot channels.
+   - `[*]` Cyan: Tasking status, transport information (Named Pipe `\pipe\browser`), and cryptographic verification (AES-256-GCM).
+   - `beacon>` White: Command prompt and execution history.
+   - `[!]` Yellow: Operational notices, help menus, and OPSEC warnings.
+3. **Status Bar**:
+   - Positioned directly above the command input.
+   - Displays current host privilege level (`[DC01] SYSTEM *` or `[HOST] operator`) and live heartbeat interval (`last: 2s`).
+4. **Supported Interactive Commands**:
+
+| Command | Syntax / Example | Description |
+| --- | --- | --- |
+| `whoami` | `whoami` | Resolves target host, user context, and token integrity (`High/System` vs `Medium`). |
+| `hashdump` | `hashdump` or `creds` | Dumps harvested NTLM SAM and LSA hashes from the target LSASS memory. |
+| `ps` | `ps` or `process` | Enumerates remote process trees and resolves parent process IDs (PPIDs). |
+| `ppid` | `ppid <pid>` | Tasks the beacon to spoof parent process IDs for defense evasion and telemetry blinding. |
+| `ssh` | `ssh <host> <user> <pass>` | Tasks beacon to establish an interactive lateral SSH session to an adjacent host. |
+| `net view` | `net view` or `hosts` | Enumerates discovered adjacent systems and active nodes within engagement scope. |
+| `clear` | `clear` | Clears the terminal scrollback history for the active session tab. |
+| `help` | `help` | Displays the quick reference of supported beacon tasking commands. |
+| `<custom>` | `shell <command>` | Tasks beacon to execute arbitrary commands with byte transmission telemetry (`sent 48 bytes`). |
 
 ### Templates
 

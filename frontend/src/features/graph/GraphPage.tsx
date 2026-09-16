@@ -170,24 +170,43 @@ function cobaltPivotLayout(
       outgoingEdges.get(e.source)?.push(e.target);
     });
 
-    // 2. Identify roots: firewall / perimeter ingress or nodes with in-degree 0
+    // 2. Identify true roots of the attack progression:
+    // Firewalls/Perimeter Ingress and true initial foothold roots (nodes with in-degree 0 AND out-degree > 0)
     const depthMap = new Map<string, number>();
     const visited = new Set<string>();
     const queue: string[] = [];
 
+    // Phase A: Firewalls / Perimeter Ingress are Stage 0
     nodes.forEach((n) => {
-      const isFw = n.type === "firewall" || n.id.includes("firewall") || n.id.includes("ingress");
-      if (isFw || (inDegree.get(n.id) ?? 0) === 0) {
+      const isFw = n.type === "firewall" || n.id.includes("firewall") || n.id.includes("ingress") || n.label.toLowerCase().includes("ingress");
+      if (isFw) {
         depthMap.set(n.id, 0);
         visited.add(n.id);
         queue.push(n.id);
       }
     });
 
+    // Phase B: True initial attack roots (nodes with in-degree 0 AND out-degree > 0)
+    // These are entry workstations/footholds that initiate subsequent lateral pivot edges
+    nodes.forEach((n) => {
+      if (!visited.has(n.id)) {
+        const inDeg = inDegree.get(n.id) ?? 0;
+        const outDeg = outgoingEdges.get(n.id)?.length ?? 0;
+        if (inDeg === 0 && outDeg > 0) {
+          const startingDepth = queue.length > 0 ? 1 : 0;
+          depthMap.set(n.id, startingDepth);
+          visited.add(n.id);
+          queue.push(n.id);
+        }
+      }
+    });
+
+    // Fallback: If no explicit roots found but nodes have edges, pick the first connected node
     if (queue.length === 0 && nodes.length > 0) {
-      depthMap.set(nodes[0].id, 0);
-      visited.add(nodes[0].id);
-      queue.push(nodes[0].id);
+      const firstConnected = nodes.find((n) => (outgoingEdges.get(n.id)?.length ?? 0) > 0 || (inDegree.get(n.id) ?? 0) > 0) || nodes[0];
+      depthMap.set(firstConnected.id, 0);
+      visited.add(firstConnected.id);
+      queue.push(firstConnected.id);
     }
 
     // 3. BFS traversal to calculate horizontal progression depth
@@ -217,7 +236,7 @@ function cobaltPivotLayout(
         } else if (inf.status === "active") {
           depthMap.set(n.id, 2); // Lateral Workstations
         } else {
-          depthMap.set(n.id, 1); // DMZ / Perimeter targets
+          depthMap.set(n.id, 1); // Scoped targets / Perimeter inventory
         }
       }
     });
@@ -246,11 +265,11 @@ function cobaltPivotLayout(
     // Vertical height is strictly capped at MAX_ROWS (3 rows) so nodes NEVER cascade downwards!
     // Additional nodes in the same stage expand horizontally into sub-columns side-by-side.
     const MAX_ROWS = 3;
-    const COL_PITCH = 240; // Horizontal spacing between adjacent node centers
-    const ROW_PITCH = 150; // Vertical pitch allowing room for monitor + stand + 2-line badge
-    const STAGE_GAP = 55;  // Visual breathing gap between major architectural stages
-    const START_X = 50;
-    const START_Y = 50;
+    const COL_PITCH = 280; // Generous horizontal spacing allowing ample room for Bezier curve arcs
+    const ROW_PITCH = 190; // Ample vertical pitch: 120px node + 70px breathing room so nodes never collide
+    const STAGE_GAP = 70;  // Clear visual demarcation between major architectural compromise tiers
+    const START_X = 60;
+    const START_Y = 60;
 
     let cursorX = START_X;
 
@@ -258,10 +277,17 @@ function cobaltPivotLayout(
       const stageNodes = stageBuckets.get(d)!;
 
       // Sort within stage for visual hierarchy and consistent lateral alignment:
-      // Firewalls first, then SYSTEM/Admin elevations, then user beacons, then mapped targets
+      // Firewalls first, then nodes with active pivot connections, then by privilege level
       stageNodes.sort((a, b) => {
         if (a.type === "firewall") return -1;
         if (b.type === "firewall") return 1;
+
+        // Connected nodes (with tracks) always sort before completely isolated nodes
+        const aConnected = (inDegree.get(a.id) ?? 0) > 0 || (outgoingEdges.get(a.id)?.length ?? 0) > 0;
+        const bConnected = (inDegree.get(b.id) ?? 0) > 0 || (outgoingEdges.get(b.id)?.length ?? 0) > 0;
+        if (aConnected && !bConnected) return -1;
+        if (!aConnected && bConnected) return 1;
+
         const aInf = inferCobaltNodeData(a);
         const bInf = inferCobaltNodeData(b);
         const prio = (priv?: string) => (priv === "system" ? 3 : priv === "admin" ? 2 : priv === "user" ? 1 : 0);
@@ -487,7 +513,6 @@ function CobaltGraphInner({
 }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const controlsBound = useRef(false);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     if (bindControls && !controlsBound.current) {
@@ -500,9 +525,11 @@ function CobaltGraphInner({
     }
   }, [bindControls, zoomIn, zoomOut, fitView]);
 
-  // Priority: Clicked Selected Node > Hovered Node (preview when nothing is selected)
+  // Pathway tracking is strictly locked on click selection.
+  // Hover effect is handled 100% via hardware-accelerated CSS (:hover) with zero React state updates,
+  // completely eliminating hover jitter, blinking loops, and node shifting.
   const isLocked = selection?.kind === "node";
-  const activeFocusNodeId = isLocked ? selection.value.id : hoveredNodeId;
+  const activeFocusNodeId = isLocked ? selection.value.id : null;
 
   const trackedPathway = useMemo(() => {
     if (!activeFocusNodeId) return null;
@@ -590,19 +617,6 @@ function CobaltGraphInner({
         paneClickDistance={8}
         onPaneClick={() => {
           if (selection) onSelect(null);
-        }}
-        onPaneMouseEnter={() => {
-          if (!isLocked) setHoveredNodeId(null);
-        }}
-        onNodeMouseEnter={(_event, node) => {
-          if (!isLocked) {
-            setHoveredNodeId((curr) => (curr === node.id ? curr : node.id));
-          }
-        }}
-        onNodeMouseLeave={(_event, node) => {
-          if (!isLocked) {
-            setHoveredNodeId((curr) => (curr === node.id ? null : curr));
-          }
         }}
         onNodeClick={(_event, node) => {
           const selectedNode = nodeById.get(node.id);

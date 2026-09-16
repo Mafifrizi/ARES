@@ -156,7 +156,8 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
   const isMapped = privilege === "uncompromised";
 
   let auraClass = "mapped";
-  if (isElevated) auraClass = "elevated";
+  if (privilege === "system") auraClass = "elevated";
+  else if (privilege === "admin") auraClass = "admin";
   else if (isActiveBeacon) auraClass = "active-beacon";
 
   let screenContent: ReactNode;
@@ -164,16 +165,17 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
     screenContent = <LinuxTuxEmblem />;
   } else if (nodeData.os === "windows-server") {
     screenContent = <WindowsServerEmblem />;
-  } else if (isElevated) {
+  } else if (privilege === "system") {
     screenContent = <Windows7WavingFlag />;
   } else {
     screenContent = <WindowsModernFlag />;
   }
 
   let privilegeText =
-    isElevated ? "SYSTEM *" :
+    privilege === "system" ? "SYSTEM *" :
+    privilege === "admin" ? "ADMIN" :
     privilege === "user" ? (nodeData.metadata?.user ? String(nodeData.metadata.user) : (nodeData.process || "BEACON")) :
-    (nodeData.label || "TARGET");
+    "TARGET";
 
   if (privilegeText.length > 26) {
     privilegeText = privilegeText.slice(0, 24) + "…";
@@ -214,7 +216,7 @@ export const PivotComputerNode = memo(function PivotComputerNode({ data, selecte
 
       {/* Under-Monitor Monospace Telemetry Badges */}
       <div className="cobalt-node-caption">
-        <span className={`cobalt-node-privilege ${isElevated ? "system" : isActiveBeacon ? "user" : "neutral"}`}>
+        <span className={`cobalt-node-privilege ${privilege === "system" ? "system" : privilege === "admin" ? "admin" : isActiveBeacon ? "user" : "neutral"}`}>
           {privilegeText}
         </span>
         {subText && (
