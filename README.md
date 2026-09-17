@@ -17,10 +17,12 @@
 [![Security](https://img.shields.io/badge/Security-Zero--Trust%20Enclave-22C55E?style=for-the-badge)](docs/security-model.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 [![Unit Suite](https://img.shields.io/badge/Tests-128%20Passing-22C55E?style=for-the-badge)](tests/)
+[![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
+[![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
 
 <br>
 
-[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#-support--sponsorship) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
@@ -692,6 +694,23 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - [**Enterprise SSO Integration Guide (SAML 2.0 / OIDC)**](docs/sso-setup.md)
 - [**Enterprise Security & Threat Model**](docs/security-model.md)
 - [**Validation Lab & Test Harness**](docs/validation-lab.md)
+
+---
+
+## 💖 Support & Sponsorship
+
+If ARES has accelerated your security assessments, helped protect your enterprise infrastructure, or advanced your offensive security research, consider sponsoring the project to fund continuous feature development, threat research, and lab infrastructure:
+
+<div align="center">
+
+| Platform | Type | Link |
+| :--- | :--- | :--- |
+| **GitHub Sponsors** | 🌍 International (Recurring / One-time) | [![Sponsor](https://img.shields.io/badge/GitHub_Sponsors-Support-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi) |
+| **Saweria** | 🇮🇩 Indonesia (QRIS / GoPay / OVO / Dana) | [![Saweria](https://img.shields.io/badge/Saweria-Donasi_Lokal-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi) |
+
+</div>
+
+> *Your support helps keep ARES open-source, robust, and continuously updated against the latest adversary tradecraft.*
 
 ---
 

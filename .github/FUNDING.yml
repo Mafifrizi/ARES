@@ -1,0 +1,16 @@
+# .github/FUNDING.yml
+# GitHub Sponsors & Donation Configuration for ARES
+
+# 1. GitHub Sponsors (Internasional via GitHub / Stripe)
+# Aktifkan profil GitHub Sponsors Anda di: https://github.com/sponsors/Mafifrizi
+github: [Mafifrizi]
+
+# 2. Platform Donasi Internasional Populer (Opsional - buka tanda '#' jika punya akunnya)
+# ko_fi: mafifrizi
+# buy_me_a_coffee: mafifrizi
+# patreon: mafifrizi
+
+# 3. Custom Donation Links (Saweria untuk Indonesia & platform custom lainnya)
+custom:
+  - https://saweria.co/mafifrizi
+  # - https://paypal.me/your_paypal_username
