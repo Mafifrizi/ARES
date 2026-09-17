@@ -20,8 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-import xml.etree.ElementTree as ET
 from typing import Any
+
+try:
+    from defusedxml.ElementTree import fromstring as _xml_fromstring
+except ImportError:
+    from xml.etree.ElementTree import fromstring as _xml_fromstring  # nosec B405, B314
 
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
@@ -94,7 +98,7 @@ def _parse_task_xml(xml_str: str) -> dict[str, Any]:
     try:
         # Strip namespace for simpler parsing
         xml_clean = re.sub(r'\s+xmlns(?::\w+)?="[^"]+"', "", xml_str)
-        root = ET.fromstring(xml_clean)
+        root = _xml_fromstring(xml_clean)  # nosec: B314
 
         # Principal
         for p in root.iter("Principal"):

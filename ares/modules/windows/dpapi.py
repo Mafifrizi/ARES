@@ -498,14 +498,18 @@ class DPAPIModule(BaseModule):
             if not nt_bytes:
                 return []
 
-            sha1_key = hashlib.sha1(nt_bytes).digest()
+            try:
+                sha1_key = hashlib.sha1(nt_bytes, usedforsecurity=False).digest()
+            except TypeError:
+                sha1_key = hashlib.sha1(nt_bytes).digest()  # nosec: B324
             creds: list[dict] = []
 
             # Try to decrypt Windows Credential files
             cred_path = local_files.get("credentials_dir", "")
             if cred_path and os.path.isfile(cred_path):
                 try:
-                    cred_obj = Credential(open(cred_path, "rb").read())
+                    with open(cred_path, "rb") as cred_fh:
+                        cred_obj = Credential(cred_fh.read())
                     # decryption would go here with derived key
                     creds.append({
                         "source":   "credential_manager",

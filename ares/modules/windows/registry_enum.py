@@ -60,16 +60,30 @@ def _decode_vnc_password(enc: bytes) -> str:
     This decodes the raw registry bytes back to a 8-char password.
     Key is publicly documented at: https://github.com/frizb/PasswordDecrypts
     """
+    vnc_key = b"\x17\x52\x6b\x06\x23\x4e\x58\x07"
+    padded = (enc + b"\x00" * 8)[:8]
     try:
-        from Crypto.Cipher import DES  # type: ignore[import]
-        vnc_key = b"\x17\x52\x6b\x06\x23\x4e\x58\x07"
-        # Registry stores as REG_BINARY — pad to 8 bytes
-        padded  = (enc + b"\x00" * 8)[:8]
-        cipher  = DES.new(vnc_key, DES.MODE_ECB)
-        decoded = cipher.decrypt(padded)
-        return decoded.rstrip(b"\x00").decode("latin-1")
+        try:
+            from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
+        except ImportError:
+            from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES  # type: ignore[no-redef]
+        from cryptography.hazmat.primitives.ciphers import Cipher, modes
+        cipher = Cipher(TripleDES(vnc_key * 3), modes.ECB())  # nosec: B304
+        decryptor = cipher.decryptor()
+        decoded = decryptor.update(padded) + decryptor.finalize()
+        return decoded.rstrip(b"\x00").decode("latin-1", errors="replace")
     except ImportError:
-        return f"<encoded: {enc.hex()}> (install pycryptodome to decode)"
+        pass
+    except Exception:
+        return f"<decode_error: {enc.hex()}>"
+
+    try:
+        from Crypto.Cipher import DES  # type: ignore[import] # nosec: B413
+        cipher = DES.new(vnc_key, DES.MODE_ECB)  # nosec: B304
+        decoded = cipher.decrypt(padded)
+        return decoded.rstrip(b"\x00").decode("latin-1", errors="replace")
+    except ImportError:
+        return f"<encoded: {enc.hex()}> (install cryptography to decode)"
     except Exception:
         return f"<decode_error: {enc.hex()}>"
 
