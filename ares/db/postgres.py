@@ -4789,6 +4789,16 @@ class PostgresDatabase:
                 c.notes,
             )
 
+    async def update_campaign_status(self, campaign_id: str, status: str) -> bool:
+        """Update campaign operational status (e.g. 'created' -> 'running')."""
+        async with self._pool.acquire() as conn:
+            tag = await conn.execute(
+                "UPDATE campaigns SET status = $1, updated_at = now() WHERE id = $2",
+                status,
+                campaign_id,
+            )
+            return tag.endswith("1")
+
     async def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM campaigns WHERE id=$1", campaign_id)
@@ -5254,6 +5264,14 @@ class PostgresDatabase:
                 int(bool(success)),
                 max(0.0, float(duration_ms or 0.0)),
                 datetime.now(timezone.utc),
+            )
+            await conn.execute(
+                """
+                UPDATE campaigns
+                   SET status = 'running', updated_at = now()
+                 WHERE id = $1 AND status = 'created'
+                """,
+                campaign_id,
             )
 
     async def get_telemetry_stats(self, campaign_id: str = "") -> dict[str, Any]:

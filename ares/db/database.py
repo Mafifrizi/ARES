@@ -1375,6 +1375,15 @@ class AresDatabase:
         )
         await self._conn.commit()
 
+    async def update_campaign_status(self, campaign_id: str, status: str) -> bool:
+        """Update campaign operational status (e.g. 'created' -> 'running')."""
+        async with self._conn.execute(
+            "UPDATE campaigns SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, campaign_id),
+        ) as cur:
+            await self._conn.commit()
+            return cur.rowcount > 0
+
     async def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
         async with self._conn.execute("SELECT * FROM campaigns WHERE id=?", (campaign_id,)) as cur:
             row = await cur.fetchone()
@@ -1854,6 +1863,14 @@ class AresDatabase:
                 max(0.0, float(duration_ms or 0.0)),
                 datetime.now(timezone.utc).isoformat(),
             ),
+        )
+        await self._conn.execute(
+            """
+            UPDATE campaigns
+               SET status = 'running', updated_at = datetime('now')
+             WHERE id = ? AND status = 'created'
+            """,
+            (campaign_id,),
         )
         await self._conn.commit()
 

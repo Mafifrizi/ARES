@@ -428,6 +428,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         setLiveCampaignId("");
         setLiveConnected(false);
       }
+      setLiveEvents((items) => items.filter((item) => (item as any)?.campaign_id !== id));
 
       await queryClient.invalidateQueries({ queryKey: ["telemetry"], refetchType: "all" });
       await queryClient.invalidateQueries({ queryKey: ["monthlyStats"], refetchType: "all" });
@@ -470,7 +471,16 @@ export function DashboardShell({ children }: { children: ReactNode }) {
     campaignId: liveCampaignId,
     enabled: liveConnected,
     onDisconnected: () => setLiveConnected(false),
-    onEvent: (event) => setLiveEvents((items) => [event, ...items].slice(0, 100))
+    onEvent: (event) => setLiveEvents((items) => {
+      const normalized = typeof event === "object" && event !== null
+        ? {
+            ...(event as Record<string, unknown>),
+            campaign_id: (event as any).campaign_id || liveCampaignId,
+            timestamp: typeof (event as any).timestamp === "number" ? (event as any).timestamp : Date.now()
+          }
+        : { raw: event, campaign_id: liveCampaignId, timestamp: Date.now() };
+      return [normalized, ...items].slice(0, 100);
+    })
   });
 
   const campaignList = campaigns.data ?? [];
@@ -484,7 +494,23 @@ export function DashboardShell({ children }: { children: ReactNode }) {
       liveConnected,
       setLiveConnected,
       liveEvents,
-      clearLiveEvents: () => setLiveEvents([]),
+      pushLiveEvent: (event: unknown) => setLiveEvents((items) => {
+        const normalized = typeof event === "object" && event !== null
+          ? {
+              ...(event as Record<string, unknown>),
+              campaign_id: (event as any).campaign_id || liveCampaignId || selectedCampaignId || "",
+              timestamp: typeof (event as any).timestamp === "number" ? (event as any).timestamp : Date.now()
+            }
+          : { raw: event, campaign_id: liveCampaignId || selectedCampaignId || "", timestamp: Date.now() };
+        return [normalized, ...items].slice(0, 100);
+      }),
+      clearLiveEvents: (targetCampaignId?: string) => {
+        if (targetCampaignId) {
+          setLiveEvents((items) => items.filter((item) => (item as any)?.campaign_id !== targetCampaignId));
+        } else {
+          setLiveEvents([]);
+        }
+      },
       campaigns: campaignList,
       campaignsLoading: campaigns.isLoading,
       campaignsError: campaigns.error,
@@ -1298,7 +1324,8 @@ export function CampaignsPage() {
     campaigns: campaignList,
     deleteCampaign,
     isDeletingCampaign,
-    refetchCampaigns
+    refetchCampaigns,
+    pushLiveEvent
   } = useDashboardUi();
   const [name, setName] = useSessionState("ares.dashboard.campaigns.create.name", "");
   const [client, setClient] = useSessionState("ares.dashboard.campaigns.create.client", "Internal");
@@ -1352,9 +1379,86 @@ export function CampaignsPage() {
       void queryClient.invalidateQueries({ queryKey: ["campaigns"], refetchType: "all" });
     }
   });
-  const restore = useMutation({ mutationFn: () => api.restoreVault(selected) });
+  const restore = useMutation({
+    mutationFn: () => api.restoreVault(selected),
+    onSuccess: (data) => {
+      const count = (data as any)?.restored ?? 0;
+      const campaignName = (detail.data ?? campaignList.find((c) => c.id === selected))?.name || selected;
+      pushLiveEvent({
+        type: "vault.restored",
+        campaign_id: selected,
+        message: `Credential vault synchronized: ${count} credential${count === 1 ? "" : "s"} rehydrated into runtime memory for '${campaignName}'.`,
+        timestamp: Date.now(),
+        restored: count
+      });
+    },
+    onError: (err) => {
+      const msg = (err as any)?.detail || (err as Error)?.message || "The request failed.";
+      pushLiveEvent({
+        type: "vault.restore_failed",
+        campaign_id: selected,
+        message: `Credential vault synchronization failed: ${msg}`,
+        timestamp: Date.now(),
+        error: msg
+      });
+    }
+  });
   const run = useMutation({
-    mutationFn: () => api.runCampaign(selected, { plan: { stages: [] }, global_params: {}, dry_run: true })
+    mutationFn: () => {
+      const selectedCampaign = detail.data ?? campaignList.find((item) => item.id === selected);
+      const targetHost = selectedCampaign?.targets?.[0] || "10.0.0.1";
+      return api.runCampaign(selected, {
+        plan: {
+          stages: [
+            {
+              name: "Stage 1: Perimeter Recon & Fingerprint",
+              modules: ["recon.fingerprint", "network.service_detect"],
+              params: {
+                "recon.fingerprint": { target: targetHost },
+                "network.service_detect": { target: targetHost }
+              }
+            },
+            {
+              name: "Stage 2: Defense Feasibility & Coverage",
+              modules: ["opsec.coverage_predictor"],
+              params: {
+                "opsec.coverage_predictor": { target: targetHost }
+              }
+            }
+          ]
+        },
+        global_params: {
+          target: targetHost,
+          noise_profile: selectedCampaign?.noise_profile || "stealth"
+        },
+        dry_run: true
+      });
+    },
+    onSuccess: (data) => {
+      const isReady = (data as any)?.summary?.ready_to_run !== false;
+      const stageCount = Array.isArray((data as any)?.plan)
+        ? (data as any).plan.length
+        : ((data as any)?.summary?.total_stages ?? 2);
+      const campaignName = (detail.data ?? campaignList.find((c) => c.id === selected))?.name || selected;
+      pushLiveEvent({
+        type: isReady ? "campaign.dry_run_ready" : "campaign.dry_run_warning",
+        campaign_id: selected,
+        message: `Plan pre-flight check ${isReady ? "passed" : "completed with warnings"}: ${stageCount} stages verified for '${campaignName}'. Status: ${isReady ? "READY" : "WARNING"}.`,
+        timestamp: Date.now(),
+        plan: (data as any)?.plan,
+        summary: (data as any)?.summary
+      });
+    },
+    onError: (err) => {
+      const msg = (err as any)?.detail || (err as Error)?.message || "The request failed.";
+      pushLiveEvent({
+        type: "campaign.dry_run_failed",
+        campaign_id: selected,
+        message: `Dry-run plan validation failed: ${msg}`,
+        timestamp: Date.now(),
+        error: msg
+      });
+    }
   });
 
   const handleDelete = async (targetId: string) => {
@@ -1435,12 +1539,24 @@ export function CampaignsPage() {
               <CampaignPicker id="scope-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
             </div>
             <CampaignScopeSummary campaign={detail.data ?? campaignList.find((item) => item.id === selected)} loading={detail.isFetching} />
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button className="btn" disabled={!selected} onClick={() => restore.mutate()}>
-                Restore Vault
+            <div className="mt-3 flex flex-wrap gap-2 items-center">
+              <button
+                className="btn"
+                disabled={!selected || restore.isPending}
+                onClick={() => restore.mutate()}
+                type="button"
+              >
+                {restore.isPending && <Loader2 className="spin" size={14} />}
+                <span>{restore.isPending ? "Restoring Vault…" : "Restore Vault"}</span>
               </button>
-              <button className="btn" disabled={!selected} onClick={() => run.mutate()}>
-                Dry Run Plan
+              <button
+                className="btn"
+                disabled={!selected || run.isPending}
+                onClick={() => run.mutate()}
+                type="button"
+              >
+                {run.isPending && <Loader2 className="spin" size={14} />}
+                <span>{run.isPending ? "Simulating Dry Run…" : "Dry Run Plan"}</span>
               </button>
               <button
                 className="btn btn-danger"
@@ -1452,6 +1568,9 @@ export function CampaignsPage() {
               <input className="field max-w-xs" placeholder="Compare campaign ID" value={otherId} onChange={(e) => setOtherId(e.target.value)} />
             </div>
           </section>
+
+          <DataPanel title="Vault Restore Error" data={restore.error} />
+          <DataPanel title="Dry Run Error" data={run.error} />
           <DataPanel title="Delete Error" data={deleteError} />
           <DataPanel title="Campaign Detail Error" data={detail.error} />
           <DataPanel title="CVSS Error" data={cvss.error} />
@@ -1616,32 +1735,7 @@ export function ModulesPage() {
     );
   });
   const sensitive = isSensitiveModule(selected);
-  const [debouncedParams, setDebouncedParams] = useState(params);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedParams(params);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [params]);
-
-  const targetStr = typeof debouncedParams.target === "string" ? debouncedParams.target.trim() : "";
-  const targetRequired = Boolean(selected?.param_schema && "target" in selected.param_schema);
-  const targetReadyForFeasibility = !targetRequired || (targetStr.length >= 3 && (isIpv4Address(targetStr) || targetStr.includes(".") || targetStr === "localhost"));
-
-  const feasibility = useQuery({
-    queryKey: ["moduleFeasibility", selectedId, campaignId, debouncedParams],
-    queryFn: () =>
-      api.moduleFeasibility(selectedId, {
-        campaign_id: campaignId,
-        params: debouncedParams,
-        target: targetStr || undefined
-      }),
-    enabled: Boolean(selectedId && campaignId && targetReadyForFeasibility),
-    staleTime: 10_000
-  });
-  const feasibilityReport = feasibility.data?.report;
-  const isFeasibilityBlocked = Boolean(feasibilityReport && !feasibilityReport.feasible);
-  const requiresConfirmation = sensitive || isFeasibilityBlocked;
+  const requiresConfirmation = sensitive;
   const dryRunSupported = selected?.dry_run_supported !== false;
   const kerberoastTargetMissing = selected?.id === "ad.kerberoast" && !String(params.target_user ?? "").trim();
   const [attemptedRun, setAttemptedRun] = useState(false);
@@ -1793,226 +1887,89 @@ export function ModulesPage() {
           </div>
 
           {selected ? (
-            <div className="mt-4 grid gap-6 lg:grid-cols-[1.1fr_0.9fr] items-start">
-              {/* Left Column: Parameters and Execution Controls */}
-              <div className="space-y-4">
+            <form
+              aria-busy={run.isPending}
+              className="mt-4 grid gap-4 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30"
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!campaignId) {
+                  setAttemptedRun(true);
+                  return;
+                }
+                if (!executionConditionBlocked) {
+                  return;
+                }
+                setAttemptedRun(false);
+                run.mutate();
+              }}
+            >
+              <div className="text-xs font-mono text-zinc-400 font-medium pb-2 border-b border-zinc-800/60 flex items-center justify-between">
+                <span>Module Parameters</span>
+                <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
+              </div>
+              <ParamForm
+                schema={selected.param_schema}
+                values={params}
+                onChange={setParams}
+                requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
+              />
 
-                <form
-                  aria-busy={run.isPending}
-                  className="grid gap-4 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!campaignId) {
-                      setAttemptedRun(true);
-                      return;
-                    }
-                    if (!executionConditionBlocked) {
-                      return;
-                    }
-                    setAttemptedRun(false);
-                    run.mutate();
-                  }}
-                >
-                  <div className="text-xs font-mono text-zinc-400 font-medium pb-2 border-b border-zinc-800/60 flex items-center justify-between">
-                    <span>Module Parameters</span>
-                    <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
-                  </div>
-                  <ParamForm
-                    schema={selected.param_schema}
-                    values={params}
-                    onChange={setParams}
-                    requiredOverrides={selected.id === "ad.kerberoast" ? { target_user: true } : undefined}
-                  />
+              {/* Execution Mode Controls */}
+              <div className="pt-2 border-t border-zinc-800/60 space-y-2.5">
+                <label className="toggle-row text-xs text-zinc-300">
+                  <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
+                  {dryRunSupported ? "Dry run (simulate without live network execution)" : "Dry run unavailable"}
+                </label>
 
-                  {/* Execution Mode Controls */}
-                  <div className="pt-2 border-t border-zinc-800/60 space-y-2.5">
-                    <label className="toggle-row text-xs text-zinc-300">
-                      <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
-                      {dryRunSupported ? "Dry run (simulate without live network execution)" : "Dry run unavailable"}
+                {requiresConfirmation && (
+                  <div className="notice notice-danger text-xs flex items-center gap-2.5 p-2.5 rounded border">
+                    <input
+                      id="confirm-override-checkbox"
+                      className="cursor-pointer shrink-0"
+                      type="checkbox"
+                      checked={confirmed}
+                      onChange={(e) => setConfirmed(e.target.checked)}
+                    />
+                    <label htmlFor="confirm-override-checkbox" className="cursor-pointer select-none">
+                      Confirm authorized high-noise or sensitive execution
                     </label>
-
-                    {requiresConfirmation && (() => {
-                      const normRisk = (feasibilityReport?.risk_level || selected?.opsec_level || "").toLowerCase();
-                      const isRiskHigh = normRisk.includes("high") || normRisk.includes("critical") || normRisk.includes("alarm");
-                      return (
-                        <div className={`text-xs flex items-center gap-2.5 p-2.5 rounded border ${
-                          isRiskHigh ? "notice notice-danger" : "notice"
-                        }`}>
-                          <input
-                            id="confirm-override-checkbox"
-                            className="cursor-pointer shrink-0"
-                            type="checkbox"
-                            checked={confirmed}
-                            onChange={(e) => setConfirmed(e.target.checked)}
-                          />
-                          <label htmlFor="confirm-override-checkbox" className="cursor-pointer select-none">
-                            {isFeasibilityBlocked
-                              ? "Override pre-flight defense blocker and confirm authorized execution"
-                              : "Confirm authorized high-noise or sensitive execution"}
-                          </label>
-                        </div>
-                      );
-                    })()}
-
-                    {runHint && runHint !== "Select a campaign before running a module." && (
-                      <p className="notice text-xs">{runHint}</p>
-                    )}
-                    {scopeWarning && (
-                      <p className="notice notice-danger text-xs">{scopeWarning}</p>
-                    )}
-
-                    <div className="pt-2">
-                      <button
-                        className="btn btn-primary w-full py-2.5 text-xs font-mono font-medium tracking-wide flex items-center justify-center gap-2"
-                        type="submit"
-                        disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
-                      >
-                        {run.isPending ? (
-                          <>
-                            <Loader2 className="spin shrink-0" size={14} /> Running {selectedId}...
-                          </>
-                        ) : (
-                          `Execute ${selected.id}`
-                        )}
-                      </button>
-                    </div>
-
-                    {run.isPending && (
-                      <div className="notice notice-danger text-xs" role="status" aria-live="polite">
-                        <Loader2 className="spin shrink-0" size={15} />
-                        Module execution in progress. Keep this page open while ARES validates the target and collects results.
-                      </div>
-                    )}
                   </div>
-                </form>
-              </div>
+                )}
 
-              {/* Right Column: Pre-Flight Defense Feasibility & Target Telemetry Dock */}
-              <div className="space-y-4">
-                <div className="p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30 min-h-[300px] flex flex-col justify-start">
-                  <div className="flex items-center justify-between pb-2 border-b border-zinc-800/60 mb-3">
-                    <div className="flex items-center gap-2 font-mono text-xs font-medium text-zinc-300">
-                      <ShieldAlert size={14} className="text-zinc-400" />
-                      <span>Pre-Flight Defense Posture</span>
-                    </div>
-                    {feasibilityReport && (
-                      <span className={opsecBadge(feasibilityReport.risk_level)}>
-                        Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
-                      </span>
+                {runHint && runHint !== "Select a campaign before running a module." && (
+                  <p className="notice text-xs">{runHint}</p>
+                )}
+                {scopeWarning && (
+                  <p className="notice notice-danger text-xs">{scopeWarning}</p>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    className="btn btn-primary w-full py-2.5 text-xs font-mono font-medium tracking-wide flex items-center justify-center gap-2"
+                    type="submit"
+                    disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
+                  >
+                    {run.isPending ? (
+                      <>
+                        <Loader2 className="spin shrink-0" size={14} /> Running {selectedId}...
+                      </>
+                    ) : (
+                      `Execute ${selected.id}`
                     )}
-                  </div>
-
-                  {feasibility.isFetching && !feasibilityReport && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-400 space-y-2.5">
-                      <Loader2 className="spin text-cyan-400" size={24} />
-                      <p className="text-xs font-mono">Assessing target defensive posture and telemetry blockers...</p>
-                    </div>
-                  )}
-
-                  {!feasibility.isFetching && !feasibilityReport && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-zinc-500 space-y-2.5">
-                      <ShieldCheck size={32} className="text-zinc-600" />
-                      <p className="text-xs font-mono max-w-[280px]">
-                        {targetStr
-                          ? "Target configured. Evaluating defense posture telemetry..."
-                          : "Specify target IP or host to evaluate defensive telemetry, EDR rules, and evasion recommendations."}
-                      </p>
-                    </div>
-                  )}
-
-                  {feasibilityReport && (() => {
-                    const normRisk = (feasibilityReport.risk_level || "").toLowerCase();
-                    const isRiskHigh = normRisk.includes("high") || normRisk.includes("critical") || normRisk.includes("alarm");
-                    const isRiskMedium = normRisk.includes("medium") || normRisk.includes("moderate") || normRisk.includes("warn");
-                    const cardTone = isRiskHigh ? "danger" : isRiskMedium || !feasibilityReport.feasible ? "warning" : "optimal";
-                    const HeaderIcon = isRiskHigh ? ShieldAlert : isRiskMedium ? AlertTriangle : ShieldCheck;
-                    const iconColorClass = isRiskHigh ? "text-rose-400" : isRiskMedium ? "text-amber-400" : "text-emerald-400";
-                    const scoreBadgeClass = !feasibilityReport.feasible || feasibilityReport.score < 0.5
-                      ? "badge badge-high"
-                      : feasibilityReport.score >= 0.8
-                      ? "badge badge-low"
-                      : "badge badge-medium";
-                    const riskBadgeClass = opsecBadge(feasibilityReport.risk_level);
-
-                    return (
-                      <div className={`defense-feasibility-card ${cardTone} !mt-0`}>
-                        <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-zinc-800/60">
-                          <div className="flex items-center gap-2">
-                            <HeaderIcon size={15} className={`${iconColorClass} shrink-0`} />
-                            <span className="font-mono text-xs text-zinc-200 font-medium">
-                              Defense Feasibility Analysis
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
-                            <span className={scoreBadgeClass}>
-                              {Math.round(feasibilityReport.score * 100)}% Feasible
-                            </span>
-                            <span className={riskBadgeClass}>
-                              Risk: {feasibilityReport.risk_level.replace(/_/g, " ").toUpperCase()}
-                            </span>
-                          </div>
-                        </div>
-
-                        {feasibilityReport.blockers.length > 0 && (
-                          <div className={`mt-2.5 p-2.5 rounded border text-xs space-y-1 ${
-                            isRiskHigh
-                              ? "border-rose-900/30 bg-rose-950/20 text-rose-300"
-                              : "border-amber-900/30 bg-amber-950/20 text-amber-300"
-                          }`}>
-                            <div className={`font-mono text-[11px] font-medium flex items-center gap-1.5 ${
-                              isRiskHigh ? "text-rose-300" : "text-amber-300"
-                            }`}>
-                              <AlertTriangle size={13} className="shrink-0" />
-                              <span>Defensive Telemetry & Policy Blockers:</span>
-                            </div>
-                            <ul className="list-disc list-inside space-y-0.5 text-zinc-400 text-[11px]">
-                              {feasibilityReport.blockers.map((blocker, idx) => (
-                                <li key={idx}>{blocker}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {Object.keys(feasibilityReport.opsec_tuning || {}).length > 0 && (
-                          <div className="mt-2 text-xs space-y-1 p-2 rounded border border-zinc-800 bg-zinc-900/40">
-                            <span className="font-mono text-[11px] text-zinc-300">OPSEC Tuning:</span>
-                            {Object.entries(feasibilityReport.opsec_tuning).map(([k, v]) => (
-                              <div key={k} className="text-zinc-400 text-[11px] font-mono">
-                                <span className="text-zinc-500">{k}:</span> {String(v)}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {feasibilityReport.recommended_alternatives.length > 0 && (
-                          <div className="mt-2.5 pt-2 border-t border-zinc-800/60 flex items-center gap-2 font-mono text-[11px] text-zinc-400 flex-wrap">
-                            <span>Suggested alternative:</span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {feasibilityReport.recommended_alternatives.map((altId) => (
-                                <button
-                                  key={altId}
-                                  type="button"
-                                  className="btn btn-secondary text-xs py-0.5 px-2 font-mono text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800"
-                                  onClick={() => {
-                                    setSelectedId(altId);
-                                  }}
-                                  title={`Switch module to ${altId}`}
-                                >
-                                  <span>Switch to <strong>{altId}</strong></span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  </button>
                 </div>
+
+                {run.isPending && (
+                  <div className="notice notice-danger text-xs" role="status" aria-live="polite">
+                    <Loader2 className="spin shrink-0" size={15} />
+                    Module execution in progress. Keep this page open while ARES validates the target and collects results.
+                  </div>
+                )}
               </div>
-            </div>
+            </form>
           ) : (
             <EmptyState text="Select a module from the catalog to configure and execute." />
           )}
@@ -3026,7 +2983,34 @@ export function LivePage() {
   } = useDashboardUi();
   const campaignId = liveCampaignId || selectedCampaignId;
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.live.tab", "Stream");
-  const streamEvents = liveEvents.slice(0, 10);
+  const [bufferViewScope, setBufferViewScope] = useState<"session" | "all">("session");
+
+  const currentCampaign = useMemo(() => {
+    return campaignList.find((c) => c.id === campaignId);
+  }, [campaignList, campaignId]);
+
+  // Session-isolated events for active campaign
+  const sessionEvents = useMemo(() => {
+    if (!campaignId) return [];
+    return liveEvents.filter((event) => {
+      const record = event && typeof event === "object" ? (event as Record<string, unknown>) : null;
+      return record?.campaign_id === campaignId;
+    });
+  }, [liveEvents, campaignId]);
+
+  // Stream uses campaign session events if a campaign is chosen, or global events if viewing all
+  const scopedEvents = useMemo(() => {
+    return campaignId ? sessionEvents : liveEvents;
+  }, [campaignId, sessionEvents, liveEvents]);
+
+  const streamEvents = useMemo(() => scopedEvents.slice(0, 10), [scopedEvents]);
+
+  const displayedBufferEvents = useMemo(() => {
+    if (!campaignId || bufferViewScope === "all") {
+      return liveEvents;
+    }
+    return sessionEvents;
+  }, [campaignId, bufferViewScope, liveEvents, sessionEvents]);
 
   return (
     <Page
@@ -3041,7 +3025,7 @@ export function LivePage() {
       <div className="panel p-4">
         <SectionHeader
           title="Campaign Event Stream"
-          action={<span className="badge">{liveEvents.length} buffered</span>}
+          action={<span className="badge">{scopedEvents.length} buffered</span>}
           description="Watch selected campaign events."
         />
         <CampaignPicker
@@ -3050,6 +3034,9 @@ export function LivePage() {
           onChange={(id) => {
             setLiveCampaignId(id);
             setSelectedCampaignId(id);
+            if (!id && liveConnected) {
+              setLiveConnected(false);
+            }
           }}
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -3070,15 +3057,49 @@ export function LivePage() {
         </div>
       </div>
       <section className="panel p-4">
-        <SectionHeader title="Current Stream" action={<span className="badge">{streamEvents.length} newest</span>} />
+        <SectionHeader
+          title="Current Stream"
+          action={
+            <div className="flex items-center gap-2">
+              <span className="badge">{streamEvents.length} newest</span>
+              {streamEvents.length > 0 && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    if (campaignId) {
+                      clearLiveEvents(campaignId);
+                    } else {
+                      clearLiveEvents();
+                    }
+                  }}
+                >
+                  Clear Stream
+                </button>
+              )}
+            </div>
+          }
+        />
         {streamEvents.length > 0 ? (
           <div className="grid gap-2">
             {streamEvents.map((event, index) => (
-              <LiveEventCard event={event} index={index} key={index} />
+              <LiveEventCard
+                event={event}
+                index={index}
+                key={(event as any)?.id || `${(event as any)?.timestamp || index}-${index}`}
+                campaigns={campaignList}
+              />
             ))}
           </div>
         ) : (
-          <EmptyState text={liveConnected ? "Connected. Waiting for events." : "Select a campaign and connect."} />
+          <EmptyState
+            text={
+              !campaignId
+                ? "Select a campaign session to stream events, or view global buffer."
+                : liveConnected
+                  ? `Connected to session '${currentCampaign?.name || campaignId}'. Waiting for incoming events...`
+                  : `Session ready for '${currentCampaign?.name || campaignId}'. Click 'Connect Stream' to begin monitoring.`
+            }
+          />
         )}
       </section>
       </>
@@ -3087,16 +3108,64 @@ export function LivePage() {
         <section className="panel p-4">
           <SectionHeader
             title="Buffered Events"
-            action={liveEvents.length > 0 ? <button className="btn" onClick={clearLiveEvents}>Clear Events</button> : <span className="badge">0 retained</span>}
+            action={
+              <div className="flex items-center gap-2">
+                {campaignId && (
+                  <div className="flex items-center gap-1 rounded bg-zinc-900/80 p-0.5 border border-zinc-800 text-xs">
+                    <button
+                      type="button"
+                      className={`px-2 py-0.5 rounded transition ${bufferViewScope === "session" ? "bg-zinc-800 text-zinc-100 font-medium" : "text-zinc-400 hover:text-zinc-200"}`}
+                      onClick={() => setBufferViewScope("session")}
+                    >
+                      Active Session ({sessionEvents.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-2 py-0.5 rounded transition ${bufferViewScope === "all" ? "bg-zinc-800 text-zinc-100 font-medium" : "text-zinc-400 hover:text-zinc-200"}`}
+                      onClick={() => setBufferViewScope("all")}
+                    >
+                      All Sessions ({liveEvents.length})
+                    </button>
+                  </div>
+                )}
+                {displayedBufferEvents.length > 0 ? (
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      if (campaignId && bufferViewScope === "session") {
+                        clearLiveEvents(campaignId);
+                      } else {
+                        clearLiveEvents();
+                      }
+                    }}
+                  >
+                    {campaignId && bufferViewScope === "session" ? "Clear Session Events" : "Clear All Events"}
+                  </button>
+                ) : (
+                  <span className="badge">0 retained</span>
+                )}
+              </div>
+            }
           />
-          {liveEvents.length > 0 ? (
+          {displayedBufferEvents.length > 0 ? (
             <div className="grid gap-2">
-              {liveEvents.map((event, index) => (
-                <LiveEventCard event={event} index={index} key={index} />
+              {displayedBufferEvents.map((event, index) => (
+                <LiveEventCard
+                  event={event}
+                  index={index}
+                  key={(event as any)?.id || `${(event as any)?.timestamp || index}-${index}`}
+                  campaigns={campaignList}
+                />
               ))}
             </div>
           ) : (
-            <EmptyState text="No events retained in the buffer." />
+            <EmptyState
+              text={
+                campaignId && bufferViewScope === "session"
+                  ? `No events retained for session '${currentCampaign?.name || campaignId}'.`
+                  : "No events retained in the buffer."
+              }
+            />
           )}
         </section>
       )}
@@ -3307,7 +3376,8 @@ function formatRate(value: unknown): string {
 
 function formatTimestamp(value: number | undefined): string {
   if (!value) return "No runtime sample yet";
-  return new Date(value * 1000).toLocaleString();
+  const ms = value > 1e11 ? value : value * 1000;
+  return new Date(ms).toLocaleString();
 }
 
 function formatBytes(value: number): string {
@@ -4162,11 +4232,21 @@ function FindingsTable({ findings }: { findings: any[] }) {
   );
 }
 
-function LiveEventCard({ event, index }: { event: unknown; index: number }) {
+function LiveEventCard({
+  event,
+  index,
+  campaigns
+}: {
+  event: unknown;
+  index: number;
+  campaigns?: Campaign[];
+}) {
   const record = event && typeof event === "object" && !Array.isArray(event) ? event as Record<string, unknown> : null;
   const type = String(record?.type ?? record?.event ?? record?.name ?? `event.${index + 1}`);
   const message = String(record?.message ?? record?.status ?? record?.detail ?? "Campaign event received.");
   const campaign = typeof record?.campaign_id === "string" ? record.campaign_id : "";
+  const matchedCampaign = campaigns?.find((c) => c.id === campaign);
+  const campaignLabel = matchedCampaign?.name ? matchedCampaign.name : (campaign ? `Campaign ${campaign.slice(0, 8)}` : "");
   const moduleId = typeof record?.module_id === "string" ? record.module_id : "";
   const created = typeof record?.timestamp === "number"
     ? formatTimestamp(record.timestamp)
@@ -4180,7 +4260,7 @@ function LiveEventCard({ event, index }: { event: unknown; index: number }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <strong>{type}</strong>
-          {campaign ? <span className="badge">Campaign {campaign.slice(0, 8)}</span> : null}
+          {campaignLabel ? <span className="badge">{campaignLabel}</span> : null}
           {moduleId ? <span className="badge">{moduleId}</span> : null}
         </div>
         <p>{message}</p>

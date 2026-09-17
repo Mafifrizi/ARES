@@ -265,6 +265,17 @@ async def _record_module_run(
             module_id=module_id,
             error=str(exc)[:120],
         )
+    try:
+        if hasattr(db, "update_campaign_status"):
+            camp = await db.get_campaign(campaign_id)
+            if camp and str(camp.get("status", "")).lower() == "created":
+                await db.update_campaign_status(campaign_id, "running")
+    except Exception as exc:
+        logger.warning(
+            "campaign_status_update_failed",
+            campaign_id=campaign_id,
+            error=str(exc)[:120],
+        )
 
 
 async def _campaign_for_report(db: AresDatabase, row: dict[str, Any]) -> Campaign:
@@ -2424,6 +2435,13 @@ async def run_module(
         if descriptor_result is not None:
             return _c_live_unavailable_response(descriptor_result)
 
+    if str(campaign.get("status", "")).lower() == "created" and hasattr(db, "update_campaign_status"):
+        try:
+            await db.update_campaign_status(body.campaign_id, "running")
+            campaign["status"] = "running"
+        except Exception as exc:
+            logger.warning("campaign_status_update_failed", campaign_id=body.campaign_id, error=str(exc)[:120])
+
     c_obj = _campaign_from_db_row(campaign)
     if not has_c_live_override and get_settings().ares_debug:
         import inspect
@@ -3708,6 +3726,13 @@ async def run_campaign_plan(
 
     if body.dry_run:
         return engine.dry_run_plan(plan, body.global_params)
+
+    if str(campaign.get("status", "")).lower() == "created" and hasattr(db, "update_campaign_status"):
+        try:
+            await db.update_campaign_status(campaign_id, "running")
+            campaign["status"] = "running"
+        except Exception as exc:
+            logger.warning("campaign_status_update_failed", campaign_id=campaign_id, error=str(exc)[:120])
 
     idempotency_key = _require_c_live_idempotency_key(request)
     children = _prepare_c_live_plan_children(plan, body.global_params)

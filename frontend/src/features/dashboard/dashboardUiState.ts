@@ -38,7 +38,8 @@ export interface DashboardUiState {
   liveConnected: boolean;
   setLiveConnected: Dispatch<SetStateAction<boolean>>;
   liveEvents: unknown[];
-  clearLiveEvents: () => void;
+  pushLiveEvent: (event: unknown) => void;
+  clearLiveEvents: (campaignId?: string) => void;
   campaigns: Campaign[];
   campaignsLoading: boolean;
   campaignsError: unknown;
