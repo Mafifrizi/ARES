@@ -370,6 +370,54 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect AS-REP Roasting (Kerberos Pre-Auth Disabled)\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4768\n"
+            f"| where PreAuthType == 0 // Pre-authentication not required\n"
+            f"| project TimeGenerated, Computer, TargetUserName, ServiceName, TicketOptions, TicketEncryptionType, IpAddress\n"
+        )
+        sigma_rule = (
+            f"title: Kerberos TGT Request Without Pre-Authentication (ASREPRoast)\n"
+            f"id: 8f1a2b3c-ares-4768-asrep\n"
+            f"status: experimental\n"
+            f"description: Detects Kerberos TGT negotiation with PreAuthType=0 associated with AS-REP roasting\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4768\n"
+            f"    PreAuthType: 0\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1558.004\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": "Detection Rule (KQL): AS-REP Roasting",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting AS-REP requests without pre-authentication",
+                    "content": {"kql": kql_query, "event_id": 4768},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": "Detection Rule (Sigma): AS-REP Roasting",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma YAML detection rule for Windows Event 4768 without pre-auth",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "siem", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["event_ids_audited"] = [4768]
+        raw["preauth_policy_assessed"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

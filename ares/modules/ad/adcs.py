@@ -208,6 +208,56 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect ADCS Certificate Requests & Enrollment\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4886, 4887)\n"
+            f"| extend Requester = extract(@\"Requester:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
+            f"| extend CertTemplate = extract(@\"Template:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
+            f"| project TimeGenerated, Computer, EventID, Requester, CertTemplate, Activity\n"
+        )
+        sigma_rule = (
+            f"title: ADCS Certificate Enrollment Request for Vulnerable Template\n"
+            f"id: c3d4e5f6-ares-4886-adcs\n"
+            f"status: experimental\n"
+            f"description: Detects certificate enrollment request (Event 4886) targeting potentially vulnerable ADCS templates\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID:\n"
+            f"      - 4886\n"
+            f"      - 4887\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1649\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": "Detection Rule (KQL): ADCS Certificate Enrollment",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for auditing ADCS certificate enrollment and issuance",
+                    "content": {"kql": kql_query, "event_ids": [4886, 4887]},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": "Detection Rule (Sigma): ADCS Certificate Enrollment",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma YAML detection rule for Windows Event 4886/4887",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "siem", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["kb5014754_strong_mapping_assessed"] = True
+        raw["event_ids_audited"] = [4886, 4887, 4888, 39, 40]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

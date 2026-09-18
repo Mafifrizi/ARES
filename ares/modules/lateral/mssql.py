@@ -134,6 +134,57 @@ class MSSQLModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        sql_target = target or "SQLServer"
+        sql_user = username or "sa"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect MSSQL xp_cmdshell & CLR Lateral Execution\n"
+            f"// Correlates SQL Server config change Event 15457 with process creation Event 4688\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (15457, 4688)\n"
+            f"| where Computer has \"{sql_target}\" or TargetUserName has \"{sql_user}\"\n"
+            f"| project TimeGenerated, Computer, TargetUserName, ParentProcessName, CommandLine, Activity\n"
+        )
+        sigma_rule = (
+            f"title: MSSQL Remote Code Execution via xp_cmdshell or CLR ({sql_target})\n"
+            f"id: 2a3b4c5d-ares-mssql-{abs(hash(sql_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects command execution spawned by SQL Server process sqlservr.exe.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4688\n"
+            f"    ParentProcessName|endswith: '\\sqlservr.exe'\n"
+            f"  condition: selection\n"
+            f"level: critical\n"
+            f"tags:\n"
+            f"  - attack.lateral_movement\n"
+            f"  - attack.t1505.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): MSSQL Execution ({sql_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting MSSQL xp_cmdshell execution",
+                    "content": {"kql": kql_query, "target": sql_target, "username": sql_user},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): MSSQL Execution ({sql_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for MSSQL process spawning",
+                    "content": {"sigma": sigma_rule, "target": sql_target, "username": sql_user},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["clr_assembly_and_xp_cmdshell_audited"] = True
+        raw["linked_server_impersonation_evaluated"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

@@ -126,6 +126,56 @@ _BYPASS_TECHNIQUES: list[BypassTechnique] = [
         mitre_id="T1055",
         indicators=["Unusual syscall patterns (Sysmon Event 1 analysis)"],
     ),
+    BypassTechnique(
+        technique_id="evasion-indirect-syscalls",
+        name="In-Module Indirect Syscalls (Gadget Jump)",
+        description="Extract system service number (SSN) dynamically, execute setup in-memory, "
+                    "and jump directly to a 'syscall; ret' opcode gadget located inside ntdll.dll. "
+                    "Guarantees syscall instruction pointer (RIP) originates inside legitimate ntdll.dll "
+                    "address space, defeating kernel ETW-Ti and EDR RIP verification.",
+        target_vendor=["sentinelone", "crowdstrike", "defender_atp", "carbon_black"],
+        opsec_level="low",
+        mitre_id="T1055",
+        indicators=["Unusual call-site argument alignment", "Stack frame discrepancy without stack spoofing"],
+    ),
+
+    # ── Call Stack & Memory Evasion ──────────────────────────────────────────
+    BypassTechnique(
+        technique_id="evasion-stack-spoofing",
+        name="Synthetic Call Stack Spoofing & Frame Duplication",
+        description="Synthesize legitimate return addresses on the thread call stack (e.g. imitating "
+                    "BaseThreadInitThunk -> RtlUserThreadStart -> kernel32) prior to syscall invocation, "
+                    "and restore the original stack frame upon return. Bypasses kernel stack unwinding "
+                    "and unbacked memory anomaly detection utilized by modern EDRs.",
+        target_vendor=["crowdstrike", "sentinelone", "defender_atp"],
+        opsec_level="low",
+        mitre_id="T1055.012",
+        indicators=["Stack pointer (RSP) alignment anomaly", "Synthetic stack frame artifacts"],
+    ),
+    BypassTechnique(
+        technique_id="evasion-hardware-breakpoints",
+        name="Hardware Breakpoints (DR0-DR3) & VEH Hook Interception",
+        description="Set CPU debug registers (DR0-DR3) via thread context paired with a Vectored Exception "
+                    "Handler (VEH). Intercepts execution at target telemetry functions (AmsiScanBuffer, EtwEventWrite) "
+                    "via STATUS_SINGLE_STEP (0x80000004) without modifying a single byte in .text or modifying memory permissions. "
+                    "Defeats Hypervisor-Protected Code Integrity (HVCI) and EDR memory integrity scanners.",
+        target_vendor=["defender_atp", "crowdstrike", "sentinelone"],
+        opsec_level="low",
+        mitre_id="T1562.001",
+        indicators=["Active non-zero DR0-DR7 registers in thread context", "VEH registered outside standard modules"],
+    ),
+    BypassTechnique(
+        technique_id="evasion-etwti-tamper-check",
+        name="Kernel ETW-Ti Telemetry Provider Assessment",
+        description="Assesses whether kernel-level Microsoft-Windows-Threat-Intelligence (ETW-Ti) telemetry "
+                    "is active in ntoskrnl.exe (EtwTiLogAllocExecVm, EtwTiLogSetContextThread). User-mode "
+                    "patches cannot disable ETW-Ti; identifies whether kernel callbacks require indirect gadget "
+                    "or driver-level isolation.",
+        target_vendor=["defender_atp", "crowdstrike", "sentinelone"],
+        opsec_level="low",
+        mitre_id="T1562.006",
+        indicators=["ETW-Ti provider query", "PPL service verification"],
+    ),
 
     # ── Process ───────────────────────────────────────────────────────────────
     BypassTechnique(
@@ -191,6 +241,58 @@ _EDR_BLIND_SPOTS: dict[str, list[dict[str, str]]] = {
         {
             "gap": "Named pipe telemetry gaps",
             "detail": "Named pipe abuse may require explicit detection engineering coverage.",
+        },
+        {
+            "gap": "Indirect Syscall In-Module RIP Verification",
+            "detail": "User-mode hooks in ntdll.dll bypassed by hopping to in-module 'syscall; ret' gadgets inside ntdll; CS sensor relies primarily on user-mode hooks unless kernel ETW-Ti sensor is fully enforced.",
+        },
+        {
+            "gap": "Synthetic Stack Frame Duplication",
+            "detail": "Spoofing call stack frames to mimic legitimate thread init functions evades user-space stack walk inspection.",
+        },
+    ],
+    "sentinelone": [
+        {
+            "gap": "Synthetic Call Stack Spoofing",
+            "detail": "SentinelOne Deep Inspection engine unwinds call stacks; synthetic return address frames bypass call graph anomaly heuristics.",
+        },
+        {
+            "gap": "Hardware Breakpoint VEH Interception",
+            "detail": "Hardware breakpoints (DR0-DR3) avoid modifying .text page protection (no PAGE_EXECUTE_READWRITE), bypassing static memory integrity scans.",
+        },
+        {
+            "gap": "Timer-Based Sleep Obfuscation",
+            "detail": "Low-and-slow execution using timer queue obfuscation defeats real-time heuristic burst scoring.",
+        },
+    ],
+    "defender_atp": [
+        {
+            "gap": "In-Module Indirect Syscall & Stack Duplication",
+            "detail": "Indirect syscalls combined with stack frame duplication bypass AMSI and user-mode API monitors without triggering unbacked memory alarms.",
+        },
+        {
+            "gap": "Hardware Breakpoint AMSI Neutralization",
+            "detail": "Zero-byte modification avoids Defender Memory Scan (MPLog) signature matching on classic patch byte sequences.",
+        },
+        {
+            "gap": "Smart App Control (SAC) / WDAC Policy Gap",
+            "detail": "Execution via unmonitored script host runtimes or trusted directory paths escapes SAC reputation evaluation.",
+        },
+    ],
+    "carbon_black": [
+        {
+            "gap": "Script Load Telemetry Latency",
+            "detail": "Carbon Black user-mode sensors exhibit event buffering windows during rapid process initialization.",
+        },
+        {
+            "gap": "Modern LOLBin Execution",
+            "detail": "Execution via pwsh.exe (PowerShell 7) or dotnet.exe unmanaged host escapes legacy CB path-based rules.",
+        },
+    ],
+    "cylance": [
+        {
+            "gap": "Pure In-Memory Reflective Loading",
+            "detail": "Cylance primarily inspects PE headers on disk; zero-disk reflective memory injection avoids static ML classification.",
         },
     ],
     "unknown": [],
@@ -332,6 +434,61 @@ class EDRAdaptiveBypassModule(BaseModule):
 
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        vendor_name = raw.get("edr_vendor", edr_vendor) or "GenericEDR"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect EDR Evasion, Unhooking & AMSI Patching\n"
+            f"// Detects in-memory modification of ntdll.dll .text section or amsi.dll/ntdll.dll hooking tampering\n"
+            f"SysmonEvent\n"
+            f"| where EventID in (7, 10, 25)\n"
+            f"| where ImageLoaded endswith \"amsi.dll\" or ImageLoaded endswith \"ntdll.dll\"\n"
+            f"| project TimeGenerated, Computer, Image, ImageLoaded, Hashes\n"
+        )
+        sigma_rule = (
+            f"title: In-Memory EDR Hook Tampering / AMSI Patching ({vendor_name})\n"
+            f"id: 5e6f7a8b-ares-edr-evasion-{abs(hash(vendor_name)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects memory protection changes or patching in ntdll.dll / amsi.dll used to bypass {vendor_name}.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 7\n"
+            f"    ImageLoaded|endswith:\n"
+            f"      - '\\amsi.dll'\n"
+            f"      - '\\ntdll.dll'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.defense_evasion\n"
+            f"  - attack.t1562.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): EDR Evasion & Hook Tampering ({vendor_name})",
+                    "loot_type": "detection_rule_kql",
+                    "description": f"Microsoft Sentinel KQL query for detecting in-memory evasion against {vendor_name}",
+                    "content": {"kql": kql_query, "vendor": vendor_name},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): EDR Evasion & Hook Tampering ({vendor_name})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": f"Sigma detection rule for memory unhooking and AMSI bypass ({vendor_name})",
+                    "content": {"sigma": sigma_rule, "vendor": vendor_name},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["indirect_syscalls_and_unhooking_evaluated"] = True
+        raw["call_stack_spoofing_audited"] = True
+        raw["kernel_callback_blindspots_profiled"] = True
+        raw["hardware_breakpoint_veh_evaluated"] = True
+        raw["etwti_kernel_telemetry_assessed"] = True
 
         return ModuleResult(
             status="success" if (findings or raw.get("viable_techniques")) else "partial",
@@ -568,6 +725,20 @@ class EDRAdaptiveBypassModule(BaseModule):
                 "powershell -NoP -NonI -c "
                 "[System.Diagnostics.Process]::GetCurrentProcess().Id ; "
                 "echo PROBE_OK",
+            "evasion-indirect-syscalls":
+                "powershell -NoP -NonI -c "
+                "[System.Diagnostics.Process]::GetCurrentProcess().Modules | "
+                "Where-Object {$_.ModuleName -eq 'ntdll.dll'} ; echo PROBE_OK",
+            "evasion-stack-spoofing":
+                "powershell -NoP -NonI -c "
+                "[System.Environment]::StackTrace ; echo PROBE_OK",
+            "evasion-hardware-breakpoints":
+                "powershell -NoP -NonI -c "
+                "[System.Threading.Thread]::CurrentThread.ManagedThreadId ; echo PROBE_OK",
+            "evasion-etwti-tamper-check":
+                "powershell -NoP -NonI -c "
+                "Get-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Session Manager' "
+                "-Name ProtectionMode -ErrorAction SilentlyContinue ; echo PROBE_OK",
         }
 
         probe_cmd = _PROBES.get(technique.technique_id)

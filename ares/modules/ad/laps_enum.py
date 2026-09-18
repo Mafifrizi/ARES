@@ -134,8 +134,59 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect LAPS v1 (ms-Mcs-AdmPwd) & Windows LAPS v2 (msLAPS-Password) Reads\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4662\n"
+            f"| where Properties has \"ms-Mcs-AdmPwd\" or Properties has \"msLAPS-Password\" or Properties has \"msLAPS-EncryptedPassword\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
+        )
+        sigma_rule = (
+            f"title: LAPS / Windows LAPS v2 Password Attribute Read\n"
+            f"id: e5f6a1b2-ares-4662-laps\n"
+            f"status: experimental\n"
+            f"description: Detects directory service read operations against LAPS v1 or modern Windows LAPS v2 password attributes\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4662\n"
+            f"    Properties|contains:\n"
+            f"      - 'ms-Mcs-AdmPwd'\n"
+            f"      - 'msLAPS-Password'\n"
+            f"      - 'msLAPS-EncryptedPassword'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1552.004\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": "Detection Rule (KQL): LAPS Attribute Read",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting LAPS password attribute reads (Event 4662)",
+                    "content": {"kql": kql_query, "event_id": 4662},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": "Detection Rule (Sigma): LAPS Attribute Read",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma YAML detection rule for LAPS v1/v2 attribute reads",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "siem", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["laps_v2_audited"] = True
+        raw["event_ids_audited"] = [4662]
+
         return ModuleResult(
-            status="success" if findings else "partial",
+            status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

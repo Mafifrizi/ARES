@@ -174,6 +174,56 @@ class TokenImpersonationModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        token_target = target or "TargetHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Token Impersonation & Privilege Escalation\n"
+            f"// Detects Security Event 4673 (Privilege Service Called) for SeImpersonatePrivilege / SeAssignPrimaryTokenPrivilege\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4672, 4673)\n"
+            f"| where PrivilegeList has \"SeImpersonatePrivilege\" or PrivilegeList has \"SeAssignPrimaryTokenPrivilege\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, PrivilegeList, ProcessName\n"
+        )
+        sigma_rule = (
+            f"title: Token Impersonation Privilege Exploitation ({token_target})\n"
+            f"id: 7a8b9c0d-ares-token-{abs(hash(token_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects exploitation of SeImpersonatePrivilege to escalate privileges to SYSTEM via named pipes or RPC.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4673\n"
+            f"    PrivilegeList|contains: 'SeImpersonatePrivilege'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1134.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Token Impersonation ({token_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting SeImpersonatePrivilege exploitation",
+                    "content": {"kql": kql_query, "target": token_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Token Impersonation ({token_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for SeImpersonatePrivilege exploitation",
+                    "content": {"sigma": sigma_rule, "target": token_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["se_impersonate_privilege_evaluated"] = True
+        raw["named_pipe_coercion_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

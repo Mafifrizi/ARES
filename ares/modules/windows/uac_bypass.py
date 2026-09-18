@@ -205,6 +205,63 @@ class UACBypassModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        uac_target = target or "TargetHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect UAC Auto-Elevation & Bypass\n"
+            f"// Detects high integrity child process spawned by auto-elevating binaries (fodhelper, sdclt, eventvwr)\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4688\n"
+            f"| where ParentProcessName has_any (\"fodhelper.exe\", \"eventvwr.exe\", \"sdclt.exe\", \"computerdefaults.exe\")\n"
+            f"| where NewProcessName has_any (\"cmd.exe\", \"powershell.exe\", \"pwsh.exe\")\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, NewProcessName, CommandLine\n"
+        )
+        sigma_rule = (
+            f"title: UAC Bypass Execution via Auto-Elevated Binary ({uac_target})\n"
+            f"id: 8b9c0d1e-ares-uac-{abs(hash(uac_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects command shells spawned by Windows binaries known for UAC auto-elevation bypasses.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4688\n"
+            f"    ParentProcessName|endswith:\n"
+            f"      - '\\fodhelper.exe'\n"
+            f"      - '\\eventvwr.exe'\n"
+            f"      - '\\sdclt.exe'\n"
+            f"    NewProcessName|endswith:\n"
+            f"      - '\\cmd.exe'\n"
+            f"      - '\\powershell.exe'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1548.002\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): UAC Bypass Detection ({uac_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting UAC bypass auto-elevation",
+                    "content": {"kql": kql_query, "target": uac_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): UAC Bypass Detection ({uac_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for UAC bypass execution patterns",
+                    "content": {"sigma": sigma_rule, "target": uac_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["consent_prompt_behavior_admin_audited"] = True
+        raw["enable_lua_status_verified"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

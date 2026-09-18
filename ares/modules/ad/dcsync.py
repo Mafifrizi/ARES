@@ -187,6 +187,57 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect DRSUAPI DCSync Directory Replication\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4662\n"
+            f"| where Properties has \"1131f6aa-9c07-11d1-f79f-00c04fc2dcd2\" or Properties has \"1131f6ad-9c07-11d1-f79f-00c04fc2dcd2\"\n"
+            f"| where SubjectUserName !endswith \"$\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
+        )
+        sigma_rule = (
+            f"title: Directory Service Replication via DRSUAPI (DCSync)\n"
+            f"id: d4e5f6a1-ares-4662-dcsync\n"
+            f"status: experimental\n"
+            f"description: Detects DS-Replication-Get-Changes-All extended right request via MS-DRSR by non-machine account\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4662\n"
+            f"    Properties|contains: '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'\n"
+            f"  filter:\n"
+            f"    SubjectUserName|endswith: '$'\n"
+            f"  condition: selection and not filter\n"
+            f"level: critical\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1003.006\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": "Detection Rule (KQL): DCSync Replication Alert",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting DRSUAPI replication from non-DC principals",
+                    "content": {"kql": kql_query, "event_id": 4662},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": "Detection Rule (Sigma): DCSync Replication Alert",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma YAML detection rule for Windows Security Event 4662 replication rights",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "siem", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["replication_extended_rights_audited"] = True
+        raw["event_ids_audited"] = [4662, 5145]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

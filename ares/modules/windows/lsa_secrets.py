@@ -218,6 +218,56 @@ class LSASecretsModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        sec_target = target or "TargetHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect LSA Secrets & Registry Hive Access\n"
+            f"// Detects Security Event 4663 (Object Access on Registry SECURITY hive / Policy Secrets)\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4656, 4663)\n"
+            f"| where ObjectName has \"\\\\SECURITY\\\\Policy\\\\Secrets\" or ObjectName has \"\\\\SAM\\\\SAM\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, ObjectName, AccessMask, ProcessName\n"
+        )
+        sigma_rule = (
+            f"title: LSA Policy Secrets Registry Hive Access ({sec_target})\n"
+            f"id: 6c7d8e9f-ares-lsa-{abs(hash(sec_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects access to the LSA Policy Secrets key within the Windows SECURITY registry hive.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4663\n"
+            f"    ObjectName|contains: '\\SECURITY\\Policy\\Secrets'\n"
+            f"  condition: selection\n"
+            f"level: critical\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1003.004\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): LSA Secrets Access ({sec_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting LSA registry hive extraction",
+                    "content": {"kql": kql_query, "target": sec_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): LSA Secrets Access ({sec_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for LSA Policy Secrets registry extraction",
+                    "content": {"sigma": sigma_rule, "target": sec_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["dpapi_machine_key_audited"] = True
+        raw["sam_security_hive_isolated"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

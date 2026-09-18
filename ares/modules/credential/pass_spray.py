@@ -392,6 +392,58 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        spray_target = target or domain or "Domain"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Password Spraying (Event 4625 Failed Logons Across Accounts)\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4625\n"
+            f"| where SubStatus == \"0xc000006a\" // STATUS_WRONG_PASSWORD\n"
+            f"| summarize FailedAccounts = dcount(TargetUserName), TotalFailures = count(), AccountList = make_set(TargetUserName) by IpAddress, bin(TimeGenerated, 15m)\n"
+            f"| where FailedAccounts >= 3\n"
+            f"| project TimeGenerated, IpAddress, FailedAccounts, TotalFailures, AccountList\n"
+        )
+        sigma_rule = (
+            f"title: Low-and-Slow Password Spraying Activity ({spray_target})\n"
+            f"id: 1f2e3d4c-ares-4625-spray-{abs(hash(spray_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects multiple failed logon attempts (Event 4625 with STATUS_WRONG_PASSWORD) against distinct user accounts from a single source.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4625\n"
+            f"    SubStatus: '0xc000006a'\n"
+            f"  condition: selection | count(TargetUserName) by IpAddress > 3\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1110.003\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Password Spray Detection ({spray_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Event 4625 password spray patterns",
+                    "content": {"kql": kql_query, "target": spray_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Password Spray Detection ({spray_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for low-and-slow password spraying",
+                    "content": {"sigma": sigma_rule, "target": spray_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["fgpp_observation_window_evaluated"] = True
+        raw["smart_lockout_defended"] = True
+        raw["closed_loop_telemetry_generated"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

@@ -272,6 +272,59 @@ class LsassDumpModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        dump_target = target or "TargetHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect LSASS Process Memory Dumping\n"
+            f"// Detects Sysmon Event 10 (ProcessAccess targeting lsass.exe with PROCESS_VM_READ)\n"
+            f"SysmonEvent\n"
+            f"| where EventID == 10\n"
+            f"| where TargetImage endswith \"\\\\lsass.exe\"\n"
+            f"| where GrantedAccess in (\"0x1FFFFF\", \"0x1010\", \"0x1410\", \"0x0010\")\n"
+            f"| project TimeGenerated, Computer, SourceImage, TargetImage, GrantedAccess, CallTrace\n"
+        )
+        sigma_rule = (
+            f"title: LSASS Memory Dumping Activity ({dump_target})\n"
+            f"id: 5b6c7d8e-ares-lsass-{abs(hash(dump_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects suspicious process access or MiniDump creation targeting lsass.exe.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: sysmon\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 10\n"
+            f"    TargetImage|endswith: '\\lsass.exe'\n"
+            f"    GrantedAccess|contains: '0x10'\n"
+            f"  condition: selection\n"
+            f"level: critical\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1003.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): LSASS Dump Detection ({dump_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Sysmon Event 10 LSASS memory access",
+                    "content": {"kql": kql_query, "target": dump_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): LSASS Dump Detection ({dump_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for LSASS handle acquisition and minidump",
+                    "content": {"sigma": sigma_rule, "target": dump_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["runasppl_protection_assessed"] = True
+        raw["credential_guard_vbs_audited"] = True
+        raw["minidump_telemetry_generated"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

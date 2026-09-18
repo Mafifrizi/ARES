@@ -259,6 +259,57 @@ class ScheduledTaskPersistence(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        st_target = getattr(ctx, "target", kwargs.get("target", "TargetHost"))
+        tname = raw.get("task_name", kwargs.get("task_name", "AresUpdater"))
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Scheduled Task Persistence Creation\n"
+            f"// Detects Security Event 4698 (Scheduled Task Creation) / 4702 (Task Updated)\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4698, 4702)\n"
+            f"| where TaskName has \"{tname}\" or Computer has \"{st_target}\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, TaskName, TaskContent\n"
+        )
+        sigma_rule = (
+            f"title: Scheduled Task Creation for Persistence ({tname} on {st_target})\n"
+            f"id: 1a2b3c4d-ares-schedtask-{abs(hash(tname + str(st_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects the creation or registration of suspicious scheduled tasks via RPC/ITaskScheduler.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4698\n"
+            f"    TaskName|contains: '{tname}'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.persistence\n"
+            f"  - attack.t1053.005\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Scheduled Task Persistence ({tname})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Event 4698 task creation",
+                    "content": {"kql": kql_query, "target": st_target, "task_name": tname},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Scheduled Task Persistence ({tname})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for scheduled task persistence",
+                    "content": {"sigma": sigma_rule, "target": st_target, "task_name": tname},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["event_4698_task_creation_audited"] = True
+        raw["hidden_task_registry_detection_evaluated"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

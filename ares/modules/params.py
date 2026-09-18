@@ -360,6 +360,28 @@ class GhostForgeParams(DomainAuthParams):
         required=False,
         default=True,
     )
+    target_technique: str = param(
+        "Adversary validation vector: auto, esc1, esc6, esc13, shadow_cred",
+        required=False,
+        default="auto",
+        max_length=64,
+    )
+    enforcement_mode_check: bool = param(
+        "Inspect KDC StrongCertificateBindingEnforcement status (KB5014754)",
+        required=False,
+        default=True,
+    )
+    policy_oid: str | None = param(
+        "Certificate Policy OID for ESC13 Issuance Policy to privileged group mapping",
+        required=False,
+        default=None,
+        max_length=128,
+    )
+    generate_detection_rules: bool = param(
+        "Automatically synthesize Microsoft Sentinel KQL and Sigma detection rules in loot",
+        required=False,
+        default=True,
+    )
 
 
 class CoerceParams(DomainAuthParams):
@@ -1151,6 +1173,28 @@ class PhantomTokenParams(ModuleParams):
     )
     evaluate_cap_bypass: bool = param(
         "Evaluate Conditional Access Policy (CAP) and MFA bypass feasibility",
+        required=False,
+        default=True,
+    )
+    assessment_mode: str = param(
+        "Evaluation vector: auto, workload_identity, prt_enclave, cae_probe",
+        required=False,
+        default="auto",
+        max_length=64,
+    )
+    federation_issuer: str | None = param(
+        "OIDC federation issuer for Workload Identity testing (e.g. https://token.actions.githubusercontent.com)",
+        required=False,
+        default=None,
+        max_length=256,
+    )
+    dpop_enforced: bool = param(
+        "Verify RFC 9449 Demonstrating Proof-of-Possession asymmetric key constraints",
+        required=False,
+        default=False,
+    )
+    generate_detection_rules: bool = param(
+        "Automatically synthesize Microsoft Sentinel KQL and Sigma detection rules in loot",
         required=False,
         default=True,
     )

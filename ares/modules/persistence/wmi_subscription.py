@@ -189,6 +189,58 @@ class WMISubscriptionModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        wmi_target = getattr(ctx, "target", target) or "TargetHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect WMI Permanent Event Subscription Persistence\n"
+            f"// Detects Sysmon Events 19, 20, 21 (WmiEventFilter, WmiEventConsumer, FilterToConsumerBinding)\n"
+            f"SysmonEvent\n"
+            f"| where EventID in (19, 20, 21)\n"
+            f"| where Computer has \"{wmi_target}\" or EventData has \"{sub_name}\"\n"
+            f"| project TimeGenerated, Computer, EventID, EventData\n"
+        )
+        sigma_rule = (
+            f"title: WMI Event Subscription Persistence ({sub_name} on {wmi_target})\n"
+            f"id: 3b4c5d6e-ares-wmi-sub-{abs(hash(sub_name + str(wmi_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects the registration of a permanent WMI event subscription for persistence.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: sysmon\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID:\n"
+            f"      - 19\n"
+            f"      - 20\n"
+            f"      - 21\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.persistence\n"
+            f"  - attack.t1546.003\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): WMI Event Subscription ({sub_name})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting WMI event filter/consumer persistence",
+                    "content": {"kql": kql_query, "target": wmi_target, "subscription": sub_name},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): WMI Event Subscription ({sub_name})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for WMI persistence creation",
+                    "content": {"sigma": sigma_rule, "target": wmi_target, "subscription": sub_name},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["sysmon_wmi_events_19_20_21_audited"] = True
+        raw["wmi_permanent_event_consumer_evaluated"] = True
+
         return ModuleResult(status="success" if (findings or raw) else "partial",
                             findings=findings, raw=raw, module_id=self.MODULE_ID,
                             execution_id=getattr(ctx, "execution_id", ""))

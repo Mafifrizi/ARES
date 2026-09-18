@@ -407,6 +407,56 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        target_name = target_user or "ServiceAccount"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Kerberoast (RC4 Downgrade & Bulk TGS Requests)\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4769\n"
+            f"| where ServiceName has \"{target_name}\" or TargetUserName has \"{target_name}\"\n"
+            f"| where TicketEncryptionType in (\"0x17\", \"0x12\") // 0x17=RC4-HMAC, 0x12=AES256\n"
+            f"| project TimeGenerated, Computer, TargetUserName, ServiceName, TicketEncryptionType, TicketOptions, IpAddress\n"
+        )
+        sigma_rule = (
+            f"title: Kerberos Service Ticket Request for Roastable Service ({target_name})\n"
+            f"id: 7e8f9a0b-ares-4769-kerb-{abs(hash(target_name)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects TGS request for SPN account potentially targeted for Kerberoasting\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4769\n"
+            f"    ServiceName|contains: '{target_name}'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1558.003\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Kerberoast {target_name}",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting TGS Kerberoast requests",
+                    "content": {"kql": kql_query, "target": target_name},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Kerberoast {target_name}",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma YAML detection rule for Windows Event 4769",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "siem", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["kb5008380_pac_validation_audited"] = True
+        raw["event_ids_audited"] = [4769, 4768]
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

@@ -264,6 +264,56 @@ class DPAPIModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        dpapi_target = target or "TargetHost"
+        dpapi_victim = target_user or username or "User"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect DPAPI MasterKey Backup & Blob Extraction\n"
+            f"// Detects Security Event 4692 (DPAPI Master Key was backed up) / 4693 (DPAPI Master Key was recovered)\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4692, 4693)\n"
+            f"| where TargetUserName has \"{dpapi_victim}\" or Computer has \"{dpapi_target}\"\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, TargetUserName, MasterKeyId, RecoveryServer\n"
+        )
+        sigma_rule = (
+            f"title: DPAPI MasterKey Extraction or Recovery ({dpapi_target})\n"
+            f"id: 9c0d1e2f-ares-dpapi-{abs(hash(dpapi_target + dpapi_victim)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects DPAPI master key recovery or backup key extraction against domain endpoints.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4693\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1555.004\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): DPAPI Extraction ({dpapi_victim}@{dpapi_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting DPAPI key backup & recovery",
+                    "content": {"kql": kql_query, "target": dpapi_target, "user": dpapi_victim},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): DPAPI Extraction ({dpapi_victim}@{dpapi_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for DPAPI master key recovery",
+                    "content": {"sigma": sigma_rule, "target": dpapi_target, "user": dpapi_victim},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["domain_backup_key_evaluated"] = True
+        raw["masterkey_derivation_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

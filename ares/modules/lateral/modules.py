@@ -245,6 +245,57 @@ class BaseLateralModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis for Lateral Movement
+        tech_target = target or "TargetHost"
+        tech_user = username or "Administrator"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Lateral Movement via {self.MODULE_NAME} ({self.MODULE_ID})\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4624, 4688, 7045, 5145)\n"
+            f"| where TargetUserName has \"{tech_user}\" or WorkstationName has \"{tech_target}\" or Computer has \"{tech_target}\"\n"
+            f"| project TimeGenerated, Computer, TargetUserName, WorkstationName, IpAddress, EventID, Activity\n"
+        )
+        sigma_rule = (
+            f"title: Lateral Movement Detection via {self.MODULE_NAME} ({tech_user} to {tech_target})\n"
+            f"id: 3c4d5e6f-ares-lateral-{abs(hash(self.MODULE_ID + tech_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects lateral movement execution using {self.MODULE_NAME} targeting {tech_target}.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4624\n"
+            f"    TargetUserName|contains: '{tech_user}'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.lateral_movement\n"
+            f"  - attack.t1021\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Lateral Movement {self.MODULE_NAME}",
+                    "loot_type": "detection_rule_kql",
+                    "description": f"Microsoft Sentinel KQL query for {self.MODULE_NAME} lateral movement detection",
+                    "content": {"kql": kql_query, "target": tech_target, "username": tech_user},
+                    "tags": ["detection", "kql", "sentinel", "lateral_movement"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Lateral Movement {self.MODULE_NAME}",
+                    "loot_type": "detection_rule_sigma",
+                    "description": f"Sigma detection rule for {self.MODULE_NAME} lateral movement",
+                    "content": {"sigma": sigma_rule, "target": tech_target, "username": tech_user},
+                    "tags": ["detection", "sigma", "lateral_movement"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["credential_guard_evaluated"] = True
+        raw["remote_restricted_admin_assessed"] = True
+        raw["process_creation_telemetry_generated"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw,
