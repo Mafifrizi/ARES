@@ -196,6 +196,57 @@ class PivotModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        pivot_host = target or "PivotHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect SSH Tunneling & SOCKS Proxy Pivoting\n"
+            f"// Monitors Linux auditd / Syslog for sshd port forwarding or ssh client running with -D or -L\n"
+            f"Syslog\n"
+            f"| where ProcessName in~ (\"sshd\", \"ssh\") and (SyslogMessage has \"forwarding\" or SyslogMessage has \"port 1080\" or SyslogMessage has \"direct-tcpip\")\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: SSH Dynamic Port Forwarding / SOCKS Pivot Established ({pivot_host})\n"
+            f"id: 0d1e2f3a-ares-sshpivot-{abs(hash(str(pivot_host))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects SSH client or daemon establishing dynamic port forwarding / internal network proxying.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: sshd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    CommandLine|contains:\n"
+            f"      - ' -D '\n"
+            f"      - ' -R '\n"
+            f"      - ' -L '\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.command_and_control\n"
+            f"  - attack.t1090.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): SSH Tunneling Pivot ({pivot_host})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting SSH dynamic port forwarding and pivoting",
+                    "content": {"kql": kql_query, "target": pivot_host},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): SSH Tunneling Pivot ({pivot_host})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for SSH dynamic port forwarding and pivoting",
+                    "content": {"sigma": sigma_rule, "target": pivot_host},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["ssh_tunnel_integrity_evaluated"] = True
+        raw["internal_routing_pivot_mapped"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

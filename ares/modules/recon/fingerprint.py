@@ -141,6 +141,55 @@ class FingerprintModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Security Product & EDR Fingerprinting Enumeration\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where EventID == 4688\n"
+            "| extend Cmd = tolower(CommandLine)\n"
+            "| where Cmd has_any (\"csagent\", \"cylance\", \"sentinelone\", \"tanium\", \"carbonblack\", \"msmpeng\", \"cbdefense\")\n"
+            "   or (Cmd has_any (\"sc query\", \"get-service\", \"tasklist\") and Cmd has_any (\"security\", \"antivirus\", \"edr\"))\n"
+            "| project TimeGenerated, Computer, Account, Process, CommandLine, ParentProcessName"
+        )
+        sigma_rule = (
+            "title: Security Software and EDR Vendor Enumeration\n"
+            "id: c9d0e1f2-a3b4-45c6-d7e8-f9a0b1c2d3e4\n"
+            "status: experimental\n"
+            "description: Detects command-line discovery targeting installed antivirus, EDR, and monitoring agents\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1518/001/\n"
+            "    - https://attack.mitre.org/techniques/T1082/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "    product: windows\n"
+            "detection:\n"
+            "    selection:\n"
+            "        CommandLine|contains:\n"
+            "            - 'csagent'\n"
+            "            - 'cylance'\n"
+            "            - 'sentinelone'\n"
+            "            - 'tanium'\n"
+            "            - 'carbonblack'\n"
+            "            - 'msmpeng'\n"
+            "    condition: selection\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.discovery\n"
+            "    - attack.t1518.001\n"
+            "    - attack.t1082"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        edrs = raw.get("edr_vendors", [])
+        raw["edr_agents_identified"] = bool(edrs)
+        raw["active_edr_count"] = len(edrs)
+        raw["high_detection_risk_environment"] = bool(edrs) or str(raw.get("detection_risk", "")).lower() == "high"
+        raw["endpoint_fingerprint_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

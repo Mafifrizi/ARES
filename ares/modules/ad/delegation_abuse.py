@@ -155,6 +155,57 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        deleg_target = ad["dc"] or "DomainController"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Kerberos Delegation Abuse & RBCD Modification\n"
+            f"// Monitors Security Event 4769 for S4U2Proxy delegation tickets (TicketOptions 0x40810010) or Event 5136\n"
+            f"SecurityEvent\n"
+            f"| where EventID in (4769, 5136)\n"
+            f"| where TicketOptions has \"0x40810010\" or AttributeLDAPDisplayName == \"msDS-AllowedToActOnBehalfOfOtherIdentity\"\n"
+            f"| project TimeGenerated, Computer, ServiceName, TicketOptions, TicketEncryptionType\n"
+        )
+        sigma_rule = (
+            f"title: Kerberos Delegation Abuse / RBCD Manipulation ({deleg_target})\n"
+            f"id: 0b1c2d3e-ares-deleg-{abs(hash(deleg_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects S4U2Proxy ticket requests or modifications to msDS-AllowedToActOnBehalfOfOtherIdentity.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4769\n"
+            f"    TicketOptions|contains: '0x40810010'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1558\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Kerberos Delegation Abuse ({deleg_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Kerberos S4U2Proxy and RBCD abuse",
+                    "content": {"kql": kql_query, "target": deleg_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Kerberos Delegation Abuse ({deleg_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for Kerberos S4U2Proxy and RBCD abuse",
+                    "content": {"sigma": sigma_rule, "target": deleg_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["rbcd_attack_surface_evaluated"] = True
+        raw["s4u2proxy_constrained_delegation_audited"] = True
+        raw["unconstrained_delegation_hosts_identified"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

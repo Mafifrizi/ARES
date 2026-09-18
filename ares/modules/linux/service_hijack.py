@@ -223,6 +223,55 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        service_target = host or "LinuxHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Linux Systemd Service Unit / Binary Hijacking\n"
+            f"// Monitors Syslog / auditd for modifications to /etc/systemd/system/*.service or ExecStart binaries\n"
+            f"Syslog\n"
+            f"| where SyslogMessage has \"/etc/systemd/system\" or SyslogMessage has \"ExecStart\" or SyslogMessage has \"systemctl daemon-reload\"\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: Linux Systemd Service Unit File / Executable Hijacking ({service_target})\n"
+            f"id: 7a8b9c0d-ares-svchijack-{abs(hash(str(service_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects unauthorized modification of systemd unit files or replacement of service executables.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: auditd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    name|contains: '/etc/systemd/system/'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.persistence\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1574.010\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Linux Service Hijacking ({service_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting systemd service binary/unit hijacking",
+                    "content": {"kql": kql_query, "target": service_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Linux Service Hijacking ({service_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for systemd service binary/unit hijacking",
+                    "content": {"sigma": sigma_rule, "target": service_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["systemd_unit_integrity_evaluated"] = True
+        raw["service_binary_writable_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

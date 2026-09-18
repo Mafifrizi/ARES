@@ -249,6 +249,53 @@ class ScheduledTasksEnumModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Scheduled Task Enumeration and Modification Detection\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where (EventID in (4698, 4702) and TaskContent has_any (\"powershell\", \"cmd.exe\", \"cscript\", \"wscript\", \"mshta\"))\n"
+            "     or (EventID == 4688 and Process has_any (\"schtasks.exe\") and CommandLine has_any (\"/query\", \"/create\", \"/change\"))\n"
+            "| project TimeGenerated, Computer, Account, Process, CommandLine, TaskName"
+        )
+        sigma_rule = (
+            "title: Scheduled Task Enumeration or Suspicious Task Registration\n"
+            "id: b8c9d0e1-f2a3-44b5-c6d7-e8f9a0b1c2d3\n"
+            "status: experimental\n"
+            "description: Detects querying or registration of scheduled tasks invoking command interpreters or scripting engines\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1053/005/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "    product: windows\n"
+            "detection:\n"
+            "    selection_schtasks:\n"
+            "        Image|endswith: '\\schtasks.exe'\n"
+            "        CommandLine|contains:\n"
+            "            - '/query'\n"
+            "            - '/create'\n"
+            "    condition: selection_schtasks\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.persistence\n"
+            "    - attack.privilege_escalation\n"
+            "    - attack.t1053.005"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        privesc_vecs = raw.get("privesc_vectors", [])
+        raw["writable_task_binaries_found"] = any(
+            "writable" in str(v).lower() for v in privesc_vecs
+        )
+        raw["unquoted_task_paths_detected"] = any(
+            "unquoted" in str(v).lower() for v in privesc_vecs
+        )
+        raw["custom_scheduled_tasks_count"] = len(raw.get("scheduled_tasks", []))
+        raw["scheduled_tasks_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

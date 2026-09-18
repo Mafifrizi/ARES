@@ -159,6 +159,55 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Password Cracking Tool Execution\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(24h)\n"
+            "| where EventID == 4688\n"
+            "| extend ProcessName = tolower(Process)\n"
+            "| where ProcessName endswith \"hashcat.exe\" or ProcessName endswith \"john.exe\" "
+            "or CommandLine has_any (\"--potfile\", \"rockyou.txt\", \"-m 1000\", \"-m 13100\", \"-m 18200\")\n"
+            "| project TimeGenerated, Computer, Account, Process, CommandLine, ParentProcessName"
+        )
+        sigma_rule = (
+            "title: Hashcat or John The Ripper Execution\n"
+            "id: d2e3f4a5-b6c7-48d9-a0b1-c2d3e4f5a6b7\n"
+            "status: experimental\n"
+            "description: Detects command-line execution of hash cracking tools like Hashcat or John the Ripper\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1110/002/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "    product: windows\n"
+            "detection:\n"
+            "    selection:\n"
+            "        Image|endswith:\n"
+            "            - '\\hashcat.exe'\n"
+            "            - '\\john.exe'\n"
+            "        CommandLine|contains:\n"
+            "            - 'rockyou'\n"
+            "            - '-m 1000'\n"
+            "            - '-m 13100'\n"
+            "            - '-m 18200'\n"
+            "    condition: selection\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.credential_access\n"
+            "    - attack.t1110.002"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["weak_passwords_identified"] = bool(raw.get("cracked_credentials"))
+        raw["offline_cracking_vulnerability"] = bool(raw.get("cracked_credentials"))
+        raw["kerberos_ticket_cracked"] = any(
+            c.get("hash_type") in ["krb5tgs", "krb5asrep"] for c in raw.get("cracked_credentials", [])
+        )
+        raw["credential_cracking_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

@@ -150,6 +150,55 @@ class StagedCollectionModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Archive Staging in Temporary Directories Before Exfiltration\n"
+            "DeviceProcessEvents\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where ProcessCommandLine has_any (\"tar -cz\", \"tar -cf\", \"zip -r\", \"Compress-Archive\", \"7z a\")\n"
+            "| where ProcessCommandLine has_any (\"/tmp/\", \"/var/tmp/\", \"\\\\AppData\\\\Local\\\\Temp\\\\\", \"\\\\Windows\\\\Temp\\\\\")\n"
+            "| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessCommandLine"
+        )
+        sigma_rule = (
+            "title: Archive Staging in Temporary Directories Prior to Exfiltration\n"
+            "id: e4f5a6b7-c8d9-40e1-a2b3-c4d5e6f7a8b9\n"
+            "status: experimental\n"
+            "description: Detects compression utilities packaging files into temporary staging directories\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1074/001/\n"
+            "    - https://attack.mitre.org/techniques/T1560/001/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "detection:\n"
+            "    selection_tool:\n"
+            "        CommandLine|contains:\n"
+            "            - 'tar -cz'\n"
+            "            - 'tar -cf'\n"
+            "            - 'zip -r'\n"
+            "            - 'Compress-Archive'\n"
+            "            - '7z a'\n"
+            "    selection_path:\n"
+            "        CommandLine|contains:\n"
+            "            - '/tmp/'\n"
+            "            - '/var/tmp/'\n"
+            "            - '\\Temp\\'\n"
+            "    condition: selection_tool and selection_path\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.collection\n"
+            "    - attack.t1074.001\n"
+            "    - attack.t1560.001"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["sensitive_files_discovered"] = bool(raw.get("files_found"))
+        raw["staging_directory_writable"] = bool(destination)
+        raw["archive_compression_staged"] = bool(raw.get("archive_path"))
+        raw["staged_collection_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("files_found")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

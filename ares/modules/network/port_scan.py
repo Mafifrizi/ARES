@@ -376,6 +376,54 @@ class PortScanModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        scan_target = target or "NetworkTarget"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Rapid Network Port Scanning / Sweep\n"
+            f"// Monitors AzureNetworkAnalytics_CL / NetworkSession for single source contacting >= 15 distinct ports within 5 minutes\n"
+            f"NetworkSession\n"
+            f"| where DestinationIp == \"{scan_target}\" or SourceIp == \"{scan_target}\"\n"
+            f"| summarize DistinctPorts = dcount(DestinationPort), StartTime = min(TimeGenerated), EndTime = max(TimeGenerated) by SourceIp, DestinationIp\n"
+            f"| where DistinctPorts >= 15\n"
+        )
+        sigma_rule = (
+            f"title: Rapid Network Port Scan / Reconnaissance ({scan_target})\n"
+            f"id: 1e2f3a4b-ares-portscan-{abs(hash(str(scan_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects rapid probing of multiple distinct TCP ports against target hosts.\n"
+            f"logsource:\n"
+            f"  product: firewall\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    dst_ip: '{scan_target}'\n"
+            f"  condition: selection | count() by src_ip > 15\n"
+            f"level: low\n"
+            f"tags:\n"
+            f"  - attack.reconnaissance\n"
+            f"  - attack.t1046\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Network Port Scan ({scan_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting rapid TCP port scanning",
+                    "content": {"kql": kql_query, "target": scan_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Network Port Scan ({scan_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for rapid TCP port scanning",
+                    "content": {"sigma": sigma_rule, "target": scan_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["port_scan_reconnaissance_evaluated"] = True
+        raw["high_value_ports_mapped"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("open_ports")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

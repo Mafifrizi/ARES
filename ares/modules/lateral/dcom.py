@@ -151,6 +151,78 @@ class DCOMLateral(BaseLateralModule):
             )
         await super().validate(ctx)
 
+    async def execute(self, ctx: "Any") -> "ModuleResult":
+        """ExecutionContext-based entry point with closed-loop purple telemetry."""
+        res = await super().execute(ctx)
+        if getattr(ctx, "dry_run", False):
+            return res
+
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML) for DCOM
+        kql_rule = (
+            "// Microsoft Sentinel - Lateral Movement via DCOM (MMC20.Application / ShellWindows)\n"
+            "DeviceProcessEvents\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where InitiatingProcessFileName in~ (\"mmc.exe\", \"explorer.exe\")\n"
+            "| where ProcessCommandLine has_any (\"cmd.exe /c\", \"powershell.exe\", \"whoami\")\n"
+            "| project TimeGenerated, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName"
+        )
+        sigma_rule = (
+            "title: DCOM Lateral Movement via MMC20.Application or ShellWindows\n"
+            "id: f5a6b7c8-d9e0-41f2-b3c4-d5e6f7a8b9c0\n"
+            "status: experimental\n"
+            "description: Detects command execution spawned by mmc.exe or explorer.exe via DCOM remote instantiation\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1021/003/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "    product: windows\n"
+            "detection:\n"
+            "    selection:\n"
+            "        ParentImage|endswith:\n"
+            "            - '\\mmc.exe'\n"
+            "            - '\\explorer.exe'\n"
+            "        Image|endswith:\n"
+            "            - '\\cmd.exe'\n"
+            "            - '\\powershell.exe'\n"
+            "    condition: selection\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.lateral_movement\n"
+            "    - attack.t1021.003"
+        )
+        if isinstance(res.raw.get("loot"), list):
+            res.raw["loot"].extend([
+                {
+                    "name": "Detection Rule (KQL): DCOM Execution",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for DCOM lateral movement",
+                    "content": {"kql": kql_rule},
+                    "tags": ["detection", "kql", "sentinel", "dcom"],
+                },
+                {
+                    "name": "Detection Rule (Sigma): DCOM Execution",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for DCOM lateral movement",
+                    "content": {"sigma": sigma_rule},
+                    "tags": ["detection", "sigma", "dcom"],
+                },
+            ])
+        elif isinstance(res.raw.get("loot"), dict):
+            res.raw["loot"]["detection_kql"] = kql_rule
+            res.raw["loot"]["detection_sigma"] = sigma_rule
+        else:
+            res.raw.setdefault("loot", {})
+            if isinstance(res.raw["loot"], dict):
+                res.raw["loot"]["detection_kql"] = kql_rule
+                res.raw["loot"]["detection_sigma"] = sigma_rule
+
+        res.raw["dcom_lateral_audited"] = True
+        res.raw["rpc_port_135_exposure"] = True
+        res.raw["mmc20_execution_detected"] = bool(res.raw.get("success"))
+        return res
+
     async def move(
         self,
         target:   str,

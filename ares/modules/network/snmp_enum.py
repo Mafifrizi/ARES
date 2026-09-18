@@ -233,6 +233,47 @@ class SnmpEnumModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - SNMP Community String Brute-Force & Walk\n"
+            "NetworkSession\n"
+            "| where TimeGenerated > ago(1h)\n"
+            "| where DestinationPort in (161, 162) and NetworkProtocol =~ \"UDP\"\n"
+            "| summarize RequestCount = count(), UniqueDestinations = dcount(DestinationIp) by SourceIp, bin(TimeGenerated, 5m)\n"
+            "| where RequestCount >= 10\n"
+            "| project TimeGenerated, SourceIp, RequestCount, UniqueDestinations"
+        )
+        sigma_rule = (
+            "title: SNMP Community String Enumeration and Polling\n"
+            "id: f1a2b3c4-d5e6-47a8-b9c0-d1e2f3a4b5c6\n"
+            "status: experimental\n"
+            "description: Detects rapid UDP port 161 SNMP polling indicative of community string brute force or OID walking\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1046/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: network_traffic\n"
+            "detection:\n"
+            "    selection:\n"
+            "        DestinationPort: 161\n"
+            "        Protocol: udp\n"
+            "    condition: selection | count() by SourceIp > 10\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.discovery\n"
+            "    - attack.t1046"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["snmp_v1_v2c_exposed"] = bool(raw.get("valid_communities"))
+        raw["default_community_detected"] = any(
+            c in ["public", "private", "community"] for c in raw.get("valid_communities", [])
+        )
+        raw["snmp_write_access_detected"] = "private" in raw.get("valid_communities", [])
+        raw["snmp_enumeration_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("valid_communities")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

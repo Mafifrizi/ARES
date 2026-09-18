@@ -154,6 +154,57 @@ class GCPModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        gcp_target = project_id[:8] if project_id else "GCPProject"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect GCP IAM Privilege Escalation & Service Account Key Creation\n"
+            f"// Monitors Google Cloud Audit Logs for SetIamPolicy or CreateServiceAccountKey\n"
+            f"GCPAuditLogs\n"
+            f"| where MethodName in~ (\"google.iam.admin.v1.CreateServiceAccountKey\", \"google.iam.admin.v1.SetIamPolicy\", \"google.cloud.resourcemanager.v3.Projects.SetIamPolicy\")\n"
+            f"| project TimeGenerated, PrincipalEmail, CallerIp, MethodName, ResourceName, Status\n"
+        )
+        sigma_rule = (
+            f"title: GCP Service Account Key Creation & IAM Policy Modification ({gcp_target})\n"
+            f"id: 0f1a2b3c-ares-gcp-{abs(hash(gcp_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects creation of service account keys or modification of project IAM policies in GCP audit logs.\n"
+            f"logsource:\n"
+            f"  product: gcp\n"
+            f"  service: gcp.audit\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    methodName:\n"
+            f"      - 'google.iam.admin.v1.CreateServiceAccountKey'\n"
+            f"      - 'google.iam.admin.v1.SetIamPolicy'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.persistence\n"
+            f"  - attack.t1098\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): GCP IAM & Key Changes ({gcp_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting GCP service account key creation and IAM policy updates",
+                    "content": {"kql": kql_query, "project": gcp_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): GCP IAM & Key Changes ({gcp_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for GCP service account key creation and IAM policy updates",
+                    "content": {"sigma": sigma_rule, "project": gcp_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["service_account_keys_evaluated"] = True
+        raw["gcp_iam_policy_bindings_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

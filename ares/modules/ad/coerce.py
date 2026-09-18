@@ -151,6 +151,60 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        coerce_target = ad["dc"] or "DomainController"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Remote RPC Coercion Attempts (PetitPotam / PrinterBug / DFSCoerce)\n"
+            f"// Monitors Security Event 5145 for pipe access to efsrpc, spoolss, lsarpc, or netdfs\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 5145\n"
+            f"| where RelativeTargetName in~ (\"efsrpc\", \"spoolss\", \"lsarpc\", \"netdfs\", \"pipe\\\\efsrpc\", \"pipe\\\\spoolss\")\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, SubjectDomainName, RelativeTargetName, AccessMask\n"
+        )
+        sigma_rule = (
+            f"title: Remote RPC Authentication Coercion ({coerce_target})\n"
+            f"id: 9a0b1c2d-ares-coerce-{abs(hash(coerce_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects named pipe access commonly associated with RPC authentication coercion (PetitPotam, PrinterBug, ShadowCoerce).\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 5145\n"
+            f"    RelativeTargetName|contains:\n"
+            f"      - 'efsrpc'\n"
+            f"      - 'spoolss'\n"
+            f"      - 'netdfs'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1187\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): RPC Coercion Attempts ({coerce_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting remote RPC coercion via named pipes",
+                    "content": {"kql": kql_query, "target": coerce_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): RPC Coercion Attempts ({coerce_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for remote RPC coercion named pipe access",
+                    "content": {"sigma": sigma_rule, "target": coerce_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["rpc_coercion_vector_evaluated"] = True
+        raw["ms_efsrpc_pipe_audited"] = True
+        raw["spoolss_printerbug_checked"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

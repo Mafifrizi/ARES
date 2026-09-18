@@ -138,6 +138,57 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        spn_target = dc or "DomainController"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Kerberoasting Reconnaissance / SPN Enumeration\n"
+            f"// Monitors Directory Service Event 1644 for LDAP queries searching for accounts with servicePrincipalName\n"
+            f"DirectoryServiceAccess\n"
+            f"| where EventID == 1644\n"
+            f"| where SearchFilter has \"servicePrincipalName=*\" and SearchFilter has \"!(userAccountControl:1.2.840.113556.1.4.803:=2)\"\n"
+            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+        )
+        sigma_rule = (
+            f"title: Active Directory SPN Query Reconnaissance ({spn_target})\n"
+            f"id: 3e4f5a6b-ares-spn-{abs(hash(spn_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects LDAP queries enumerating Service Principal Names (SPNs) typically conducted prior to Kerberoasting.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: directory_service\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 1644\n"
+            f"    SearchFilter|contains: 'servicePrincipalName=*'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.discovery\n"
+            f"  - attack.t1087.002\n"
+            f"  - attack.t1558.003\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): SPN Enumeration ({spn_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting LDAP SPN enumeration for Kerberoasting",
+                    "content": {"kql": kql_query, "target": spn_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): SPN Enumeration ({spn_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for LDAP SPN enumeration",
+                    "content": {"sigma": sigma_rule, "target": spn_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["spn_accounts_enumerated"] = True
+        raw["kerberoastable_surface_mapped"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

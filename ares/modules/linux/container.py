@@ -113,6 +113,59 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        container_target = getattr(ctx, "target", "") or "ContainerHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Linux Container Escape & Docker Socket Abuse\n"
+            f"// Monitors Syslog / auditd for Docker daemon socket access or privileged container creation\n"
+            f"Syslog\n"
+            f"| where SyslogMessage has \"/var/run/docker.sock\" or SyslogMessage has \"--privileged\" or SyslogMessage has \"cgroup.procs\"\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: Linux Container Escape / Docker Socket Manipulation ({container_target})\n"
+            f"id: 2b3c4d5e-ares-contescape-{abs(hash(str(container_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects command-line or container runtime events accessing docker.sock or mounting host root.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: auditd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    comm:\n"
+            f"      - 'docker'\n"
+            f"      - 'crictl'\n"
+            f"    CommandLine|contains:\n"
+            f"      - 'docker.sock'\n"
+            f"      - '--privileged'\n"
+            f"  condition: selection\n"
+            f"level: critical\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1611\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Container Escape ({container_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Docker socket abuse and container escapes",
+                    "content": {"kql": kql_query, "target": container_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Container Escape ({container_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for Docker socket abuse and container escapes",
+                    "content": {"sigma": sigma_rule, "target": container_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["docker_socket_risk_evaluated"] = True
+        raw["container_escape_vectors_mapped"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

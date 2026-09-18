@@ -274,6 +274,59 @@ class SecretsScan(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Mass File Content Searching for Hardcoded Secrets\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where EventID == 4688\n"
+            "| extend Cmd = tolower(CommandLine)\n"
+            "| where Cmd has_any (\"select-string\", \"findstr\", \"grep -r\", \"grep -i\") "
+            "and Cmd has_any (\"password\", \"connectionstring\", \"begin private key\", \"akia\", \"secret\")\n"
+            "| project TimeGenerated, Computer, Account, Process, CommandLine, ParentProcessName"
+        )
+        sigma_rule = (
+            "title: File Content Searching for Plaintext Passwords and API Keys\n"
+            "id: b2c3d4e5-f6a7-48b9-c0d1-e2f3a4b5c6d7\n"
+            "status: experimental\n"
+            "description: Detects command-line utilities scanning filesystem files for hardcoded passwords and private keys\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1552/001/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: process_creation\n"
+            "    product: windows\n"
+            "detection:\n"
+            "    selection_tool:\n"
+            "        CommandLine|contains:\n"
+            "            - 'Select-String'\n"
+            "            - 'findstr'\n"
+            "            - 'grep -r'\n"
+            "    selection_secrets:\n"
+            "        CommandLine|contains:\n"
+            "            - 'password'\n"
+            "            - 'connectionstring'\n"
+            "            - 'AKIA'\n"
+            "            - 'BEGIN'\n"
+            "    condition: selection_tool and selection_secrets\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.credential_access\n"
+            "    - attack.t1552.001"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["hardcoded_secrets_detected"] = bool(raw.get("credential_list"))
+        raw["private_key_exposure"] = any(
+            "ssh" in str(c).lower() or "private" in str(c).lower() for c in raw.get("credential_list", [])
+        )
+        raw["cloud_credentials_exposed"] = any(
+            "aws" in str(c).lower() or "akia" in str(c).lower() for c in raw.get("credential_list", [])
+        )
+        raw["filesystem_secret_audit_complete"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("credential_list")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

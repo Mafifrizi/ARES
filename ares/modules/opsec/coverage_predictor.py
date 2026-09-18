@@ -728,6 +728,47 @@ class CoveragePredictorModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Multi-Technique Attack Campaign Correlation & Detection Scoring\n"
+            "SecurityAlert\n"
+            "| where TimeGenerated > ago(24h)\n"
+            "| extend Techniques = parse_json(Techniques)\n"
+            "| mv-expand Techniques\n"
+            "| summarize UniqueTechniques = dcount(to_string(Techniques)), AlertCount = count(), Severities = make_set(AlertSeverity) by CompromisedEntity, bin(TimeGenerated, 1h)\n"
+            "| where UniqueTechniques >= 3 or AlertCount >= 5\n"
+            "| project TimeGenerated, CompromisedEntity, UniqueTechniques, AlertCount, Severities"
+        )
+        sigma_rule = (
+            "title: Correlated Multi-Stage Adversary Activity Detection\n"
+            "id: e1f2a3b4-c5d6-47e8-f9a0-b1c2d3e4f5a6\n"
+            "status: experimental\n"
+            "description: Correlates multiple distinct MITRE ATT&CK tactical alerts against a single host or identity\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1592/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: alert\n"
+            "detection:\n"
+            "    selection:\n"
+            "        AlertSeverity:\n"
+            "            - high\n"
+            "            - critical\n"
+            "    condition: selection | count() by CompromisedEntity > 3\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.defense_evasion\n"
+            "    - attack.t1592"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["overall_detection_probability"] = float(raw.get("detection_score", 0.0))
+        raw["siem_correlations_identified"] = bool(raw.get("siem_correlations"))
+        raw["recommended_wait_hours"] = int(raw.get("wait_hours", 0))
+        raw["opsec_coverage_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("detection_score", 0) >= 0) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

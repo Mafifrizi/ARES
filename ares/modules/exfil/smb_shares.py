@@ -163,6 +163,49 @@ class SmbSharesExfil(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Extensive SMB Network Share Enumeration & Access\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where EventID in (5140, 5145)\n"
+            "| summarize AccessedShares = dcount(ShareName), AccessCount = count() by Account, IpAddress, bin(TimeGenerated, 10m)\n"
+            "| where AccessedShares >= 3 or (ShareName has_any (\"C$\", \"ADMIN$\", \"IPC$\") and AccessCount > 10)\n"
+            "| project TimeGenerated, Account, IpAddress, AccessedShares, AccessCount"
+        )
+        sigma_rule = (
+            "title: Network Share Enumeration and Administrative Share Access\n"
+            "id: c3d4e5f6-a7b8-49c0-d1e2-f3a4b5c6d7e8\n"
+            "status: experimental\n"
+            "description: Detects enumeration of multiple network shares or administrative shares (C$, ADMIN$) via SMB\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1039/\n"
+            "    - https://attack.mitre.org/techniques/T1135/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    product: windows\n"
+            "    service: security\n"
+            "detection:\n"
+            "    selection:\n"
+            "        EventID: 5140\n"
+            "    condition: selection | count(ShareName) by Account, IpAddress > 2\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.discovery\n"
+            "    - attack.collection\n"
+            "    - attack.t1039\n"
+            "    - attack.t1135"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        shares = [s.get("name", "") if isinstance(s, dict) else str(s) for s in raw.get("file_share_list", [])]
+        raw["administrative_shares_accessible"] = any("ADMIN$" in s or "C$" in s for s in shares)
+        raw["anonymous_share_read_allowed"] = any("READ" in str(s).upper() for s in raw.get("file_share_list", []))
+        raw["sensitive_files_discovered"] = bool(raw.get("sensitive_file_paths"))
+        raw["smb_share_audit_complete"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("file_share_list")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

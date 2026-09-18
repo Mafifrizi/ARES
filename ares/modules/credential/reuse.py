@@ -117,6 +117,52 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Multi-Host Credential Reuse & Authentication Anomalies\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where EventID in (4624, 4625)\n"
+            "| where LogonType in (3, 10) // Network, RemoteInteractive\n"
+            "| summarize UniqueTargets = dcount(Computer), SuccessCount = countif(EventID == 4624), FailCount = countif(EventID == 4625) by TargetUserName, IpAddress, bin(TimeGenerated, 15m)\n"
+            "| where UniqueTargets >= 2 or (FailCount > 3 and SuccessCount >= 1)\n"
+            "| project TimeGenerated, TargetUserName, IpAddress, UniqueTargets, SuccessCount, FailCount"
+        )
+        sigma_rule = (
+            "title: Multi-Host Credential Reuse and Successful Lateral Logon\n"
+            "id: a1b2c3d4-e5f6-47a8-b9c0-123456789abc\n"
+            "status: experimental\n"
+            "description: Detects logon events (Type 3 or 10) across multiple hosts originating from a single IP using the same credentials\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1078/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    product: windows\n"
+            "    service: security\n"
+            "detection:\n"
+            "    selection:\n"
+            "        EventID:\n"
+            "            - 4624\n"
+            "            - 4625\n"
+            "        LogonType:\n"
+            "            - 3\n"
+            "            - 10\n"
+            "    condition: selection | count(Computer) by IpAddress, TargetUserName > 2\n"
+            "level: high\n"
+            "tags:\n"
+            "    - attack.lateral_movement\n"
+            "    - attack.credential_access\n"
+            "    - attack.t1078"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["credential_reuse_confirmed"] = bool(raw.get("valid_credentials"))
+        raw["password_spray_susceptibility"] = len(raw.get("valid_credentials", [])) > 1
+        raw["single_credential_lateral_reach"] = len(raw.get("valid_credentials", []))
+        raw["credential_reuse_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

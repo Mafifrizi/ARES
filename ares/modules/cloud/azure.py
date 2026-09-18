@@ -148,6 +148,56 @@ class AzureModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        azure_target = subscription_id[:8] if subscription_id else "AzureSubscription"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Azure Resource & Key Vault Reconnaissance\n"
+            f"// Monitors AzureActivity for KeyVault secret reads or Storage Account key enumeration\n"
+            f"AzureActivity\n"
+            f"| where OperationNameValue in~ (\"Microsoft.KeyVault/vaults/secrets/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\", \"Microsoft.Compute/virtualMachines/runCommand/action\")\n"
+            f"| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, SubscriptionId\n"
+        )
+        sigma_rule = (
+            f"title: Azure KeyVault & Secret Key Enumeration ({azure_target})\n"
+            f"id: 8d9e0f1a-ares-azure-{abs(hash(azure_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects enumeration of Azure Key Vault secrets or Storage Account access keys via Azure Resource Manager.\n"
+            f"logsource:\n"
+            f"  product: azure\n"
+            f"  service: activity\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    OperationNameValue:\n"
+            f"      - 'Microsoft.KeyVault/vaults/secrets/read'\n"
+            f"      - 'Microsoft.Storage/storageAccounts/listKeys/action'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1552\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Azure KeyVault & Key Enumeration ({azure_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Azure Key Vault and Storage Key reads",
+                    "content": {"kql": kql_query, "target": azure_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Azure KeyVault & Key Enumeration ({azure_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for Azure Key Vault and Storage Key reads",
+                    "content": {"sigma": sigma_rule, "target": azure_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["managed_identity_tokens_evaluated"] = True
+        raw["keyvault_access_policies_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

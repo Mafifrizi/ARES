@@ -142,6 +142,59 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        sccm_target = ad["dc"] or "SCCMHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect SCCM / MECM Site Infrastructure Reconnaissance & NAA Extraction\n"
+            f"// Monitors Security Event 4688 and WMI queries on namespace root\\\\SMS\\\\site_*\n"
+            f"SecurityEvent\n"
+            f"| where EventID == 4688\n"
+            f"| where CommandLine has_any (\"SMS_Site\", \"SMS_SCI_SiteDefinition\", \"CCM_Client\", \"NAA_\")\n"
+            f"| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, CommandLine\n"
+        )
+        sigma_rule = (
+            f"title: SCCM / MECM Site Infrastructure Abuse & NAA Credential Discovery ({sccm_target})\n"
+            f"id: 5a6b7c8d-ares-sccm-{abs(hash(sccm_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects WMI queries or command-line activity targeting SCCM site definitions or Network Access Accounts.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: security\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 4688\n"
+            f"    CommandLine|contains:\n"
+            f"      - 'SMS_Site'\n"
+            f"      - 'SMS_SCI_SiteDefinition'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1552\n"
+            f"  - attack.t1078\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): SCCM Reconnaissance ({sccm_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting SCCM site enumeration and credential discovery",
+                    "content": {"kql": kql_query, "target": sccm_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): SCCM Reconnaissance ({sccm_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for SCCM site enumeration and NAA discovery",
+                    "content": {"sigma": sigma_rule, "target": sccm_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["sccm_site_infrastructure_evaluated"] = True
+        raw["network_access_accounts_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

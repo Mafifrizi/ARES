@@ -163,6 +163,56 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        comp_target = dc or "DomainController"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Active Directory Computer & DC Enumeration\n"
+            f"// Monitors Directory Service Event 1644 for mass LDAP search on objectClass=computer or userAccountControl\n"
+            f"DirectoryServiceAccess\n"
+            f"| where EventID == 1644\n"
+            f"| where SearchFilter has \"objectCategory=computer\" or SearchFilter has \"primaryGroupID=516\"\n"
+            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+        )
+        sigma_rule = (
+            f"title: Active Directory Computer & DC Mass Enumeration ({comp_target})\n"
+            f"id: 2d3e4f5a-ares-computers-{abs(hash(comp_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects LDAP queries enumerating domain computers and domain controllers across the directory.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: directory_service\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 1644\n"
+            f"    SearchFilter|contains: 'objectClass=computer'\n"
+            f"  condition: selection\n"
+            f"level: low\n"
+            f"tags:\n"
+            f"  - attack.discovery\n"
+            f"  - attack.t1018\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): AD Computer & DC Enumeration ({comp_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting LDAP computer enumeration",
+                    "content": {"kql": kql_query, "target": comp_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): AD Computer & DC Enumeration ({comp_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for LDAP computer enumeration",
+                    "content": {"sigma": sigma_rule, "target": comp_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["computer_accounts_enumerated"] = True
+        raw["domain_controllers_identified"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

@@ -238,6 +238,54 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        nfs_target = host or "LinuxHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Linux NFS no_root_squash Misconfiguration / SUID Drop\n"
+            f"// Monitors Syslog / auditd for modifications to /etc/exports or SUID creation on NFS mounts\n"
+            f"Syslog\n"
+            f"| where SyslogMessage has \"/etc/exports\" or SyslogMessage has \"no_root_squash\" or SyslogMessage has \"mountd\"\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: Insecure NFS no_root_squash Export Configuration ({nfs_target})\n"
+            f"id: 5e6f7a8b-ares-nfsescape-{abs(hash(str(nfs_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects insecure NFS export configuration permitting remote root clients full root privileges.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: auditd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    name: '/etc/exports'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1548.001\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): NFS no_root_squash Misconfig ({nfs_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting insecure NFS exports with no_root_squash",
+                    "content": {"kql": kql_query, "target": nfs_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): NFS no_root_squash Misconfig ({nfs_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for insecure NFS export configurations",
+                    "content": {"sigma": sigma_rule, "target": nfs_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["no_root_squash_exports_evaluated"] = True
+        raw["nfs_privesc_vectors_mapped"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

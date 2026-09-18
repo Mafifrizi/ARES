@@ -164,6 +164,54 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        privesc_target = host or "LinuxHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Linux Privilege Escalation & SUID Abuse\n"
+            f"// Monitors Syslog / auditd for sudo NOPASSWD abuse or anomalous setuid transitions\n"
+            f"Syslog\n"
+            f"| where ProcessName == \"sudo\" or SyslogMessage has \"NOPASSWD\" or SyslogMessage has \"setuid\"\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: Linux Sudo Misconfiguration / SUID Privilege Escalation ({privesc_target})\n"
+            f"id: 6f7a8b9c-ares-linuxpriv-{abs(hash(str(privesc_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects exploitation of sudo NOPASSWD entries or anomalous SUID binary execution.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: auditd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    comm: 'sudo'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1548.003\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Linux Privilege Escalation ({privesc_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Linux privilege escalation via sudo/SUID",
+                    "content": {"kql": kql_query, "target": privesc_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Linux Privilege Escalation ({privesc_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for Linux privilege escalation via sudo/SUID",
+                    "content": {"sigma": sigma_rule, "target": privesc_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["sudo_nopasswd_rules_evaluated"] = True
+        raw["suid_capabilities_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings,

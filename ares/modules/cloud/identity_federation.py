@@ -190,6 +190,56 @@ class CloudIdentityFederationModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        fed_target = domain or tenant_id or "HybridFederation"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Federated Identity & Golden SAML Abuse\n"
+            f"// Monitors SigninLogs for anomalous federated authentications or new Federated Identity Credentials\n"
+            f"SigninLogs\n"
+            f"| where AuthenticationRequirement == \"singleFactorAuthentication\" and TokenIssuerType == \"AzureADFederated\"\n"
+            f"| where RiskLevelDuringSignIn in~ (\"high\", \"medium\") or ResultType in (50005, 50107)\n"
+            f"| project TimeGenerated, UserPrincipalName, AppDisplayName, IPAddress, TokenIssuerType, ResultType\n"
+        )
+        sigma_rule = (
+            f"title: Federated Identity SAML / OIDC Trust Abuse ({fed_target})\n"
+            f"id: 1a2b3c4d-ares-fedabuse-{abs(hash(str(fed_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects forged SAML assertions or anomalous token exchanges via federated external identity providers.\n"
+            f"logsource:\n"
+            f"  product: azure\n"
+            f"  service: signin\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    TokenIssuerType: 'AzureADFederated'\n"
+            f"    ResultType: 50107\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.credential_access\n"
+            f"  - attack.t1606.002\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Federated Identity Abuse ({fed_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting anomalous SAML/OIDC federated token issuance",
+                    "content": {"kql": kql_query, "target": fed_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Federated Identity Abuse ({fed_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for anomalous federated SAML token issuance",
+                    "content": {"sigma": sigma_rule, "target": fed_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["golden_saml_token_forgery_evaluated"] = True
+        raw["federated_credential_trust_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

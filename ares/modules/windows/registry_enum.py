@@ -277,6 +277,58 @@ class RegistryEnumModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Suspicious Remote Registry Credential Enumeration\n"
+            "SecurityEvent\n"
+            "| where TimeGenerated > ago(2h)\n"
+            "| where (EventID == 5145 and RelativeTargetName =~ \"winreg\") or\n"
+            "        (EventID in (4656, 4663) and ObjectType =~ \"Key\" and ObjectName has_any (\"Winlogon\", \"PuTTY\\\\Sessions\", \"SNMP\\\\Parameters\", \"RealVNC\", \"AlwaysInstallElevated\"))\n"
+            "| project TimeGenerated, Computer, Account, ObjectName, AccessMask, ProcessName"
+        )
+        sigma_rule = (
+            "title: Remote Registry Credential and Privilege Escalation Keys Enumeration\n"
+            "id: a7b8c9d0-e1f2-43a4-b5c6-d7e8f9a0b1c2\n"
+            "status: experimental\n"
+            "description: Detects access to registry keys commonly storing cleartext credentials or privilege escalation vectors\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1552/002/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    product: windows\n"
+            "    service: security\n"
+            "detection:\n"
+            "    selection_namedpipe:\n"
+            "        EventID: 5145\n"
+            "        ShareRelativeTargetName: 'winreg'\n"
+            "    selection_regkeys:\n"
+            "        EventID:\n"
+            "            - 4656\n"
+            "            - 4663\n"
+            "        ObjectName|contains:\n"
+            "            - 'Winlogon'\n"
+            "            - 'PuTTY\\Sessions'\n"
+            "            - 'AlwaysInstallElevated'\n"
+            "    condition: selection_namedpipe or selection_regkeys\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.credential_access\n"
+            "    - attack.privilege_escalation\n"
+            "    - attack.t1552.002"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["autologon_credentials_found"] = any(
+            "autologon" in str(f).lower() for f in raw.get("cleartext_credentials", [])
+        )
+        raw["putty_stored_credentials_found"] = bool(raw.get("putty_sessions"))
+        raw["always_install_elevated_risk"] = any(
+            "alwaysinstallelevated" in str(f).lower() for f in findings
+        )
+        raw["remote_registry_audited"] = True
+
         return ModuleResult(
             status="success" if findings else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

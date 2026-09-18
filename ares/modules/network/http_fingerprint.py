@@ -163,6 +163,56 @@ class HttpFingerprintModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        http_target = target or "WebTarget"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Web Application Reconnaissance & Admin Surface Probing\n"
+            f"// Monitors W3CIISLog / AppGW for scanning of administrative endpoints (/admin, /actuator, /swagger)\n"
+            f"W3CIISLog\n"
+            f"| where csUriStem in~ (\"/admin\", \"/actuator\", \"/swagger-ui.html\", \"/api-docs\", \"/.env\")\n"
+            f"| project TimeGenerated, cIP, csMethod, csUriStem, scStatus, sSiteName\n"
+        )
+        sigma_rule = (
+            f"title: Web Application Admin Interface & Actuator Probing ({http_target})\n"
+            f"id: 9c0d1e2f-ares-httpprobe-{abs(hash(str(http_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects HTTP requests targeting administrative interfaces, Spring Actuator, or API documentation.\n"
+            f"logsource:\n"
+            f"  product: webserver\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    c-uri-stem:\n"
+            f"      - '/admin'\n"
+            f"      - '/actuator*'\n"
+            f"      - '/swagger*'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.reconnaissance\n"
+            f"  - attack.t1592.002\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): HTTP Admin Probing ({http_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting HTTP admin interface scanning",
+                    "content": {"kql": kql_query, "target": http_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): HTTP Admin Probing ({http_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for HTTP admin interface scanning",
+                    "content": {"sigma": sigma_rule, "target": http_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["security_headers_compliance_evaluated"] = True
+        raw["admin_interfaces_probed"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("web_fingerprint")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

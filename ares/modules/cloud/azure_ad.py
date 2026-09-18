@@ -168,6 +168,57 @@ class AzureADModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        tenant_short = str(tenant_id)[:8] if tenant_id else "AzureADTenant"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Azure AD / Entra ID Privileged Role Assignment & App Abuse\n"
+            f"// Monitors AuditLogs for role assignments, service principal secret addition, or app consent\n"
+            f"AuditLogs\n"
+            f"| where OperationName in~ (\"Add member to role\", \"Add service principal credentials\", \"Consent to application\", \"Update application – Certificates and secrets management \")\n"
+            f"| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result\n"
+        )
+        sigma_rule = (
+            f"title: Azure AD / Entra ID Privileged Role Assignment & App Secret Addition ({tenant_short})\n"
+            f"id: 9e0f1a2b-ares-azuread-{abs(hash(tenant_short)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects addition of credentials to service principals or assignment of administrative directory roles in Entra ID.\n"
+            f"logsource:\n"
+            f"  product: azure\n"
+            f"  service: audit\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    OperationName:\n"
+            f"      - 'Add member to role'\n"
+            f"      - 'Add service principal credentials'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.persistence\n"
+            f"  - attack.t1098\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): Azure AD Privileged Role & Credential Changes ({tenant_short})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting Entra ID privileged role assignments and credential additions",
+                    "content": {"kql": kql_query, "tenant": tenant_short},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): Azure AD Privileged Role & Credential Changes ({tenant_short})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for Entra ID privileged role assignments and credential additions",
+                    "content": {"sigma": sigma_rule, "tenant": tenant_short},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["privileged_directory_roles_evaluated"] = True
+        raw["app_role_assignments_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

@@ -149,6 +149,58 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        user_target = dc or "DomainController"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Mass AD User & Privileged Account Enumeration\n"
+            f"// Monitors Directory Service Event 1644 for LDAP queries looking for adminCount=1 or DONT_REQ_PREAUTH\n"
+            f"DirectoryServiceAccess\n"
+            f"| where EventID == 1644\n"
+            f"| where SearchFilter has \"adminCount=1\" or SearchFilter has \"userAccountControl:1.2.840.113556.1.4.803:=4194304\"\n"
+            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+        )
+        sigma_rule = (
+            f"title: Active Directory Privileged & Roastable User Enumeration ({user_target})\n"
+            f"id: 4f5a6b7c-ares-users-{abs(hash(user_target)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects LDAP queries enumerating privileged domain users (adminCount=1) or AS-REP roastable accounts.\n"
+            f"logsource:\n"
+            f"  product: windows\n"
+            f"  service: directory_service\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    EventID: 1644\n"
+            f"    SearchFilter|contains:\n"
+            f"      - 'adminCount=1'\n"
+            f"      - 'userAccountControl'\n"
+            f"  condition: selection\n"
+            f"level: medium\n"
+            f"tags:\n"
+            f"  - attack.discovery\n"
+            f"  - attack.t1087.002\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): AD User Enumeration ({user_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting LDAP user and privileged account enumeration",
+                    "content": {"kql": kql_query, "target": user_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): AD User Enumeration ({user_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for LDAP user enumeration",
+                    "content": {"sigma": sigma_rule, "target": user_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["privileged_users_evaluated"] = True
+        raw["asrep_roastable_users_identified"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw,

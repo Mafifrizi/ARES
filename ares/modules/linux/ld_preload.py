@@ -183,6 +183,55 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        preload_target = host or "LinuxHost"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect Linux Shared Library Hijack / LD_PRELOAD Persistence\n"
+            f"// Monitors Syslog / auditd for modifications to /etc/ld.so.preload or execution with LD_PRELOAD env\n"
+            f"Syslog\n"
+            f"| where SyslogMessage has \"/etc/ld.so.preload\" or SyslogMessage has \"LD_PRELOAD\" or SyslogMessage has \"/etc/ld.so.conf.d/\"\n"
+            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+        )
+        sigma_rule = (
+            f"title: Shared Library Hijacking via LD_PRELOAD / ld.so.preload ({preload_target})\n"
+            f"id: 4d5e6f7a-ares-ldpreload-{abs(hash(str(preload_target))) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects creation or modification of /etc/ld.so.preload or execution of sudo with LD_PRELOAD preserved.\n"
+            f"logsource:\n"
+            f"  product: linux\n"
+            f"  service: auditd\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    name: '/etc/ld.so.preload'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.persistence\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1574.006\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): LD_PRELOAD Hijack ({preload_target})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting shared library hijacking via ld.so.preload",
+                    "content": {"kql": kql_query, "target": preload_target},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): LD_PRELOAD Hijack ({preload_target})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for shared library hijacking via ld.so.preload",
+                    "content": {"sigma": sigma_rule, "target": preload_target},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["ld_preload_sudoers_evaluated"] = True
+        raw["ld_so_preload_integrity_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

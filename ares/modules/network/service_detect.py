@@ -191,6 +191,55 @@ class ServiceDetectModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
+        kql_rule = (
+            "// Microsoft Sentinel - Multi-Port Service Banner Enumeration\n"
+            "NetworkSession\n"
+            "| where TimeGenerated > ago(1h)\n"
+            "| where DestinationPort in (21, 22, 25, 80, 443, 6379, 8080, 8443, 27017)\n"
+            "| summarize PortCount = dcount(DestinationPort), BytesReceived = sum(BytesReceived), SessionCount = count() by SourceIp, DestinationIp, bin(TimeGenerated, 5m)\n"
+            "| where PortCount >= 3 or (SessionCount >= 5 and BytesReceived < 5000)\n"
+            "| project TimeGenerated, SourceIp, DestinationIp, PortCount, SessionCount"
+        )
+        sigma_rule = (
+            "title: Network Service Banner Grabbing and Version Enumeration\n"
+            "id: e8a91b2c-3d4e-4f5a-b6c7-d8e9f0a1b2c3\n"
+            "status: experimental\n"
+            "description: Detects rapid connection handshakes and probe queries targeted at service banner ports\n"
+            "references:\n"
+            "    - https://attack.mitre.org/techniques/T1046/\n"
+            "author: ARES Purple Team Modernization\n"
+            "date: 2026-03-30\n"
+            "logsource:\n"
+            "    category: network_traffic\n"
+            "detection:\n"
+            "    selection:\n"
+            "        DestinationPort:\n"
+            "            - 21\n"
+            "            - 22\n"
+            "            - 25\n"
+            "            - 80\n"
+            "            - 443\n"
+            "            - 6379\n"
+            "            - 8080\n"
+            "            - 8443\n"
+            "            - 27017\n"
+            "    condition: selection | count(DestinationPort) by SourceIp, DestinationIp > 3\n"
+            "level: medium\n"
+            "tags:\n"
+            "    - attack.discovery\n"
+            "    - attack.t1046"
+        )
+        raw.setdefault("loot", {})
+        raw["loot"]["detection_kql"] = kql_rule
+        raw["loot"]["detection_sigma"] = sigma_rule
+        raw["banner_exposure_detected"] = bool(raw.get("service_versions"))
+        raw["unauthenticated_service_risk"] = any(
+            "no-auth" in vs.get("cve_hint", "") for vs in raw.get("vulnerable_services", [])
+        )
+        raw["legacy_version_detected"] = bool(raw.get("vulnerable_services"))
+        raw["service_enumeration_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("service_versions")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,

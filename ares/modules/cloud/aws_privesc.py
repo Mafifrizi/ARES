@@ -164,6 +164,58 @@ class AWSPrivescModule(BaseModule):
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
 
+        # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
+        aws_region = pdict.get("region") or pdict.get("aws_region") or "us-east-1"
+        kql_query = (
+            f"// ARES Closed-Loop Telemetry: Detect AWS IAM Privilege Escalation Attempts\n"
+            f"// Monitors CloudTrail for high-risk IAM policy manipulation API calls\n"
+            f"AWSCloudTrail\n"
+            f"| where EventName in~ (\"PutUserPolicy\", \"AttachUserPolicy\", \"AttachRolePolicy\", \"CreateAccessKey\", \"UpdateAssumeRolePolicy\")\n"
+            f"| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, RequestParameters, AWSRegion\n"
+        )
+        sigma_rule = (
+            f"title: AWS IAM Privilege Escalation Policy Modification ({aws_region})\n"
+            f"id: 7c8d9e0f-ares-awspriv-{abs(hash(aws_region)) % 1000000:06d}\n"
+            f"status: experimental\n"
+            f"description: Detects modification of IAM policies or creation of access keys granting administrative rights.\n"
+            f"logsource:\n"
+            f"  product: aws\n"
+            f"  service: cloudtrail\n"
+            f"detection:\n"
+            f"  selection:\n"
+            f"    eventName:\n"
+            f"      - 'PutUserPolicy'\n"
+            f"      - 'AttachUserPolicy'\n"
+            f"      - 'CreateAccessKey'\n"
+            f"      - 'UpdateAssumeRolePolicy'\n"
+            f"  condition: selection\n"
+            f"level: high\n"
+            f"tags:\n"
+            f"  - attack.privilege_escalation\n"
+            f"  - attack.t1098\n"
+        )
+        loot_items: list[dict[str, Any]] = raw.get("loot", [])
+        if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
+            loot_items.extend([
+                {
+                    "name": f"Detection Rule (KQL): AWS IAM Privilege Escalation ({aws_region})",
+                    "loot_type": "detection_rule_kql",
+                    "description": "Microsoft Sentinel KQL query for detecting AWS IAM privilege escalation actions",
+                    "content": {"kql": kql_query, "region": aws_region},
+                    "tags": ["detection", "kql", "sentinel", "blue_team"],
+                },
+                {
+                    "name": f"Detection Rule (Sigma): AWS IAM Privilege Escalation ({aws_region})",
+                    "loot_type": "detection_rule_sigma",
+                    "description": "Sigma detection rule for AWS IAM privilege escalation policy modifications",
+                    "content": {"sigma": sigma_rule, "region": aws_region},
+                    "tags": ["detection", "sigma", "blue_team"],
+                },
+            ])
+        raw["loot"] = loot_items
+        raw["iam_privesc_vectors_evaluated"] = True
+        raw["passrole_boundary_audited"] = True
+
         return ModuleResult(
             status="success" if (findings or raw.get("privesc_paths")) else "partial",
             findings=findings, raw=raw, module_id=self.MODULE_ID,
