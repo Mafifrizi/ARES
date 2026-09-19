@@ -2,6 +2,7 @@
 Unit tests for ARES CLI 'update' and 'upgrade' subcommands.
 """
 
+import re
 from unittest.mock import patch
 from typer.testing import CliRunner
 
@@ -11,22 +12,29 @@ from ares.core.updater import ModuleManifestItem, UpdateCheckResult
 runner = CliRunner()
 
 
+def _clean(text: str) -> str:
+    """Strip ANSI escape sequences from CLI output."""
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
+
+
 def test_cli_update_help():
-    result = runner.invoke(app, ["update", "--help"])
+    result = runner.invoke(app, ["update", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == 0
-    assert "Synchronize and install newly released ARES attack modules" in result.stdout
-    assert "--dry-run" in result.stdout
-    assert "--module" in result.stdout
+    out = _clean(result.stdout)
+    assert "Synchronize and install newly released ARES attack modules" in out
+    assert "--dry-run" in out
+    assert "--module" in out
 
 
 def test_cli_upgrade_help():
-    result = runner.invoke(app, ["upgrade", "--help"])
+    result = runner.invoke(app, ["upgrade", "--help"], env={"NO_COLOR": "1"})
     assert result.exit_code == 0
-    assert "Upgrade existing ARES modules, Web UI dashboard, or the entire platform" in result.stdout
-    assert "--all" in result.stdout
-    assert "--ui" in result.stdout
-    assert "--modules" in result.stdout
-    assert "--dry-run" in result.stdout
+    out = _clean(result.stdout)
+    assert "Upgrade existing ARES modules, Web UI dashboard, or the entire platform" in out
+    assert "--all" in out
+    assert "--ui" in out
+    assert "--modules" in out
+    assert "--dry-run" in out
 
 
 def test_cli_update_dry_run_all_installed():
@@ -37,9 +45,10 @@ def test_cli_update_dry_run_all_installed():
         remote_count=65,
     )
     with patch("ares.core.updater.PlatformUpdateManager.check_updates", return_value=fake_check):
-        result = runner.invoke(app, ["update", "--dry-run"])
+        result = runner.invoke(app, ["update", "--dry-run"], env={"NO_COLOR": "1"})
         assert result.exit_code == 0
-        assert "All official modules are already installed" in result.stdout
+        out = _clean(result.stdout)
+        assert "All official modules are already installed" in out
 
 
 def test_cli_update_dry_run_with_new_module():
@@ -56,10 +65,11 @@ def test_cli_update_dry_run_with_new_module():
         remote_count=66,
     )
     with patch("ares.core.updater.PlatformUpdateManager.check_updates", return_value=fake_check):
-        result = runner.invoke(app, ["update", "--dry-run"])
+        result = runner.invoke(app, ["update", "--dry-run"], env={"NO_COLOR": "1"})
         assert result.exit_code == 0
-        assert "recon.subdomain_takeover" in result.stdout
-        assert "Dry-run complete" in result.stdout
+        out = _clean(result.stdout)
+        assert "recon.subdomain_takeover" in out
+        assert "Dry-run complete" in out
 
 
 def test_cli_upgrade_dry_run_all():
@@ -72,9 +82,10 @@ def test_cli_upgrade_dry_run_all():
         "dry_run": True,
     }
     with patch("ares.core.updater.PlatformUpdateManager.upgrade_all", return_value=fake_all_res):
-        result = runner.invoke(app, ["upgrade", "--all", "--dry-run"])
+        result = runner.invoke(app, ["upgrade", "--all", "--dry-run"], env={"NO_COLOR": "1"})
         assert result.exit_code == 0
-        assert "Dry-run simulation completed" in result.stdout
+        out = _clean(result.stdout)
+        assert "Dry-run simulation completed" in out
 
 
 def test_cli_upgrade_ui_dry_run():
@@ -84,6 +95,7 @@ def test_cli_upgrade_ui_dry_run():
         "target_dir": "frontend/dist",
     }
     with patch("ares.core.updater.PlatformUpdateManager.upgrade_ui", return_value=fake_ui_res):
-        result = runner.invoke(app, ["upgrade", "--ui", "--dry-run"])
+        result = runner.invoke(app, ["upgrade", "--ui", "--dry-run"], env={"NO_COLOR": "1"})
         assert result.exit_code == 0
-        assert "Would build or synchronize" in result.stdout
+        out = _clean(result.stdout)
+        assert "Would build or synchronize" in out
