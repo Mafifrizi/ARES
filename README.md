@@ -22,13 +22,13 @@
 
 <br>
 
-[**Platform Showcase**](#-platform-showcase--control-surfaces) • [**Why ARES?**](#-why-enterprises-choose-ares) • [**Competitive Matrix**](#-market-comparison-matrix) • [**Architecture**](#-system-architecture--data-pipeline) • [**MITRE Matrix**](#-adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#-quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#-support--sponsorship) • [**Zero-Trust Security**](#-enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
 ---
 
-## ⚡ Executive Summary
+## Executive Summary
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
@@ -36,7 +36,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ---
 
-## 🎯 Why Enterprises Choose ARES
+## Why Enterprises Choose ARES
 
 ```
                                     THE ARES ADVANTAGE
@@ -66,7 +66,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ---
 
-## 📊 Market Comparison Matrix
+## Market Comparison Matrix
 
 | Operational Capability | Traditional Manual Pentest | Legacy Vulnerability Scanners | ARES Autonomous Platform |
 | :--- | :---: | :---: | :---: |
@@ -93,7 +93,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 1. 🛡️ Operator Enclave & Zero-Trust Gateway
+### 1. Operator Enclave & Zero-Trust Gateway
 
 *Autonomous entry barrier designed specifically for authorized offensive operators and security personnel.*
 
@@ -117,7 +117,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 2. 📊 Executive Command Center & Telemetry
+### 2. Executive Command Center & Telemetry
 
 *Real-time operational command console providing instant posture visibility across active campaigns.*
 
@@ -125,7 +125,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Executive Command Center & Telemetry](docs/assets/screenshots/dashboard-overview.png)
 
-*Executive Command Center displaying real-time telemetry, confirmed findings by severity, and operational health.*
+*Executive Command Center displaying real-time telemetry, validated findings, attack surface metrics, and activity pulse.*
 
 <br>
 
@@ -135,19 +135,19 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 </div>
 
-- **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries.
+- **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries or complex log filtering.
 - **Key Capabilities**:
-  - **Operational Design System**: Engineered with high-density visual hierarchy (inspired by Grafana, Linear, and Sentry) - featuring subtle left-accented contextual panels (`panel-subtle`), dynamic reactive topbar health indicators, and distinct dashed progress tracks for uninitialized metric baselines.
-  - **Actionable Engagement Insights**: Replaces redundant raw counts with contextual security posture insights:
-    - *Engagement Posture*: Clear state delineation (`Staged`, `Executing`, or `Standby`) distinguishing scoped targets from executing campaigns.
-    - *Execution Health*: Real-time monitor of pipeline anomalies, module execution failures, and enclave stability.
-    - *Attack Surface*: Live tracking of discovered hosts, credential pivots, and network penetration depth.
-  - **Telemetry & Pipeline Ingestion**: Real-time worker pool throughput, P95 task duration, and live event ingestion indicators.
+  - **Executive Telemetry HUD**: Clean 4-card operational matrix featuring `Active Engagements`, `Validated Findings`, `Attack Surface`, and `Engine Health` (P95 latency, worker pool, and queue depth). Engineered with crisp typography (Plus Jakarta Sans & JetBrains Mono), eliminating redundant counts and distracting indicator dots.
+  - **Balanced Execution Workstation (50/50 Split)**:
+    - *Execution Telemetry*: Real-time operational health tracking Task Queue depth, Module Runs with success/failure breakdown, Failure Rate, Worker Pool health, and instant action links to Modules, Attack Graph, and Reports.
+    - *Activity Pulse*: 14-day security signal distribution sparkline with live telemetry stream status.
+  - **Campaign Inventory Matrix**: Single source of truth for all scoped engagements with click-to-filter reactivity, status badges, noise controls, and operator identity.
+  - **Streamlined Topbar Heartbeat**: Minimalist live system status indicator (`Operational` / `Offline`) with on-demand subsystem health inspection from any view.
   - **Tactical Fresh-Install Hero**: Automatic empty-state fallback with a centered initialization CTA and minimal readiness strip when starting with zero campaigns.
 
 ---
 
-### 3. 🎯 Scoped Campaign & Target Boundary Management
+### 3. Scoped Campaign & Target Boundary Management
 
 *Zero-collateral target governance enforcing hard CIDR whitelist boundaries and encrypted evidence isolation.*
 
@@ -169,7 +169,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 4. ⚡ Modular Adversary Orchestration (60+ Modules)
+### 4. Modular Adversary Orchestration (60+ Modules)
 
 *Extensive catalog of weaponized adversary techniques aligned with the MITRE ATT&CK enterprise matrix.*
 
@@ -191,7 +191,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 5. 🕸️ Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Dock
+### 5. Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Dock
 
 *Interactive Cobalt Strike-styled hierarchical lateral pivot topology graph paired with a real-time multi-tabbed Beacon session terminal console.*
 
@@ -227,7 +227,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 6. 📑 Automated Report Engine & Evidence Library
+### 6. Automated Report Engine & Evidence Library
 
 *Instant deliverable generation producing branded, audit-ready compliance reports across multiple enterprise formats (Executive PDF, Technical Markdown, Defect CSV).*
 
@@ -249,7 +249,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 7. 🧠 Autonomous Strategy & AI Planner
+### 7. Autonomous Strategy & AI Planner
 
 *Goal-directed autonomous engine that plans, prioritizes, and executes complex attack chains while respecting OPSEC limits.*
 
@@ -270,7 +270,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 8. 🔗 Multi-Stage Adversary Execution Chains
+### 8. Multi-Stage Adversary Execution Chains
 
 *Deterministic, multi-step kill chains orchestrating reconnaissance, credential harvesting, and lateral movement in sequence.*
 
@@ -290,7 +290,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 9. 🛡️ EDR / OPSEC Evasion & Bypass Knowledge Base
+### 9. EDR / OPSEC Evasion & Bypass Knowledge Base
 
 *Empirical tracking of evasion efficacy across enterprise endpoint detection and response (EDR) platforms.*
 
@@ -310,7 +310,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 10. 🔐 Zero-Trust Security Governance & Audit Trail
+### 10. Zero-Trust Security Governance & Audit Trail
 
 *Audited multi-role access control, cryptographic API key lifecycle, and continuous platform integrity verification.*
 
@@ -330,7 +330,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 11. 📡 Live Operations & Real-Time Event Stream
+### 11. Live Operations & Real-Time Event Stream
 
 *High-frequency WebSocket event bus streaming operational telemetry, module output, and pipeline status.*
 
@@ -350,7 +350,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 12. 📋 Enterprise Playbooks & Campaign Templates
+### 12. Enterprise Playbooks & Campaign Templates
 
 *Standardized engagement architectures for recurring red team exercises, compliance audits, and purple team drills.*
 
@@ -370,7 +370,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 13. 🔌 Interactive OpenAPI 3.1 & Developer Integration
+### 13. Interactive OpenAPI 3.1 & Developer Integration
 
 *Fully documented, interactive REST API surface for custom tooling, SOC orchestration, and CI/CD pipeline integration.*
 
@@ -390,7 +390,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-## 🎛️ Control Surfaces Breakdown
+## Control Surfaces Breakdown
 
 | Surface | Core Responsibility | Available Sub-Tabs | Primary Operators |
 | :--- | :--- | :--- | :--- |
@@ -407,7 +407,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-## 🏗️ System Architecture & Data Pipeline
+## System Architecture & Data Pipeline
 
 ARES follows a strict defense-in-depth architecture separating presentation, execution orchestration, security governance, and persistent cryptographic storage:
 
@@ -458,7 +458,7 @@ flowchart TB
 
 ---
 
-## ⚔️ Adversary Techniques & MITRE ATT&CK Matrix
+## Adversary Techniques & MITRE ATT&CK Matrix
 
 ARES implements 60+ modular adversary techniques natively mapped to the MITRE ATT&CK Enterprise Framework:
 
@@ -482,7 +482,7 @@ ARES implements 60+ modular adversary techniques natively mapped to the MITRE AT
 
 ---
 
-## 🚀 Quickstart: Up and Running in 60 Seconds
+## Quickstart: Up and Running in 60 Seconds
 
 ### Prerequisites
 - **Python**: 3.11 or 3.12 (Python 3.12 recommended for Windows).
@@ -520,7 +520,7 @@ Open your browser to **`http://127.0.0.1:5173/dashboard/`**.
 
 ---
 
-## 🔐 Enterprise Security Model & Compliance
+## Enterprise Security Model & Compliance
 
 ARES was designed for environments with the most stringent compliance and confidentiality requirements:
 
@@ -547,7 +547,7 @@ ARES enforces strict RBAC permissions across all API endpoints, background jobs,
 
 ---
 
-## 🔌 ARES MCP Gateway & Product-Grade CLI
+## ARES MCP Gateway & Product-Grade CLI
 
 ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that enables modern AI coding assistants (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline, Zed, Open-WebUI, LibreChat) to interact with the ARES purple-team offensive platform safely and under strict governance.
 
@@ -561,7 +561,7 @@ ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that e
 
 Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, ARES enforces strict **Pre-Flight Scope Invariance (`ScopeGuard`)**, **Anti-Prompt-Injection Taint Isolation**, and **Single-Use 60-second HMAC Confirmation Tokens** before any live offensive action can execute.
 
-### 🚀 Where Do I Start First? (Step-by-Step Onboarding)
+### Where Do I Start First? (Step-by-Step Onboarding)
 
 For operators or developers connecting Cursor, Claude Desktop, or Windsurf to ARES:
 
@@ -610,7 +610,7 @@ For in-depth architecture, the 7 security invariants, CLI scriptability (`--json
 
 ---
 
-## 🛠️ Extensible Developer SDK (Next-Gen Autonomous Architecture)
+## Extensible Developer SDK (Next-Gen Autonomous Architecture)
 
 ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
 
@@ -679,7 +679,7 @@ See [docs/module_sdk.md](docs/module_sdk.md) and [docs/module-development.md](do
 
 ---
 
-## 📚 Documentation Sitemap
+## Documentation Sitemap
 
 Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
@@ -697,7 +697,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 ---
 
-## 💖 Support & Sponsorship
+## Support & Sponsorship
 
 If ARES has accelerated your security assessments, helped protect your enterprise infrastructure, or advanced your offensive security research, consider sponsoring the project to fund continuous feature development, threat research, and lab infrastructure:
 
@@ -714,7 +714,7 @@ If ARES has accelerated your security assessments, helped protect your enterpris
 
 ---
 
-## ⚖️ Responsible Use & Legal Disclaimer
+## Responsible Use & Legal Disclaimer
 
 > [!IMPORTANT]
 > **ARES is a dual-use software framework designed exclusively for authorized cybersecurity research, internal enterprise resilience validation, and professional red-team engagements with explicit written permission.**
@@ -727,7 +727,7 @@ To report security vulnerabilities in ARES, please follow our [Security Policy](
 
 ---
 
-## 📄 License
+## License
 
 ARES is distributed under the open-source **[MIT License](LICENSE)**.
 

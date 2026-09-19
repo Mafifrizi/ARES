@@ -207,13 +207,10 @@ Purpose: quick system status.
 
 Shows:
 
-- API health.
-- Campaign count.
-- Telemetry status.
-- Telemetry metric cards for module runs, findings, latency, throughput,
-  queue depth, worker health, and scope counters.
-- Expandable raw telemetry snapshot for debugging.
-- Campaign summary table.
+- API & system heartbeat status (`Operational` / `Offline`).
+- Tier 1 Executive HUD: Active Engagements, Validated Findings, Attack Surface, and Engine Health (P95 latency, worker pool, queue depth).
+- Tier 2 Operational Telemetry (50/50 split): Task Queue, Module Runs, Failure Rate, Worker Pool, and 14-day Activity Pulse sparkline.
+- Tier 3 Campaign Activity Table for inventory management and instant scope isolation.
 
 Overview does not have variation tabs; the accepted dashboard view is shown
 directly.
