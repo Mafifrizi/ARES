@@ -2239,6 +2239,12 @@ async def reload_modules(
                 detail="Insufficient permissions for module reload.",
             ) from exc
 
+    import sys
+
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("ares.modules.") and not mod_name.endswith(".base"):
+            sys.modules.pop(mod_name, None)
+
     importlib.invalidate_caches()
     count = engine.load_modules()
     logger.info("engine_modules_reloaded", total_modules=count, client=client_host)
