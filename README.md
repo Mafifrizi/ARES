@@ -512,6 +512,27 @@ Open your browser to **`http://127.0.0.1:5173/dashboard/`**.
 - **Initial Operator**: `admin`
 - **Initial Password**: Configured via `ARES_DEFAULT_ADMIN_PASSWORD` in `.env` (default: `Admin123456!`)
 
+### Seamless Platform Updates & In-Place Upgrades (`ares update` & `ares upgrade`)
+
+ARES includes a built-in Nuclei-style update engine. Operators do not need to `git clone` or manually recompile the frontend when new capabilities or visual improvements are released:
+
+- **Add New Attack Modules (Additive Only)**:
+  ```powershell
+  ares update                  # Scan GitHub and install newly released modules
+  ares update --module <id>    # Install a specific new module
+  ares update --dry-run        # Preview new modules without modifying disk
+  ```
+- **In-Place Upgrades (Existing Modules, Web UI, Full Platform)**:
+  ```powershell
+  ares upgrade --all           # Upgrade full platform (modules + Web UI + engine)
+  ares upgrade --ui            # Upgrade Frontend Web UI dashboard bundle
+  ares upgrade --modules       # Upgrade installed modules to latest revisions
+  ares upgrade --dry-run       # Preview upgrades without modifying disk
+  ```
+
+> [!NOTE]
+> **Zero Data Loss Guarantee**: User databases (`~/.ares/ares.db` or PostgreSQL), credentials, configuration files (`config.yaml`), audit reports, and custom user plugins (`~/.ares/plugins/`) are mathematically blacklisted from modification. Pre-flight Python AST verification and atomic file writes ensure zero risk of corruption.
+
 ---
 
 ## Enterprise Security Model & Compliance

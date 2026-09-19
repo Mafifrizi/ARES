@@ -355,7 +355,13 @@ class PluginLoader:
 
     def _import_and_register(self, module_path: str, source: str) -> None:
         try:
-            mod = importlib.import_module(module_path)
+            if module_path in sys.modules:
+                try:
+                    mod = importlib.reload(sys.modules[module_path])
+                except Exception:
+                    mod = importlib.import_module(module_path)
+            else:
+                mod = importlib.import_module(module_path)
             for _, cls in inspect.getmembers(mod, inspect.isclass):
                 if self._is_valid_module_class(cls):
                     self.registry.register(cls, source=source)

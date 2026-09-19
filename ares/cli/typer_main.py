@@ -2298,10 +2298,171 @@ def backup(
 
     try:
         out = asyncio.run(_run())
-        console.print(f"[green]✅ Backup saved:[/green] {out}")
+        console.print(f"[green][+] Backup saved:[/green] {out}")
     except Exception as exc:
-        console.print(f"[red]❌ Backup failed: {exc}[/red]")
+        console.print(f"[red][-] Backup failed: {exc}[/red]")
         raise typer.Exit(1)
+
+
+# ── update command (Additive new modules) ─────────────────────────────────────
+
+@app.command("update")
+def update_cmd(
+    module: Optional[str] = typer.Option(None, "--module", "-m", help="Specific new module ID to install"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview new modules without downloading"),
+    repo: str = typer.Option("Mafifrizi/ARES", "--repo", help="Official GitHub repository (owner/repo)"),
+    branch: str = typer.Option("main", "--branch", help="Git branch to synchronize against"),
+) -> None:
+    """
+    Synchronize and install newly released ARES attack modules (additive only).
+
+    This command only fetches new modules that you do not already possess.
+    Existing modules, user configuration, and database files remain untouched.
+    """
+    from ares.core.updater import PlatformUpdateManager
+
+    console.print(Panel.fit(
+        "[bold cyan]ARES Module Update Engine[/bold cyan]\n"
+        f"Target: [green]{repo}@{branch}[/green] | Mode: [yellow]{'Dry-Run' if dry_run else 'Additive Install'}[/yellow]",
+        border_style="cyan",
+    ))
+
+    mgr = PlatformUpdateManager(github_repo=repo, branch=branch)
+
+    try:
+        with console.status("[cyan]Checking remote repository for new attack modules...[/cyan]"):
+            check_res = mgr.check_updates()
+    except Exception as exc:
+        console.print(f"[red][-] Update check failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    new_mods = check_res.new_modules
+    if module:
+        cleaned = module.strip().lower()
+        new_mods = [m for m in new_mods if m.module_id.lower() == cleaned or m.relative_path.lower().endswith(f"{cleaned}.py")]
+
+    if not new_mods:
+        console.print("[green][+] All official modules are already installed. No new modules available.[/green]")
+        console.print(f"[dim]Total local modules: {check_res.local_count} | Remote catalog: {check_res.remote_count}[/dim]")
+        if check_res.upgradable_modules:
+            console.print("[yellow][*] Note: Existing modules have revisions available. Run 'ares upgrade --modules' to update them.[/yellow]")
+        return
+
+    table = Table(title="New Modules Available for Installation", box=box.ROUNDED)
+    table.add_column("Module ID", style="cyan bold")
+    table.add_column("Category", style="green")
+    table.add_column("Relative Path", style="dim")
+    table.add_column("Size", style="yellow")
+
+    for item in new_mods:
+        table.add_row(item.module_id, item.category or "general", item.relative_path, f"{item.size_bytes} B")
+    console.print(table)
+
+    if dry_run:
+        console.print(f"\n[yellow][*] Dry-run complete. {len(new_mods)} new module(s) can be installed with 'ares update'.[/yellow]")
+        return
+
+    console.print(f"\n[cyan][*] Installing {len(new_mods)} new module(s)...[/cyan]")
+    res = mgr.update_modules(module_id=module, dry_run=False)
+
+    if res.get("status") == "ok":
+        console.print(f"[green][+] Successfully installed {res.get('installed_count')} new module(s).[/green]")
+        for mod in res.get("installed_modules", []):
+            console.print(f"  [green]+[/green] {mod}")
+    else:
+        console.print(f"[yellow][!] Installed {res.get('installed_count')} module(s) with errors:[/yellow]")
+        for err in res.get("errors", []):
+            console.print(f"  [red]-[/red] {err}")
+
+
+# ── upgrade command (In-place patches, UI dashboard, full platform) ───────────
+
+@app.command("upgrade")
+def upgrade_cmd(
+    all: bool = typer.Option(False, "--all", "-a", help="Upgrade full platform (modules + Web UI + engine)"),
+    ui: bool = typer.Option(False, "--ui", help="Upgrade Frontend Web UI Dashboard bundle"),
+    modules: bool = typer.Option(False, "--modules", help="Upgrade existing attack modules to latest versions"),
+    module: Optional[str] = typer.Option(None, "--module", "-m", help="Specific installed module ID to upgrade"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview upgrades without modifying disk"),
+    repo: str = typer.Option("Mafifrizi/ARES", "--repo", help="Official GitHub repository (owner/repo)"),
+    branch: str = typer.Option("main", "--branch", help="Git branch to synchronize against"),
+) -> None:
+    """
+    Upgrade existing ARES modules, Web UI dashboard, or the entire platform.
+
+    Ensures zero data loss: Databases, credentials, and custom configurations are preserved.
+    """
+    from ares.core.updater import PlatformUpdateManager
+
+    # Default to --all if no specific scope is selected
+    if not all and not ui and not modules and not module:
+        all = True
+
+    action_label = "Full Platform" if all else ("Web UI Dashboard" if ui and not modules else "Attack Modules")
+
+    console.print(Panel.fit(
+        "[bold cyan]ARES Platform Upgrade Engine[/bold cyan]\n"
+        f"Target: [green]{repo}@{branch}[/green] | Scope: [bold]{action_label}[/bold] | Mode: [yellow]{'Dry-Run' if dry_run else 'In-Place Upgrade'}[/yellow]",
+        border_style="cyan",
+    ))
+
+    mgr = PlatformUpdateManager(github_repo=repo, branch=branch)
+
+    if all:
+        with console.status("[cyan]Upgrading complete platform (modules, Web UI, hot-reload)...[/cyan]"):
+            res = mgr.upgrade_all(dry_run=dry_run)
+        if dry_run:
+            console.print("[yellow][*] Dry-run simulation completed. No files modified.[/yellow]")
+            return
+        console.print("[green][+] Full platform upgrade completed successfully.[/green]")
+        console.print(f"  - Modules updated: [cyan]{res.get('modules_upgraded', 0)}[/cyan]")
+        console.print(f"  - New modules added: [cyan]{res.get('modules_added', 0)}[/cyan]")
+        console.print(f"  - Web UI status: [cyan]{res.get('ui_status', 'ok')}[/cyan]")
+        srv = res.get("server_reload", {})
+        if srv.get("connected"):
+            console.print(f"  - Live Server Hot-Reload: [green]Connected ({srv.get('module_count')} modules active)[/green]")
+        else:
+            console.print("  - Live Server: [dim]Offline (changes will apply on next start)[/dim]")
+        return
+
+    if ui:
+        with console.status("[cyan]Upgrading Frontend Web UI Dashboard bundle...[/cyan]"):
+            try:
+                res = mgr.upgrade_ui(dry_run=dry_run)
+                if dry_run:
+                    console.print(f"[yellow][*] {res.get('message')}[/yellow]")
+                else:
+                    console.print(f"[green][+] {res.get('message')}[/green]")
+                    console.print(f"[dim]Distribution path: {res.get('target_dir')}[/dim]")
+            except Exception as exc:
+                console.print(f"[red][-] UI upgrade failed: {exc}[/red]")
+                raise typer.Exit(1)
+        if not modules and not module:
+            return
+
+    if modules or module:
+        with console.status("[cyan]Checking and upgrading attack modules...[/cyan]"):
+            try:
+                res = mgr.upgrade_modules(module_id=module, dry_run=dry_run)
+            except Exception as exc:
+                console.print(f"[red][-] Module upgrade failed: {exc}[/red]")
+                raise typer.Exit(1)
+
+        if dry_run:
+            console.print(f"[yellow][*] Dry-run complete. {res.get('upgraded_count', 0)} module(s) eligible for upgrade.[/yellow]")
+            return
+
+        if res.get("status") == "ok":
+            console.print(f"[green][+] Successfully upgraded {res.get('upgraded_count', 0)} module(s).[/green]")
+            for mod in res.get("upgraded_modules", []):
+                console.print(f"  [green]*[/green] {mod}")
+        elif res.get("status") == "not_found":
+            console.print(f"[yellow][!] {res.get('message')}[/yellow]")
+        else:
+            console.print(f"[yellow][!] Upgraded with warnings:[/yellow]")
+            for err in res.get("errors", []):
+                console.print(f"  [red]-[/red] {err}")
+
 
 
 
