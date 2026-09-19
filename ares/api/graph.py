@@ -3,9 +3,9 @@ ARES Campaign Graph API
 Builds the attack graph data structure for frontend visualization.
 
 Returns JSON with:
-  nodes  — hosts, users, credentials, pivots, findings
-  edges  — attack paths, credential flows, lateral movement
-  layout — suggested layout hints (hierarchical, force-directed)
+  nodes  - hosts, users, credentials, pivots, findings
+  edges  - attack paths, credential flows, lateral movement
+  layout - suggested layout hints (hierarchical, force-directed)
 
 Frontend can render with:
   - D3.js (force-directed)
@@ -13,19 +13,19 @@ Frontend can render with:
   - vis.js (timeline + network)
 
 Node types:
-  host        — discovered hosts (color by compromise level)
-  credential  — credentials (color by privilege)
-  user        — AD users / service accounts
-  pivot       — pivot tunnels
-  finding     — individual findings (severity → color)
-  dc          — Domain Controllers (special shape)
+  host        - discovered hosts (color by compromise level)
+  credential  - credentials (color by privilege)
+  user        - AD users / service accounts
+  pivot       - pivot tunnels
+  finding     - individual findings (severity → color)
+  dc          - Domain Controllers (special shape)
 
 Edge types:
-  compromise  — "host A was compromised via module X"
-  credential  — "credential flows from A to B"
-  lateral     — "lateral movement A → B"
-  pivot       — "pivot route A → B"
-  discovery   — "B was discovered from A"
+  compromise  - "host A was compromised via module X"
+  credential  - "credential flows from A to B"
+  lateral     - "lateral movement A → B"
+  pivot       - "pivot route A → B"
+  discovery   - "B was discovered from A"
 
 Usage:
     from ares.api.graph import build_campaign_graph

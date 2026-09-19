@@ -1,15 +1,15 @@
 """
-LAPS Password Enumeration — ad.laps_enum
-MITRE: T1552.004 — Credentials from Password Stores: Private Keys / LAPS Passwords
+LAPS Password Enumeration - ad.laps_enum
+MITRE: T1552.004 - Credentials from Password Stores: Private Keys / LAPS Passwords
 
 Reads plaintext local admin passwords from Active Directory.
 LAPS (Local Administrator Password Solution) stores the password in
 ms-Mcs-AdmPwd (LAPS v1) or msLAPS-Password (LAPS v2) on computer objects.
 
 Only accounts with AllExtendedRights or ReadProperty on ms-Mcs-AdmPwd
-can read these — ad.enum_acl identifies which accounts have this access.
+can read these - ad.enum_acl identifies which accounts have this access.
 
-OPSEC: LOW — single LDAP query, same noise level as ad.enum_users.
+OPSEC: LOW - single LDAP query, same noise level as ad.enum_users.
        Passwords stored directly in vault for immediate use.
 
 Quick win: very common in enterprise environments, effort is minimal,
@@ -50,7 +50,7 @@ logger = get_logger("ares.modules.ad.laps_enum")
 )
 class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
     """
-    ad.laps_enum — Read LAPS local admin passwords from Active Directory computer objects. Supports LAPS v1 (ms-Mcs
+    ad.laps_enum - Read LAPS local admin passwords from Active Directory computer objects. Supports LAPS v1 (ms-Mcs
 
     OPSEC: LOW
     MITRE: "T1552.004"
@@ -254,7 +254,7 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
                     "host_count":  len(laps_entries),
                     "computers":   [e["computer"] for e in laps_entries[:20]],
                     "laps_version": list({e["version"] for e in laps_entries}),
-                    "note": "Plaintext passwords in vault — not shown in findings",
+                    "note": "Plaintext passwords in vault - not shown in findings",
                 },
                 remediation = (
                     "Restrict ReadProperty on ms-Mcs-AdmPwd to only authorized admins. "
@@ -281,7 +281,7 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
         LDAP query for LAPS passwords on computer objects.
         Tries LAPS v1 (ms-Mcs-AdmPwd) then LAPS v2 (msLAPS-Password).
         Returns list of {computer, password, version, expiry}.
-        Sync — runs in executor.
+        Sync - runs in executor.
         """
         import ssl
         import ldap3

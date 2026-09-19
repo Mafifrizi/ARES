@@ -2,9 +2,9 @@
 ARES Plugin Loader
 Auto-discovers modules via three mechanisms (in priority order):
 
-1. Built-in   — ares/modules/**/*.py   (always loaded, trusted)
-2. Entry points — third-party packages that register ares.modules entry points
-3. External dir — ARES_PLUGIN_DIR env var (drop-in .py files, no install needed)
+1. Built-in   - ares/modules/**/*.py   (always loaded, trusted)
+2. Entry points - third-party packages that register ares.modules entry points
+3. External dir - ARES_PLUGIN_DIR env var (drop-in .py files, no install needed)
 
 Security controls added in v1.0.0:
   - Signature verification before loading external/entry-point modules
@@ -13,10 +13,10 @@ Security controls added in v1.0.0:
   - Unsigned external modules loaded with capability restriction warning
 
 Trust levels:
-  builtin     — shipped with ARES, always trusted
-  entrypoint  — installed pip package with ares.modules entry point → WARN_UNSIGNED
-  external    — .py file in plugin dir → REQUIRE_SIGNED (configurable)
-  unsigned    — passes WARN/ALLOW policy, cap-restricted
+  builtin     - shipped with ARES, always trusted
+  entrypoint  - installed pip package with ares.modules entry point → WARN_UNSIGNED
+  external    - .py file in plugin dir → REQUIRE_SIGNED (configurable)
+  unsigned    - passes WARN/ALLOW policy, cap-restricted
 
 Config:
   ARES_PLUGIN_SIGNING_POLICY = require_signed | warn_unsigned | allow_all
@@ -310,7 +310,7 @@ class PluginLoader:
             else Path.home() / ".ares" / "plugins"
         )
 
-        # Path traversal guard — resolve to absolute path and verify it stays within
+        # Path traversal guard - resolve to absolute path and verify it stays within
         # an allowed base (home dir or explicitly trusted locations).
         try:
             plugin_dir = plugin_dir.resolve()
@@ -321,7 +321,7 @@ class PluginLoader:
         _allowed_bases = [
             Path.home().resolve(),
             *self._trusted_external_roots,
-            Path("/tmp").resolve(),  # noqa: S108  — sandbox staging area
+            Path("/tmp").resolve(),  # noqa: S108  - sandbox staging area
         ]
         if not any(
             _is_path_within_base(plugin_dir, base) for base in _allowed_bases
@@ -380,7 +380,7 @@ class PluginLoader:
                 if trust not in ("trusted", "community"):
                     logger.warning(
                         f"[plugin_loader] Loading {path.name!r} with trust={trust!r} "
-                        f"— capabilities will be restricted"
+                        f" -  capabilities will be restricted"
                     )
             except ValueError as e:
                 self._errors.append({"path": str(path), "error": str(e)})
@@ -403,7 +403,7 @@ class PluginLoader:
                         for v in cap_violations:
                             logger.error("plugin_loader_capability_violation", v=v)
                             self._errors.append({"path": str(path), "error": v})
-                        continue  # Skip module — capability violation
+                        continue  # Skip module - capability violation
 
                     self.registry.register(cls, source=source)
 

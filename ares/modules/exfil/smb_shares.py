@@ -1,15 +1,15 @@
 """
-ARES Exfil Module — SMB Share Enumeration & Staging (T1039 / T1021.002)
+ARES Exfil Module - SMB Share Enumeration & Staging (T1039 / T1021.002)
 
 Enumerates accessible SMB shares with impacket SMBConnection:
   1. connect() to target on port 445
-  2. listShares() — get all share names
-  3. listPath(share, "*") — recursively scan each share for sensitive filenames
-  4. logoff() — clean disconnect
+  2. listShares() - get all share names
+  3. listPath(share, "*") - recursively scan each share for sensitive filenames
+  4. logoff() - clean disconnect
 
 MITRE ATT&CK:
-  T1039  — Data from Network Shared Drive
-  T1021.002 — Remote Services: SMB/Windows Admin Shares
+  T1039  - Data from Network Shared Drive
+  T1021.002 - Remote Services: SMB/Windows Admin Shares
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _list_share_recursive(conn: Any, share: str, path: str = "*",
 )
 class SmbSharesExfil(BaseModule):
     """
-    exfil.smb_shares — Enumerate accessible SMB shares and scan for sensitive files including configs, keys, and credential
+    exfil.smb_shares - Enumerate accessible SMB shares and scan for sensitive files including configs, keys, and credential
 
     OPSEC: MEDIUM
     MITRE: "T1039", "T1021.002"
@@ -112,7 +112,7 @@ class SmbSharesExfil(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "exfil.smb_shares requires 'target' — IP of Windows/Samba host.",
+                "exfil.smb_shares requires 'target' - IP of Windows/Samba host.",
                 module_id=self.MODULE_ID, field="target",
             )
 
@@ -260,7 +260,7 @@ class SmbSharesExfil(BaseModule):
 
         def _smb_enum_sync() -> tuple[list[str], list[str]]:
             """
-            All blocking SMB operations in one sync function — runs in executor.
+            All blocking SMB operations in one sync function - runs in executor.
             Wrapping in run_in_executor prevents freezing the event loop during
             SMBConnection.login(), listShares(), and recursive listPath() calls.
             """

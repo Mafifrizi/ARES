@@ -1,5 +1,5 @@
 """
-ARES — fingerprint
+ARES - fingerprint
 OS, EDR, and environment fingerprinting
 
 Public API for this package. Import from here in production code:

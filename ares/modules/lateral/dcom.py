@@ -5,15 +5,15 @@ MITRE: T1021.003 (Remote Services: Distributed Component Object Model)
 Uses DCOM COM objects to execute commands on remote Windows hosts.
 Three DCOM objects attempted in order (MMC20.Application is most reliable):
 
-  1. MMC20.Application  — Document.ActiveView.ExecuteShellCommand
-  2. ShellWindows       — Item(0).Document.Application.ShellExecute
-  3. ShellBrowserWindow — Document.Application.ShellExecute
+  1. MMC20.Application  - Document.ActiveView.ExecuteShellCommand
+  2. ShellWindows       - Item(0).Document.Application.ShellExecute
+  3. ShellBrowserWindow - Document.Application.ShellExecute
 
 All three are documented Microsoft COM objects present in default Windows
 installations. No additional software or service is required on the target.
 
 Requires: valid credentials with local admin rights on the target.
-OPSEC: MEDIUM — DCOM traffic on port 135 + dynamic RPC ports.
+OPSEC: MEDIUM - DCOM traffic on port 135 + dynamic RPC ports.
        Creates process on target (visible in process list / Event ID 4688).
        Less noisy than PsExec (no service creation / Event ID 7045).
 
@@ -69,14 +69,14 @@ class DCOMLateral(BaseLateralModule):
     MODULE_NAME        = "DCOM Lateral"
     MODULE_DESCRIPTION = (
         "DCOM lateral movement via MMC20.Application / ShellWindows COM objects "
-        "(T1021.003) — stealthier than PsExec, no service creation"
+        "(T1021.003) - stealthier than PsExec, no service creation"
     )
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
     REQUIRES           = ["local_admin_creds"]
     OUTPUTS            = ["lateral_session", "command_output"]
     MITRE_TECHNIQUES   = ["T1021.003"]
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
-    MIN_NOISE_PROFILE  = "normal"   # blocked in stealth — creates remote process
+    MIN_NOISE_PROFILE  = "normal"   # blocked in stealth - creates remote process
     PARAMS_MODEL       = DCOMParams
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
@@ -254,11 +254,11 @@ class DCOMLateral(BaseLateralModule):
                 technique=LateralTechnique.DCOM,
                 source_host="operator", target_host=target,
                 username=username, domain=domain, success=False,
-                error="impacket not installed — pip install ares-redteam[ad]",
+                error="impacket not installed - pip install ares-redteam[ad]",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
-        # Parse credential — support cleartext and NTLM hash
+        # Parse credential - support cleartext and NTLM hash
         lmhash, nthash = "", ""
         password = secret
         if ":" in secret and len(secret) in (65, 33):
@@ -345,14 +345,14 @@ class DCOMLateral(BaseLateralModule):
 
                 # All three methods exhausted
                 return False, "", (
-                    "All DCOM methods failed — target may not be running "
+                    "All DCOM methods failed - target may not be running "
                     "MMC20/ShellWindows/ShellBrowserWindow, or firewall blocks DCOM"
                 )
 
             except Exception as exc:
                 err = str(exc).lower()
                 if "access denied" in err or "rpc_s_access_denied" in err:
-                    return False, "", f"Access denied — insufficient privileges on {target}"
+                    return False, "", f"Access denied - insufficient privileges on {target}"
                 if "logon failure" in err or "invalid credentials" in err:
                     return False, "", f"Authentication failed for {username}@{target}"
                 return False, "", str(exc)[:300]

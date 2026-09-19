@@ -242,7 +242,7 @@ class EvidenceStore:
 
 
 # Modules yang butuh konfirmasi eksplisit sebelum dieksekusi
-_HIGH_RISK_MODULES: set[str] = {"ad.dcsync"}  # only dcsync: replicates ALL domain hashes — truly irreversible
+_HIGH_RISK_MODULES: set[str] = {"ad.dcsync"}  # only dcsync: replicates ALL domain hashes - truly irreversible
 
 # IP range yang selalu diblokir (cloud IMDS, loopback, link-local)
 _ALWAYS_BLOCKED_CIDRS: list[str] = [
@@ -405,7 +405,7 @@ class OutcomeTracker:
                     finally:
                         fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             except ImportError:
-                # fcntl not available (Windows) — best-effort write
+                # fcntl not available (Windows) - best-effort write
                 self._path.write_text(_json.dumps(self._data, indent=2))
         except Exception:
             pass
@@ -420,7 +420,7 @@ class OutcomeTracker:
     def success_rate(self, module_id: str) -> float:
         rec = self._data.get(module_id)
         if not rec or rec["total"] == 0:
-            return 0.5   # neutral prior — no history yet
+            return 0.5   # neutral prior - no history yet
         return rec["success"] / rec["total"]
 
     def stats(self, module_id: str) -> dict[str, int | float]:

@@ -1,5 +1,5 @@
 """
-ARES — modules.edr
+ARES - modules.edr
 EDR detection and adaptive evasion modules.
 """
 from __future__ import annotations

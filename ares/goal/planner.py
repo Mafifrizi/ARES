@@ -18,13 +18,13 @@ Algorithm:
   4. Return ordered recommendations with rationale
 
 Scoring factors (each 0.0–1.0):
-  prereq_met       — all REQUIRES already satisfied in session
-  credential_match — vault has creds matching required privilege
-  host_reachable   — target host is in scope and accessible
-  technique_value  — MITRE technique effectiveness for this goal
-  kb_score         — knowledge base historical success rate
-  artifact_match   — artifact correlator found specific opportunity
-  novelty          — haven't tried this module yet on this target
+  prereq_met       - all REQUIRES already satisfied in session
+  credential_match - vault has creds matching required privilege
+  host_reachable   - target host is in scope and accessible
+  technique_value  - MITRE technique effectiveness for this goal
+  kb_score         - knowledge base historical success rate
+  artifact_match   - artifact correlator found specific opportunity
+  novelty          - haven't tried this module yet on this target
 
 Usage:
     planner = AttackPlanner(registry, session, vault, kb)
@@ -104,7 +104,7 @@ class PlannerContext:
 # ── Scoring weights ────────────────────────────────────────────────────────────
 
 _SCORE_WEIGHTS = {
-    "prereq_met":       0.28,   # most important — must have pre-reqs
+    "prereq_met":       0.28,   # most important - must have pre-reqs
     "credential_match": 0.18,   # having right creds matters a lot
     "technique_value":  0.18,   # MITRE relevance to current goal
     "artifact_match":   0.15,   # artifact correlator found direct path
@@ -381,7 +381,7 @@ class AttackPlanner:
     ) -> float:
         """How many prerequisites are already satisfied (0.0–1.0)."""
         if not requires:
-            return 0.8   # No prereqs — slightly prefer prereq-free in recon phase
+            return 0.8   # No prereqs - slightly prefer prereq-free in recon phase
 
         met = sum(1 for r in requires if self._has_capability(r, target, ctx))
         return met / len(requires)
@@ -426,7 +426,7 @@ class AttackPlanner:
         """Score based on credential availability for this module."""
         vault = ctx.vault or self.vault
         if not vault:
-            return 0.3   # No vault — neutral
+            return 0.3   # No vault - neutral
 
         requires = getattr(cls, "REQUIRES", [])
         cred_reqs = [r for r in requires if "cred" in r or "admin" in r]

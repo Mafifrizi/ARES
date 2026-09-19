@@ -9,7 +9,7 @@
 > credential.
 >
 > **Note:** The web dashboard (`/dashboard/*`) has its own authentication
-> using the same tokens — see [Dashboard](#dashboard) section.
+> using the same tokens - see [Dashboard](#dashboard) section.
 
 ---
 
@@ -195,12 +195,12 @@ restriction on API-key-compatible routes and do not replace RBAC.
 {
   "id": "...",
   "key": "ares_...",
-  "note": "Save this key — it will NOT be shown again.",
+  "note": "Save this key - it will NOT be shown again.",
   "prefix": "ares_..."
 }
 ```
 
-> Store `key` immediately — the full API key secret is not recoverable after
+> Store `key` immediately - the full API key secret is not recoverable after
 > this response.
 > In the dashboard, the same one-time secret is shown in the `Save your key`
 > modal. The key list shows metadata and a prefix only, not the full secret.
@@ -294,7 +294,7 @@ Get CVSS score distribution for a campaign.
 
 ### `GET /campaigns/{id}/diff/{other_id}`
 
-Compare two campaigns — shows new findings, fixed findings, and severity changes.
+Compare two campaigns - shows new findings, fixed findings, and severity changes.
 Useful for verifying remediation between assessments.
 
 ---

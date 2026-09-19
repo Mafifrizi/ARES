@@ -1,5 +1,5 @@
 """
-AD Computer Enumeration — Production ldap3 Implementation
+AD Computer Enumeration - Production ldap3 Implementation
 Enumerate domain computers, DCs, OS versions, stale accounts.
 MITRE: T1018, T1087.002
 """
@@ -85,7 +85,7 @@ def _format_ldap_connection_failure(
 )
 class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
-    ad.enum_computers — Enumerate domain computers, OS versions, stale accounts, DCs
+    ad.enum_computers - Enumerate domain computers, OS versions, stale accounts, DCs
 
     OPSEC: LOW
     MITRE: "T1018","T1087.002"

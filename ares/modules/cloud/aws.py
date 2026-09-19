@@ -1,4 +1,4 @@
-"""AWS Recon — boto3 implementation. IAM, S3, Security Groups, IMDS. MITRE: T1526, T1530, T1552.005, T1580"""
+"""AWS Recon - boto3 implementation. IAM, S3, Security Groups, IMDS. MITRE: T1526, T1530, T1552.005, T1580"""
 from __future__ import annotations
 import asyncio
 from functools import partial
@@ -32,7 +32,7 @@ SENSITIVE_PORTS = {22:"SSH",23:"Telnet",3389:"RDP",1433:"MSSQL",3306:"MySQL",
 )
 class AWSEnumModule(BaseModule):
     """
-    cloud.aws — IAM enum, S3 misconfig, IMDS check, Security Group audit
+    cloud.aws - IAM enum, S3 misconfig, IMDS check, Security Group audit
 
     OPSEC: LOW
     MITRE: "T1526","T1530","T1552.005","T1580"
@@ -59,12 +59,12 @@ class AWSEnumModule(BaseModule):
             pdict = dict(params)
         else:
             pdict = {}
-        # Cloud modules need AWS credentials — check at least one method available
+        # Cloud modules need AWS credentials - check at least one method available
         has_key = bool(pdict.get("access_key") or pdict.get("profile") or pdict.get("aws_profile"))
         has_env = bool(__import__("os").environ.get("AWS_ACCESS_KEY_ID"))
         if not has_key and not has_env:
             raise ModuleValidationError(
-                "cloud.aws requires AWS credentials — set access_key/aws_profile params "
+                "cloud.aws requires AWS credentials - set access_key/aws_profile params "
                 "or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY environment variables.",
                 module_id=self.MODULE_ID, field="access_key",
             )
@@ -187,7 +187,7 @@ class AWSEnumModule(BaseModule):
     @trace_module("cloud.aws")
     async def run(self, profile=None, access_key=None, secret_key=None,
                   session_token=None, region="us-east-1", **kwargs):
-        # Note: before_request() intentionally not called — cloud modules use
+        # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
         logger.info("aws_recon_start", region=region)
@@ -337,11 +337,11 @@ class AWSEnumModule(BaseModule):
                 severity=Severity.HIGH,mitre_technique="T1046",mitre_tactic="Discovery",
                 evidence={"rules":open_sgs[:10]},remediation="Restrict ingress. Use VPN or SSM Session Manager.")
         if imds.get("imdsv1_available"):
-            self.finding(title="IMDSv1 Available — SSRF → Credential Theft",
+            self.finding(title="IMDSv1 Available - SSRF → Credential Theft",
                 description="EC2 IMDSv1 accessible without token. SSRF can extract IAM credentials.",
                 severity=Severity.HIGH,mitre_technique="T1552.005",mitre_tactic="Credential Access",
                 evidence={"roles":imds.get("credential_roles",[])},
                 remediation="Require IMDSv2: aws ec2 modify-instance-metadata-options --http-tokens required.")
 
-# Backward-compat alias — was AWSModule before v3.0.1
+# Backward-compat alias - was AWSModule before v3.0.1
 AWSModule = AWSEnumModule  # noqa

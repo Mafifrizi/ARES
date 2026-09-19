@@ -95,16 +95,16 @@ Source 3: external     ~/.ares/plugins/*.py           external trust
 
 **Security controls at load time:**
 
-1. Signature verification (`ModuleVerifier`) — configurable via `ARES_PLUGIN_SIGNING_POLICY`
-2. Capability enforcement (`CapabilityPolicy`) — module can only declare allowed caps for trust level
-3. Metadata validation (`validate_module_class`) — all required attrs present
-4. Duplicate detection — existing module_id from builtin takes priority
+1. Signature verification (`ModuleVerifier`) - configurable via `ARES_PLUGIN_SIGNING_POLICY`
+2. Capability enforcement (`CapabilityPolicy`) - module can only declare allowed caps for trust level
+3. Metadata validation (`validate_module_class`) - all required attrs present
+4. Duplicate detection - existing module_id from builtin takes priority
 
 ---
 
 ## Dependency Injection (AresContainer)
 
-All services are resolved through `AresContainer` — never instantiated directly in engine code:
+All services are resolved through `AresContainer` - never instantiated directly in engine code:
 
 ```python
 # Production setup (CLI / API startup)
@@ -158,7 +158,7 @@ class ExecutionContext:
     credentials:   list[Credential]
     primary_credential: Credential | None
 
-    # Shared state (references — mutations visible to engine)
+    # Shared state (references - mutations visible to engine)
     session:       OperatorSession
     vault:         CredentialVault
 
@@ -229,13 +229,13 @@ except AresError as e:
 
 ## Legacy GoalEngine/AttackPlanner design (production inactive)
 
-**GoalEngine** (`ares/goal/engine.py`) — deterministic backward chaining:
+**GoalEngine** (`ares/goal/engine.py`) - deterministic backward chaining:
 - Operator sets `Goal.DOMAIN_ADMIN`
 - Engine looks at `GOAL_DEFINITIONS` to find required outputs
 - Finds modules that produce those outputs
 - Topological sort → `ExecutionPlan` with ordered stages
 
-**AttackPlanner** (`ares/goal/planner.py`) — probabilistic AI scoring:
+**AttackPlanner** (`ares/goal/planner.py`) - probabilistic AI scoring:
 - Scores ALL candidate modules against current session state
 - 6-factor weighted score: prereqs, credentials, technique value, artifact match, novelty, opsec
 - Returns ranked `Suggestion` list with rationale
@@ -255,7 +255,7 @@ GoalEngine.plan() → initial deterministic chain
 
 ## Legacy AdaptiveAttackStrategy (production inactive)
 
-When a module fails, the engine doesn't stop — it pivots:
+When a module fails, the engine doesn't stop - it pivots:
 
 ```
 lateral.psexec  → FAIL (EDR blocked)

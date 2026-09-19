@@ -1,5 +1,5 @@
 """
-DNS Enumeration — Zone Transfer, Subdomain Brute, Record Enum
+DNS Enumeration - Zone Transfer, Subdomain Brute, Record Enum
 MITRE: T1590.002
 
 Attempts:
@@ -63,7 +63,7 @@ _RECORD_TYPES: list[str] = ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME", "PTR
 )
 class DnsEnumModule(BaseModule):
     """
-    network.dns_enum — DNS zone transfer attempt, subdomain brute force, and record enumeration — maps DNS infrastructure and finds internal hostnames
+    network.dns_enum - DNS zone transfer attempt, subdomain brute force, and record enumeration - maps DNS infrastructure and finds internal hostnames
 
     OPSEC: LOW
     MITRE: "T1590.002"
@@ -73,7 +73,7 @@ class DnsEnumModule(BaseModule):
     MODULE_NAME        = "DNS Enumeration"
     MODULE_CATEGORY    = "network"
     MODULE_DESCRIPTION = (
-        "DNS zone transfer attempt, subdomain brute force, and record enumeration — "
+        "DNS zone transfer attempt, subdomain brute force, and record enumeration - "
         "maps DNS infrastructure and finds internal hostnames"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -97,7 +97,7 @@ class DnsEnumModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -226,7 +226,7 @@ class DnsEnumModule(BaseModule):
             import dns.query          # type: ignore[import]
             import dns.exception      # type: ignore[import]
         except ImportError:
-            return [], {"error": "dnspython not installed — run: pip install dnspython"}
+            return [], {"error": "dnspython not installed - run: pip install dnspython"}
 
         logger.info("dns_enum_start", domain=domain)
         await self.noise.rate_limiter.acquire("network_scan")
@@ -243,7 +243,7 @@ class DnsEnumModule(BaseModule):
         resolver.timeout  = 3
         resolver.lifetime = 5
 
-        # ── 1. Standard record enumeration — blocking, wrapped in executor ──────
+        # ── 1. Standard record enumeration - blocking, wrapped in executor ──────
         def _resolve_records() -> dict[str, list[str]]:
             results: dict[str, list[str]] = {}
             for rtype in _RECORD_TYPES:
@@ -256,7 +256,7 @@ class DnsEnumModule(BaseModule):
 
         dns_records = await loop.run_in_executor(None, _resolve_records)
 
-        # ── 2. Zone transfer attempt — blocking, wrapped in executor ─────────────
+        # ── 2. Zone transfer attempt - blocking, wrapped in executor ─────────────
         ns_servers: list[str] = dns_records.get("NS", [])
 
         def _try_axfr(ns_host: str) -> list[str]:
@@ -276,7 +276,7 @@ class DnsEnumModule(BaseModule):
                     description=(
                         f"The nameserver {ns_clean} allowed a full zone transfer (AXFR) "
                         f"for {domain}. This exposes the complete DNS zone with "
-                        f"{len(zone_transfer_data)} records — all internal hostnames and IPs."
+                        f"{len(zone_transfer_data)} records - all internal hostnames and IPs."
                     ),
                     severity=Severity.CRITICAL,
                     mitre_technique="T1590.002",
@@ -340,7 +340,7 @@ class DnsEnumModule(BaseModule):
             import re
             if re.search(r"v=spf1|DKIM|DMARC|google-site-verification|"
                          r"atlassian-domain|MS=ms|docusign", txt, re.IGNORECASE):
-                pass  # Normal SPF/DMARC records — not findings
+                pass  # Normal SPF/DMARC records - not findings
             elif re.search(r"password|secret|token|key|credential", txt, re.IGNORECASE):
                 self.finding(
                     title=f"Sensitive Data in DNS TXT Record for {domain}",

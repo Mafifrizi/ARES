@@ -1,4 +1,4 @@
-"""AD SPN Enumeration — Production ldap3 Implementation. MITRE: T1558.003, T1087.002"""
+"""AD SPN Enumeration - Production ldap3 Implementation. MITRE: T1558.003, T1087.002"""
 from __future__ import annotations
 import datetime
 from typing import Any
@@ -58,7 +58,7 @@ def classify_enum_spn_outcome(spn_count: int) -> tuple[str, str]:
 )
 class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
-    ad.enum_spn — Find SPN accounts (Kerberoasting candidates)
+    ad.enum_spn - Find SPN accounts (Kerberoasting candidates)
 
     OPSEC: LOW
     MITRE: "T1558.003","T1087.002"
@@ -90,7 +90,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.enum_spn requires domain credentials — "
+                "ad.enum_spn requires domain credentials - "
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
@@ -247,9 +247,9 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
 
     def _fetch_spns_sync(self, dc, username, password, domain):
         """
-        Sync (non-async) — runs in executor so it never blocks the event loop.
+        Sync (non-async) - runs in executor so it never blocks the event loop.
         Issue #1 fix: moved from async def to sync def + run_in_executor call above.
-        Issue #2 fix: conn.unbind() in try/finally — always closes even on exception.
+        Issue #2 fix: conn.unbind() in try/finally - always closes even on exception.
         """
         import ssl
         import ldap3
@@ -368,7 +368,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
         privd    = [s for s in spns if s.get("is_admin")]
         old_pass = [s for s in spns if (s.get("days_since_pwd") or 0) > 365]
         self.finding(title=f"Kerberoastable Service Accounts ({len(spns)})",
-            description=(f"{len(spns)} SPN accounts — {len(rc4)} use RC4 (fastest to crack), "
+            description=(f"{len(spns)} SPN accounts - {len(rc4)} use RC4 (fastest to crack), "
                          f"{len(privd)} in privileged groups."),
             severity=Severity.CRITICAL if privd else Severity.HIGH,
             mitre_technique="T1558.003", mitre_tactic="Credential Access",

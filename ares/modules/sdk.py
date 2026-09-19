@@ -50,7 +50,7 @@ Quick start:
             )
 
         async def run(self, **kwargs):
-            # Legacy interface — prefer execute(ctx) instead
+            # Legacy interface - prefer execute(ctx) instead
             ctx = ExecutionContext.for_test(**kwargs)
             result = await self.execute(ctx)
             return result.findings, result.raw
@@ -230,7 +230,7 @@ def timeout(seconds: int | float) -> Any:
     return decorator
 
 
-# ── TestHelper — makes unit testing modules trivial ───────────────────────────
+# ── TestHelper - makes unit testing modules trivial ───────────────────────────
 
 
 class ModuleTestHelper:

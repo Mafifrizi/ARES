@@ -1,5 +1,5 @@
 """
-ares/strategy/target_state.py — Per-Host Memory for StrategyEngine
+ares/strategy/target_state.py - Per-Host Memory for StrategyEngine
 
 Tracks what ARES knows about each target host across rounds:
 - Which modules succeeded / failed here

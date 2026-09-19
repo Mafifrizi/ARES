@@ -63,7 +63,7 @@ class TaskState(str, Enum):
 
 _SENSITIVE_PARAM_KEYS: frozenset[str] = frozenset(
     {
-        # Credentials — must never be stored plaintext in Redis
+        # Credentials - must never be stored plaintext in Redis
         "password",
         "secret",
         "nt_hash",
@@ -104,9 +104,9 @@ class ClusterTask:
     timeout_s: int = 300  # 5 min default task timeout
 
     def to_json(self) -> str:
-        """Serialize to JSON — redacts sensitive credential params before writing to Redis."""
+        """Serialize to JSON - redacts sensitive credential params before writing to Redis."""
         d = asdict(self)
-        # Redact sensitive values — never store plaintext credentials in Redis
+        # Redact sensitive values - never store plaintext credentials in Redis
         if d.get("params"):
             d["params"] = {
                 k: "<REDACTED>" if k in _SENSITIVE_PARAM_KEYS else v
@@ -242,7 +242,7 @@ class RedisTaskQueue:
         """
         Claim the highest-priority task this worker can handle.
 
-        Uses ZPOPMIN (truly atomic) — a single command that reads and removes
+        Uses ZPOPMIN (truly atomic) - a single command that reads and removes
         in one operation. The old zrange+zrem pattern was non-atomic: two workers
         could both read the same candidate then race on zrem, with the loser
         silently dropping the task. ZPOPMIN prevents that entirely.
@@ -251,7 +251,7 @@ class RedisTaskQueue:
         the queue with its original score so another worker can pick it up.
         """
         # ZPOPMIN pops the member with the lowest score (= highest priority) atomically.
-        # count=1 — claim one task per call. Loop until we find one we can handle
+        # count=1 - claim one task per call. Loop until we find one we can handle
         # or the queue is empty.
         max_skip = 20  # don't loop forever if every task is unhandleable
         for _ in range(max_skip):
@@ -269,7 +269,7 @@ class RedisTaskQueue:
 
             task_json = await self._redis.hget(self.INFLIGHT_KEY, task_id)
             if not task_json:
-                # Orphaned score entry — already completed/failed, skip
+                # Orphaned score entry - already completed/failed, skip
                 continue
 
             task = ClusterTask.from_json(task_json)
@@ -392,7 +392,7 @@ class RedisTaskQueue:
 
 class InProcessTaskQueue:
     """
-    Pure asyncio in-process queue — no Redis required.
+    Pure asyncio in-process queue - no Redis required.
     Same interface as RedisTaskQueue.
     Used in single-operator mode and testing.
     """
@@ -678,11 +678,11 @@ class ClusterWorkerNode:
                 settings = get_settings()
 
                 # Fetch real campaign scope from DB so scope guard is not bypassed
-                _real_scope: list[ScopeEntry] = []  # deny-all default — fail closed
+                _real_scope: list[ScopeEntry] = []  # deny-all default - fail closed
                 try:
                     from ares.db.database import AresDatabase
 
-                    # AresDatabase.create() calls connect() internally — do NOT call again
+                    # AresDatabase.create() calls connect() internally - do NOT call again
                     async with await AresDatabase.create(
                         settings.ares_database_url,
                         settings.encryption_key_value,
@@ -709,7 +709,7 @@ class ClusterWorkerNode:
                     )
                     await self.queue.fail(
                         task,
-                        "Campaign scope unavailable — refusing to execute with unbounded scope. "
+                        "Campaign scope unavailable - refusing to execute with unbounded scope. "
                         "Check DB connectivity.",
                         requeue=False,
                     )
@@ -724,7 +724,7 @@ class ClusterWorkerNode:
                 noise = NoiseController(campaign)
                 module = module_cls(settings=settings, campaign=campaign, noise=noise)
 
-                # Use execute(ctx) — same interface as engine, respects vault/context
+                # Use execute(ctx) - same interface as engine, respects vault/context
                 ctx = _ExCtx.build(
                     campaign=campaign,
                     target=task.params.get("target", ""),

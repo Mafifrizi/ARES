@@ -1,5 +1,5 @@
 """
-ares.strategy.models — Data models for the autonomous engagement strategy engine.
+ares.strategy.models - Data models for the autonomous engagement strategy engine.
 
 Dataclasses used across StrategyEngine, KnowledgeBase, and Notifier.
 Extracted from strategy/__init__.py for maintainability.

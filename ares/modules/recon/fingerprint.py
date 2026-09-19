@@ -1,7 +1,7 @@
 """
-Target Environment Fingerprinting — recon.fingerprint
-MITRE: T1082 — System Information Discovery
-       T1518.001 — Security Software Discovery
+Target Environment Fingerprinting - recon.fingerprint
+MITRE: T1082 - System Information Discovery
+       T1518.001 - Security Software Discovery
 
 Thin wrapper around ares/fingerprint/engine.py (650 lines, fully implemented).
 Runs passive-first OS/domain/EDR fingerprinting BEFORE attack modules.
@@ -12,7 +12,7 @@ Key outputs:
   - recommended_profile: stealth | normal | aggressive
   - Stored to campaign._artifact_store for GoalEngine + AdaptiveOpsecEngine
 
-OPSEC: LOW — passive techniques first (banner grab, DNS PTR, NTLM challenge).
+OPSEC: LOW - passive techniques first (banner grab, DNS PTR, NTLM challenge).
        No authentication required. No exploit sent to target.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ _HIGH_RISK_EDR = {"crowdstrike", "sentinelone", "defender_atp"}
 )
 class FingerprintModule(BaseModule):
     """
-    recon.fingerprint — Passive-first OS, domain role, and EDR/AV detection before any attack module. Detects CrowdStrik
+    recon.fingerprint - Passive-first OS, domain role, and EDR/AV detection before any attack module. Detects CrowdStrik
 
     OPSEC: LOW
     MITRE: "T1082", "T1518.001"
@@ -83,7 +83,7 @@ class FingerprintModule(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "recon.fingerprint requires 'target' — IP or hostname to fingerprint.",
+                "recon.fingerprint requires 'target' - IP or hostname to fingerprint.",
                 module_id=self.MODULE_ID, field="target",
             )
 
@@ -241,7 +241,7 @@ class FingerprintModule(BaseModule):
                     edr=[e.value for e in result.edr_vendors],
                     risk=result.detection_risk)
 
-        # Finding: EDR detected — warn operator before attack modules run
+        # Finding: EDR detected - warn operator before attack modules run
         if result.edr_vendors:
             edr_names  = [e.value for e in result.edr_vendors]
             is_high    = any(e.value in _HIGH_RISK_EDR for e in result.edr_vendors)
@@ -251,12 +251,12 @@ class FingerprintModule(BaseModule):
                 description = (
                     f"Security software detected on {target}: {', '.join(edr_names)}. "
                     + (
-                        "Advanced EDR (CrowdStrike/SentinelOne/Defender ATP) detected — "
+                        "Advanced EDR (CrowdStrike/SentinelOne/Defender ATP) detected - "
                         "STEALTH noise profile strongly recommended. "
                         "HIGH_NOISE modules (dcsync, kerberoast burst, psexec) "
                         "will generate immediate alerts."
                         if is_high else
-                        f"EDR active — use NORMAL or STEALTH profile."
+                        f"EDR active - use NORMAL or STEALTH profile."
                     )
                 ),
                 severity    = sev,
@@ -299,5 +299,5 @@ class FingerprintModule(BaseModule):
                 host = target, confidence = 0.95,
             )
 
-        raw["fingerprint_result"] = {k: v for k, v in raw.items()}  # OUTPUTS key — shallow copy to avoid circular ref
+        raw["fingerprint_result"] = {k: v for k, v in raw.items()}  # OUTPUTS key - shallow copy to avoid circular ref
         return self._findings[:], raw

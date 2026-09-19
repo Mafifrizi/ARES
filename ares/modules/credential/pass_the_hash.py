@@ -41,7 +41,7 @@ logger = get_logger("ares.modules.credential.pass_the_hash")
 )
 class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
     """
-    credential.pass_the_hash — Authenticate to target using NTLM hash — no plaintext password required"
+    credential.pass_the_hash - Authenticate to target using NTLM hash - no plaintext password required"
 
     OPSEC: MEDIUM
     MITRE: "T1550.002"
@@ -52,7 +52,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
     MODULE_NAME        = "Pass-the-Hash"
     MODULE_CATEGORY    = "credential"
     MODULE_DESCRIPTION = (
-        "Authenticate to target using NTLM hash — "
+        "Authenticate to target using NTLM hash - "
         "no plaintext password required"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -141,13 +141,13 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
         nt_hash = ctx.params.get("nt_hash", "") or ctx.params.get("hash", "")
         if not target:
             raise ModuleValidationError(
-                "credential.pass_the_hash requires 'target' — "
+                "credential.pass_the_hash requires 'target' - "
                 "IP or hostname of the host to authenticate against.",
                 module_id=self.MODULE_ID, field="target",
             )
         if not nt_hash:
             raise ModuleValidationError(
-                "credential.pass_the_hash requires 'nt_hash' — "
+                "credential.pass_the_hash requires 'nt_hash' - "
                 "the 32-character NT hash from ad.dcsync output.",
                 module_id=self.MODULE_ID, field="nt_hash",
             )

@@ -24,7 +24,7 @@ Keys checked:
   HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*
       → Some installers store credentials in uninstall strings
 
-OPSEC: LOW — remote registry read via SMB named pipe \\pipe\\winreg.
+OPSEC: LOW - remote registry read via SMB named pipe \\pipe\\winreg.
 Leaves minimal traces (SMB session + registry access audit events if
 Object Access auditing is enabled, which is rare on workstations).
 """
@@ -142,7 +142,7 @@ _ENUM_TARGETS: list[tuple[str, str, list[str] | None, str, str]] = [
     ),
 ]
 
-# HKCU paths (per-user) — enumerated under current user context
+# HKCU paths (per-user) - enumerated under current user context
 _HKCU_TARGETS: list[tuple[str, str, list[str] | None, str, str]] = [
     (
         "HKCU",
@@ -178,7 +178,7 @@ _SEV_MAP = {
 )
 class RegistryEnumModule(BaseModule):
     """
-    windows.registry_enum — Read-only enumeration of well-known registry keys that store credentials — AutoLogon, VNC passwo
+    windows.registry_enum - Read-only enumeration of well-known registry keys that store credentials - AutoLogon, VNC passwo
 
     OPSEC: LOW
     MITRE: "T1552.002", "T1082"
@@ -191,7 +191,7 @@ class RegistryEnumModule(BaseModule):
     MODULE_CATEGORY    = "windows"
     MODULE_DESCRIPTION = (
         "Read-only enumeration of well-known registry keys that store "
-        "credentials — AutoLogon, VNC passwords, SNMP community strings"
+        "credentials - AutoLogon, VNC passwords, SNMP community strings"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
@@ -221,7 +221,7 @@ class RegistryEnumModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -358,7 +358,7 @@ class RegistryEnumModule(BaseModule):
                 hBaseRegCloseKey, DCERPCException,
             )
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("registry_enum_start", target=target, username=username)
         audit("registry_enum", actor=username, source="operator",
@@ -403,7 +403,7 @@ class RegistryEnumModule(BaseModule):
                             ans  = hBaseRegOpenKey(dce, hive, reg_path)
                             hkey = ans["phkResult"]
                         except DCERPCException:
-                            # Key does not exist — normal
+                            # Key does not exist - normal
                             hBaseRegCloseKey(dce, hive)
                             continue
 
@@ -518,7 +518,7 @@ class RegistryEnumModule(BaseModule):
 
         # ── Generate findings ──────────────────────────────────────────────
 
-        # AutoLogon — most critical
+        # AutoLogon - most critical
         autologon = next(
             (h for h in all_findings
              if "Winlogon" in h["path"]),

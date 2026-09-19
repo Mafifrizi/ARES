@@ -1,5 +1,5 @@
 """
-ARES — api.dashboard
+ARES - api.dashboard
 Real-time campaign dashboard
 
 Public API for this package. Import from here in production code:

@@ -45,7 +45,7 @@ logger = get_logger("ares.modules.windows.lsa_secrets")
 )
 class LSASecretsModule(BaseModule):
     """
-    windows.lsa_secrets — "Extract local account hashes (SAM
+    windows.lsa_secrets - "Extract local account hashes (SAM
 
     OPSEC: HIGH_NOISE
     MITRE: "T1003.002", "T1003.004"
@@ -56,7 +56,7 @@ class LSASecretsModule(BaseModule):
     MODULE_NAME        = "LSA Secrets & SAM Dump"
     MODULE_CATEGORY    = "windows"
     MODULE_DESCRIPTION = (
-        "Extract local account hashes (SAM) and LSA secrets via impacket secretsdump — "
+        "Extract local account hashes (SAM) and LSA secrets via impacket secretsdump - "
         "recovers service account cleartext passwords stored in LSA"
     )
     OPSEC_LEVEL        = OpsecLevel.HIGH_NOISE
@@ -137,7 +137,7 @@ class LSASecretsModule(BaseModule):
         )
 
     async def validate(self, ctx: "Any") -> None:
-        """LSA secrets dump blocked in STEALTH — registry access triggers Sysmon."""
+        """LSA secrets dump blocked in STEALTH - registry access triggers Sysmon."""
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         from ares.core.campaign import NoiseProfile
@@ -155,13 +155,13 @@ class LSASecretsModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                "windows.lsa_secrets requires 'target' — IP of target Windows host.",
+                "windows.lsa_secrets requires 'target' - IP of target Windows host.",
                 module_id=self.MODULE_ID, field="target",
             )
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "windows.lsa_secrets is blocked in STEALTH profile — "
+                "windows.lsa_secrets is blocked in STEALTH profile - "
                 "registry hive access triggers Sysmon Event ID 12/13 and EDR alerts. "
                 "Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -282,7 +282,7 @@ class LSASecretsModule(BaseModule):
         domain   = kwargs.get("domain", "")
         dry_run  = kwargs.get("dry_run", False)
 
-        target = sanitize_hostname(target)   # lsa_secrets was missing this — ISU fix
+        target = sanitize_hostname(target)   # lsa_secrets was missing this - ISU fix
 
         if not target or not username:
             return [], {"error": "target and username required"}
@@ -297,7 +297,7 @@ class LSASecretsModule(BaseModule):
             )
             from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("lsa_secrets_start", target=target, username=username)
         audit("lsa_secrets", actor=username, source="operator",
@@ -370,7 +370,7 @@ class LSASecretsModule(BaseModule):
 
         if sam_hashes:
             self.finding(
-                title=f"SAM Database Dumped — {len(sam_hashes)} Local Account Hash(es) from {target}",
+                title=f"SAM Database Dumped - {len(sam_hashes)} Local Account Hash(es) from {target}",
                 description=(
                     f"Successfully dumped SAM database from {target} with {len(sam_hashes)} "
                     "local account NTLM hash(es). These can be used for Pass-the-Hash attacks "
@@ -397,7 +397,7 @@ class LSASecretsModule(BaseModule):
                 if re.search(r'\$MACHINE\.ACC|_SC_|DPAPI|NL\$KM', s)
             )
             self.finding(
-                title=f"LSA Secrets Extracted — {len(lsa_secrets_out)} Secret(s) from {target}",
+                title=f"LSA Secrets Extracted - {len(lsa_secrets_out)} Secret(s) from {target}",
                 description=(
                     f"LSA secrets extracted from {target}. "
                     "LSA secrets can contain service account cleartext passwords, "

@@ -1,5 +1,5 @@
 """
-ARES — Automated Red team Engagement System
+ARES - Automated Red team Engagement System
 Active Recon & Exploitation Suite for structured, AI-guided penetration testing.
 
 Quickstart:

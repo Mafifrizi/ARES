@@ -54,7 +54,7 @@ class ServiceProfile:
     description:     str = ""
     attack_modules:  list[str] = field(default_factory=list)  # module IDs that can attack this service
     cred_types:      list[str] = field(default_factory=list)  # credential types that work here
-    opsec_risk:      str = "medium"  # low | medium | high — how noisy attacking this is
+    opsec_risk:      str = "medium"  # low | medium | high - how noisy attacking this is
     mitre_techniques: list[str] = field(default_factory=list)
 
 

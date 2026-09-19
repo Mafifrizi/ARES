@@ -1,5 +1,5 @@
 """
-edr.bypass_adaptive — Adaptive EDR Evasion Engine
+edr.bypass_adaptive - Adaptive EDR Evasion Engine
 
 Detects EDR vendor and version from recon.fingerprint results,
 then selects and applies the appropriate evasion technique automatically.
@@ -18,12 +18,12 @@ It enumerates which bypass techniques are applicable given the detected
 EDR, and tests whether benign probes are detected.
 
 MITRE:
-  T1562.001 — Impair Defenses: Disable or Modify Tools
-  T1055     — Process Injection (test probe only)
-  T1027     — Obfuscated Files or Information
-  T1562.006 — Impair Defenses: Indicator Blocking (ETW patching)
+  T1562.001 - Impair Defenses: Disable or Modify Tools
+  T1055     - Process Injection (test probe only)
+  T1027     - Obfuscated Files or Information
+  T1562.006 - Impair Defenses: Indicator Blocking (ETW patching)
 
-OPSEC: MEDIUM — some detection tests may trigger EDR telemetry
+OPSEC: MEDIUM - some detection tests may trigger EDR telemetry
 """
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ _BYPASS_TECHNIQUES: list[BypassTechnique] = [
         technique_id="amsi-force-error",
         name="AMSI Force Error via Context Corruption",
         description="Corrupt AmsiContext pointer to force AMSI initialization failure. "
-                    "Lower detection than reflection method — no assembly load needed.",
+                    "Lower detection than reflection method - no assembly load needed.",
         target_vendor=["defender_atp", "defender_av", "crowdstrike"],
         opsec_level="low",
         mitre_id="T1562.001",
@@ -193,7 +193,7 @@ _BYPASS_TECHNIQUES: list[BypassTechnique] = [
     BypassTechnique(
         technique_id="lolbin-mshta",
         name="MSHTA LOLBin Execution",
-        description="Use mshta.exe to execute HTA files — signed Microsoft binary, "
+        description="Use mshta.exe to execute HTA files - signed Microsoft binary, "
                     "bypasses application whitelisting and static analysis.",
         target_vendor=["cylance", "carbon_black"],
         opsec_level="medium",
@@ -203,7 +203,7 @@ _BYPASS_TECHNIQUES: list[BypassTechnique] = [
     BypassTechnique(
         technique_id="lolbin-wmic",
         name="WMIC LOLBin for Script Execution",
-        description="Use wmic.exe process call create for code execution — "
+        description="Use wmic.exe process call create for code execution - "
                     "bypasses script-based detection when script is not on disk.",
         target_vendor=["cylance", "carbon_black", "defender_av"],
         opsec_level="medium",
@@ -215,7 +215,7 @@ _BYPASS_TECHNIQUES: list[BypassTechnique] = [
     BypassTechnique(
         technique_id="generic-in-memory-exec",
         name="In-Memory Execution (No Disk Write)",
-        description="Load and execute payload entirely in memory — never writes to disk. "
+        description="Load and execute payload entirely in memory - never writes to disk. "
                     "Bypasses file-based detection and AV scanning.",
         target_vendor=["*"],  # all vendors
         opsec_level="medium",
@@ -307,10 +307,10 @@ _EDR_BLIND_SPOTS: dict[str, list[dict[str, str]]] = {
 )
 class EDRAdaptiveBypassModule(BaseModule):
     """
-    edr.bypass_adaptive — Adaptive EDR evasion engine.
+    edr.bypass_adaptive - Adaptive EDR evasion engine.
 
     Reads EDR detection results from recon.fingerprint and selects the
-    optimal evasion strategy. Does NOT generate payloads — outputs technique
+    optimal evasion strategy. Does NOT generate payloads - outputs technique
     recommendations and probes which approaches are viable.
 
     OPSEC: MEDIUM
@@ -323,7 +323,7 @@ class EDRAdaptiveBypassModule(BaseModule):
     MODULE_CATEGORY    = "edr"
     MODULE_DESCRIPTION = (
         "Detect EDR vendor from fingerprint results and select optimal evasion techniques. "
-        "Outputs ranked bypass techniques with OPSEC notes — does not generate payloads."
+        "Outputs ranked bypass techniques with OPSEC notes - does not generate payloads."
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
@@ -517,7 +517,7 @@ class EDRAdaptiveBypassModule(BaseModule):
         **kwargs: Any,
     ) -> tuple[list[Finding], dict[str, Any]]:
         """
-        Note: before_request() not called — this module analyzes EDR data
+        Note: before_request() not called - this module analyzes EDR data
         and runs local probes. Network calls to target are minimal/optional.
         """
         audit("edr_bypass_selection", actor="operator",
@@ -564,7 +564,7 @@ class EDRAdaptiveBypassModule(BaseModule):
             if "*" in tech.target_vendor or vendor_lower in tech.target_vendor:
                 applicable.append(tech)
 
-        # BYOVD techniques (universal — always append as last resort)
+        # BYOVD techniques (universal - always append as last resort)
         byovd = list(_BYOVD_TECHNIQUES)
 
         # Sort user-mode by OPSEC level (low-noise first), BYOVD always last
@@ -602,7 +602,7 @@ class EDRAdaptiveBypassModule(BaseModule):
         plan = []
         if not techniques:
             return [{"step": 1, "action": "No specific bypass identified",
-                     "detail": "EDR vendor unknown — use generic in-memory execution techniques"}]
+                     "detail": "EDR vendor unknown - use generic in-memory execution techniques"}]
 
         for i, tech in enumerate(techniques[:5], 1):
             plan.append({
@@ -634,7 +634,7 @@ class EDRAdaptiveBypassModule(BaseModule):
         # Try to get DB from settings (injected via campaign context)
         db = getattr(self, "_db_ref", None)
         if not db or not hasattr(db, "get_bypass_success_rate"):
-            return techniques  # No DB available — return as-is
+            return techniques  # No DB available - return as-is
 
         rates: dict = {}
         import asyncio as _aio
@@ -651,16 +651,16 @@ class EDRAdaptiveBypassModule(BaseModule):
             try:
                 coro = db.get_bypass_success_rate(t.technique_id, edr_vendor)
                 if running_loop is None:
-                    # No running loop — asyncio.run() is safe
+                    # No running loop - asyncio.run() is safe
                     rate = _aio.run(coro)
                 else:
-                    # Inside async context — run in separate thread with its own loop
+                    # Inside async context - run in separate thread with its own loop
                     with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
                         rate = _pool.submit(_aio.run, coro).result(timeout=5.0)
                 if rate is not None:
                     rates[t.technique_id] = rate
             except Exception:
-                pass  # DB unavailable or timeout — skip ranking for this technique
+                pass  # DB unavailable or timeout - skip ranking for this technique
 
         if not rates:
             return techniques
@@ -670,11 +670,11 @@ class EDRAdaptiveBypassModule(BaseModule):
             opsec_order = {"low": 0, "medium": 1, "high_noise": 2}
             opsec_val   = opsec_order.get(t.opsec_level, 1)
             if rate is None:
-                return (1, opsec_val)    # unknown — middle rank
+                return (1, opsec_val)    # unknown - middle rank
             elif rate >= 0.80:
-                return (0, opsec_val)    # promote — proven effective
+                return (0, opsec_val)    # promote - proven effective
             elif rate <= 0.30:
-                return (2, opsec_val)    # demote — likely patched
+                return (2, opsec_val)    # demote - likely patched
             else:
                 return (1, opsec_val)    # normal rank
 
@@ -692,15 +692,15 @@ class EDRAdaptiveBypassModule(BaseModule):
         """
         Run a harmless probe to verify a bypass technique is still effective
         against the target EDR. Returns True = applicable, False = blocked/patched.
-        Fails open (returns True) on timeout or error — red team should still try.
+        Fails open (returns True) on timeout or error - red team should still try.
         Only executes if technique.probe_safe=True and a run_cmd runner is provided.
         """
         if not technique.probe_safe:
-            return True   # BYOVD, etc — cannot probe safely, assume applicable
+            return True   # BYOVD, etc - cannot probe safely, assume applicable
         if not run_cmd:
-            return True   # No SSH/shell runner provided — assume works
+            return True   # No SSH/shell runner provided - assume works
 
-        # Safe probe commands — each echoes PROBE_OK if the technique is applicable
+        # Safe probe commands - each echoes PROBE_OK if the technique is applicable
         _PROBES = {
             "amsi-patch-reflection":
                 "powershell -NoP -NonI -c "
@@ -743,7 +743,7 @@ class EDRAdaptiveBypassModule(BaseModule):
 
         probe_cmd = _PROBES.get(technique.technique_id)
         if not probe_cmd:
-            return True   # No probe defined for this technique — assume works
+            return True   # No probe defined for this technique - assume works
 
         try:
             raw     = await asyncio.wait_for(run_cmd(probe_cmd), timeout=10.0)
@@ -761,7 +761,7 @@ class EDRAdaptiveBypassModule(BaseModule):
             logger.debug("edr_probe_error",
                          technique=technique.technique_id,
                          error=str(exc)[:60])
-            return True   # Fail open — red team should try
+            return True   # Fail open - red team should try
 
     async def _select_techniques_with_probe(
         self,
@@ -812,7 +812,7 @@ class EDRAdaptiveBypassModule(BaseModule):
                 mitre_technique="T1562.001",
                 mitre_tactic="Defense Evasion",
                 evidence={"edr_vendor": edr_vendor, "techniques_checked": len(_BYPASS_TECHNIQUES)},
-                remediation="N/A — informational for red team",
+                remediation="N/A - informational for red team",
                 host=target or "local",
                 confidence=0.60,
             )
@@ -822,13 +822,13 @@ class EDRAdaptiveBypassModule(BaseModule):
         medium    = [t for t in viable if t.opsec_level == "medium"]
 
         self.finding(
-            title=f"EDR Bypass Techniques Available for {edr_vendor} — {len(viable)} Applicable",
+            title=f"EDR Bypass Techniques Available for {edr_vendor} - {len(viable)} Applicable",
             description=(
                 f"Detected {edr_vendor}. Found {len(viable)} applicable evasion techniques: "
                 f"{len(low_noise)} low-noise, {len(medium)} medium-noise. "
                 f"Recommended first approach: {viable[0].name}. "
                 f"This technique targets: {', '.join(viable[0].target_vendor[:3])}. "
-                "Apply techniques in order of OPSEC level — lowest noise first."
+                "Apply techniques in order of OPSEC level - lowest noise first."
             ),
             severity=Severity.HIGH,
             mitre_technique="T1562.001",
@@ -853,12 +853,12 @@ class EDRAdaptiveBypassModule(BaseModule):
         # Blind spots finding
         if blinds:
             self.finding(
-                title=f"EDR Blind Spots for {edr_vendor} — {len(blinds)} Coverage Gaps",
+                title=f"EDR Blind Spots for {edr_vendor} - {len(blinds)} Coverage Gaps",
                 description=(
                     f"Identified {len(blinds)} telemetry gaps in {edr_vendor} coverage. "
                     f"Exploiting blind spots is more OPSEC-safe than active bypass techniques "
                     f"because no EDR hooks are touched. "
-                    f"Top gap: {blinds[0]['gap']} — {blinds[0]['detail'][:150]}"
+                    f"Top gap: {blinds[0]['gap']} - {blinds[0]['detail'][:150]}"
                 ),
                 severity=Severity.MEDIUM,
                 mitre_technique="T1562.006",
@@ -875,12 +875,12 @@ class EDRAdaptiveBypassModule(BaseModule):
         # BYOVD warning finding
         if byovd:
             self.finding(
-                title=f"BYOVD Techniques Available — {len(byovd)} Universal Kernel-Level Bypasses",
+                title=f"BYOVD Techniques Available - {len(byovd)} Universal Kernel-Level Bypasses",
                 description=(
                     "BYOVD (Bring Your Own Vulnerable Driver) techniques can disable ALL "
                     "user-mode and kernel-mode EDR hooks regardless of vendor. "
                     f"Available: {byovd[0].name}. "
-                    "HIGH NOISE — use only as last resort when user-mode techniques fail. "
+                    "HIGH NOISE - use only as last resort when user-mode techniques fail. "
                     "Requires admin rights and may trigger Windows Event 7045."
                 ),
                 severity=Severity.HIGH,
@@ -901,7 +901,7 @@ class EDRAdaptiveBypassModule(BaseModule):
 
 
     # ══════════════════════════════════════════════════════════════════════════
-    # Deep EDR Probe Methods — Real detection testing, not theoretical scoring
+    # Deep EDR Probe Methods - Real detection testing, not theoretical scoring
     # ══════════════════════════════════════════════════════════════════════════
 
     async def deep_probe(
@@ -912,12 +912,12 @@ class EDRAdaptiveBypassModule(BaseModule):
         Run comprehensive EDR detection testing on a compromised Windows host.
 
         Tests:
-          1. AMSI status — is AMSI active? Can AmsiScanBuffer be patched?
-          2. ETW providers — which ETW providers are active? Which can be blinded?
-          3. Sysmon config — extract Sysmon config from registry (shows monitoring rules)
-          4. ntdll hook detection — check if EDR hooked ntdll.dll syscall stubs
-          5. PPL status — is Protected Process Light enabled?
-          6. Credential Guard — is Credential Guard active?
+          1. AMSI status - is AMSI active? Can AmsiScanBuffer be patched?
+          2. ETW providers - which ETW providers are active? Which can be blinded?
+          3. Sysmon config - extract Sysmon config from registry (shows monitoring rules)
+          4. ntdll hook detection - check if EDR hooked ntdll.dll syscall stubs
+          5. PPL status - is Protected Process Light enabled?
+          6. Credential Guard - is Credential Guard active?
 
         Requires: SSH/WinRM/SMB exec access to target (compromised host).
         Returns detailed dict with each test result.

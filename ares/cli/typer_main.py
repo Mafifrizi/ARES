@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ARES CLI — Typer-based command line interface.
+ARES CLI - Typer-based command line interface.
 All subcommands use Python type annotations for automatic --help generation.
 
 Structure:
@@ -54,7 +54,7 @@ from rich.table import Table
 app     = typer.Typer(
     name    = "ares",
     help    = (
-        "ARES — Automated Red team Engagement System\n\n"
+        "ARES - Automated Red team Engagement System\n\n"
         "[bold]Quick start:[/bold]\n"
         "  ares campaign create --name \"Lab\" --client ACME --targets 10.0.0.0/24\n"
         "  ares module run ad.enum_users --dc 10.0.0.5 --domain corp.local\n"
@@ -281,7 +281,7 @@ app.add_typer(mcp_app,      name="mcp")
 def version_callback(show: bool) -> None:
     if show:
         from ares.__version__ import __version__ as _ver
-        rprint(f"[bold cyan]ARES[/] v{_ver} — Automated Red team Engagement System")
+        rprint(f"[bold cyan]ARES[/] v{_ver} - Automated Red team Engagement System")
         raise typer.Exit()
 
 
@@ -291,7 +291,7 @@ def main(
                                   callback=version_callback, is_eager=True,
                                   help="Show version and exit"),
 ) -> None:
-    """ARES — Automated Red team Engagement System."""
+    """ARES - Automated Red team Engagement System."""
 
 
 # ── Campaign commands ──────────────────────────────────────────────────────────
@@ -332,7 +332,7 @@ def campaign_create(
             f"[bold green]✓ Campaign created[/]\n"
             f"  ID:       [cyan]{c.id}[/]\n"
             f"  Name:     {c.name}\n"
-            f"  Client:   {c.client or '—'}\n"
+            f"  Client:   {c.client or ' - '}\n"
             f"  Profile:  [yellow]{profile}[/]\n"
             f"  Scope:    {', '.join(s.cidr for s in c.scope)}",
             title="Campaign Created",
@@ -368,7 +368,7 @@ def campaign_list(
         table.add_row(
             c.get("id", "")[:8],
             c.get("name", ""),
-            c.get("client", "—"),
+            c.get("client", " - "),
             c.get("noise_profile", "normal"),
             str(c.get("finding_count", 0)),
             c.get("created_at", ""),
@@ -453,7 +453,7 @@ def campaign_resume(
         f"[green]▶  Campaign resumed[/]\n"
         f"  Checkpoint:  [dim]{cp['checkpoint_id']}[/]\n"
         f"  Saved at:    {cp['saved_at']}\n"
-        f"  Notes:       {cp.get('notes', '—') or '—'}\n\n"
+        f"  Notes:       {cp.get('notes', ' - ') or ' - '}\n\n"
         f"Run [cyan]ares module run <id> --campaign {campaign_id[:8]}[/] to continue.",
         title="Resumed from Checkpoint",
     ))
@@ -590,11 +590,11 @@ def module_info(
         f"  Category:    {meta['category']}\n"
         f"  OpSec:       [yellow]{meta['opsec_level']}[/]\n"
         f"  Author:      {meta.get('author', 'ARES Team')}\n"
-        f"  Requires:    {', '.join(meta.get('requires', [])) or '—'}\n"
-        f"  Outputs:     {', '.join(meta.get('outputs', [])) or '—'}\n"
+        f"  Requires:    {', '.join(meta.get('requires', [])) or ' - '}\n"
+        f"  Outputs:     {', '.join(meta.get('outputs', [])) or ' - '}\n"
         f"  MITRE:       {', '.join(meta.get('mitre_list', []))}\n"
         + (f"\n[bold]Techniques:[/]\n" + "\n".join(
-            f"  [cyan]{t.technique_id}[/] {t.name} — [dim]{t.tactic}[/]"
+            f"  [cyan]{t.technique_id}[/] {t.name} - [dim]{t.tactic}[/]"
             for t in techs
         ) if techs else ""),
         title=f"Module: {module_id}",
@@ -655,8 +655,8 @@ def module_install(
         if result and result.get("success"):
             console.print(Panel(
                 f"[green]✓ Installed {module_spec}[/]\n"
-                f"  Version:  {result.get('version', '—')}\n"
-                f"  Path:     [dim]{result.get('path', '—')}[/]\n"
+                f"  Version:  {result.get('version', ' - ')}\n"
+                f"  Path:     [dim]{result.get('path', ' - ')}[/]\n"
                 f"  Verified: {'[green]yes[/]' if result.get('verified') else '[yellow]no[/]'}",
                 title="Module Installed",
             ))
@@ -780,7 +780,7 @@ def chain_suggest(
         suggestions = planner.suggest(ctx, limit=limit)
 
         if not suggestions:
-            console.print("[dim]No suggestions available — check registry modules.[/]")
+            console.print("[dim]No suggestions available - check registry modules.[/]")
             return
 
         table = Table(title=f"Suggestions for [{goal}] → {target}", show_lines=True)
@@ -842,7 +842,7 @@ def report_generate(
         console.print(Panel(
             "\n".join(f"  [green]✓[/] [cyan]{fmt.upper()}[/]  {path}"
                       for fmt, path in result_paths.items()),
-            title=f"Report Generated — {c['name']}",
+            title=f"Report Generated - {c['name']}",
         ))
     else:
         console.print("[red]Report generation failed. Check logs.[/]")
@@ -959,7 +959,7 @@ def signing_verify(
              "unsigned": "dim", "invalid": "red", "revoked": "red"}.get(
         result.trust_level.value, "white"
     )
-    icon  = {"trusted": "✓", "community": "⚠", "unsigned": "—",
+    icon  = {"trusted": "✓", "community": "⚠", "unsigned": " - ",
               "invalid": "✗", "revoked": "✗"}.get(result.trust_level.value, "?")
 
     console.print(
@@ -1067,7 +1067,7 @@ async def _run_chain(
         console.print("[red]c-live-cli:chain-intent-invalid[/]")
         return
 
-    plan_table = RTable(title=f"Attack Plan — [{goal}]", show_lines=True)
+    plan_table = RTable(title=f"Attack Plan - [{goal}]", show_lines=True)
     plan_table.add_column("#",       width=4,  style="dim")
     plan_table.add_column("Module",  width=24, style="cyan")
     plan_table.add_column("Reason",  width=46)
@@ -1076,7 +1076,7 @@ async def _run_chain(
 
     for i, module_id in enumerate(modules, start=1):
         plan_table.add_row(
-            str(i), module_id, "deterministic configured chain", "—", "[dim]pending[/]",
+            str(i), module_id, "deterministic configured chain", " - ", "[dim]pending[/]",
         )
 
     console.print(plan_table)
@@ -1219,7 +1219,7 @@ def _display_result(module_id: str, result: dict) -> None:
         f"  Findings:    {result.get('findings', 0)}"
         + findings_summary + "\n"
         f"  Credentials: {result.get('new_credentials', 0)}\n"
-        f"  New hosts:   {', '.join(result.get('discovered_hosts', [])) or '—'}",
+        f"  New hosts:   {', '.join(result.get('discovered_hosts', [])) or ' - '}",
         title=f"Module Result: {module_id}",
     ))
 
@@ -1307,7 +1307,7 @@ def doctor(
     from pathlib import Path
     from ares.modules.ad.dependencies import AD_INSTALL_HINT, AD_SUPPORT_DEPENDENCIES
 
-    console.print("\n[bold]ARES Doctor[/bold] — prerequisite check\n")
+    console.print("\n[bold]ARES Doctor[/bold] - prerequisite check\n")
 
     ok = warn = fail = 0
 
@@ -1410,7 +1410,7 @@ def doctor(
             check(f"impacket {version_match[0]}", "ok", ">= 0.11 required")
         elif version_match:
             check(f"impacket {version_match[0]}", "warn",
-                  f"too old ({version_match[0]}); expected >= 0.11 — upgrade: pip install --upgrade impacket")
+                  f"too old ({version_match[0]}); expected >= 0.11 - upgrade: pip install --upgrade impacket")
         else:
             check("impacket  (AD/SMB modules)", "ok",
                   "importable; version unknown from source/local install")
@@ -1574,7 +1574,7 @@ def doctor(
             check(f"{tool}  ({desc})", "ok", path)
         else:
             check(f"{tool}  ({desc})", "warn",
-                  f"not in PATH — install: apt install {tool} (Linux) / brew install {tool} (macOS)")
+                  f"not in PATH - install: apt install {tool} (Linux) / brew install {tool} (macOS)")
 
     # ── network socket support ────────────────────────────────────────────────
     import socket as _socket
@@ -1593,12 +1593,12 @@ def doctor(
         content = env_path.read_text()
         if "CHANGE_ME" in content:
             check(".env configured", "fail",
-                  "CHANGE_ME placeholders found — run: ares-setup to generate secure keys")
+                  "CHANGE_ME placeholders found - run: ares-setup to generate secure keys")
         else:
             check(".env configured", "ok")
     else:
         check(".env file", "fail",
-              "Missing — run: cp .env.example .env && ares-setup")
+              "Missing - run: cp .env.example .env && ares-setup")
 
     # Database
     try:
@@ -1610,7 +1610,7 @@ def doctor(
             check("Database (SQLite)", "ok", db_path or ":memory:")
     except SystemExit:
         check("Settings loadable", "fail",
-              "env vars missing — fix: cp .env.example .env && ares-setup")
+              "env vars missing - fix: cp .env.example .env && ares-setup")
     except Exception as exc:
         check("Settings loadable", "warn", str(exc)[:60])
 
@@ -1621,7 +1621,7 @@ def doctor(
         console.print(f"[bold green]All {total} checks passed.[/bold green] ARES is ready.\n")
     elif fail == 0:
         console.print(f"[bold yellow]{ok}/{total} checks OK, {warn} warning(s).[/bold yellow]"
-                      " ARES should work — optional tools missing.\n")
+                      " ARES should work - optional tools missing.\n")
     else:
         console.print(f"[bold red]{fail} check(s) failed.[/bold red]"
                       f" Fix the [FAIL] items above, then re-run [cyan]ares doctor[/cyan].\n")
@@ -2124,7 +2124,7 @@ def dashboard_dev(
 
 @app.command("quickstart")
 def quickstart() -> None:
-    """Guided wizard for first-time users — creates your first campaign."""
+    """Guided wizard for first-time users - creates your first campaign."""
     import uuid
 
     console.print("\n[bold cyan]ARES Quick Start Wizard[/bold cyan]\n")
@@ -2333,7 +2333,7 @@ def goal_run(
         console.print("[red]c-live-cli:goal-intent-invalid[/]")
         raise typer.Exit(1)
 
-    table = Table(title=f"[bold]Goal Preview — {goal}[/bold]", show_lines=True)
+    table = Table(title=f"[bold]Goal Preview - {goal}[/bold]", show_lines=True)
     table.add_column("Step", style="cyan", width=5)
     table.add_column("Module", style="green")
     table.add_column("Reason")
@@ -2343,7 +2343,7 @@ def goal_run(
     console.print(f"\n[dim]Estimated duration: {min(len(modules) * 3, 60)} min[/dim]")
 
     if dry_run:
-        console.print("[yellow]Preview only — no HTTP request or module code executed.[/yellow]")
+        console.print("[yellow]Preview only - no HTTP request or module code executed.[/yellow]")
         return
 
     try:
@@ -2449,12 +2449,12 @@ def graph_show(
             f"Edges: [cyan]{stats['edges']}[/cyan]  "
             f"High-value targets: [red]{stats['high_value']}[/red]  "
             f"Attack paths: [yellow]{stats['attack_paths']}[/yellow]",
-            title=f"Attack Graph — Campaign {campaign_id[:8]}",
+            title=f"Attack Graph - Campaign {campaign_id[:8]}",
         ))
 
         paths = graph.top_paths(n=top_n)
         if not paths:
-            console.print("[dim]No attack paths found yet — run recon modules first.[/dim]")
+            console.print("[dim]No attack paths found yet - run recon modules first.[/dim]")
             return
 
         for i, p in enumerate(paths, 1):
@@ -2557,7 +2557,7 @@ def module_create(
     module_code = f'''\
 from __future__ import annotations
 """
-{class_name} — {desc_str}
+{class_name} - {desc_str}
 
 MITRE ATT&CK: Fill in technique ID (e.g. T1558.003 for Kerberoasting)
 """
@@ -2587,7 +2587,7 @@ class {class_name}(BaseModule):
     {desc_str}
 
     Parameters:
-        target  — target host IP or hostname
+        target  - target host IP or hostname
         # Add module-specific params here, e.g.:
         # target_port: int = 445,  # target port number
     """
@@ -2638,7 +2638,7 @@ class {class_name}(BaseModule):
         )
 
     async def run(self, **kwargs: Any):
-        """Legacy interface — do not modify."""
+        """Legacy interface - do not modify."""
         ctx    = ExecutionContext.for_test(**kwargs)
         result = await self.execute(ctx)
         return result.findings, result.raw
@@ -2716,7 +2716,7 @@ async def test_missing_target_raises(module):
         f"  2. Fill in [cyan]REQUIRES[/cyan], [cyan]OUTPUTS[/cyan], [cyan]mitre[/cyan] metadata\n"
         f"  3. Run tests:  [cyan]pytest {test_file.name}[/cyan]\n"
         f"  4. Install:    [cyan]ares module install ./{module_file.name}[/cyan]",
-        title=f"ares module create — {module_id}",
+        title=f"ares module create - {module_id}",
     ))
 
 

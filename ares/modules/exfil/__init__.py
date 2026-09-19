@@ -1,5 +1,5 @@
 """
-ARES — modules.exfil
+ARES - modules.exfil
 Exfiltration and data collection modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

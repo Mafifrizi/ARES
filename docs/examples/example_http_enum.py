@@ -1,5 +1,5 @@
 """
-ARES Example Module — HTTP Service Enumeration
+ARES Example Module - HTTP Service Enumeration
 A minimal, fully commented example of the ARES public module SDK.
 
 Copy this file as a starting point for your own module.
@@ -223,7 +223,7 @@ class HttpEnumModule(BaseModule):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests — run with: pytest docs/examples/example_http_enum.py -v
+# Tests - run with: pytest docs/examples/example_http_enum.py -v
 # ─────────────────────────────────────────────────────────────────────────────
 
 import pytest

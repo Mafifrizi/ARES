@@ -1,5 +1,5 @@
 """
-ARES — collab
+ARES - collab
 Multi-operator collaboration manager
 
 Public API for this package. Import from here in production code:

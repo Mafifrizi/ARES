@@ -44,7 +44,7 @@ logger = get_logger("ares.modules.credential.golden_ticket")
 )
 class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
     """
-    credential.golden_ticket — Forge a Kerberos TGT using the krbtgt hash — provides persistent domain access that survives pas
+    credential.golden_ticket - Forge a Kerberos TGT using the krbtgt hash - provides persistent domain access that survives pas
 
     OPSEC: MEDIUM
     MITRE: "T1558.001"
@@ -55,7 +55,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
     MODULE_NAME        = "Golden Ticket Forgery"
     MODULE_CATEGORY    = "credential"
     MODULE_DESCRIPTION = (
-        "Forge a Kerberos TGT using the krbtgt hash — "
+        "Forge a Kerberos TGT using the krbtgt hash - "
         "provides persistent domain access that survives password resets"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -158,7 +158,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
             )
         if not krbtgt_hash:
             raise ModuleValidationError(
-                "credential.golden_ticket requires 'krbtgt_hash' — "
+                "credential.golden_ticket requires 'krbtgt_hash' - "
                 "obtain from ad.dcsync output. Format: NT (32 hex) or LM:NT.",
                 module_id=self.MODULE_ID, field="krbtgt_hash",
             )
@@ -171,7 +171,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
             )
         if not domain_sid:
             raise ModuleValidationError(
-                "credential.golden_ticket requires 'domain_sid' — "
+                "credential.golden_ticket requires 'domain_sid' - "
                 "obtain from ad.dcsync or 'Get-ADDomain | Select-Object DomainSID'. "
                 "Format: S-1-5-21-<sub1>-<sub2>-<sub3>",
                 module_id=self.MODULE_ID, field="domain_sid",
@@ -293,12 +293,12 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
         krbtgt_hash = kwargs.get("krbtgt_hash", "")
         domain_sid  = kwargs.get("domain_sid", "")
         username    = kwargs.get("username", "Administrator")  # identity to forge as
-        # Sanitize username before using in path — prevent path traversal in tempdir
+        # Sanitize username before using in path - prevent path traversal in tempdir
         import re as _re_path
         username = _re_path.sub(r"[^\w.-]", "_", username)
         target      = kwargs.get("target", "")
         dry_run     = kwargs.get("dry_run", False)
-        # Scope + rate-limit check — domain is the "target" for golden ticket
+        # Scope + rate-limit check - domain is the "target" for golden ticket
         if domain and not dry_run:
             await self.before_request(domain, "golden_ticket")
 
@@ -324,7 +324,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
         def _forge() -> tuple[bool, str, str]:
             """
             Forge Golden Ticket using impacket.krb5 library directly.
-            Drops the old subprocess ticketer approach — unstable, PATH-dependent.
+            Drops the old subprocess ticketer approach - unstable, PATH-dependent.
             Uses impacket.krb5.ticket + CCache to build a valid TGT from the krbtgt hash.
             """
             try:

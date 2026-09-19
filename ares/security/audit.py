@@ -7,7 +7,7 @@ Results exposed via:
   - Scheduled: runs on engine startup (warn-only by default)
 
 pip-audit queries the OSV (Open Source Vulnerabilities) database
-and PyPI Advisory Database — no external API key needed.
+and PyPI Advisory Database - no external API key needed.
 
 Usage:
     from ares.security.audit import run_dependency_audit, AuditPolicy
@@ -21,9 +21,9 @@ Startup check (engine integration):
     await startup_audit(policy=AuditPolicy.WARN)  # or BLOCK_CRITICAL
 
 Policy:
-    WARN            — log vulnerabilities, continue startup
-    BLOCK_CRITICAL  — abort startup if any CRITICAL CVEs found
-    BLOCK_ANY       — abort startup if any CVEs found
+    WARN            - log vulnerabilities, continue startup
+    BLOCK_CRITICAL  - abort startup if any CRITICAL CVEs found
+    BLOCK_ANY       - abort startup if any CVEs found
 """
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ class AuditResult:
         if self.error:
             return f"Audit failed: {self.error}"
         if self.clean:
-            return f"✓ Clean — {self.scanned_packages} packages, 0 vulnerabilities"
+            return f"✓ Clean - {self.scanned_packages} packages, 0 vulnerabilities"
         return (
             f"⚠ {self.total_count} vulnerabilities "
             f"({self.critical_count} critical, {self.high_count} high) "
@@ -194,7 +194,7 @@ def _cvss_to_severity(fix_versions: list[str], vuln_id: str,
     # 2. Heuristic fallback based on vuln_id prefix
     vuln_lower = vuln_id.lower()
     if "ghsa" in vuln_lower or "cve" in vuln_lower:
-        return CVSSScore.HIGH   # conservative — HIGH until score confirmed
+        return CVSSScore.HIGH   # conservative - HIGH until score confirmed
     return CVSSScore.UNKNOWN
 
 
@@ -228,7 +228,7 @@ async def _run_pip_audit(
 
     # Check if pip-audit is available
     if not shutil.which("pip-audit"):
-        logger.warning("pip-audit not installed — dependency audit unavailable")
+        logger.warning("pip-audit not installed - dependency audit unavailable")
         return AuditResult(
             tool_available = False,
             error          = "pip-audit not installed. Install: pip install pip-audit",
@@ -260,7 +260,7 @@ async def _run_pip_audit(
 
     duration = time.monotonic() - t0
 
-    # pip-audit exits 1 when vulnerabilities found — parse output regardless
+    # pip-audit exits 1 when vulnerabilities found - parse output regardless
     try:
         raw_json = json.loads(stdout.decode())
     except json.JSONDecodeError:
@@ -314,9 +314,9 @@ async def startup_audit(
 ) -> None:
     """
     Run audit at engine startup. Behavior controlled by policy:
-      WARN           — log vulnerabilities, continue
-      BLOCK_CRITICAL — raise if critical CVEs found
-      BLOCK_ANY      — raise if any CVEs found
+      WARN           - log vulnerabilities, continue
+      BLOCK_CRITICAL - raise if critical CVEs found
+      BLOCK_ANY      - raise if any CVEs found
     """
     logger.info("Running startup dependency audit...")
     result = await _run_pip_audit()

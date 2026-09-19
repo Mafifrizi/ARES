@@ -1,5 +1,5 @@
 """
-ARES — core
+ARES - core
 Core ARES data models and engine
 
 Public API for this package. Import from here in production code:

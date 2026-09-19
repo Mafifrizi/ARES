@@ -75,13 +75,13 @@ class JitterEngine:
         if lo >= hi:
             delay_ms = lo
         else:
-            # Use triangular distribution — more realistic than uniform
+            # Use triangular distribution - more realistic than uniform
             delay_ms = int(random.triangular(lo, hi, (lo + hi) // 2))
         logger.debug("noise_jitter_sleep_ms", delay_ms=delay_ms, profile=self.profile)
         await asyncio.sleep(delay_ms / 1000)
 
     async def sleep_between_hosts(self) -> None:
-        """Longer pause when moving between hosts — mimics human behavior."""
+        """Longer pause when moving between hosts - mimics human behavior."""
         multiplier = {"stealth": 3, "normal": 1.5, "aggressive": 0.5}[self.profile]
         await self.sleep(
             override_min=int(self.min_ms * multiplier),
@@ -136,7 +136,7 @@ class RateLimiter:
 
 class ScopeGuard:
     """
-    HARD STOP — prevents any action outside defined scope.
+    HARD STOP - prevents any action outside defined scope.
     This protects operators from accidental out-of-scope activity.
     """
 
@@ -158,7 +158,7 @@ class ScopeGuard:
                 "timestamp": time.time(),
             })
             logger.warning(
-                f"[scope_guard] BLOCKED: '{action}' against '{target}' — OUT OF SCOPE"
+                f"[scope_guard] BLOCKED: '{action}' against '{target}' - OUT OF SCOPE"
             )
 
         return in_scope
@@ -175,7 +175,7 @@ class ScopeGuard:
         return len(self._blocked_attempts)
 
 
-class ScopeViolationError(ScopeError):  # alias for backward compat — use ScopeError directly
+class ScopeViolationError(ScopeError):  # alias for backward compat - use ScopeError directly
     """Raised when an action targets an out-of-scope host."""
 
 
@@ -183,7 +183,7 @@ class ScopeViolationError(ScopeError):  # alias for backward compat — use Scop
 
 class NoiseController:
     """
-    Master controller — combines jitter + rate limiter + scope guard.
+    Master controller - combines jitter + rate limiter + scope guard.
     Every module must use this before making any network call.
     """
 

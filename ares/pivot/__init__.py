@@ -1,5 +1,5 @@
 """
-ARES — pivot
+ARES - pivot
 Pivot tunnel management (SOCKS5, local-forward, teardown).
 
 Public API for this package. Import from here in production code:

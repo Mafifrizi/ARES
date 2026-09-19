@@ -1,4 +1,4 @@
-"""ARES version — single source of truth from pyproject.toml."""
+"""ARES version - single source of truth from pyproject.toml."""
 try:
     from importlib.metadata import version
     __version__: str = version("ares-redteam")

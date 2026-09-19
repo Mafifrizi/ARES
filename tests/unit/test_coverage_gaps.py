@@ -5,7 +5,7 @@ Unit tests covering previously untested modules:
   - knowledge/base.py
   - telemetry/collector.py
 
-Written against the actual source APIs — verified before writing.
+Written against the actual source APIs - verified before writing.
 """
 from __future__ import annotations
 import pytest
@@ -19,13 +19,13 @@ from pathlib import Path
 class TestCredentialVault:
     """
     API verified:
-        CredentialVault(encryption_key)  — None = ephemeral auto key
-        vault.store(cred, secret)        — raises ValueError on empty secret
-        vault.add(cred, secret)          — alias for store()
-        vault.all()                      — list of all Credential objects
-        vault.domain_admins()            — DOMAIN_ADMIN + ENTERPRISE_ADMIN creds
-        vault.by_privilege(level)        — filter by PrivilegeLevel
-        vault.reveal(cred_id)            — decrypt → plaintext
+        CredentialVault(encryption_key)  - None = ephemeral auto key
+        vault.store(cred, secret)        - raises ValueError on empty secret
+        vault.add(cred, secret)          - alias for store()
+        vault.all()                      - list of all Credential objects
+        vault.domain_admins()            - DOMAIN_ADMIN + ENTERPRISE_ADMIN creds
+        vault.by_privilege(level)        - filter by PrivilegeLevel
+        vault.reveal(cred_id)            - decrypt → plaintext
     """
 
     @pytest.fixture
@@ -114,7 +114,7 @@ class TestFingerprintEngine:
     """
     API verified:
         class EnvironmentFingerprinter  (NOT HostFingerprinter)
-        FingerprintResult fields: host, os_type, os_version, open_ports — NO 'confidence'
+        FingerprintResult fields: host, os_type, os_version, open_ports - NO 'confidence'
         OSType.WINDOWS = "windows_10", OSType.LINUX = "linux_ubuntu" (convenience aliases)
         to_dict() → flat dict with 'host', 'os_type', 'open_ports'
     """
@@ -191,8 +191,8 @@ class TestFingerprintEngine:
 class TestKnowledgeBase:
     """
     API verified:
-        suggest(host_state: dict)  — takes a DICT, not OperatorSession
-        success_rate(module_id)    — 0.5 neutral prior when no history
+        suggest(host_state: dict)  - takes a DICT, not OperatorSession
+        success_rate(module_id)    - 0.5 neutral prior when no history
         record_outcome(id, bool)
         all_entries()
         get(entry_id)
@@ -203,7 +203,7 @@ class TestKnowledgeBase:
 
     @pytest.fixture
     def kb(self, tmp_path: Path):
-        """Fresh KB with isolated OutcomeTracker — never reads ~/.ares/kb_outcomes.json."""
+        """Fresh KB with isolated OutcomeTracker - never reads ~/.ares/kb_outcomes.json."""
         from ares.knowledge.base import AttackKnowledgeBase, OutcomeTracker
         kb = AttackKnowledgeBase()
         # Override tracker to use tmp_path so disk state doesn't leak across tests
@@ -224,7 +224,7 @@ class TestKnowledgeBase:
             assert e.description or e.title
 
     def test_success_rate_neutral_without_history(self, kb):
-        # Fresh tmp_path tracker — no prior data
+        # Fresh tmp_path tracker - no prior data
         rate = kb.success_rate("ad.kerberoast")
         assert rate == 0.5
 
@@ -275,8 +275,8 @@ class TestTelemetryCollector:
     """
     API verified:
         record_execution(module_id, duration_ms, success, ...)
-        record_finding(count=1)      — NO severity kwarg
-        record_credential(count=1)   — NO cred_type kwarg
+        record_finding(count=1)      - NO severity kwarg
+        record_credential(count=1)   - NO cred_type kwarg
         record_host_discovered/owned(count=1)
         snapshot(campaign_id="")     → TelemetrySnapshot
         snapshot().to_dict()         → {'modules': ..., 'findings': ..., ...}
@@ -354,7 +354,7 @@ class TestTelemetryCollector:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# goal/engine.py CapabilityGraph — circular dependency handling
+# goal/engine.py CapabilityGraph - circular dependency handling
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestCapabilityGraphEdgeCases:
@@ -406,7 +406,7 @@ class TestCapabilityGraphEdgeCases:
     def test_circular_dependency_does_not_loop(self):
         """
         Circular deps (A requires cap_b, B requires cap_a)
-        should NOT loop infinitely — visited set prevents it.
+        should NOT loop infinitely - visited set prevents it.
         """
         from ares.goal.engine import CapabilityGraph
         reg = self._make_registry({
@@ -450,7 +450,7 @@ class TestCapabilityGraphEdgeCases:
         cg = CapabilityGraph.from_registry(reg)
         # Only mod.a is available
         chain = cg.resolve_chain(["cap_y"], available_modules=["mod.a"])
-        assert "mod.b" not in chain   # filtered out — not in available_modules
+        assert "mod.b" not in chain   # filtered out - not in available_modules
         assert chain == []             # no available module produces cap_y
 
     def test_empty_registry_returns_empty_chain(self):

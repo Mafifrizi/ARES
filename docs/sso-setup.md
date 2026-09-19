@@ -4,7 +4,7 @@ This document provides a comprehensive guide for configuring and utilizing **Ent
 
 ---
 
-## PART 1 — End-User Authentication Guide
+## PART 1 - End-User Authentication Guide
 
 ### When to Use Direct Local "Sign in" vs. "Or continue with SSO"
 
@@ -31,7 +31,7 @@ If you click **"Or continue with SSO"** and an inline warning appears:
 
 ---
 
-## PART 2 — Administrator Guide: Organization SSO Setup
+## PART 2 - Administrator Guide: Organization SSO Setup
 
 ### 1. Prerequisite: `ARES_ENCRYPTION_KEY` Environment Variable
 
@@ -191,7 +191,7 @@ After saving the configuration, verify the setup without opening database tables
 
 ---
 
-## PART 3 — Troubleshooting Guide for Administrators
+## PART 3 - Troubleshooting Guide for Administrators
 
 Common error messages returned in the login redirect URL (`/dashboard/login?error=...`) and their resolutions:
 

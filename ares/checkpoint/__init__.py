@@ -1,5 +1,5 @@
 """
-ARES — checkpoint
+ARES - checkpoint
 Campaign checkpoint save/restore
 
 Public API for this package. Import from here in production code:

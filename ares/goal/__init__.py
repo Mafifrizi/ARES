@@ -1,5 +1,5 @@
 """
-ARES — goal
+ARES - goal
 Goal-based attack planning engine
 
 Public API for this package. Import from here in production code:

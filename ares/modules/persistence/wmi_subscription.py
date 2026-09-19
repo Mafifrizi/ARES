@@ -4,7 +4,7 @@ MITRE: T1546.003
 
 Creates a WMI event subscription (FilterToConsumerBinding) that executes
 a command when a specified event fires (e.g., user logon, time trigger).
-Extremely stealthy — survives reboots, not visible in Autoruns by default.
+Extremely stealthy - survives reboots, not visible in Autoruns by default.
 
 Requires: local admin on target.
 """
@@ -39,7 +39,7 @@ logger = get_logger("ares.modules.persistence.wmi_subscription")
 )
 class WMISubscriptionModule(BaseModule):
     """
-    persistence.wmi_subscription — Create a WMI FilterToConsumerBinding that executes a command on event trigger — highly stealthy 
+    persistence.wmi_subscription - Create a WMI FilterToConsumerBinding that executes a command on event trigger - highly stealthy 
 
     OPSEC: MEDIUM
     MITRE: "T1546.003"
@@ -50,7 +50,7 @@ class WMISubscriptionModule(BaseModule):
     MODULE_NAME        = "WMI Event Subscription Persistence"
     MODULE_CATEGORY    = "persistence"
     MODULE_DESCRIPTION = (
-        "Create a WMI FilterToConsumerBinding that executes a command on event trigger — "
+        "Create a WMI FilterToConsumerBinding that executes a command on event trigger - "
         "highly stealthy persistence that survives reboots"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"

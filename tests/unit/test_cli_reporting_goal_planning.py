@@ -1,5 +1,5 @@
 """
-Round 3 tests — covers the 5 priority features:
+Round 3 tests - covers the 5 priority features:
   1. CLI end-to-end (campaign CRUD, pause/resume, target import)
   2. Reporting (ReportGenerator JSON/HTML/MD, context builder)
   3. Attack Chain (DependencyResolver, CapabilityResolver, ChainAdvisor)
@@ -642,7 +642,7 @@ class TestDashboardApp:
         with self._authenticated_dashboard(mock_db) as headers, \
              patch("ares.api.dashboard.app.dashboard_app.state", mock_state):
             r = client.get("/api/campaigns", headers=headers)
-            # Either 200 with data or 500 if DB init fails — both are valid
+            # Either 200 with data or 500 if DB init fails - both are valid
             assert r.status_code in (200, 500)
 
     def test_api_findings_with_campaign_id(self, client):
@@ -820,7 +820,7 @@ class TestGoalEngine:
     def test_check_goal_achieved_empty_session(self):
         from ares.goal.engine import Goal
         engine = self._make_engine()
-        # Fresh session — goal not achieved
+        # Fresh session - goal not achieved
         assert engine.check_goal_achieved(Goal.DOMAIN_ADMIN) is False
 
     def test_check_initial_access_with_owned_host(self):
@@ -1081,7 +1081,7 @@ class TestAdaptiveStrategy:
 
         session = OperatorSession(campaign_id="test")
         engine = AdaptiveStrategy(session=session)
-        hints = engine.strategy_hints("access is denied — EDR blocked service creation")
+        hints = engine.strategy_hints("access is denied - EDR blocked service creation")
         assert isinstance(hints, list)
 
     def test_alternative_chain_for_psexec_failure(self):

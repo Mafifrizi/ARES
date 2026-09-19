@@ -1,5 +1,5 @@
 """
-ARES — graph
+ARES - graph
 Attack graph construction and path analysis
 
 Public API for this package. Import from here in production code:

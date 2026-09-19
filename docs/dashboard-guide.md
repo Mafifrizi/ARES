@@ -197,11 +197,11 @@ Current page tabs:
 
 ![Dashboard overview standby zero-state](assets/screenshots/dashboard-overview-empty.png)
 
-*Tactical Zero-State Overview — Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
+*Tactical Zero-State Overview - Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
 
 ![Dashboard overview active telemetry](assets/screenshots/dashboard-overview.png)
 
-*Active Telemetry Overview — Real-time telemetry, confirmed findings by severity, queue metrics, and campaign status.*
+*Active Telemetry Overview - Real-time telemetry, confirmed findings by severity, queue metrics, and campaign status.*
 
 Purpose: quick system status.
 
@@ -335,7 +335,7 @@ Purpose: understand lateral pivot relationships, trace multi-hop compromise rout
 
 ![Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal](assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal Console — Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege styling, and interactive command execution.*
+*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal Console - Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege styling, and interactive command execution.*
 
 #### Graph Topology & Navigation
 

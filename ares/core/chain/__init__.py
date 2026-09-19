@@ -1,5 +1,5 @@
 """
-ARES — core.chain
+ARES - core.chain
 Attack chain automation and dependency resolution
 
 Public API for this package. Import from here in production code:

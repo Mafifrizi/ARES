@@ -8,12 +8,12 @@ Usage:
     results = await engine.execute(plan)
 
 Goals:
-  DOMAIN_ADMIN      — obtain domain admin credential
-  ENTERPRISE_ADMIN  — obtain enterprise admin
-  DATA_EXFIL        — find and access sensitive data stores
-  CLOUD_ADMIN       — obtain cloud administrator access
-  PERSISTENCE       — establish persistent access
-  FULL_COMPROMISE   — achieve domain admin + cloud admin
+  DOMAIN_ADMIN      - obtain domain admin credential
+  ENTERPRISE_ADMIN  - obtain enterprise admin
+  DATA_EXFIL        - find and access sensitive data stores
+  CLOUD_ADMIN       - obtain cloud administrator access
+  PERSISTENCE       - establish persistent access
+  FULL_COMPROMISE   - achieve domain admin + cloud admin
 
 Planning algorithm (backward chaining):
   1. Start from goal
@@ -236,7 +236,7 @@ class CapabilityGraph:
             max_depth: prevent infinite recursion
 
         Returns:
-            Ordered list of module IDs (topological order — safe to run sequentially).
+            Ordered list of module IDs (topological order - safe to run sequentially).
         """
         resolved:  list[str] = []
         visited:   set[str]  = set()
@@ -436,7 +436,7 @@ class GoalEngine:
           3. Fallback chains from GoalDefinition
           4. Best-effort: available modules from primary chain
         """
-        # 1. Preferred chain — use if fully available
+        # 1. Preferred chain - use if fully available
         if self._chain_feasible(defn.preferred_chain):
             return defn.preferred_chain
 
@@ -557,7 +557,7 @@ class GoalEngine:
             )
         if goal == Goal.CLOUD_ADMIN:
             # Check for validated cloud credentials (API keys, JWTs, certificates)
-            # — NOT domain_admins() which checks AD privilege level
+            # - NOT domain_admins() which checks AD privilege level
             if self.vault is None:
                 return False
             from ares.credential.vault import CredentialType

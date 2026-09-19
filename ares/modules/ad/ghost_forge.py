@@ -1,8 +1,8 @@
 """
-ad.ghost_forge — ADCS Cryptographic Identity & Kerberos PKINIT Takeover
+ad.ghost_forge - ADCS Cryptographic Identity & Kerberos PKINIT Takeover
 MITRE ATT&CK:
-  T1649 — Steal or Forge Authentication Certificates
-  T1558 — Steal or Forge Kerberos Tickets
+  T1649 - Steal or Forge Authentication Certificates
+  T1558 - Steal or Forge Kerberos Tickets
 
 Autonomous adversary emulation vector for Active Directory Certificate Services (ADCS):
   1. Targets misconfigured certificate templates (e.g. ESC1 / SAN specification allowed).
@@ -48,7 +48,7 @@ logger = get_logger("ares.modules.ad.ghost_forge")
 )
 class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
     """
-    ad.ghost_forge — Autonomous ADCS Cryptographic Identity & Kerberos PKINIT Takeover.
+    ad.ghost_forge - Autonomous ADCS Cryptographic Identity & Kerberos PKINIT Takeover.
     """
     MODULE_ID          = "ad.ghost_forge"
     MODULE_NAME        = "ADCS Cryptographic Identity & PKINIT Takeover"
@@ -192,7 +192,7 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
         if technique == "esc13":
             policy_oid_val = getattr(p, "policy_oid", None) or "1.3.6.1.4.1.311.99.1.13"
             finding = ctx.emit_finding(
-                title=f"ADCS ESC13 Policy OID Abuse — PAC Group Elevation via Template Policy: {p.template}",
+                title=f"ADCS ESC13 Policy OID Abuse - PAC Group Elevation via Template Policy: {p.template}",
                 severity=Severity.CRITICAL,
                 description=(
                     f"Demonstrated architectural elevation via ESC13: Certificate template '{p.template}' enforces "
@@ -220,7 +220,7 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
             )
         else:
             finding = ctx.emit_finding(
-                title=f"ADCS Full-Chain Compromise — Persistent Domain Escalation as {target_account}",
+                title=f"ADCS Full-Chain Compromise - Persistent Domain Escalation as {target_account}",
                 severity=Severity.CRITICAL,
                 description=(
                     f"Successfully demonstrated end-to-end cryptographic identity takeover: "

@@ -32,13 +32,13 @@ function spawnEdgeParticles(
     let px = 0, py = 0, vx = 0, vy = 0;
 
     if (edge === 0) {
-      // Top edge — fire curls up and slightly inward
+      // Top edge - fire curls up and slightly inward
       px = PAD + Math.random() * bw;
       py = PAD + (Math.random() * 4 - 2);   // tight to top border
       vy = -(Math.random() * 0.8 + 0.3);    // gently upward
       vx = (Math.random() - 0.5) * 0.6;
     } else if (edge === 1) {
-      // Bottom edge — fire rises upward more strongly
+      // Bottom edge - fire rises upward more strongly
       px = PAD + Math.random() * bw;
       py = PAD + bh + (Math.random() * 3);  // just below bottom border
       vy = -(Math.random() * 1.2 + 0.6);    // rise up toward button
@@ -125,7 +125,7 @@ export function AresIgniteButton({
 
         p.x += p.vx;
         p.y += p.vy;
-        // Gentle buoyancy — fire hugs button
+        // Gentle buoyancy - fire hugs button
         p.vy -= 0.06;
         p.vx += (Math.random() - 0.5) * 0.18;
         p.vx *= 0.97;
@@ -203,7 +203,7 @@ export function AresIgniteButton({
 
   return (
     <div ref={wrapRef} className="relative mt-2 w-full">
-      {/* Fire canvas — absolute overlay, pointer-events none */}
+      {/* Fire canvas - absolute overlay, pointer-events none */}
       <canvas
         ref={canvasRef}
         className="absolute pointer-events-none z-20"

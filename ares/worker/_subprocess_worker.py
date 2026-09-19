@@ -4,7 +4,7 @@ This script is executed as a child process by IsolatedRunner.
 It reads a JSON payload from stdin, runs the requested module,
 and writes a JSON result to stdout.
 
-Parent process reads stdout — stderr is logged separately.
+Parent process reads stdout - stderr is logged separately.
 Exit code 0 = success (even if module found nothing).
 Exit code 1 = crash (parent will log stderr).
 """
@@ -23,7 +23,7 @@ try:
     _HAS_RESOURCE = True
 except ImportError:
     _resource = None  # type: ignore[assignment]
-    _HAS_RESOURCE = False  # Windows — resource limits not available
+    _HAS_RESOURCE = False  # Windows - resource limits not available
 
 
 def apply_memory_limit(max_mb: int | None) -> None:
@@ -46,7 +46,7 @@ def apply_capability_limits(caps: set[str], limits: dict[str, int]) -> None:
     to apply CPU, memory, process, and file descriptor limits.
     """
     if not _HAS_RESOURCE:
-        return  # Windows — resource limits not supported
+        return  # Windows - resource limits not supported
     try:
         cpu_s = limits.get("cpu_time_s", 30)
         mem_mb = limits.get("memory_mb", 256)
@@ -70,7 +70,7 @@ def apply_capability_limits(caps: set[str], limits: dict[str, int]) -> None:
         _resource.setrlimit(_resource.RLIMIT_NOFILE, (nfiles, nfiles))
 
     except (AttributeError, ValueError, OSError):
-        pass  # Platform doesn't support — fail open (log in parent)
+        pass  # Platform doesn't support - fail open (log in parent)
 
 
 def check_capability_boundary(module_id: str, caps: set[str]) -> None:
@@ -84,7 +84,7 @@ def check_capability_boundary(module_id: str, caps: set[str]) -> None:
     di test environment.
     """
     if "cap_unsafe" in caps:
-        return  # builtin modules — no restrictions
+        return  # builtin modules - no restrictions
 
     import os
 
@@ -223,7 +223,7 @@ def main() -> None:
         sys.stdout.write(json.dumps(result))
         sys.stdout.flush()
         sys.exit(0)
-    except Exception:  # top-level subprocess handler — must catch all
+    except Exception:  # top-level subprocess handler - must catch all
         err = traceback.format_exc()
         sys.stderr.write(f"[worker] Unhandled exception:\n{err}\n")
         error_result = {

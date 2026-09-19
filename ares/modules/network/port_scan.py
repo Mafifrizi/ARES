@@ -1,8 +1,8 @@
 """
-Network Port Scanner — Production Implementation
+Network Port Scanner - Production Implementation
 MITRE: T1046 (Network Service Discovery)
 
-TCP connect scan with asyncio — no raw sockets, no root required.
+TCP connect scan with asyncio - no raw sockets, no root required.
 Respects NoiseController rate limits and opsec profile.
 Results feed ServiceIntelEngine for automatic module recommendation.
 
@@ -274,7 +274,7 @@ async def _tcp_connect(host: str, port: int, timeout: float = 2.0) -> bool:
 )
 class PortScanModule(BaseModule):
     """
-    network.port_scan — Async TCP connect scan — identifies open ports and maps them to services and recommended attack paths
+    network.port_scan - Async TCP connect scan - identifies open ports and maps them to services and recommended attack paths
 
     OPSEC: MEDIUM
     MITRE: "T1046"
@@ -284,7 +284,7 @@ class PortScanModule(BaseModule):
     MODULE_NAME        = "TCP Port Scanner"
     MODULE_CATEGORY    = "network"
     MODULE_DESCRIPTION = (
-        "Async TCP connect scan — identifies open ports and maps them to "
+        "Async TCP connect scan - identifies open ports and maps them to "
         "services and recommended attack modules"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -305,7 +305,7 @@ class PortScanModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                "network.port_scan requires 'target' — IP or CIDR to scan.",
+                "network.port_scan requires 'target' - IP or CIDR to scan.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)

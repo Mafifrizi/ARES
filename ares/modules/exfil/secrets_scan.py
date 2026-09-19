@@ -1,16 +1,16 @@
 """
-ARES Exfil Module — Secrets Scanner (T1552 / T1083)
+ARES Exfil Module - Secrets Scanner (T1552 / T1083)
 
 Two live execution paths:
-  Linux/SSH  — paramiko connect, run grep -rIl against /home /root /etc /opt /var/www,
+  Linux/SSH  - paramiko connect, run grep -rIl against /home /root /etc /opt /var/www,
                then grep each match for credential regex patterns, parse line hits.
-  Windows/WMI — impacket WMIEXEC, run PowerShell Get-ChildItem | Select-String
+  Windows/WMI - impacket WMIEXEC, run PowerShell Get-ChildItem | Select-String
                against common config paths, parse JSON output.
 
 MITRE ATT&CK:
-  T1552   — Unsecured Credentials
-  T1552.001 — Credentials In Files
-  T1083   — File and Directory Discovery
+  T1552   - Unsecured Credentials
+  T1552.001 - Credentials In Files
+  T1083   - File and Directory Discovery
 """
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _ssh_scan(target: str, username: str, password: str = "",
             "ssh_host_key_unverified",
             target=target,
             risk=(
-                "Host key not verified — MITM possible on untrusted networks. "
+                "Host key not verified - MITM possible on untrusted networks. "
                 "Pass known_hosts_file=<path> to enable strict verification."
             ),
         )
@@ -188,7 +188,7 @@ def _wmi_scan(target: str, username: str, password: str = "",
 )
 class SecretsScan(BaseModule):
     """
-    exfil.secrets_scan — Scan filesystem for hardcoded credentials, API keys, private keys, and connection strings
+    exfil.secrets_scan - Scan filesystem for hardcoded credentials, API keys, private keys, and connection strings
 
     OPSEC: LOW
     MITRE: "T1552", "T1552.001", "T1083"
@@ -217,7 +217,7 @@ class SecretsScan(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "exfil.secrets_scan requires 'target' — IP or hostname.",
+                "exfil.secrets_scan requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
 

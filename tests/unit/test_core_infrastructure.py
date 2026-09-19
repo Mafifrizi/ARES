@@ -1,13 +1,13 @@
 """
-Step 1 — Unit Tests: Core Infrastructure
+Step 1 - Unit Tests: Core Infrastructure
 
 Tests for the foundation that every module depends on:
-  - AresDatabase (SQLite) — CRUD, encryption, bypass outcomes
-  - CredentialVault — encrypt/decrypt round-trip, privilege scoring
-  - Campaign — scope enforcement, finding management, noise profiles
-  - Security — sanitize_path whitelist, sanitize_hostname, DataEncryptor
-  - NoiseController — jitter, rate limiting
-  - AresContainer (DI) — registration, retrieval, factory, module building
+  - AresDatabase (SQLite) - CRUD, encryption, bypass outcomes
+  - CredentialVault - encrypt/decrypt round-trip, privilege scoring
+  - Campaign - scope enforcement, finding management, noise profiles
+  - Security - sanitize_path whitelist, sanitize_hostname, DataEncryptor
+  - NoiseController - jitter, rate limiting
+  - AresContainer (DI) - registration, retrieval, factory, module building
 
 Run: pytest tests/unit/test_core_infrastructure.py -v
 """
@@ -30,7 +30,7 @@ if str(_ROOT) not in sys.path:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1. AresDatabase — SQLite async CRUD
+# 1. AresDatabase - SQLite async CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAresDatabase:
@@ -317,7 +317,7 @@ class TestAresDatabase:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. Campaign — scope enforcement, findings, noise
+# 2. Campaign - scope enforcement, findings, noise
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestCampaign:
@@ -377,7 +377,7 @@ class TestCampaign:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 3. CredentialVault — encryption/decryption
+# 3. CredentialVault - encryption/decryption
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestCredentialVault:
@@ -437,7 +437,7 @@ class TestCredentialVault:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. Security — sanitize_path, sanitize_hostname, DataEncryptor
+# 4. Security - sanitize_path, sanitize_hostname, DataEncryptor
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSecurity:
@@ -502,7 +502,7 @@ class TestSecurity:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 5. NoiseController — jitter, rate limiting
+# 5. NoiseController - jitter, rate limiting
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNoiseController:
@@ -544,7 +544,7 @@ class TestNoiseController:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 6. AresContainer (DI) — registration, retrieval, module building
+# 6. AresContainer (DI) - registration, retrieval, module building
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestAresContainer:

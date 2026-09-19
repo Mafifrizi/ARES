@@ -43,7 +43,7 @@ _PRIVESC_ACTIONS: list[tuple[str, str, str]] = [
     ("iam:PutUserPolicy",              "Create inline admin policy on self", "T1548"),
     ("iam:AddUserToGroup",             "Add self to privileged group", "T1078"),
     ("iam:PassRole",                   "Pass privileged role to compute service", "T1548"),
-    ("sts:AssumeRole",                 "Assume another role — check trust policy", "T1550.001"),
+    ("sts:AssumeRole",                 "Assume another role - check trust policy", "T1550.001"),
     ("lambda:CreateFunction",          "Create Lambda with privileged execution role", "T1648"),
     ("ec2:RunInstances",               "Launch EC2 with privileged instance profile", "T1578.002"),
     ("cloudformation:CreateStack",     "Deploy stack with privileged service role", "T1578"),
@@ -61,7 +61,7 @@ _PRIVESC_ACTIONS: list[tuple[str, str, str]] = [
 )
 class AWSPrivescModule(BaseModule):
     """
-    cloud.aws_privesc — Enumerate current IAM permissions and identify privilege escalation paths — PassRole abuse, Assu
+    cloud.aws_privesc - Enumerate current IAM permissions and identify privilege escalation paths - PassRole abuse, Assu
 
     OPSEC: LOW
     MITRE: "T1078.004", "T1548", "T1098"
@@ -71,7 +71,7 @@ class AWSPrivescModule(BaseModule):
     MODULE_NAME        = "AWS IAM Privilege Escalation"
     MODULE_CATEGORY    = "cloud"
     MODULE_DESCRIPTION = (
-        "Enumerate current IAM permissions and identify privilege escalation paths — "
+        "Enumerate current IAM permissions and identify privilege escalation paths - "
         "PassRole abuse, AssumeRole, policy manipulation techniques"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -101,7 +101,7 @@ class AWSPrivescModule(BaseModule):
                        __import__("os").environ.get("AWS_ACCESS_KEY_ID"))
         if not has_key:
             raise ModuleValidationError(
-                "cloud.aws_privesc requires AWS credentials — set access_key/aws_access_key param "
+                "cloud.aws_privesc requires AWS credentials - set access_key/aws_access_key param "
                 "or AWS_ACCESS_KEY_ID environment variable.",
                 module_id=self.MODULE_ID, field="access_key",
             )
@@ -224,7 +224,7 @@ class AWSPrivescModule(BaseModule):
 
     @trace_module("cloud.aws_privesc")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
-        # Note: before_request() intentionally not called — cloud modules use
+        # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
         access_key    = kwargs.get("aws_access_key") or kwargs.get("access_key", "")
@@ -239,7 +239,7 @@ class AWSPrivescModule(BaseModule):
         try:
             import boto3  # type: ignore[import]
         except ImportError:
-            return [], {"error": "boto3 not installed — pip install ares-redteam[cloud]"}
+            return [], {"error": "boto3 not installed - pip install ares-redteam[cloud]"}
 
         logger.info("aws_privesc_check_start")
         await self.noise.rate_limiter.acquire("cloud_api")

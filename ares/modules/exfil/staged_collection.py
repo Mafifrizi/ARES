@@ -51,7 +51,7 @@ _COLLECTION_PATTERNS = [
 )
 class StagedCollectionModule(BaseModule):
     """
-    exfil.staged_collection — "Search for high-value files (credentials, keys, configs, backups
+    exfil.staged_collection - "Search for high-value files (credentials, keys, configs, backups
 
     OPSEC: MEDIUM
     MITRE: "T1119", "T1039", "T1552"
@@ -87,7 +87,7 @@ class StagedCollectionModule(BaseModule):
             )
         if not ctx.params.get("destination"):
             raise ModuleValidationError(
-                "exfil.staged_collection requires 'destination' — "
+                "exfil.staged_collection requires 'destination' - "
                 "UNC path or remote share to stage files to.",
                 module_id=self.MODULE_ID, field="destination",
             )

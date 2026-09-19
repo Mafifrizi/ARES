@@ -101,13 +101,13 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
 
-*ARES Operator Enclave — Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas, system environment specifications, and ARES Cyber Dragon mascot on the right panel.*
+*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas, system environment specifications, and ARES Cyber Dragon mascot on the right panel.*
 
 </div>
 
 - **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
 - **Key Capabilities**:
-  - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) — physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
+  - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) - physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
   - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
@@ -131,13 +131,13 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Executive Overview Standby & Fresh-Install Hero](docs/assets/screenshots/dashboard-overview-empty.png)
 
-*Tactical Zero-State Overview — Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
+*Tactical Zero-State Overview - Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
 
 </div>
 
 - **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries.
 - **Key Capabilities**:
-  - **Operational Design System**: Engineered with high-density visual hierarchy (inspired by Grafana, Linear, and Sentry) — featuring subtle left-accented contextual panels (`panel-subtle`), dynamic reactive topbar health indicators, and distinct dashed progress tracks for uninitialized metric baselines.
+  - **Operational Design System**: Engineered with high-density visual hierarchy (inspired by Grafana, Linear, and Sentry) - featuring subtle left-accented contextual panels (`panel-subtle`), dynamic reactive topbar health indicators, and distinct dashed progress tracks for uninitialized metric baselines.
   - **Actionable Engagement Insights**: Replaces redundant raw counts with contextual security posture insights:
     - *Engagement Posture*: Clear state delineation (`Staged`, `Executing`, or `Standby`) distinguishing scoped targets from executing campaigns.
     - *Execution Health*: Real-time monitor of pipeline anomalies, module execution failures, and enclave stability.
@@ -199,14 +199,14 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Terminal Console — Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege borders (SYSTEM * / ADMIN / BEACON), and real-time interactive command terminal.*
+*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Terminal Console - Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege borders (SYSTEM * / ADMIN / BEACON), and real-time interactive command terminal.*
 
 </div>
 
 - **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
 - **Key Capabilities**:
   - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`K8S-INGRESS-01`), initial foothold workstations (`WS-FIN-042`, `AWS-IMDS-GW`), internal database and file servers (`SQL01`, `FS01`), and high-value Active Directory Domain Controllers (`DC01`).
-  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers — Crimson `SYSTEM *` for Tier-0 Domain Controllers, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
+  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
   - **Organic Cubic Bezier Routing & Telemetry Stream**: Fluid vector curves with directional arrowheads and animated glowing particle pulses visualizing live command-and-control and pivot traffic.
   - **Persistent Click-to-Lock Pathway Tracking**: Click any node to instantly freeze its upstream compromise lineage and downstream lateral reachability, complete with a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan across complex topologies without losing situational focus.
   - **Docked Multi-Row Beacon Terminal Console (`CobaltSessionDock`)**:
@@ -735,7 +735,7 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 
 <div align="center">
 
-**ARES — Enterprise-Grade Autonomous Red Team Engagement System.**  
+**ARES - Enterprise-Grade Autonomous Red Team Engagement System.**  
 *Continuous Security Validation. Zero Collateral Risk.*
 
 </div>

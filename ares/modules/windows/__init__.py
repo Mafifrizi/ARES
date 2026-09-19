@@ -1,5 +1,5 @@
 """
-ARES — modules.windows
+ARES - modules.windows
 Windows post-exploitation modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

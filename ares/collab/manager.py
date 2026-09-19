@@ -3,10 +3,10 @@ ARES Multi-Operator Collaboration
 Supports multiple red team operators working on the same campaign.
 
 Roles:
-  TEAM_LEAD   — full access: start/stop campaign, manage operators
-  OPERATOR    — run modules, view findings, create artifacts
-  RECON       — recon modules only (enumeration, no lateral/exploit)
-  REPORTER    — read-only access to findings and artifacts
+  TEAM_LEAD   - full access: start/stop campaign, manage operators
+  OPERATOR    - run modules, view findings, create artifacts
+  RECON       - recon modules only (enumeration, no lateral/exploit)
+  REPORTER    - read-only access to findings and artifacts
 
 Operator session tracking:
   - Each operator has independent local session state
@@ -19,8 +19,8 @@ Conflict prevention:
   - Warning emitted if two operators target same host
 
 State synchronization:
-  - In-memory (single ARES process) — direct Python references
-  - Multi-process (Redis pub/sub) — JSON delta events
+  - In-memory (single ARES process) - direct Python references
+  - Multi-process (Redis pub/sub) - JSON delta events
 """
 from __future__ import annotations
 
@@ -74,13 +74,13 @@ def can_role_run_module(
 
     Priority:
       1. ROLE_PERMISSIONS prefix-based fast path
-      2. Registry OPSEC_LEVEL fallback for RECON — LOW-opsec modules allowed
+      2. Registry OPSEC_LEVEL fallback for RECON - LOW-opsec modules allowed
          even if their prefix isn't in RECON's list
 
     Args:
         role:      OperatorRole enum or plain string (e.g. "operator")
         module_id: Dotted module ID (e.g. "ad.kerberoast")
-        registry:  Optional ModuleRegistry — enables dynamic OPSEC fallback
+        registry:  Optional ModuleRegistry - enables dynamic OPSEC fallback
 
     Returns True if the role may run the module.
     """
@@ -327,7 +327,7 @@ class CollaborationManager:
         arg2: str = "",
         module_id: str = "",
     ) -> "tuple[bool, str] | str | None":
-        """Async-safe version of acquire_lock — use this from coroutines."""
+        """Async-safe version of acquire_lock - use this from coroutines."""
         async with self._get_mutex():
             return self.acquire_lock(arg1, arg2, module_id)
 

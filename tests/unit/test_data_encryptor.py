@@ -1,5 +1,5 @@
 """
-Unit tests — DataEncryptor edge cases (ares/core/security.py)
+Unit tests - DataEncryptor edge cases (ares/core/security.py)
 
 Tests every edge case: key mismatch, tampered ciphertext, None input,
 legacy format migration, unicode, and the exception narrowing fix.
@@ -63,7 +63,7 @@ class TestBasicEncryptDecrypt:
 
     def test_roundtrip_unicode(self):
         enc = make_enc()
-        value = "P@ssw0rd! — привет — 中文 — emoji 🔴"
+        value = "P@ssw0rd! - привет - 中文 - emoji 🔴"
         assert enc.decrypt(enc.encrypt(value)) == value
 
     def test_roundtrip_long_string(self):
@@ -91,14 +91,14 @@ class TestKeyMismatch:
         assert enc2.decrypt(token) is None
 
     def test_empty_key_fails_gracefully(self):
-        """Empty key should not crash — returns None on decrypt."""
+        """Empty key should not crash - returns None on decrypt."""
         try:
             enc = DataEncryptor("")
             token = enc.encrypt("test")
             result = enc.decrypt(token)
             assert result is None or result == "test"
         except Exception:
-            pass  # construction may fail — that is also acceptable
+            pass  # construction may fail - that is also acceptable
 
     def test_key_with_special_characters(self):
         key = "key-with-!@#$%^&*()-special-chars!"
@@ -164,7 +164,7 @@ class TestTamperedCiphertext:
 class TestLegacyFormat:
 
     def test_legacy_format_decrypts_with_legacy_salt(self):
-        """Simulate v5-era ciphertext (no salt prefix) — must decrypt with legacy salt."""
+        """Simulate v5-era ciphertext (no salt prefix) - must decrypt with legacy salt."""
         key = "test-key-32chars-minimum-required"
         enc = DataEncryptor(key)
 

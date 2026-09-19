@@ -1,5 +1,5 @@
 """
-ARES — normalize
+ARES - normalize
 Artifact normalization layer
 
 Public API for this package. Import from here in production code:

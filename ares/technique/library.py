@@ -652,7 +652,7 @@ _MODULE_TECHNIQUE_MAP: dict[str, list[str]] = {
     "network.pivot":           ["T1090.001", "T1021.004"],
     # ── Recon & Reporting ────────────────────────────────────────────────────
     "recon.fingerprint":    ["T1082", "T1518.001"],
-    "reporting.report_gen":              [],   # no offensive technique — output only
+    "reporting.report_gen":              [],   # no offensive technique - output only
     # ── New strategic modules ─────────────────────────────────────────────────
     "opsec.coverage_predictor":          ["T1592"],
     "edr.bypass_adaptive":               ["T1562.001", "T1055", "T1027", "T1562.006"],

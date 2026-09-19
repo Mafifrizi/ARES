@@ -1,5 +1,5 @@
 """
-ARES — execution
+ARES - execution
 Remote command execution backends
 
 Public API for this package. Import from here in production code:

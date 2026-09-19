@@ -1,5 +1,5 @@
 """
-ARES — lateral movement modules
+ARES - lateral movement modules
 
 All lateral movement classes. Import from here:
 

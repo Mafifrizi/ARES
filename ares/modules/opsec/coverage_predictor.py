@@ -1,5 +1,5 @@
 """
-opsec.coverage_predictor — Real-Time Detection Probability Scoring
+opsec.coverage_predictor - Real-Time Detection Probability Scoring
 
 Analyzes all actions performed in a campaign and predicts how likely
 the engagement has been detected, based on:
@@ -17,9 +17,9 @@ Output:
   - Stealth improvement recommendations
 
 MITRE: T1592 (Gather Victim Host Information - defensive analysis)
-OPSEC: LOCAL (no network calls — pure data analysis)
+OPSEC: LOCAL (no network calls - pure data analysis)
 
-Note: before_request() intentionally not called — this module performs
+Note: before_request() intentionally not called - this module performs
 offline analysis of campaign data only. No network calls.
 """
 from __future__ import annotations
@@ -52,57 +52,57 @@ logger = get_logger("ares.modules.opsec.coverage_predictor")
 
 _TECHNIQUE_DETECTION_MAP: dict[str, list[tuple[str, str, float, str]]] = {
     # Active Directory
-    "T1558.003": [("Sysmon", "18", 0.75, "Kerberos TGS request — potential kerberoasting"),
-                  ("Security", "4769", 0.80, "Kerberos Service Ticket Operation — RC4 encryption flag")],
-    "T1558.004": [("Security", "4768", 0.70, "Kerberos Auth Ticket request — potential ASREPRoasting")],
-    "T1003.006": [("Security", "4662", 0.95, "DCSync — DS-Replication-Get-Changes-All permission used"),
+    "T1558.003": [("Sysmon", "18", 0.75, "Kerberos TGS request - potential kerberoasting"),
+                  ("Security", "4769", 0.80, "Kerberos Service Ticket Operation - RC4 encryption flag")],
+    "T1558.004": [("Security", "4768", 0.70, "Kerberos Auth Ticket request - potential ASREPRoasting")],
+    "T1003.006": [("Security", "4662", 0.95, "DCSync - DS-Replication-Get-Changes-All permission used"),
                   ("Security", "4929", 0.90, "AD replica source naming context removed")],
-    "T1649":     [("Security", "4886", 0.60, "Certificate request — potential ADCS abuse"),
-                  ("Security", "4887", 0.65, "Certificate issued — track enrollment patterns")],
-    "T1187":     [("Security", "4624", 0.50, "Network logon — NTLM coercion incoming auth"),
-                  ("Sysmon",   "3",    0.40, "Network connection — SMB to attacker IP")],
-    "T1552.004": [("Security", "4661", 0.55, "SAM handle request — LAPS read attempt")],
+    "T1649":     [("Security", "4886", 0.60, "Certificate request - potential ADCS abuse"),
+                  ("Security", "4887", 0.65, "Certificate issued - track enrollment patterns")],
+    "T1187":     [("Security", "4624", 0.50, "Network logon - NTLM coercion incoming auth"),
+                  ("Sysmon",   "3",    0.40, "Network connection - SMB to attacker IP")],
+    "T1552.004": [("Security", "4661", 0.55, "SAM handle request - LAPS read attempt")],
 
     # Credential
-    "T1003.001": [("Sysmon",   "10",   0.99, "LSASS process access — lsass_dump"),
+    "T1003.001": [("Sysmon",   "10",   0.99, "LSASS process access - lsass_dump"),
                   ("Security", "4656", 0.90, "LSASS handle request with PROCESS_VM_READ"),
                   ("Defender", "ASR",  0.95, "Attack Surface Reduction rule: Block credential stealing from LSASS")],
-    "T1003.002": [("Security", "4657", 0.80, "Registry value modification — SAM hive access"),
-                  ("Sysmon",   "13",   0.75, "Registry value set — LSA secrets read")],
-    "T1555.004": [("Sysmon",   "11",   0.50, "File creation — DPAPI blob decryption temp file"),
-                  ("Security", "4663", 0.55, "File access — Chrome Login Data")],
-    "T1110.003": [("Security", "4625", 0.85, "Account failed logon — potential spray pattern"),
-                  ("Security", "4771", 0.80, "Kerberos pre-auth failed — spray via Kerberos")],
-    "T1550.002": [("Security", "4624", 0.70, "Network logon type 3 — PTH pattern (no Kerberos TGT)"),
-                  ("Security", "4648", 0.75, "Explicit credential logon — PTH indicator")],
+    "T1003.002": [("Security", "4657", 0.80, "Registry value modification - SAM hive access"),
+                  ("Sysmon",   "13",   0.75, "Registry value set - LSA secrets read")],
+    "T1555.004": [("Sysmon",   "11",   0.50, "File creation - DPAPI blob decryption temp file"),
+                  ("Security", "4663", 0.55, "File access - Chrome Login Data")],
+    "T1110.003": [("Security", "4625", 0.85, "Account failed logon - potential spray pattern"),
+                  ("Security", "4771", 0.80, "Kerberos pre-auth failed - spray via Kerberos")],
+    "T1550.002": [("Security", "4624", 0.70, "Network logon type 3 - PTH pattern (no Kerberos TGT)"),
+                  ("Security", "4648", 0.75, "Explicit credential logon - PTH indicator")],
 
     # Lateral Movement
-    "T1569.002": [("System",  "7045", 0.90, "New service installed — PsExec service"),
-                  ("Sysmon",  "1",    0.85, "Process creation — PSEXESVC.exe"),
+    "T1569.002": [("System",  "7045", 0.90, "New service installed - PsExec service"),
+                  ("Sysmon",  "1",    0.85, "Process creation - PSEXESVC.exe"),
                   ("Security","4697", 0.90, "Service installed in system")],
     "T1047":     [("Sysmon",  "20",   0.80, "WMI remote activity"),
-                  ("Security","4688", 0.60, "Process creation — WMI provider host")],
-    "T1021.006": [("Security","4624", 0.55, "Network logon — WinRM (port 5985/5986)"),
+                  ("Security","4688", 0.60, "Process creation - WMI provider host")],
+    "T1021.006": [("Security","4624", 0.55, "Network logon - WinRM (port 5985/5986)"),
                   ("Microsoft-Windows-WinRM", "91", 0.60, "WSMan session created")],
-    "T1021.001": [("Security","4624", 0.60, "Interactive/RemoteInteractive logon — RDP"),
-                  ("Security","4778", 0.65, "Session reconnected to Window Station — RDP")],
-    "T1505.001": [("SQLServer","18456",0.70, "MSSQL login failed — potential brute/spray"),
-                  ("SQLServer","15457",0.85, "xp_cmdshell enabled — high-confidence IOC")],
-    "T1021.003": [("Sysmon",  "3",    0.65, "DCOM network connection — WBEM/MMC"),
-                  ("Security","4648", 0.55, "Explicit credential use — DCOM auth")],
+    "T1021.001": [("Security","4624", 0.60, "Interactive/RemoteInteractive logon - RDP"),
+                  ("Security","4778", 0.65, "Session reconnected to Window Station - RDP")],
+    "T1505.001": [("SQLServer","18456",0.70, "MSSQL login failed - potential brute/spray"),
+                  ("SQLServer","15457",0.85, "xp_cmdshell enabled - high-confidence IOC")],
+    "T1021.003": [("Sysmon",  "3",    0.65, "DCOM network connection - WBEM/MMC"),
+                  ("Security","4648", 0.55, "Explicit credential use - DCOM auth")],
 
     # Persistence
     "T1053.005": [("Security", "4698", 0.85, "Scheduled task created"),
-                  ("Sysmon",   "1",    0.80, "Process creation — schtasks.exe")],
+                  ("Sysmon",   "1",    0.80, "Process creation - schtasks.exe")],
     "T1546.003": [("WMI",  "5860",  0.90, "WMI permanent subscription created"),
                   ("Sysmon", "19",   0.95, "WMI event filter activity")],
     "T1547.001": [("Sysmon", "13",   0.70, "Registry run key modification"),
-                  ("Security","4657", 0.65, "Registry value set — HKCU/Run")],
+                  ("Security","4657", 0.65, "Registry value set - HKCU/Run")],
 
     # Exfil
-    "T1039":     [("Sysmon", "11",   0.40, "File creation — SMB share staging"),
-                  ("Security","5140", 0.55, "Network share access — enumeration pattern")],
-    "T1552":     [("Sysmon",  "1",   0.50, "Process creation — grep/findstr on credential files")],
+    "T1039":     [("Sysmon", "11",   0.40, "File creation - SMB share staging"),
+                  ("Security","5140", 0.55, "Network share access - enumeration pattern")],
+    "T1552":     [("Sysmon",  "1",   0.50, "Process creation - grep/findstr on credential files")],
 
     # Cloud
     "T1528":     [("AzureAD","Sign-in",0.60,"Azure AD OAuth token theft attempt")],
@@ -111,11 +111,11 @@ _TECHNIQUE_DETECTION_MAP: dict[str, list[tuple[str, str, float, str]]] = {
 
 # Detection probability modifier by OPSEC level
 _OPSEC_MODIFIERS = {
-    "local":       0.05,   # LOCAL — no network, very low detection risk
-    "silent":      0.10,   # SILENT — highly obfuscated
-    "low":         0.25,   # LOW — passive enumeration
-    "medium":      0.55,   # MEDIUM — active but targeted
-    "high_noise":  0.90,   # HIGH_NOISE — loud, likely detected
+    "local":       0.05,   # LOCAL - no network, very low detection risk
+    "silent":      0.10,   # SILENT - highly obfuscated
+    "low":         0.25,   # LOW - passive enumeration
+    "medium":      0.55,   # MEDIUM - active but targeted
+    "high_noise":  0.90,   # HIGH_NOISE - loud, likely detected
     "stealth":     0.15,   # STEALTH profile modifier
     "normal":      0.55,
     "aggressive":  0.85,
@@ -123,12 +123,12 @@ _OPSEC_MODIFIERS = {
 
 # Wait-time recommendations based on score (hours)
 _WAIT_RECOMMENDATIONS = [
-    (0.0,  0.20, 0,   "Continue — detection risk minimal"),
-    (0.20, 0.40, 2,   "Low risk — optional 2hr pause before next lateral move"),
-    (0.40, 0.60, 12,  "Moderate risk — recommended 12hr pause, switch technique"),
-    (0.60, 0.75, 24,  "High risk — 24hr pause, consider abandoning noisy artifacts"),
-    (0.75, 0.90, 72,  "Very high risk — 72hr pause or fresh compromise recommended"),
-    (0.90, 1.01, 168, "Critical — assume detected. Full OPSEC reset required (7 days)"),
+    (0.0,  0.20, 0,   "Continue - detection risk minimal"),
+    (0.20, 0.40, 2,   "Low risk - optional 2hr pause before next lateral move"),
+    (0.40, 0.60, 12,  "Moderate risk - recommended 12hr pause, switch technique"),
+    (0.60, 0.75, 24,  "High risk - 24hr pause, consider abandoning noisy artifacts"),
+    (0.75, 0.90, 72,  "Very high risk - 72hr pause or fresh compromise recommended"),
+    (0.90, 1.01, 168, "Critical - assume detected. Full OPSEC reset required (7 days)"),
 ]
 
 
@@ -221,17 +221,17 @@ def _compute_soc_activity_factor(
     recommendation = ""
     if base_factor > 0.7:
         recommendation = (
-            f"HIGH SOC ACTIVITY ({base_factor:.0%}) — defer high-noise actions. "
+            f"HIGH SOC ACTIVITY ({base_factor:.0%}) - defer high-noise actions. "
             f"Optimal window: {best_window} local time."
         )
     elif base_factor > 0.4:
         recommendation = (
-            f"MODERATE SOC ACTIVITY ({base_factor:.0%}) — use stealth techniques only. "
+            f"MODERATE SOC ACTIVITY ({base_factor:.0%}) - use stealth techniques only. "
             f"Better window in {max(0, shift_end - local_hour)}h."
         )
     else:
         recommendation = (
-            f"LOW SOC ACTIVITY ({base_factor:.0%}) — execute now. "
+            f"LOW SOC ACTIVITY ({base_factor:.0%}) - execute now. "
             f"Optimal window: {best_window} local time."
         )
 
@@ -310,21 +310,21 @@ _SIEM_CORRELATION_RULES: list[SIEMCorrelationRule] = [
     ),
     SIEMCorrelationRule(
         name="WMI Persistence via Event Subscription",
-        description="WMI event filter and consumer created — common persistence IOC",
+        description="WMI event filter and consumer created - common persistence IOC",
         triggers=["T1546.003"],
         within_minutes=5, threshold=1, severity="high",
         common_in=["Splunk", "Sentinel", "Elastic", "Sysmon"],
     ),
     SIEMCorrelationRule(
         name="Pass-the-Hash Network Logon Pattern",
-        description="Network logon (type 3) without Kerberos TGT — PTH indicator",
+        description="Network logon (type 3) without Kerberos TGT - PTH indicator",
         triggers=["T1550.002"],
         within_minutes=10, threshold=1, severity="high",
         common_in=["Splunk", "Sentinel", "Microsoft Defender XDR"],
     ),
     SIEMCorrelationRule(
         name="LSASS Memory Access",
-        description="Process accessing LSASS memory with PROCESS_VM_READ — credential theft",
+        description="Process accessing LSASS memory with PROCESS_VM_READ - credential theft",
         triggers=["T1003.001"],
         within_minutes=1, threshold=1, severity="critical",
         common_in=["CrowdStrike", "SentinelOne", "Defender ATP", "Sentinel"],
@@ -393,7 +393,7 @@ def _apply_dwell_time_decay(
     Logic: if EDR hasn't caught us after N days, signatures may not match.
 
     Decay schedule:
-      < 1 day:   0%  reduction (fresh compromise — full risk)
+      < 1 day:   0%  reduction (fresh compromise - full risk)
       1-3 days:  10% reduction
       3-7 days:  20% reduction
       1-2 weeks: 35% reduction
@@ -444,7 +444,7 @@ class CoveragePrediction:
 
 class CoveragePredictor:
     """
-    Offline scoring engine — no network calls.
+    Offline scoring engine - no network calls.
     Reads campaign findings and audit data to compute detection probability.
     """
 
@@ -495,8 +495,8 @@ class CoveragePredictor:
                         timestamp=ts,
                     ))
 
-        # Compute overall score — weighted by highest individual risks
-        # Apply dwell time decay — longer undetected = lower score
+        # Compute overall score - weighted by highest individual risks
+        # Apply dwell time decay - longer undetected = lower score
         campaign_start = kwargs.get("campaign_start_time")
         if campaign_start is None:
             campaign_obj = kwargs.get("campaign")
@@ -531,7 +531,7 @@ class CoveragePredictor:
 
         # Wait time recommendation
         wait_hours = 0
-        wait_reason = "Continue — detection risk minimal"
+        wait_reason = "Continue - detection risk minimal"
         for lo, hi, hours, reason in _WAIT_RECOMMENDATIONS:
             if lo <= overall < hi:
                 wait_hours = hours
@@ -613,12 +613,12 @@ class CoveragePredictor:
 
         # LSASS-specific
         if any("LSASS" in r.description for r in risks):
-            recs.append("LSASS access detected — CrowdStrike/Defender ATP almost certainly alerted. "
+            recs.append("LSASS access detected - CrowdStrike/Defender ATP almost certainly alerted. "
                         "Use DPAPI or LAPS enumeration as credential alternatives.")
 
         # DCSync-specific
         if any("DCSync" in r.description for r in risks):
-            recs.append("DCSync detected — high-confidence SIEM alert expected. "
+            recs.append("DCSync detected - high-confidence SIEM alert expected. "
                         "Verify krbtgt rotation has not occurred before using harvested hashes.")
 
         if not recs:
@@ -654,10 +654,10 @@ class CoveragePredictor:
 )
 class CoveragePredictorModule(BaseModule):
     """
-    opsec.coverage_predictor — Real-time detection probability scoring
+    opsec.coverage_predictor - Real-time detection probability scoring
 
-    OPSEC: LOCAL (offline analysis — no network calls)
-    MITRE: T1592 (informational — analyzes existing campaign data)
+    OPSEC: LOCAL (offline analysis - no network calls)
+    MITRE: T1592 (informational - analyzes existing campaign data)
     REQUIRES: active_campaign
     OUTPUTS:  detection_score, action_risks, wait_recommendation
     """
@@ -782,7 +782,7 @@ class CoveragePredictorModule(BaseModule):
         noise_profile: str = "normal",
         **kwargs: Any,
     ) -> tuple[list, dict]:
-        # Note: before_request() intentionally not called — LOCAL module, no network.
+        # Note: before_request() intentionally not called - LOCAL module, no network.
 
         loop = asyncio.get_running_loop()
         prediction = await loop.run_in_executor(
@@ -815,7 +815,7 @@ class CoveragePredictorModule(BaseModule):
 
         if prediction.overall_score > 0.05:
             self.finding(
-                title=f"Detection Probability: {score_pct}% — {prediction.wait_reason}",
+                title=f"Detection Probability: {score_pct}% - {prediction.wait_reason}",
                 description=(
                     f"Based on {prediction.modules_analyzed} modules executed and "
                     f"{len(prediction.techniques_triggered)} MITRE techniques triggered, "
@@ -882,7 +882,7 @@ class CoveragePredictorModule(BaseModule):
         """
         from ares.technique.library import _MODULE_TECHNIQUE_MAP
 
-        # HIGH_NOISE modules — verified against OPSEC_LEVEL in module definitions
+        # HIGH_NOISE modules - verified against OPSEC_LEVEL in module definitions
         # lateral.wmiexec removed (MEDIUM, not HIGH_NOISE)
         # ad.coerce + windows.lsa_secrets added (confirmed HIGH_NOISE)
         _KNOWN_HIGH_NOISE = {
@@ -925,8 +925,8 @@ class CoveragePredictorModule(BaseModule):
             "warnings":         warnings,
             "module_breakdown": sorted(breakdowns, key=lambda x: -x["contribution"]),
             "recommendation": (
-                "SAFE — proceed" if safe else
-                f"DANGEROUS — this plan will raise detection to {projected:.0%}. "
+                "SAFE - proceed" if safe else
+                f"DANGEROUS - this plan will raise detection to {projected:.0%}. "
                 "Revise to stealthier techniques."
             ),
         }
@@ -959,7 +959,7 @@ class CoveragePredictorModule(BaseModule):
                     modules_run.append({
                         "module_id":        mid,
                         "mitre_techniques": techniques,
-                        "opsec_level":      "medium",   # default — refined below
+                        "opsec_level":      "medium",   # default - refined below
                         "timestamp":        time.monotonic(),
                     })
 

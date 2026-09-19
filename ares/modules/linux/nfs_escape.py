@@ -1,22 +1,22 @@
 """
-Linux NFS Misconfiguration — no_root_squash Detection
+Linux NFS Misconfiguration - no_root_squash Detection
 MITRE: T1548.001 (Abuse Elevation Control Mechanism: Setuid and Setgid)
 
 Checks NFS exports on the target for the no_root_squash option.
 When no_root_squash is set, a remote root user mounting that export
-retains root privileges on the NFS share — allowing SUID binary
+retains root privileges on the NFS share - allowing SUID binary
 creation or direct overwrite of sensitive files like /etc/passwd.
 
 Two execution paths:
-  Remote (SSH) — connects via asyncssh, reads /etc/exports and
+  Remote (SSH) - connects via asyncssh, reads /etc/exports and
                  mounted NFS shares from /proc/mounts
-  Local        — reads directly from /etc/exports and /proc/mounts
+  Local        - reads directly from /etc/exports and /proc/mounts
 
 This module is DETECTION ONLY.
 It reports misconfigured exports and the exploitation path.
 It does NOT mount anything or create any files on the target.
 
-OPSEC: LOW — reads config files via SSH, no network scanning.
+OPSEC: LOW - reads config files via SSH, no network scanning.
 """
 from __future__ import annotations
 
@@ -54,17 +54,17 @@ _DANGEROUS_OPTIONS: list[tuple[str, str, str]] = [
     ),
     (
         "no_all_squash",
-        "All UIDs/GIDs are preserved — non-root users may also gain elevated access",
+        "All UIDs/GIDs are preserved - non-root users may also gain elevated access",
         "HIGH",
     ),
     (
         "insecure",
-        "Allows connections from unprivileged ports (>1024) — easier to connect",
+        "Allows connections from unprivileged ports (>1024) - easier to connect",
         "MEDIUM",
     ),
     (
         "rw",
-        "Export is writable — required for file placement attacks",
+        "Export is writable - required for file placement attacks",
         "INFO",
     ),
 ]
@@ -125,7 +125,7 @@ def _parse_exports(exports_content: str) -> list[dict[str, Any]]:
 )
 class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
     """
-    linux.nfs_escape — Detect NFS exports with no_root_squash — allows root on attacker machine to write SUID binaries 
+    linux.nfs_escape - Detect NFS exports with no_root_squash - allows root on attacker machine to write SUID binaries 
 
     OPSEC: LOW
     MITRE: "T1548.001", "T1082"
@@ -135,7 +135,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
     MODULE_NAME        = "NFS no_root_squash Detection"
     MODULE_CATEGORY    = "linux"
     MODULE_DESCRIPTION = (
-        "Detect NFS exports with no_root_squash — allows root on attacker "
+        "Detect NFS exports with no_root_squash - allows root on attacker "
         "machine to write SUID binaries to the share for privilege escalation"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -154,7 +154,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                 target = ctx.params.get("target") or ctx.params.get("host", "")
             if not target:
                 raise ModuleValidationError(
-                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                     module_id=self.MODULE_ID, field="target",
                 )
             ssh_user = None
@@ -365,7 +365,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                                 "execute it from a low-priv shell on the NFS server "
                                 "to escalate to root."
                                 if is_writable else
-                                "The export is read-only — no_root_squash is less "
+                                "The export is read-only - no_root_squash is less "
                                 "immediately exploitable but still a misconfiguration."
                             )
                         ),
@@ -384,7 +384,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                                 "cp /bin/bash /mnt/share/ && chmod +s /mnt/share/bash. "
                                 "3. On the NFS server (as low-priv user): "
                                 f"/mnt_nfs{path}/bash -p  (opens root shell)."
-                            ) if is_writable else "read-only export — limited impact",
+                            ) if is_writable else "read-only export - limited impact",
                         },
                         remediation=(
                             f"Remove no_root_squash from {path} export in /etc/exports. "
@@ -401,7 +401,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                         description=(
                             f"NFS export {path!r} on {host} has no_all_squash for "
                             f"client {client_host!r}. "
-                            "UIDs from the client are passed through to the server — "
+                            "UIDs from the client are passed through to the server - "
                             "if the client has a UID matching a privileged user on "
                             "the server, it gains their access."
                         ),
@@ -440,7 +440,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
         raw["privesc_vectors"] = self._findings  # OUTPUTS key
         return self._findings[:], raw
 
-    # ── SSH / local runner helpers — identical pattern to linux.privesc ────
+    # ── SSH / local runner helpers - identical pattern to linux.privesc ────
 
     async def _make_ssh_runner(
         self,
@@ -454,7 +454,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed — pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

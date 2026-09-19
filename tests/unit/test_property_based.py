@@ -1,5 +1,5 @@
 """
-Property-based tests — Input sanitizers (ares/core/security.py)
+Property-based tests - Input sanitizers (ares/core/security.py)
 Using hypothesis to fuzz sanitize_ldap, sanitize_hostname, validate_ip_or_cidr,
 sanitize_path, create_access_token, and DataEncryptor.
 
@@ -35,14 +35,14 @@ from ares.core.security import (
 
 # ── Shared strategies ─────────────────────────────────────────────────────────
 
-# Printable ASCII — the typical input space for user-supplied strings
+# Printable ASCII - the typical input space for user-supplied strings
 printable_text = st.text(
     alphabet=string.printable,
     min_size=0,
     max_size=200,
 )
 
-# Unicode including emoji, CJK, RTL, null bytes — the adversarial space
+# Unicode including emoji, CJK, RTL, null bytes - the adversarial space
 adversarial_text = st.text(min_size=0, max_size=200)
 
 # LDAP injection payloads specifically
@@ -108,7 +108,7 @@ class TestSanitizeLdap:
         # Key invariant: result is safe to embed in LDAP filter
         assert isinstance(result, str)
         # If ldap3 is available, injection chars get escaped with \xx
-        # If not, they get stripped — either way the output is safe
+        # If not, they get stripped - either way the output is safe
 
     @given(st.just("") )
     def test_empty_string_stays_empty(self, value: str) -> None:
@@ -118,7 +118,7 @@ class TestSanitizeLdap:
     @settings(max_examples=100)
     def test_alphanumeric_passthrough(self, value: str) -> None:
         """Pure alphanumeric strings should pass through unchanged."""
-        # ldap3 escapes everything that's not safe — alphanum is safe
+        # ldap3 escapes everything that's not safe - alphanum is safe
         result = sanitize_ldap(value)
         # At minimum the result must contain all the original chars in some form
         assert len(result) >= len(value)
@@ -280,7 +280,7 @@ class TestValidateIpOrCidr:
     @given(printable_text)
     @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
     def test_never_raises(self, value: str) -> None:
-        """validate_ip_or_cidr must never raise — only return True/False."""
+        """validate_ip_or_cidr must never raise - only return True/False."""
         try:
             result = validate_ip_or_cidr(value)
             assert isinstance(result, bool)
@@ -308,7 +308,7 @@ class TestValidateIpOrCidr:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DataEncryptor — property-based
+# DataEncryptor - property-based
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestDataEncryptorProperties:
@@ -352,7 +352,7 @@ class TestDataEncryptorProperties:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# JWT — property-based
+# JWT - property-based
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestJWTProperties:

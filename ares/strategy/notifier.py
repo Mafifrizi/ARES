@@ -1,5 +1,5 @@
 """
-ares.strategy.notifier — Operator notification hooks for autonomous engagements.
+ares.strategy.notifier - Operator notification hooks for autonomous engagements.
 
 Collects and dispatches notifications during strategy engine rounds.
 Pluggable via webhook callback or WebSocket forwarding.
@@ -18,7 +18,7 @@ logger = get_logger("ares.strategy.notifier")
 
 
 class OperatorNotifier:
-    """Collects operator notifications — pluggable via webhook or WebSocket."""
+    """Collects operator notifications - pluggable via webhook or WebSocket."""
 
     def __init__(self, notify_fn: Callable | None = None) -> None:
         self._fn       = notify_fn

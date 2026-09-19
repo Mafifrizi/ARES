@@ -1,5 +1,5 @@
 """
-ARES — modules.credential
+ARES - modules.credential
 Credential access and cracking modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

@@ -1,5 +1,5 @@
 """
-ARES — knowledge
+ARES - knowledge
 Attack knowledge base and evidence storage
 
 Public API for this package. Import from here in production code:

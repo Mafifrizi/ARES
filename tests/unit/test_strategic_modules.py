@@ -1,5 +1,5 @@
 """
-Unit tests — 4 strategic modules (v34+)
+Unit tests - 4 strategic modules (v34+)
 
 Covers:
   - ai.autonomous_planner
@@ -396,7 +396,7 @@ class TestCloudFederationAbuse:
         """Dry run must not make any real network calls."""
         from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
         mod, _ = _make_module(CloudIdentityFederationModule)
-        # If network calls happen, they'll fail in test env — dry_run should prevent them
+        # If network calls happen, they'll fail in test env - dry_run should prevent them
         ctx = _mock_ctx(params={"tenant_id": "real-tenant-id"}, dry_run=True)
         ctx.campaign = _mock_campaign()
         result = _run(mod.execute(ctx))
@@ -424,7 +424,7 @@ class TestAIAutonomousPlanner:
         assert result.status == "dry_run"
 
     def test_auto_approve_false_by_default(self):
-        """auto_approve must default to False — operator review is required."""
+        """auto_approve must default to False - operator review is required."""
         from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
         from ares.modules.params import AIPlannerParams
         params = AIPlannerParams()
@@ -444,7 +444,7 @@ class TestAIAutonomousPlanner:
                  "modules": ["ad.kerberoast", "ad.dcsync"], "params": {}},
             ],
             "alternative": [],
-            "warnings":    ["DCSync is HIGH_NOISE — may trigger SIEM"],
+            "warnings":    ["DCSync is HIGH_NOISE - may trigger SIEM"],
         })
         plan = mod._parse_llm_response(valid, "claude-opus-4-6", 1000)
         assert plan.confidence == 0.85
@@ -462,7 +462,7 @@ class TestAIAutonomousPlanner:
         assert len(plan.warnings) > 0, "Should warn about parse failure"
 
     def test_parse_llm_response_strips_markdown_fences(self):
-        """LLM may wrap JSON in ```json ... ``` — should be stripped."""
+        """LLM may wrap JSON in ```json ... ``` - should be stripped."""
         from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
         mod, _ = _make_module(AIAutonomousPlannerModule)
         fenced = '```json\n{"reasoning": "test", "confidence": 0.5, "stages": [], "alternative": [], "warnings": []}\n```'
@@ -540,7 +540,7 @@ class TestAIAutonomousPlanner:
                     {"name": "asrep", "rationale": "if kerberoast fails",
                      "modules": ["ad.asreproast"], "params": {}},
                 ],
-                "warnings": ["DCSync requires domain admin — ensure creds obtained first"],
+                "warnings": ["DCSync requires domain admin - ensure creds obtained first"],
             }),
             "model":       "claude-opus-4-6",
             "tokens_used": 1247,
@@ -592,7 +592,7 @@ class TestAIAutonomousPlanner:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODULE_PARAMS registry — all 4 new modules registered
+# MODULE_PARAMS registry - all 4 new modules registered
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestNewModulesRegistered:
@@ -641,7 +641,7 @@ class TestNewModulesRegistered:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# New feature tests — added in v35
+# New feature tests - added in v35
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestMultiLLMConsensus:
@@ -804,7 +804,7 @@ class TestSOCShiftModeling:
         assert "recommendation" in result
 
     def test_soc_healthcare_is_high_coverage(self):
-        """Healthcare SOC operates 24/7 — factor should always be moderate-high."""
+        """Healthcare SOC operates 24/7 - factor should always be moderate-high."""
         from ares.modules.opsec.coverage_predictor import _compute_soc_activity_factor
         import datetime
         # Test at 3am UTC (off-hours for most)
@@ -916,7 +916,7 @@ class TestStrategyEngine:
         engine = StrategyEngine(ares_engine=None, settings=None)
         campaign = _mock_campaign()
         # Simulate a DCSync finding
-        mock_finding = type("F", (), {"title": "DCSync — krbtgt hash obtained"})()
+        mock_finding = type("F", (), {"title": "DCSync - krbtgt hash obtained"})()
         campaign.findings = [mock_finding]
         assert engine._check_goal_achieved(campaign, "domain_admin") is True
 
@@ -971,7 +971,7 @@ class TestOutcomeQuality:
         kb.record_outcome("ad.kerberoast", success=True,  quality=1.0, edr_vendor="cs")
         kb.record_outcome("ad.kerberoast", success=True,  quality=0.3, edr_vendor="cs")
         rates = kb.get_success_rates()
-        # Average quality: (1.0 + 0.3) / 2 = 0.65 — not just binary count
+        # Average quality: (1.0 + 0.3) / 2 = 0.65 - not just binary count
         assert 0.6 <= rates["ad.kerberoast"] <= 0.7
 
 
@@ -1269,7 +1269,7 @@ class TestEDRProbe:
         assert result is True
 
     def test_probe_no_runner_returns_true(self):
-        """No SSH runner means we can't probe — fail open (return True)."""
+        """No SSH runner means we can't probe - fail open (return True)."""
         from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule, BypassTechnique
         mod, _ = _make_module(EDRAdaptiveBypassModule)
         tech = BypassTechnique(
@@ -1295,7 +1295,7 @@ class TestEDRProbe:
 
 class TestBugRegressions:
 
-    # Bug 1 — probe methods must exist and be callable
+    # Bug 1 - probe methods must exist and be callable
     def test_probe_technique_method_exists(self):
         from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule
         mod, _ = _make_module(EDRAdaptiveBypassModule)
@@ -1336,7 +1336,7 @@ class TestBugRegressions:
         result = _run(mod._probe_technique(tech, run_cmd=mock_run))
         assert result is True
 
-    # Bug 2 — credentials must use actionable format
+    # Bug 2 - credentials must use actionable format
     def test_credentials_format_actionable(self):
         from ares.modules.ai.autonomous_planner import CampaignContextBuilder
         builder = CampaignContextBuilder()
@@ -1356,7 +1356,7 @@ class TestBugRegressions:
             "Credentials must be in actionable format with recommended_use"
         assert len(first["recommended_use"]) > 0
 
-    # Bug 3 — AD modules use "dc" key, not "target"
+    # Bug 3 - AD modules use "dc" key, not "target"
     def test_target_hint_checks_dc_key(self):
         from ares.strategy.target_state import TargetStateMap
         from ares.modules.base import ModuleResult
@@ -1367,7 +1367,7 @@ class TestBugRegressions:
         assert state is not None
         assert "ad.kerberoast" in state.successful_modules
 
-    # Bug 4 — datetime.timestamp() must be used
+    # Bug 4 - datetime.timestamp() must be used
     def test_dwell_decay_with_datetime_object(self):
         from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         import datetime, time
@@ -1379,7 +1379,7 @@ class TestBugRegressions:
         assert result < 0.8, "Dwell decay must reduce score after 10 days"
         assert result == pytest.approx(0.8 * 0.65, abs=0.02)
 
-    # Bug 9 — target_states must appear in prompt
+    # Bug 9 - target_states must appear in prompt
     def test_target_states_rendered_in_prompt(self):
         from ares.modules.ai.autonomous_planner import _build_user_prompt
         context = {
@@ -1417,7 +1417,7 @@ class TestBugRegressions:
         assert "Per-host state" not in prompt, \
             "Empty target_states must not add noise to prompt"
 
-    # Bug 11 — HIGH_NOISE list accuracy
+    # Bug 11 - HIGH_NOISE list accuracy
     def test_high_noise_list_excludes_wmiexec(self):
         from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
         mod, _ = _make_module(CoveragePredictorModule)
@@ -1446,7 +1446,7 @@ class TestBugRegressions:
         assert any("lsa_secrets" in w for w in warnings), \
             "windows.lsa_secrets must be flagged as HIGH_NOISE"
 
-    # API Gap — /strategy/engage endpoint exists
+    # API Gap - /strategy/engage endpoint exists
     def test_strategy_engage_endpoint_registered(self):
         import sys
         # Check that the endpoint is registered in server.py

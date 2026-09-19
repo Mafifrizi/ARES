@@ -1,5 +1,5 @@
 """
-ARES test suite — conftest.py
+ARES test suite - conftest.py
 Shared pytest fixtures, PYTHONPATH bootstrap, and async configuration.
 Auto-discovered by pytest. All fixtures are available to every test file.
 """
@@ -25,7 +25,7 @@ if str(_REPO_ROOT) not in sys.path:
 import tempfile
 
 # ── Required env vars for AresSettings ───────────────────────────────────────
-# AresSettings has Field(...) on secret_key and encryption_key — no defaults.
+# AresSettings has Field(...) on secret_key and encryption_key - no defaults.
 # Setting these at module level guarantees test collection never crashes when
 # a test file imports ares.api.server or calls get_settings() at module import time.
 os.environ.setdefault("ARES_SECRET_KEY",             "test-secret-key-min-32-chars-placeholder!!")
@@ -213,7 +213,7 @@ def goal_engine():
     mock_registry.__iter__ = lambda self: iter([])
     mock_registry.all.return_value = []   # ModuleRegistry uses .all() not .all_modules()
     mock_registry.get.return_value = None
-    # CapabilityGraph.from_registry is called in __init__ — mock it
+    # CapabilityGraph.from_registry is called in __init__ - mock it
     with __import__("unittest.mock", fromlist=["patch"]).patch(
         "ares.goal.engine.CapabilityGraph.from_registry",
         return_value=MagicMock()

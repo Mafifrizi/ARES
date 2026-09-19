@@ -1,5 +1,5 @@
 """
-AD ACL Enumeration — Production ldap3 Implementation
+AD ACL Enumeration - Production ldap3 Implementation
 Find dangerous ACL delegations: WriteDACL, GenericAll, GenericWrite, DCSync rights.
 MITRE: T1222.001, T1003.006
 """
@@ -42,7 +42,7 @@ DCSYNC_RIGHTS = {
 )
 class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
-    ad.enum_acl — Find WriteDACL, GenericAll, GenericWrite, DCSync delegation misconfigs
+    ad.enum_acl - Find WriteDACL, GenericAll, GenericWrite, DCSync delegation misconfigs
 
     OPSEC: LOW
     MITRE: "T1222.001","T1003.006"
@@ -74,7 +74,7 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.enum_acl requires domain credentials — "
+                "ad.enum_acl requires domain credentials - "
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
@@ -215,7 +215,7 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
 
     def _enum_acls_sync(self, dc, username, password, domain):
         """
-        Sync — runs in executor (fix: was async def blocking event loop).
+        Sync - runs in executor (fix: was async def blocking event loop).
         Fixes: AUTO_BIND_NONE, cookie loop, LDAPS fallback, try/finally unbind.
         """
         import ssl
@@ -359,13 +359,13 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         generic_all = [m for m in misconfigs if m["right"] == "GenericAll"]
         if generic_all:
             self.finding(title=f"GenericAll ACE on {len(generic_all)} Objects",
-                description=f"{len(generic_all)} objects have GenericAll ACE — full control over target.",
+                description=f"{len(generic_all)} objects have GenericAll ACE - full control over target.",
                 severity=Severity.CRITICAL, mitre_technique="T1222.001", mitre_tactic="Defense Evasion",
                 evidence={"objects": generic_all[:10]},
                 remediation="Remove GenericAll ACE. Use specific delegations instead.")
         if write_dacl:
             self.finding(title=f"WriteDACL on {len(write_dacl)} Objects",
-                description=f"{len(write_dacl)} objects have WriteDACL — attacker can grant arbitrary rights.",
+                description=f"{len(write_dacl)} objects have WriteDACL - attacker can grant arbitrary rights.",
                 severity=Severity.HIGH, mitre_technique="T1222.001", mitre_tactic="Defense Evasion",
                 evidence={"objects": write_dacl[:10]},
                 remediation="Audit and remove WriteDACL delegations. Enable AD Protected Users.")

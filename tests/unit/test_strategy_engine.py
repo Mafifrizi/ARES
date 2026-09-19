@@ -1,5 +1,5 @@
 """
-Step 2 — Unit Tests: Strategy Engine
+Step 2 - Unit Tests: Strategy Engine
 
 Tests for the autonomous engagement orchestration layer:
   - ModuleOutcome / RoundResult / EngagementResult (models)
@@ -8,7 +8,7 @@ Tests for the autonomous engagement orchestration layer:
   - ConstitutionEnforcer (module blocking, scope check, authorization)
   - StrategyEngine._check_goal_achieved (goal detection logic)
 
-All tests use mock dependencies — no real LLM, network, or module execution.
+All tests use mock dependencies - no real LLM, network, or module execution.
 
 Run: pytest tests/unit/test_strategy_engine.py -v
 """
@@ -568,7 +568,7 @@ class TestGoalAchieved:
         engine = self._make_engine()
         campaign = self._make_campaign_with_findings([
             "Port Scan Complete",
-            "DCSync Attack Successful — krbtgt hash obtained",
+            "DCSync Attack Successful - krbtgt hash obtained",
         ])
         assert engine._check_goal_achieved(campaign, "domain_admin") is True
 
@@ -616,7 +616,7 @@ class TestGoalAchieved:
         engine = self._make_engine()
         campaign = MagicMock()
         campaign.findings = [
-            {"title": "DCSync Attack — Domain Admin Achieved"},
+            {"title": "DCSync Attack - Domain Admin Achieved"},
         ]
         assert engine._check_goal_achieved(campaign, "domain_admin") is True
 

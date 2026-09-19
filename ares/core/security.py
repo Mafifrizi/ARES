@@ -36,7 +36,7 @@ def _get_legacy_salt() -> bytes:
 
 
 # ── Password hashing ──────────────────────────────────────────────────────────
-# NOTE: Use bcrypt directly — passlib 1.7.4 is incompatible with bcrypt >= 4.0
+# NOTE: Use bcrypt directly - passlib 1.7.4 is incompatible with bcrypt >= 4.0
 # which added an explicit 72-byte limit. We truncate + call bcrypt directly.
 def hash_password(password: str) -> str:
     pw_bytes = password.encode("utf-8")[:72]
@@ -55,10 +55,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ── JWT ───────────────────────────────────────────────────────────────────────
 #
 # Algorithm support:
-#   HS256 (default) — symmetric HMAC. Simple, single-service deployments.
+#   HS256 (default) - symmetric HMAC. Simple, single-service deployments.
 #                     ARES_JWT_ALGORITHM=HS256, ARES_SECRET_KEY=<32+ char secret>
 #
-#   RS256            — asymmetric RSA. Multi-service: any service can verify tokens
+#   RS256            - asymmetric RSA. Multi-service: any service can verify tokens
 #                     using only the public key without knowing the private key.
 #                     Generate:
 #                       openssl genrsa -out ares_jwt_private.pem 2048
@@ -78,8 +78,8 @@ def _load_jwt_key(
     """
     Return the correct key object for PyJWT based on algorithm.
 
-    HS256: symmetric — same key for sign and verify.
-    RS256: asymmetric — private key for sign, public key for verify.
+    HS256: symmetric - same key for sign and verify.
+    RS256: asymmetric - private key for sign, public key for verify.
            Keys are read from ARES_JWT_PRIVATE_KEY_PATH / ARES_JWT_PUBLIC_KEY_PATH
            env vars if present; otherwise falls back to secret_key string (useful
            for testing, not recommended for production RS256 deployments).
@@ -107,13 +107,13 @@ def _load_jwt_key(
                     logger.error(
                         "jwt_public_key_load_failed", path=key_path, error=str(exc)
                     )
-        # Fallback — not safe for RS256 production use, but allows unit tests to run
+        # Fallback - not safe for RS256 production use, but allows unit tests to run
         logger.warning(
             "jwt_asymmetric_key_fallback",
             msg="Set ARES_JWT_PRIVATE_KEY_PATH/ARES_JWT_PUBLIC_KEY_PATH for RS256",
         )
         return secret_key
-    # HS256 / HS384 / HS512 — symmetric
+    # HS256 / HS384 / HS512 - symmetric
     return secret_key
 
 
@@ -176,7 +176,7 @@ class DataEncryptor:
         A 16-byte random salt is generated per DataEncryptor instance.
         Every ciphertext is stored as "<salt_hex_32chars>:<fernet_token>".
         On decrypt(), the salt is parsed from the prefix so the correct
-        derived key is always used — no need to store salt separately in DB.
+        derived key is always used - no need to store salt separately in DB.
 
         This means each encrypted value has its own unique salt, eliminating
         the fixed-salt offline brute-force risk entirely. Decryption works
@@ -188,7 +188,7 @@ class DataEncryptor:
         They will be re-encrypted with a random salt on the next write.
     """
 
-    # Legacy fixed salt — ONLY for decrypting old records written before per-record salts.
+    # Legacy fixed salt - ONLY for decrypting old records written before per-record salts.
     # Security rationale: this salt is intentionally static because it was used as a
     # global salt in v5 and earlier. All new writes use per-record random salts (see encrypt()).
     # Override via ARES_LEGACY_SALT env var if you rotated this in your deployment.
@@ -256,20 +256,20 @@ class DataEncryptor:
                 fernet_token = raw_fernet_token.encode()
                 return self._derive_fernet(salt).decrypt(fernet_token).decode()
 
-            # Legacy fallback: no prefix — use old fixed salt for pre-existing DB records
+            # Legacy fallback: no prefix - use old fixed salt for pre-existing DB records
             if not self._is_canonical_fernet_token(token):
                 raise ValueError("Invalid Fernet token encoding")
             result = (
                 self._derive_fernet(self._LEGACY_SALT).decrypt(token.encode()).decode()
             )
             logger.info(
-                "[security] Decrypted legacy ciphertext — will re-encrypt on next write"
+                "[security] Decrypted legacy ciphertext - will re-encrypt on next write"
             )
             return result
 
         except (InvalidToken, ValueError, UnicodeDecodeError) as exc:
             logger.error(
-                "[security] Decryption failed — data may be tampered or key mismatch",
+                "[security] Decryption failed - data may be tampered or key mismatch",
                 error=str(exc)[:80],
             )
             return None
@@ -359,7 +359,7 @@ def sanitize_path(value: str) -> str:
         logger.warning("security_sensitive_path_blocked", path=repr(resolved))
         raise ValueError(f"Access to sensitive path is not allowed: {resolved}")
 
-    # Allowed directory roots — only these can be accessed.
+    # Allowed directory roots - only these can be accessed.
     _ALLOWED = tuple(
         p.resolve()
         for p in (
@@ -538,14 +538,14 @@ def secure_mkstemp(
     Registers path for campaign-scoped tracking so cleanup deletes only the
     correct campaign's artifacts.
 
-    Returns (path, fd) — caller MUST os.close(fd) after use.
+    Returns (path, fd) - caller MUST os.close(fd) after use.
     """
     import os
     import tempfile
 
     fd, path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
     if hasattr(os, "fchmod"):
-        os.fchmod(fd, 0o600)  # owner read/write only — BEFORE any data written
+        os.fchmod(fd, 0o600)  # owner read/write only - BEFORE any data written
     else:
         os.chmod(path, 0o600)  # Windows reflects file modes through chmod(path)
     _restrict_windows_acl(path)

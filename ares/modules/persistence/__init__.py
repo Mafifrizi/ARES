@@ -1,5 +1,5 @@
 """
-ARES — modules.persistence
+ARES - modules.persistence
 Persistence mechanism modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

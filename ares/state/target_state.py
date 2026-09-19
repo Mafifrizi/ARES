@@ -69,7 +69,7 @@ class ServiceEntry:
 class HostState:
     """Full state of a single target host."""
     ip_address:  str = ""
-    ip:          str = field(default="", repr=False)   # alias — set either ip_address or ip
+    ip:          str = field(default="", repr=False)   # alias - set either ip_address or ip
     hostname:    str = ""
     fqdn:        str = ""
     domain:      str = ""
@@ -296,7 +296,7 @@ class OperatorSession:
         credentials:    list | None = None,
         **kwargs: Any,
     ) -> None:
-        """Alias untuk mark_host_owned — auto-create host jika belum ada."""
+        """Alias untuk mark_host_owned - auto-create host jika belum ada."""
         if ip_or_hostname not in self._hosts:
             self.add_host(ip_or_hostname)
         self.mark_host_owned(ip_or_hostname, level, via_module=via_module, username=username)
@@ -497,5 +497,5 @@ class OperatorSession:
 
 # ── Public aliases (backward compatibility + test convenience) ─────────────────
 
-#: Alias for HostState — used in tests and external tooling that prefer the name TargetHost
+#: Alias for HostState - used in tests and external tooling that prefer the name TargetHost
 TargetHost = HostState

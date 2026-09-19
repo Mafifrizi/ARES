@@ -77,7 +77,7 @@ class ReuseResult:
         return round(self.successes / self.total_attempts, 3)
 
 
-# ── Protocol validators — real impacket/paramiko implementations ──────────────
+# ── Protocol validators - real impacket/paramiko implementations ──────────────
 
 class _ProtocolValidator:
     """Base class for protocol-specific authentication testers."""
@@ -95,7 +95,7 @@ class _ProtocolValidator:
 
         Subclasses **must** implement this method for each protocol.
         """
-        raise NotImplementedError(  # abstract — each protocol validator must override
+        raise NotImplementedError(  # abstract - each protocol validator must override
             f"{self.__class__.__name__} must implement test()"
         )
 
@@ -157,7 +157,7 @@ class _WinRMValidator(_ProtocolValidator):
             import winrm
             from winrm.exceptions import InvalidCredentialsError, WinRMError, WinRMTransportError
         except ImportError:
-            return False, "pywinrm not installed — run: pip install pywinrm"
+            return False, "pywinrm not installed - run: pip install pywinrm"
 
         loop = asyncio.get_running_loop()
 
@@ -204,14 +204,14 @@ class _SSHValidator(_ProtocolValidator):
         def _connect() -> tuple[bool, str]:
             client = paramiko.SSHClient()
             # AutoAddPolicy is required here because credential spray tests many
-            # hosts — supplying a known_hosts file is impractical at this stage.
+            # hosts - supplying a known_hosts file is impractical at this stage.
             # Risk: MITM on untrusted networks can intercept credentials.
             # Operator should run credential reuse only from a trusted pivot or
             # secured operator workstation, not from hotel/public wifi.
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             import logging as _log
             _log.getLogger("ares.credential.reuse").warning(
-                "ssh_host_key_unverified host=%s — MITM risk on untrusted networks; "
+                "ssh_host_key_unverified host=%s - MITM risk on untrusted networks; "
                 "run credential reuse only from a secured operator workstation.",
                 host,
             )
@@ -433,7 +433,7 @@ class ReuseEngine:
                 result.failures += 1
 
     def _should_skip(self, host: str, cred: Credential) -> bool:
-        """Lockout protection — skip if attempt count exceeds threshold."""
+        """Lockout protection - skip if attempt count exceeds threshold."""
         key = f"{host}:{cred.username.lower()}"
         if self._attempt_counts.get(key, 0) >= self.lockout_threshold:
             logger.debug("reuse_skip_lockout_protection", host=host, username=cred.username)
@@ -448,8 +448,8 @@ class ReuseEngine:
 
 # ── Public aliases (backward compatibility) ───────────────────────────────
 
-#: Alias for ReuseEngine — canonical export name used by tests and external tooling
+#: Alias for ReuseEngine - canonical export name used by tests and external tooling
 CredentialReuser = ReuseEngine
 
-#: Alias for ReuseResult — descriptive name for import
+#: Alias for ReuseResult - descriptive name for import
 ReuseResult = ReuseResult  # noqa: PLW0127 (self-assignment for explicit export)

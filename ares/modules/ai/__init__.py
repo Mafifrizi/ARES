@@ -1,5 +1,5 @@
 """
-ARES — modules.ai
+ARES - modules.ai
 AI-powered attack planning and orchestration modules.
 """
 from __future__ import annotations

@@ -1,18 +1,23 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowRight,
   Bell,
   CheckCircle2,
   ChevronDown,
   Copy,
+  Cpu,
+  Crosshair,
   Info,
   Layers,
   Loader2,
   Menu,
   Plus,
+  Radio,
   Search,
   ShieldAlert,
   ShieldCheck,
+  Target,
   Terminal,
   Trash2,
   X,
@@ -938,9 +943,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                     >
                       <span className={`status-dot ${topbarDotClass}`} />
                       <span className="status-title">{topbarText}</span>
-                      <span className="status-pill-count font-mono">
-                        {telemetrySnapshot ? `${metricNumber(telemetrySnapshot.modules, "total")} runs` : healthSnapshot?.version ? `v${healthSnapshot.version}` : "v6.0"}
-                      </span>
                     </button>
                   );
                 })()}
@@ -1110,7 +1112,11 @@ export function OverviewPage() {
   const trackedCount = nonDeletedCampaigns.length;
   const runningCount = runningCampaigns.length;
 
-  const findings = typeof monthlyData?.confirmed_findings === "number" ? monthlyData.confirmed_findings : 0;
+  const findings = typeof monthlyData?.confirmed_findings === "number"
+    ? monthlyData.confirmed_findings
+    : typeof snapshot?.findings === "number"
+    ? snapshot.findings
+    : 0;
   const monthlyTotal = typeof monthlyData?.total === "number" ? monthlyData.total : 0;
   const monthlySeries = normalizeMonthlySeries(monthlyData?.period, monthlyData?.series);
 
@@ -1127,7 +1133,7 @@ export function OverviewPage() {
     overviewSubtitle = `${trackedCount} campaign${trackedCount === 1 ? "" : "s"} in scope · Telemetry pipeline standby · Fail-closed policy enforced`;
   }
 
-  // Fresh install empty-state (Task 5)
+  // Fresh install empty-state (Task 5 / CampaignSync test requirement)
   if (!campaignsLoading && trackedCount === 0) {
     return (
       <Page title="Overview" subtitle={overviewSubtitle}>
@@ -1177,118 +1183,246 @@ export function OverviewPage() {
     );
   }
 
-  // Tactical operational highlights (Task 2 & 3)
+  // Tactical operational metrics extraction
+  const totalRuns = metricNumber(snapshot?.modules, "total");
+  const successRuns = metricNumber(snapshot?.modules, "success");
   const failedRuns = metricNumber(snapshot?.modules, "failed");
   const errorRate = metricNumber(snapshot?.modules, "error_rate");
+  const p95 = metricNumberOrNull(snapshot?.latency_ms, "p95");
+  const queueDepth = metricNumber(snapshot?.queue, "depth");
+  const activeWorkers = metricNumber(snapshot?.workers, "active");
+  const unhealthyWorkers = metricNumber(snapshot?.workers, "unhealthy");
   const hostsDiscovered = metricNumber(snapshot?.hosts, "discovered");
   const hostsOwned = metricNumberOrNull(snapshot?.hosts, "owned");
+  const tasksPerMin = metricNumberOrNull(snapshot?.throughput, "tasks_per_min");
+  const credentialsCount = typeof snapshot?.credentials === "number" ? snapshot.credentials : 0;
+  const isIngestionActive = Boolean(snapshot && snapshot.timestamp);
+
+  const quickActions = (
+    <div className="overview-quick-actions">
+      <button
+        type="button"
+        className="btn btn-primary text-xs flex items-center gap-1.5"
+        onClick={() => {
+          writeDashboardSession("ares.dashboard.campaigns.tab", "List");
+          navigate("/campaigns");
+        }}
+        title="Initialize an authorized engagement"
+      >
+        <Plus size={14} />
+        <span>New Campaign</span>
+      </button>
+      <button
+        type="button"
+        className="btn text-xs flex items-center gap-1.5"
+        onClick={() => navigate("/modules")}
+        title="Browse validation module catalog"
+      >
+        <Layers size={14} />
+        <span>Module Catalog</span>
+      </button>
+      <button
+        type="button"
+        className="btn text-xs flex items-center gap-1.5"
+        onClick={() => navigate("/live")}
+        title="Open real-time event telemetry stream"
+      >
+        <Radio size={14} />
+        <span>Live Stream</span>
+      </button>
+    </div>
+  );
 
   return (
-    <Page title="Overview" subtitle={overviewSubtitle}>
-      <div className="dashboard-grid">
-        <TelemetryPanel snapshot={snapshot} loading={telemetry.isLoading} confirmedFindings={findings} />
-        <div className="side-stack">
-          <section className="panel-subtle">
-            <SectionHeader title="Highlights" />
-            <div className="highlight-list">
-              {runningCount > 0 ? (
-                <HighlightRow
-                  label="Engagement Posture"
-                  value={`${runningCount} Running`}
-                  tone="low"
-                  detail={selectedCampaign ? `${selectedCampaign.name} actively executing validation modules` : `${runningCount} engagement${runningCount === 1 ? "" : "s"} actively executing validation modules`}
-                />
-              ) : selectedCampaign ? (
-                <HighlightRow
-                  label="Engagement Posture"
-                  value={selectedCampaign.status ? selectedCampaign.status.toUpperCase() : "STAGED"}
-                  tone="neutral"
-                  detail={`Isolated campaign: ${selectedCampaign.name} (${selectedCampaign.targets?.length ?? 0} targets)`}
-                />
-              ) : trackedCount > 0 ? (
-                <HighlightRow
-                  label="Engagement Posture"
-                  value="Staged"
-                  tone="neutral"
-                  detail={
-                    trackedCount === 1
-                      ? "1 campaign in scope - awaiting execution run"
-                      : `${trackedCount} campaigns in scope - awaiting execution run`
-                  }
-                />
-              ) : (
-                <HighlightRow
-                  label="Engagement Posture"
-                  value="Standby"
-                  tone="neutral"
-                  detail="No active engagements"
-                />
-              )}
-
-              {failedRuns > 0 ? (
-                <HighlightRow
-                  label="Execution Health"
-                  value={`${failedRuns} Failed`}
-                  tone="high"
-                  detail={`${formatRate(errorRate)} module failure rate detected`}
-                />
-              ) : snapshot ? (
-                <HighlightRow
-                  label="Execution Health"
-                  value="Nominal"
-                  tone="low"
-                  detail="Zero module execution errors recorded"
-                />
-              ) : (
-                <HighlightRow
-                  label="Execution Health"
-                  value="Standby"
-                  tone="neutral"
-                  detail="Awaiting telemetry sample ingestion"
-                />
-              )}
-
-              {hostsDiscovered > 0 ? (
-                <HighlightRow
-                  label="Attack Surface"
-                  value={`${hostsDiscovered} Mapped`}
-                  tone={hostsOwned && hostsOwned > 0 ? "high" : "low"}
-                  detail={hostsOwned && hostsOwned > 0 ? `${hostsOwned} targets owned` : "Perimeter discovered, 0 targets owned"}
-                />
-              ) : (
-                <HighlightRow
-                  label="Attack Surface"
-                  value="Unmapped"
-                  tone="neutral"
-                  detail="Run recon modules to map attack surface"
-                />
-              )}
+    <Page title="Overview" subtitle={overviewSubtitle} actions={quickActions}>
+      <div className="overview-shell">
+        {/* Tier 1: Executive Telemetry HUD */}
+        <div className="hud-bento-grid">
+          {/* Card 1: Active Engagements */}
+          <div className="hud-bezel-card">
+            <div className="hud-bezel-inner">
+              <div className="hud-card-header">
+                <span className="hud-card-title">Active Engagements</span>
+              </div>
+              <div className="hud-card-value">
+                {trackedCount}
+              </div>
+              <div className="hud-card-footer">
+                <span className="hud-context-text">
+                  {runningCount > 0
+                    ? `${runningCount} active execution${runningCount > 1 ? "s" : ""}`
+                    : trackedCount > 0
+                    ? "Staged readiness"
+                    : "Standby"}
+                </span>
+              </div>
             </div>
-          </section>
+          </div>
 
-          <section className="panel-subtle">
-            <SectionHeader title="Monthly Statistics" />
-            <div className="monthly-stat">
-              <span>{formatMetric(monthlyTotal)}</span>
-              <small>{monthlyData?.label ?? "Security signals this cycle"}</small>
+          {/* Card 2: Validated Findings */}
+          <div className="hud-bezel-card">
+            <div className="hud-bezel-inner">
+              <div className="hud-card-header">
+                <span className="hud-card-title">Validated Findings</span>
+              </div>
+              <div className="hud-card-value">
+                {formatMetric(findings)}
+              </div>
+              <div className="hud-card-footer">
+                <span className="hud-context-text">
+                  {findings > 0 ? "Confirmed security vulnerabilities" : "No vulnerabilities detected"}
+                </span>
+              </div>
             </div>
-            {monthlyStats.isPending ? <p className="text-sm text-zinc-400">Loading monthly activity...</p> : null}
-            {monthlyStats.isError ? <p className="text-sm text-zinc-400">Monthly activity unavailable.</p> : null}
-            {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal === 0 ? (
-              <p className="text-sm text-zinc-400">No monthly activity yet</p>
-            ) : null}
-            {!monthlyStats.isPending && !monthlyStats.isError && monthlyTotal > 0 && monthlySeries.some((value) => value.count > 0) ? (
-              <SparklineBars values={monthlySeries} />
-            ) : null}
-          </section>
+          </div>
+
+          {/* Card 3: Attack Surface */}
+          <div className="hud-bezel-card">
+            <div className="hud-bezel-inner">
+              <div className="hud-card-header">
+                <span className="hud-card-title">Attack Surface</span>
+              </div>
+              <div className="hud-card-value">
+                {hostsDiscovered > 0 ? hostsDiscovered : "0"} <span className="text-xs font-normal text-zinc-400 font-sans">hosts</span>
+              </div>
+              <div className="hud-card-footer">
+                <span className="hud-context-text">
+                  {hostsOwned !== null && hostsOwned > 0
+                    ? `${hostsOwned} compromise targets`
+                    : "Perimeter mapped"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: Engine Health */}
+          <div className="hud-bezel-card">
+            <div className="hud-bezel-inner">
+              <div className="hud-card-header">
+                <span className="hud-card-title">Engine Health</span>
+              </div>
+              <div className="hud-card-value">
+                {p95 !== null ? `${formatMetric(p95)} ms` : isIngestionActive ? "Nominal" : "Standby"}
+              </div>
+              <div className="hud-card-footer">
+                <span className="hud-context-text">
+                  {activeWorkers} workers online · {queueDepth} queued
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Tier 2: Operational Telemetry (Clean 50/50 Balanced Grid) */}
+        <div className="workstation-split">
+          {/* Panel 1: Execution & Queue Telemetry */}
+          <div className="overview-content-card">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  Execution Telemetry
+                </span>
+                <span className="font-mono text-[11px] text-zinc-500">
+                  {snapshot?.timestamp ? formatReportTime(snapshot.timestamp) : "Standby"}
+                </span>
+              </div>
+
+              <div className="pulse-stat-grid mt-3">
+                <div className="pulse-stat-cell">
+                  <div className="pulse-stat-label">Task Queue</div>
+                  <div className="pulse-stat-value">
+                    {queueDepth} <span className="text-xs font-normal text-zinc-400 font-sans">queued</span>
+                  </div>
+                </div>
+                <div className="pulse-stat-cell">
+                  <div className="pulse-stat-label">Module Runs</div>
+                  <div className="pulse-stat-value">
+                    {totalRuns} <span className="text-xs font-normal text-zinc-400 font-sans">({successRuns} ok)</span>
+                  </div>
+                </div>
+                <div className="pulse-stat-cell">
+                  <div className="pulse-stat-label">Failure Rate</div>
+                  <div className={`pulse-stat-value ${failedRuns > 0 ? "text-rose-400" : "text-zinc-200"}`}>
+                    {formatRate(errorRate)}
+                  </div>
+                </div>
+                <div className="pulse-stat-cell">
+                  <div className="pulse-stat-label">Worker Pool</div>
+                  <div className="pulse-stat-value text-emerald-400">
+                    {activeWorkers} <span className="text-xs font-normal text-zinc-400 font-sans">active</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800/60">
+              <button
+                type="button"
+                className="btn btn-compact text-xs flex items-center gap-1.5"
+                onClick={() => navigate("/modules")}
+                title="Browse validation module catalog"
+              >
+                <Terminal size={13} />
+                <span>Run Modules</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-compact text-xs flex items-center gap-1.5"
+                onClick={() => navigate("/graph")}
+                title="Open attack relationship graph"
+              >
+                <Crosshair size={13} />
+                <span>Attack Graph</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-compact text-xs flex items-center gap-1.5 ml-auto"
+                onClick={() => navigate("/reports")}
+                title="View compliance and engagement reports"
+              >
+                <ShieldCheck size={13} />
+                <span>Reports</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Panel 2: Activity Pulse & Signals */}
+          <div className="overview-content-card">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                  Activity Pulse
+                </span>
+                <span className="font-mono text-[11px] text-zinc-300">
+                  {monthlyTotal} signals total
+                </span>
+              </div>
+              <div className="mt-3">
+                {monthlySeries.some((value) => value.count > 0) ? (
+                  <SparklineBars values={monthlySeries} />
+                ) : (
+                  <div className="h-24 flex items-center justify-center text-xs text-zinc-400 bg-zinc-950/40 rounded border border-dashed border-zinc-800">
+                    Awaiting operational signal telemetry
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-zinc-400 pt-2 border-t border-zinc-800/60 font-mono text-[11px]">
+              <span>Telemetry: {isIngestionActive ? "Ingestion Active" : "Standby"}</span>
+              <span>{hostsDiscovered} hosts mapped</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Tier 3: Campaign Inventory Matrix */}
+        <CampaignTable
+          campaigns={selectedCampaign ? [selectedCampaign] : campaignList}
+          scopedCampaignId={selectedCampaignId}
+          onClearScope={() => setSelectedCampaignId("")}
+          onSelectCampaign={(id) => setSelectedCampaignId(id)}
+        />
       </div>
-      <CampaignTable
-        campaigns={selectedCampaign ? [selectedCampaign] : campaignList}
-        scopedCampaignId={selectedCampaignId}
-        onClearScope={() => setSelectedCampaignId("")}
-        onSelectCampaign={(id) => setSelectedCampaignId(id)}
-      />
     </Page>
   );
 }
@@ -4172,7 +4306,7 @@ function CampaignTable({
               {campaigns.map((campaign, index) => (
                 <tr
                   key={campaign.id}
-                  className={onSelectCampaign ? "cursor-pointer hover:bg-zinc-900/60 transition-colors" : ""}
+                  className={`campaign-table-row ${campaign.id === scopedCampaignId ? "is-selected" : ""} ${onSelectCampaign ? "cursor-pointer" : ""}`}
                   onClick={() => onSelectCampaign?.(campaign.id)}
                   title={onSelectCampaign ? `Filter dashboard to ${campaign.name}` : undefined}
                 >

@@ -1,5 +1,5 @@
 """
-Round 2 tests — covers previously 0% components:
+Round 2 tests - covers previously 0% components:
   - execution/executor.py
   - pivot/infrastructure.py
   - network/model.py
@@ -451,7 +451,7 @@ class TestNetworkModel:
         assert "hosts" in d
 
 
-# ── credential/reuse.py — WinRM validator ────────────────────────────────────
+# ── credential/reuse.py - WinRM validator ────────────────────────────────────
 
 class TestWinRMValidator:
 
@@ -512,7 +512,7 @@ class TestWinRMValidator:
         assert priv in ("administrator", "user")
 
 
-# ── lateral/modules.py — RDP + all techniques ────────────────────────────────
+# ── lateral/modules.py - RDP + all techniques ────────────────────────────────
 
 class TestLateralModules:
 
@@ -638,7 +638,7 @@ class TestLateralModules:
         assert r.session_id != ""
 
 
-# ── credential/reuse.py — ReuseEngine ────────────────────────────────────────
+# ── credential/reuse.py - ReuseEngine ────────────────────────────────────────
 
 class TestReuseEngine:
 

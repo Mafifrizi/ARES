@@ -1,5 +1,5 @@
 """
-FINAL Hardening Tests — Last line of defense.
+FINAL Hardening Tests - Last line of defense.
 
 Tests campaign-scoped artifact isolation, guaranteed cleanup on all paths,
 exception safety, and long-running accumulation prevention.
@@ -375,7 +375,7 @@ class TestEngineCleanupPlacement:
 
         # Check indentation: the cleanup call should be at the same or lower
         # indent level as the pivot if-block, NOT inside it.
-        # The pivot block starts with 'if "network.pivot"' — find its indent
+        # The pivot block starts with 'if "network.pivot"' - find its indent
         pivot_line = None
         pivot_indent = None
         for i, line in enumerate(lines):
@@ -413,7 +413,7 @@ class TestThreadSafety:
     def test_artifact_tracking_uses_lock(self):
         """_ARTIFACT_LOCK must exist and be a lock object."""
         from ares.core.security import _ARTIFACT_LOCK
-        # threading.Lock() returns _thread.lock — verify it has acquire/release
+        # threading.Lock() returns _thread.lock - verify it has acquire/release
         assert hasattr(_ARTIFACT_LOCK, "acquire"), \
             "Artifact tracking must use a lock for thread safety"
         assert hasattr(_ARTIFACT_LOCK, "release"), \

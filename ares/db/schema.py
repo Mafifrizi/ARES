@@ -1,18 +1,18 @@
 """
-ARES Database Schema — v5
+ARES Database Schema - v5
 SQLite WAL mode via aiosqlite. All credential/token content encrypted at rest.
 
 Tables (v5 additions marked ★):
-  schema_version  — migration tracking
-  campaigns       — engagement metadata
-  findings        — vulnerability findings with MITRE mapping
-  hosts           — discovered hosts and services
-  credentials     — captured attack credentials (encrypted)
-  loot            — captured artifacts (hashes, tokens, files)
-  audit_log       — append-only action log
-  ★ users         — operator accounts (replaces in-memory dict)
-  ★ api_keys      — long-lived API keys for CI/CD automation
-  ★ refresh_tokens — JWT refresh tokens with expiry tracking
+  schema_version  - migration tracking
+  campaigns       - engagement metadata
+  findings        - vulnerability findings with MITRE mapping
+  hosts           - discovered hosts and services
+  credentials     - captured attack credentials (encrypted)
+  loot            - captured artifacts (hashes, tokens, files)
+  audit_log       - append-only action log
+  ★ users         - operator accounts (replaces in-memory dict)
+  ★ api_keys      - long-lived API keys for CI/CD automation
+  ★ refresh_tokens - JWT refresh tokens with expiry tracking
 """
 from __future__ import annotations
 
@@ -340,7 +340,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_refresh_token_one_active
 CREATE INDEX IF NOT EXISTS idx_refresh_family_generation
     ON refresh_tokens(family_id,generation);
 
--- Revoked access token JTIs — allows early revocation before natural expiry (60 min TTL)
+-- Revoked access token JTIs - allows early revocation before natural expiry (60 min TTL)
 CREATE TABLE IF NOT EXISTS revoked_access_tokens (
     jti         TEXT PRIMARY KEY,            -- JWT jti claim
     user_id     TEXT NOT NULL,
@@ -504,7 +504,7 @@ CREATE INDEX IF NOT EXISTS idx_sso_flow_lookup ON sso_flow_states(flow_id, is_co
 # Applied automatically by AresDatabase.connect() when SCHEMA_VERSION mismatch.
 
 # V5 → V6: adds revoked_access_tokens table for JWT JTI blacklist (logout revocation).
-# Databases upgraded from v5 will not have this table — this migration adds it safely
+# Databases upgraded from v5 will not have this table - this migration adds it safely
 # via CREATE TABLE IF NOT EXISTS so running it on a fresh v6 DB is also a no-op.
 MIGRATION_V5_TO_V6 = """
 CREATE TABLE IF NOT EXISTS revoked_access_tokens (

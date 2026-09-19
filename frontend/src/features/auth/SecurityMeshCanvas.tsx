@@ -5,18 +5,18 @@ interface SecurityMeshCanvasProps {
 }
 
 /**
- * SecurityMeshCanvas — ARES Dragon Scale Grid
+ * SecurityMeshCanvas - ARES Dragon Scale Grid
  *
  * Renders a tiled hexagonal grid (dragon scales). At rest the scales are barely
- * visible — a ghostly crimson lattice. A slow diagonal breathing wave drifts
+ * visible - a ghostly crimson lattice. A slow diagonal breathing wave drifts
  * across the grid, keeping it alive. When the operator moves the cursor over
  * the panel the scales beneath react, glowing bright crimson, as if the dragon
  * is aware of the operator's presence.
  *
  * Motivation for every animation:
- *   • Hex grid         — dragon scales, the ARES identity made literal
- *   • Breathing wave   — the system is live, not dormant
- *   • Mouse proximity  — the dragon reacts to the operator approaching
+ *   • Hex grid         - dragon scales, the ARES identity made literal
+ *   • Breathing wave   - the system is live, not dormant
+ *   • Mouse proximity  - the dragon reacts to the operator approaching
  */
 export function SecurityMeshCanvas({ className = "" }: SecurityMeshCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -135,12 +135,12 @@ export function SecurityMeshCanvas({ className = "" }: SecurityMeshCanvasProps) 
         }
         ctx!.closePath();
 
-        // Fill — subtle warm ember glow on wave crests, concentrated under cursor
+        // Fill - subtle warm ember glow on wave crests, concentrated under cursor
         const fillAlpha = glow * 0.13;
         ctx!.fillStyle = `rgba(185, 28, 28, ${fillAlpha})`;
         ctx!.fill();
 
-        // Border — distinct, crisp crimson lattice lines
+        // Border - distinct, crisp crimson lattice lines
         const borderAlpha = 0.20 + glow * 0.38;
         ctx!.strokeStyle = `rgba(239, 68, 68, ${borderAlpha})`;
         ctx!.lineWidth = 0.85;

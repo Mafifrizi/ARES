@@ -1,8 +1,8 @@
 """
-ARES OpenTelemetry Distributed Tracing — v3.1.0 (canonical)
+ARES OpenTelemetry Distributed Tracing - v3.1.0 (canonical)
 
 Single source of truth for all tracing in ARES.
-Replaces ares/telemetry/tracing.py (deleted — this file is the merge target).
+Replaces ares/telemetry/tracing.py (deleted - this file is the merge target).
 
 Provides trace ID correlation from:
     HTTP request → engine → module execution → outgoing HTTP
@@ -11,18 +11,18 @@ Features:
     - OTLP gRPC exporter (Jaeger / Grafana Tempo / OTLP-compatible)
     - Console exporter for local dev (ARES_OTEL_CONSOLE=true)
     - FastAPI auto-instrumentation (per-request spans with route + status)
-    - @trace_module() decorator — wraps module run() in a child span
+    - @trace_module() decorator - wraps module run() in a child span
     - span() / async_span() context managers for inline spans
-    - inject_trace_context() — W3C traceparent header for outgoing calls
-    - TraceIDLogFilter — injects trace_id + span_id into every loguru record
+    - inject_trace_context() - W3C traceparent header for outgoing calls
+    - TraceIDLogFilter - injects trace_id + span_id into every loguru record
     - X-Trace-Id response header set by server middleware
-    - Full NoOp fallback — zero overhead when opentelemetry not installed
+    - Full NoOp fallback - zero overhead when opentelemetry not installed
 
 Environment variables:
-    ARES_OTEL_ENDPOINT    — OTLP gRPC endpoint (e.g. http://jaeger:4317)
-    ARES_OTEL_SERVICE     — Service name shown in trace UI (default: ares-api)
-    ARES_OTEL_SAMPLE_RATE — 0.0–1.0 sampling rate (default: 1.0 = 100%)
-    ARES_OTEL_CONSOLE     — also print spans to stdout (dev mode, default: false)
+    ARES_OTEL_ENDPOINT    - OTLP gRPC endpoint (e.g. http://jaeger:4317)
+    ARES_OTEL_SERVICE     - Service name shown in trace UI (default: ares-api)
+    ARES_OTEL_SAMPLE_RATE - 0.0–1.0 sampling rate (default: 1.0 = 100%)
+    ARES_OTEL_CONSOLE     - also print spans to stdout (dev mode, default: false)
 
 Usage:
 
@@ -67,7 +67,7 @@ except ImportError:
 
 class _NoOpSpan:
     """
-    Context-manager no-op span — identical public API to real OTel span.
+    Context-manager no-op span - identical public API to real OTel span.
     Used when opentelemetry-sdk is not installed. All methods are intentional
     no-ops (pass) that satisfy the interface contract without side effects.
     """
@@ -102,7 +102,7 @@ def setup_tracing(
 ) -> bool:
     """
     Initialize OTel tracing. Returns True if successfully configured.
-    Safe to call multiple times — subsequent calls are no-ops.
+    Safe to call multiple times - subsequent calls are no-ops.
     Called automatically from server.py lifespan.
     """
     global _provider, _tracer
@@ -318,11 +318,11 @@ def trace_module(module_id: str) -> Callable:
                 ...
 
     The span automatically records:
-        ares.module_id      — module identifier
-        ares.campaign_id    — campaign ID (from self.campaign.id if available)
-        ares.findings_count — count of findings returned
-        ares.status         — "success" or "error"
-        error details       — exception type + message on failure
+        ares.module_id      - module identifier
+        ares.campaign_id    - campaign ID (from self.campaign.id if available)
+        ares.findings_count - count of findings returned
+        ares.status         - "success" or "error"
+        error details       - exception type + message on failure
     """
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
@@ -380,8 +380,8 @@ class TraceIDLogFilter:
         logger.add(sys.stderr, filter=TraceIDLogFilter(), format=TRACE_LOG_FORMAT)
     """
     def __call__(self, record: dict) -> bool:
-        record["extra"].setdefault("trace_id", get_current_trace_id() or "—")
-        record["extra"].setdefault("span_id",  get_current_span_id()  or "—")
+        record["extra"].setdefault("trace_id", get_current_trace_id() or " - ")
+        record["extra"].setdefault("span_id",  get_current_span_id()  or " - ")
         return True
 
 

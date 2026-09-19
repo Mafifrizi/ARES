@@ -29,7 +29,7 @@ Wordlist priority:
   4. Custom client wordlist
 
 Security note:
-  Cracking always happens locally — no hashes sent externally.
+  Cracking always happens locally - no hashes sent externally.
   All cracked plaintext is encrypted in vault before any logging.
 """
 from __future__ import annotations
@@ -147,7 +147,7 @@ class CrackingWorker:
         audit("crack_job_start", actor="cracker",
               job_id=job.job_id, hash_type=job.hash_type, username=job.username)
 
-        # Hashcat (preferred — GPU accelerated)
+        # Hashcat (preferred - GPU accelerated)
         if self._hashcat and job.hashcat_mode:
             result = await self._run_hashcat(job)
         else:

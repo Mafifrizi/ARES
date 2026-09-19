@@ -1,5 +1,5 @@
 """
-Windows Token Impersonation — SeImpersonatePrivilege Abuse (Potato Attacks)
+Windows Token Impersonation - SeImpersonatePrivilege Abuse (Potato Attacks)
 MITRE: T1134.001, T1134.002
 
 Detects and exploits SeImpersonatePrivilege via impacket.
@@ -40,7 +40,7 @@ logger = get_logger("ares.modules.windows.token_impersonation")
 )
 class TokenImpersonationModule(BaseModule):
     """
-    windows.token_impersonation — Detect SeImpersonatePrivilege on current session — prerequisite check for Potato-family privileg
+    windows.token_impersonation - Detect SeImpersonatePrivilege on current session - prerequisite check for Potato-family privileg
 
     OPSEC: MEDIUM
     MITRE: "T1134.001", "T1134.002"
@@ -51,7 +51,7 @@ class TokenImpersonationModule(BaseModule):
     MODULE_NAME        = "Token Impersonation"
     MODULE_CATEGORY    = "windows"
     MODULE_DESCRIPTION = (
-        "Detect SeImpersonatePrivilege on current session — "
+        "Detect SeImpersonatePrivilege on current session - "
         "prerequisite check for Potato-family privilege escalation attacks"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -248,7 +248,7 @@ class TokenImpersonationModule(BaseModule):
         try:
             from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("token_impersonation_check", target=target, username=username)
         from ares.core.logger import audit as _audit
@@ -280,7 +280,7 @@ class TokenImpersonationModule(BaseModule):
                     wmi_iface = wmi.WMIInterface(dce)
                     query     = "SELECT * FROM Win32_Process WHERE Name = 'lsass.exe'"
                     results   = wmi_iface.ExecQuery(query)
-                    # Just connectivity check — real priv check via WMI is complex
+                    # Just connectivity check - real priv check via WMI is complex
                     return "connected"
                 except Exception as e:
                     return str(e)[:200]

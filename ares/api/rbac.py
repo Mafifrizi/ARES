@@ -1,18 +1,18 @@
 """
-ARES API RBAC + Rate Limiting — v3.0.0
+ARES API RBAC + Rate Limiting - v3.0.0
 
 Roles:
-    team_lead   — full access
-    operator    — run modules, view findings, manage campaigns
-    recon       — enum-only modules, read-only campaigns/graph
-    reporter    — read-only findings, reports, telemetry
+    team_lead   - full access
+    operator    - run modules, view findings, manage campaigns
+    recon       - enum-only modules, read-only campaigns/graph
+    reporter    - read-only findings, reports, telemetry
 
 Rate Limiting strategy (priority order):
     1. Redis sliding-window (if ARES_REDIS_URL is set)  ← multi-pod safe
     2. In-process token bucket (fallback for single-pod / dev)
 
 Redis rate limit key format: ares:rl:{bucket}:{key}
-Uses ZADD + ZREMRANGEBYSCORE + ZCARD — atomic in single pipeline call.
+Uses ZADD + ZREMRANGEBYSCORE + ZCARD - atomic in single pipeline call.
 TTL auto-expires keys after 120s to prevent memory leaks.
 """
 from __future__ import annotations
@@ -78,7 +78,7 @@ class AuthenticatedUser:
 
     @property
     def operator_role(self) -> OperatorRole:
-        """Convert string role to OperatorRole enum (safe — defaults to REPORTER)."""
+        """Convert string role to OperatorRole enum (safe - defaults to REPORTER)."""
         try:
             return OperatorRole(self.role)
         except ValueError:
@@ -392,7 +392,7 @@ class _RedisRateLimiter:
         # results[1] = count BEFORE this request was added
         count = int(results[1])
         if count >= max_per_minute:
-            # Over limit — remove the member we just added
+            # Over limit - remove the member we just added
             await self._r.zrem(window_key, member)
             return False, 0
 
@@ -422,11 +422,11 @@ class APIRateLimiter:
         logger.info("rate_limiter_mode", backend="redis")
 
     def is_allowed(self, key: str, max_per_minute: int) -> tuple[bool, int]:
-        """Sync fallback — used by global middleware (which can't easily await)."""
+        """Sync fallback - used by global middleware (which can't easily await)."""
         return self._inprocess.is_allowed(key, max_per_minute)
 
     async def is_allowed_async(self, key: str, max_per_minute: int) -> tuple[bool, int]:
-        """Async check — preferred for endpoint dependencies."""
+        """Async check - preferred for endpoint dependencies."""
         if self._redis_mode and self._redis:
             try:
                 return await self._redis.is_allowed_async(key, max_per_minute)
@@ -449,7 +449,7 @@ class APIRateLimiter:
         return remaining
 
     def check_or_raise(self, key: str, max_per_minute: int, detail: str = "") -> int:
-        """Sync version of check_or_raise — used in non-async contexts."""
+        """Sync version of check_or_raise - used in non-async contexts."""
         allowed, remaining = self.is_allowed(key, max_per_minute)
         if not allowed:
             raise HTTPException(
@@ -481,7 +481,7 @@ def get_limiter() -> APIRateLimiter:
 
 def rate_limit(bucket: str = "global") -> Any:
     """
-    FastAPI async dependency — checks rate limit for request IP.
+    FastAPI async dependency - checks rate limit for request IP.
     Uses Redis if available, otherwise in-process.
 
     Usage:
@@ -513,10 +513,10 @@ def _role_can_access(role: str, method: str, path: str) -> bool:
     Return True if `role` may call `method` on `path`.
 
     Rules:
-      team_lead  — full access to everything
-      operator   — GET/POST/DELETE on most paths except /auth/register
-      recon      — GET only (except enumeration modules); no write access
-      reporter   — GET only on /campaigns, /findings, /reports, /telemetry
+      team_lead  - full access to everything
+      operator   - GET/POST/DELETE on most paths except /auth/register
+      recon      - GET only (except enumeration modules); no write access
+      reporter   - GET only on /campaigns, /findings, /reports, /telemetry
     """
     role = role.lower()
     method = method.upper()
@@ -671,7 +671,7 @@ def check_endpoint_access(actor: AuthenticatedUser, method: str, path: str) -> N
 
 def init_user_store(store: dict) -> None:
     """
-    Backward-compatibility shim — intentional no-op.
+    Backward-compatibility shim - intentional no-op.
 
     In ARES ≥ 0.5 all users are managed by AresDatabase.
     This function is retained so older integrations do not break.

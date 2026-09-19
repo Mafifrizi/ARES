@@ -55,7 +55,7 @@ stored sensitive records.
 
 ### In Transit
 
-- REST API: HTTPS (TLS 1.2+) — use a reverse proxy (nginx/caddy)
+- REST API: HTTPS (TLS 1.2+) - use a reverse proxy (nginx/caddy)
 - WebSocket dashboard: WSS
 - Redis cluster connection: `redis+tls://` with cert pinning
 - C-LIVE worker IPC: none; subprocess stdin payloads are rejected
@@ -130,9 +130,9 @@ credential management, user registration, and API-key lifecycle operations are
 performed from an authenticated browser/JWT session.
 
 **Endpoints without an existing bearer** (by design):
-- `GET /auth/csrf` — same-origin pre-login CSRF bootstrap
-- `POST /auth/token` — same-origin, CSRF-protected browser login
-- `GET /health` — health check (no sensitive data)
+- `GET /auth/csrf` - same-origin pre-login CSRF bootstrap
+- `POST /auth/token` - same-origin, CSRF-protected browser login
+- `GET /health` - health check (no sensitive data)
 
 The supported dashboard is the React application served by the main ARES
 FastAPI application at `/dashboard`. The older
@@ -310,7 +310,7 @@ Strict-Transport-Security: max-age=31536000
 
 Every module execution passes through `CampaignGuardrail.check()`:
 
-1. **Sensitive range check**: 169.254.0.0/16 (AWS IMDS), 127.0.0.0/8 (loopback) — always blocked
+1. **Sensitive range check**: 169.254.0.0/16 (AWS IMDS), 127.0.0.0/8 (loopback) - always blocked
 2. **Scope CIDR check**: target must be in one of the campaign's declared scope CIDRs
 3. **Dangerous module confirmation**: `ad.dcsync`, `lateral.psexec`, `linux.container` require `confirmed=True`
 
@@ -325,7 +325,7 @@ allowed, _ = guardrail.check("ad.dcsync", "10.0.0.1", confirmed=True)
 
 ### ScopeGuard (NoiseController)
 
-At the network level, `ScopeGuard.assert_in_scope(target)` is called in `BaseModule.before_request()` before every network call. Raises `ScopeError` (which is `ABORT` action — never retried).
+At the network level, `ScopeGuard.assert_in_scope(target)` is called in `BaseModule.before_request()` before every network call. Raises `ScopeError` (which is `ABORT` action - never retried).
 
 ---
 

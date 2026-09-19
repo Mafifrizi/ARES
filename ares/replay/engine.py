@@ -3,10 +3,10 @@ ARES Campaign Replay Engine
 Replays a past campaign for training, purple team exercises, and forensic analysis.
 
 Modes:
-  FULL      — re-execute all attacks (real network, real targets)
-  SIMULATE  — replay attack sequence without network connections (safe for demos)
-  TIMELINE  — stream events chronologically for visualization
-  PURPLE    — replay with defender notifications (detection testing)
+  FULL      - re-execute all attacks (real network, real targets)
+  SIMULATE  - replay attack sequence without network connections (safe for demos)
+  TIMELINE  - stream events chronologically for visualization
+  PURPLE    - replay with defender notifications (detection testing)
 
 Usage:
     replay = CampaignReplay.load(campaign_id, db)
@@ -33,7 +33,7 @@ logger = get_logger("ares.replay")
 
 class ReplayMode(str, Enum):
     FULL     = "full"       # real execution on live network
-    SIMULATE = "simulate"   # no network — event simulation only
+    SIMULATE = "simulate"   # no network - event simulation only
     TIMELINE = "timeline"   # stream events at original timing
     PURPLE   = "purple"     # run + alert defender team
 

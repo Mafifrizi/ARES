@@ -109,7 +109,7 @@ class AdaptiveOpsecEngine:
         self.auth_fail_threshold  = auth_fail_threshold
         self.jitter_increment_s   = jitter_increment_s
 
-        # Signal event buffers — deque of (timestamp, event) per signal type
+        # Signal event buffers - deque of (timestamp, event) per signal type
         self._signals: defaultdict[str, deque[SignalEvent]] = defaultdict(
             lambda: deque(maxlen=200)
         )
@@ -202,7 +202,7 @@ class AdaptiveOpsecEngine:
         if recent >= self.timeout_threshold:
             return [OpsecAdaptation(
                 action=ResponseAction.ESCALATE_PROFILE,
-                reason=f"{recent} timeouts in {self.window_s}s — escalating to stealth",
+                reason=f"{recent} timeouts in {self.window_s}s - escalating to stealth",
                 triggered_by=[event],
                 new_profile=self._next_stealth_profile(),
                 new_jitter_s=self._current_jitter_boost + self.jitter_increment_s,
@@ -219,7 +219,7 @@ class AdaptiveOpsecEngine:
         if host_resets >= self.reset_threshold:
             return [OpsecAdaptation(
                 action=ResponseAction.BLACKLIST_HOST,
-                reason=f"{host_resets} connection resets from {event.host} — possible IPS/EDR",
+                reason=f"{host_resets} connection resets from {event.host} - possible IPS/EDR",
                 triggered_by=[event],
                 blacklist_host=event.host,
             )]
@@ -236,7 +236,7 @@ class AdaptiveOpsecEngine:
         if count >= self.auth_fail_threshold:
             return [OpsecAdaptation(
                 action=ResponseAction.STOP_ACCOUNT,
-                reason=f"{count} auth failures for {username} — lockout protection",
+                reason=f"{count} auth failures for {username} - lockout protection",
                 triggered_by=[event],
                 stop_account=username,
             )]
@@ -247,7 +247,7 @@ class AdaptiveOpsecEngine:
             return []
         return [OpsecAdaptation(
             action=ResponseAction.INCREASE_JITTER,
-            reason="Rate limit detected — increasing inter-request jitter",
+            reason="Rate limit detected - increasing inter-request jitter",
             triggered_by=[event],
             new_jitter_s=self._current_jitter_boost + self.jitter_increment_s * 2,
         )]
@@ -257,7 +257,7 @@ class AdaptiveOpsecEngine:
             return []
         return [OpsecAdaptation(
             action=ResponseAction.PAUSE_ALL,
-            reason="Scan detected (honeypot/IDS alert) — pausing all operations",
+            reason="Scan detected (honeypot/IDS alert) - pausing all operations",
             triggered_by=[event],
             new_profile="stealth",
         )]

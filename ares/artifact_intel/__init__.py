@@ -1,5 +1,5 @@
 """
-ARES — artifact_intel
+ARES - artifact_intel
 Artifact correlation and attack opportunity detection
 
 Public API for this package. Import from here in production code:

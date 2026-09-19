@@ -1,10 +1,10 @@
 """
-GCP Recon & Attack Module — Production Implementation
+GCP Recon & Attack Module - Production Implementation
 IAM bindings, GCS buckets, service account keys, metadata server.
 
 Authentication (automatic priority order):
-  1. Service account key file — if credentials_file supplied
-  2. Application Default Credentials (ADC) — env GOOGLE_APPLICATION_CREDENTIALS,
+  1. Service account key file - if credentials_file supplied
+  2. Application Default Credentials (ADC) - env GOOGLE_APPLICATION_CREDENTIALS,
      gcloud auth, Workload Identity, or Compute Engine metadata server
 
 Required API permissions (read-only):
@@ -47,7 +47,7 @@ _PUBLIC_MEMBERS = frozenset({"allUsers", "allAuthenticatedUsers"})
 
 
 def _get_gcp_credentials(credentials_file: str | None = None) -> "Any":
-    """Return Google credentials — file or ADC."""
+    """Return Google credentials - file or ADC."""
     if credentials_file:
         from google.oauth2 import service_account  # type: ignore[import]
         return service_account.Credentials.from_service_account_file(
@@ -71,7 +71,7 @@ def _get_gcp_credentials(credentials_file: str | None = None) -> "Any":
 )
 class GCPModule(BaseModule):
     """
-    cloud.gcp — IAM bindings, GCS misconfig, SA key audit, metadata server
+    cloud.gcp - IAM bindings, GCS misconfig, SA key audit, metadata server
 
     OPSEC: LOW
     MITRE: "T1526", "T1530", "T1552.005", "T1580"
@@ -107,7 +107,7 @@ class GCPModule(BaseModule):
                         __import__("os").environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
         if not has_cred:
             raise ModuleValidationError(
-                "cloud.gcp requires GCP credentials — set project_id param or "
+                "cloud.gcp requires GCP credentials - set project_id param or "
                 "GOOGLE_APPLICATION_CREDENTIALS environment variable.",
                 module_id=self.MODULE_ID, field="project_id",
             )
@@ -214,7 +214,7 @@ class GCPModule(BaseModule):
     @trace_module("cloud.gcp")
     async def run(self, project_id: str, credentials_file: str | None = None,
                   **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
-        # Note: before_request() intentionally not called — cloud modules use
+        # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
         logger.info("gcp_recon_start", project_id=project_id)
@@ -254,7 +254,7 @@ class GCPModule(BaseModule):
     def _check_iam_bindings(self, credentials: Any, project_id: str) -> dict[str, Any]:
         """
         Get project IAM policy via Google Cloud Resource Manager SDK.
-        Fixed: was using requests.post directly — replaced with SDK that handles
+        Fixed: was using requests.post directly - replaced with SDK that handles
         auth refresh automatically and is the supported stable API.
         """
         try:
@@ -475,7 +475,7 @@ class GCPModule(BaseModule):
         old_keys:  list[dict[str, Any]] = []
         many_keys: list[dict[str, Any]] = []   # SAs with >2 active keys
 
-        # List ALL service accounts — paginate until nextPageToken is absent
+        # List ALL service accounts - paginate until nextPageToken is absent
         service_accounts: list[dict] = []
         page_token: str | None = None
         while True:
@@ -501,7 +501,7 @@ class GCPModule(BaseModule):
             sa_email = sa.get("email", "")
             sa_name  = sa.get("name", "")
 
-            # List keys — only USER_MANAGED type (system-managed keys auto-rotate)
+            # List keys - only USER_MANAGED type (system-managed keys auto-rotate)
             try:
                 keys_resp = session.get(
                     f"https://iam.googleapis.com/v1/{sa_name}/keys",
@@ -616,7 +616,7 @@ class GCPModule(BaseModule):
                     sa_list = []
 
                 self.finding(
-                    title="GCE Metadata Server Accessible — SSRF → Credential Theft",
+                    title="GCE Metadata Server Accessible - SSRF → Credential Theft",
                     description=(
                         "The GCE metadata server (169.254.169.254) is reachable from this context. "
                         "SSRF vulnerabilities in any application running here can steal service "
@@ -641,7 +641,7 @@ class GCPModule(BaseModule):
                 )
                 return {"accessible": True, "service_accounts": sa_list}
         except httpx.ConnectError:
-            # Expected — not running on GCE or metadata blocked
+            # Expected - not running on GCE or metadata blocked
             pass
         except Exception as exc:
             logger.debug("gcp_metadata_check_failed", error=str(exc)[:80])

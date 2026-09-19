@@ -32,7 +32,7 @@ class TestCampaign:
         assert c.is_in_scope("10.0.1.1") is False
 
     def test_scope_guard_no_scope_denies_all(self):
-        """No scope = deny all — safe default."""
+        """No scope = deny all - safe default."""
         c = Campaign(name="T")
         assert c.is_in_scope("10.0.0.1") is False
 

@@ -1,5 +1,5 @@
 """
-ARES Database — async SQLite via aiosqlite.
+ARES Database - async SQLite via aiosqlite.
 All credential/token content encrypted at rest via Fernet.
 """
 
@@ -616,7 +616,7 @@ class AresDatabase:
 
     def _require_connected(self) -> aiosqlite.Connection:
         if not self._connected or self._conn is None:
-            raise RuntimeError("Database not connected — call await db.connect() first")
+            raise RuntimeError("Database not connected - call await db.connect() first")
         return self._conn
 
     @property
@@ -746,7 +746,7 @@ class AresDatabase:
 
             return await PostgresDatabase.create(dsn=url, encryption_key=encryption_key)
 
-        # SQLite path — strip dialect prefix if present
+        # SQLite path - strip dialect prefix if present
         for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
             if url.startswith(prefix):
                 url = url[len(prefix) :]
@@ -1264,7 +1264,7 @@ class AresDatabase:
     # ── Backup / export ───────────────────────────────────────────────────────
 
     async def checkpoint_wal(self) -> None:
-        """Force a WAL checkpoint — consolidates WAL into main DB file.
+        """Force a WAL checkpoint - consolidates WAL into main DB file.
         Call periodically (e.g. hourly) or before taking a file-system backup."""
         await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         await self._conn.commit()
@@ -1272,7 +1272,7 @@ class AresDatabase:
     async def export_json(self, output_path: str | None = None) -> str:
         """
         Export all campaigns + findings to JSON.
-        Safe to call during engagement — read-only snapshot.
+        Safe to call during engagement - read-only snapshot.
 
         Returns the output file path written.
         Default path: ~/.ares/backups/ares_export_<timestamp>.json
@@ -2056,7 +2056,7 @@ class AresDatabase:
                 c.campaign_id,
                 c.host_id,
                 c.username,
-                c.secret,  # already vault-encrypted — store verbatim
+                c.secret,  # already vault-encrypted - store verbatim
                 c.cred_type,
                 c.domain,
                 c.source_module,
@@ -2068,7 +2068,7 @@ class AresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign from DB as raw dicts.
-        Secrets are returned as-is (Fernet-encrypted by CredentialVault) —
+        Secrets are returned as-is (Fernet-encrypted by CredentialVault)  - 
         use CredentialVault.restore_from_db_records() to re-hydrate.
         """
         async with self._conn.execute(
@@ -3352,7 +3352,7 @@ class AresDatabase:
         import hashlib
 
         # Generate cryptographically strong random token
-        raw_token = secrets.token_urlsafe(48)  # 384 bits — URL-safe, client sees this
+        raw_token = secrets.token_urlsafe(48)  # 384 bits - URL-safe, client sees this
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()  # stored in DB
         expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
         await self._conn.execute(
@@ -3957,7 +3957,7 @@ class AresDatabase:
             )
             await self._conn.commit()
         except Exception:
-            # Table may not exist yet — create it
+            # Table may not exist yet - create it
             await self._ensure_bypass_outcomes_table()
             await self._conn.execute(
                 """INSERT INTO bypass_outcomes

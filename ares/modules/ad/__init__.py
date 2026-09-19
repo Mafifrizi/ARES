@@ -1,5 +1,5 @@
 """
-ARES — modules.ad
+ARES - modules.ad
 Active Directory attack and enumeration modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

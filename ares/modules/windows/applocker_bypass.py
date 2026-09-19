@@ -10,10 +10,10 @@ Reads AppLocker rules from the registry and checks for:
   4. Classic unsigned bypass paths (WMIC, mshta, wscript, cscript, etc.)
      that may still be allowed under publisher or path rules
 
-This module is ENUMERATION ONLY — no code execution on target.
+This module is ENUMERATION ONLY - no code execution on target.
 Operator uses findings to assess bypass feasibility.
 
-OPSEC: LOW — remote registry read + optional WinRM command for path writability.
+OPSEC: LOW - remote registry read + optional WinRM command for path writability.
        Main detection surface is registry access audit (rarely enabled).
 """
 from __future__ import annotations
@@ -48,10 +48,10 @@ _COLLECTIONS = ["Exe", "Script", "Msi", "Dll", "Appx"]
 
 # Classic LOLBins that bypass application whitelisting when not explicitly blocked
 _LOLBINS: list[dict[str, str]] = [
-    {"binary": "mshta.exe",       "technique": "Execute HTA files — often not in AppLocker rules"},
+    {"binary": "mshta.exe",       "technique": "Execute HTA files - often not in AppLocker rules"},
     {"binary": "wscript.exe",     "technique": "Execute VBScript/JScript"},
     {"binary": "cscript.exe",     "technique": "Execute VBScript/JScript via cscript"},
-    {"binary": "regsvr32.exe",    "technique": "Squiblydoo — execute SCT file via COM"},
+    {"binary": "regsvr32.exe",    "technique": "Squiblydoo - execute SCT file via COM"},
     {"binary": "regasm.exe",      "technique": "Execute .NET assembly via COM registration"},
     {"binary": "regsvcs.exe",     "technique": "Execute .NET assembly via COM services"},
     {"binary": "installutil.exe", "technique": "Execute .NET assembly via installer utility"},
@@ -62,7 +62,7 @@ _LOLBINS: list[dict[str, str]] = [
     {"binary": "wmic.exe",        "technique": "Execute XSL via wmic /format"},
     {"binary": "forfiles.exe",    "technique": "Execute arbitrary commands via /c parameter"},
     {"binary": "pcalua.exe",      "technique": "Execute arbitrary program as child process"},
-    {"binary": "bash.exe",        "technique": "WSL bash — execute Linux binaries if WSL enabled"},
+    {"binary": "bash.exe",        "technique": "WSL bash - execute Linux binaries if WSL enabled"},
     {"binary": "pwsh.exe",        "technique": "PowerShell 7+ unmanaged engine execution bypassing classic Windows PowerShell Constrained Language Mode"},
     {"binary": "dotnet.exe",      "technique": "Execute compiled DLL assemblies directly without msbuild/csc under trusted program files"},
     {"binary": "curl.exe",        "technique": "Native Windows curl download & execute (Windows 10 1803+)"},
@@ -91,7 +91,7 @@ _TRUSTED_WRITABLE_CANDIDATES: list[str] = [
 )
 class AppLockerBypassModule(BaseModule):
     """
-    windows.applocker_bypass — Enumerate AppLocker policy from registry, identify enforcement mode, and detect writable trusted 
+    windows.applocker_bypass - Enumerate AppLocker policy from registry, identify enforcement mode, and detect writable trusted 
 
     OPSEC: LOW
     MITRE: "T1218", "T1574.001", "T1082"
@@ -130,7 +130,7 @@ class AppLockerBypassModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -269,7 +269,7 @@ class AppLockerBypassModule(BaseModule):
                 hBaseRegCloseKey, DCERPCException,
             )
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("applocker_enum_start", target=target, username=username)
         audit("applocker_enum", actor=username, source="operator",
@@ -441,7 +441,7 @@ class AppLockerBypassModule(BaseModule):
                     description=(
                         f"The following AppLocker rule collections are in Audit mode "
                         f"(not enforcing) on {target}: {', '.join(audit_only)}. "
-                        "Rules are logged but NOT blocked — any executable can still run."
+                        "Rules are logged but NOT blocked - any executable can still run."
                     ),
                     severity=Severity.HIGH,
                     mitre_technique="T1218",
@@ -530,7 +530,7 @@ class AppLockerBypassModule(BaseModule):
 
             # ── Finding 4: Writable trusted path candidates ────────────────
             self.finding(
-                title=f"Potential Writable Trusted Paths on {target} — Manual Verification Needed",
+                title=f"Potential Writable Trusted Paths on {target} - Manual Verification Needed",
                 description=(
                     f"The following paths are commonly writable by low-privileged users "
                     f"on Windows systems and may fall within AppLocker trusted path rules: "

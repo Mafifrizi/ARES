@@ -358,7 +358,7 @@ class NetworkModel:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Legacy-compatible classes (ARES ≤ 0.4 API — kept for backward compatibility)
+# Legacy-compatible classes (ARES ≤ 0.4 API - kept for backward compatibility)
 # New code should use HostNode / NetworkModel.
 # ═══════════════════════════════════════════════════════════════════════════════
 

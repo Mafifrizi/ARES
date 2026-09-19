@@ -54,7 +54,7 @@ REGISTRY_FILE = Path.home() / ".ares" / "plugins" / "registry.json"
 # Community module index
 COMMUNITY_INDEX_URL = "https://raw.githubusercontent.com/ares-framework/modules/main/index.json"
 
-# Bundled offline index — always available, no internet required.
+# Bundled offline index - always available, no internet required.
 # `ares module search` and CLI work fully offline using this index.
 # Live fetch overlays additional community modules when ARES_MARKETPLACE_LIVE=true.
 _BUNDLED_INDEX: "dict" = {
@@ -62,7 +62,7 @@ _BUNDLED_INDEX: "dict" = {
     "source": "bundled",
     "modules": [
         {"id": "ad.kerberoast",      "name": "Kerberoasting",           "category": "ad",
-         "description": "Request TGS tickets for SPN accounts — hashcat-ready hashes",
+         "description": "Request TGS tickets for SPN accounts - hashcat-ready hashes",
          "opsec": "medium", "requires": ["domain_creds"], "outputs": ["kerberos_hashes"],
          "mitre": ["T1558.003"], "builtin": True},
         {"id": "ad.asreproast",      "name": "ASREPRoasting",           "category": "ad",
@@ -102,7 +102,7 @@ _BUNDLED_INDEX: "dict" = {
          "opsec": "low",    "requires": [],                "outputs": [],
          "mitre": ["T1526", "T1530", "T1552.005"], "builtin": True},
         {"id": "linux.privesc",      "name": "Linux Privilege Escalation","category": "linux",
-         "description": "SUID, sudo, cron, capabilities, writable PATH — local or remote SSH",
+         "description": "SUID, sudo, cron, capabilities, writable PATH - local or remote SSH",
          "opsec": "medium", "requires": [],                "outputs": ["privesc_vectors"],
          "mitre": ["T1548.001", "T1053.003", "T1574.006"], "builtin": True},
         {"id": "linux.container",    "name": "Container Escape",        "category": "linux",
@@ -126,7 +126,7 @@ _BUNDLED_INDEX: "dict" = {
          "opsec": "low",    "requires": ["ssh_access", "ssh_credentials"],
          "outputs": ["lateral_session", "socks5_proxy"], "mitre": ["T1021.004"], "builtin": True},
         {"id": "lateral.rdp",        "name": "RDP Lateral",             "category": "lateral",
-         "description": "RDP lateral movement — high noise",
+         "description": "RDP lateral movement - high noise",
          "opsec": "high_noise", "requires": ["rdp_access", "domain_creds"],
          "outputs": ["lateral_session"], "mitre": ["T1021.001"], "builtin": True},
         {"id": "exfil.smb_shares",   "name": "SMB Share Enumeration",   "category": "exfil",
@@ -174,7 +174,7 @@ _BUNDLED_INDEX: "dict" = {
          "mitre": ["T1046","T1590"], "builtin": True},
         # ── Windows modules ──
         {"id": "windows.token_impersonation","name": "Token Impersonation","category": "windows",
-         "description": "Detect SeImpersonatePrivilege — prerequisite for Potato-family LPE",
+         "description": "Detect SeImpersonatePrivilege - prerequisite for Potato-family LPE",
          "opsec": "medium", "requires": ["lateral_session"], "outputs": ["privesc_vectors"],
          "mitre": ["T1134.001", "T1134.002"], "builtin": True},
         {"id": "windows.lsa_secrets",   "name": "LSA Secrets & SAM Dump", "category": "windows",
@@ -183,12 +183,12 @@ _BUNDLED_INDEX: "dict" = {
          "mitre": ["T1003.002", "T1003.004"], "builtin": True},
         # ── Linux extra modules ──
         {"id": "linux.kernel_suggester","name": "Kernel Exploit Suggester","category": "linux",
-         "description": "Map kernel version to known LPE CVEs — detection only, no exploitation",
+         "description": "Map kernel version to known LPE CVEs - detection only, no exploitation",
          "opsec": "low",    "requires": ["ssh_credentials"], "outputs": ["privesc_vectors"],
          "mitre": ["T1068", "T1082"], "builtin": True},
         # ── Credential extra modules ──
         {"id": "credential.golden_ticket","name": "Golden Ticket Forgery", "category": "credential",
-         "description": "Forge Kerberos TGT using krbtgt hash — persistent domain access",
+         "description": "Forge Kerberos TGT using krbtgt hash - persistent domain access",
          "opsec": "medium", "requires": ["ntlm_hashes", "domain_admin_creds"], "outputs": ["golden_ticket"],
          "mitre": ["T1558.001"], "builtin": True},
         {"id": "credential.pass_the_hash","name": "Pass-the-Hash",        "category": "credential",
@@ -223,7 +223,7 @@ _BUNDLED_INDEX: "dict" = {
     ],
 }
 
-# Live community index — fetched from GitHub when ARES_MARKETPLACE_LIVE=true.
+# Live community index - fetched from GitHub when ARES_MARKETPLACE_LIVE=true.
 # Disabled by default: the public ares-framework/modules repo is not yet published.
 # Enable: export ARES_MARKETPLACE_LIVE=true
 import os as _os
@@ -415,7 +415,7 @@ class ModuleInstaller:
 
         source_url = entry.get("source_url", "")
         if not source_url:
-            raise ValueError(f"No source URL recorded for '{module_id}' — cannot auto-update")
+            raise ValueError(f"No source URL recorded for '{module_id}' - cannot auto-update")
 
         self.uninstall(module_id)
         return self.install(source_url, force=True)
@@ -470,7 +470,7 @@ class ModuleInstaller:
             if sidecar.exists():
                 import json as _json
                 return _json.loads(sidecar.read_text())
-            # No sidecar — cannot extract sha256 from source alone
+            # No sidecar - cannot extract sha256 from source alone
             return None
         except Exception:
             return None
@@ -480,7 +480,7 @@ class ModuleInstaller:
         if not verify_signature:
             logger.warning("marketplace_url_install_unverified",
                            url=url,
-                           risk="Module downloaded without signature verification — supply chain risk")
+                           risk="Module downloaded without signature verification - supply chain risk")
         with tempfile.TemporaryDirectory() as tmp:
             local = Path(tmp) / "module.py"
             try:
@@ -491,11 +491,11 @@ class ModuleInstaller:
                     resp.raise_for_status()
                     local.write_bytes(resp.content)
             except ImportError:
-                # httpx always in deps — this is a safety net only
+                # httpx always in deps - this is a safety net only
                 urllib.request.urlretrieve(url, str(local))
             except Exception as e:
                 raise ConnectionError(f"Failed to download {url}: {e}") from e
-            # Verify BEFORE installing — if hash fails, file never touches plugin dir
+            # Verify BEFORE installing - if hash fails, file never touches plugin dir
             if verify_signature and local.exists():
                 # Read manifest from tmp file to get sha256 without installing
                 _tmp_manifest = self._read_manifest_from_file(local)
@@ -513,7 +513,7 @@ class ModuleInstaller:
                 else:
                     logger.warning(
                         "marketplace_no_signature: module has no sha256 in manifest "
-                        "— cannot verify integrity. Set verify_signature=False to silence.",
+                        " -  cannot verify integrity. Set verify_signature=False to silence.",
                         url=url,
                     )
             manifest = self._install_single_file(local, source_url=url, force=force)
@@ -588,7 +588,7 @@ class ModuleInstaller:
         if not deps:
             return
 
-        # Allowlist regex — rejects pip flags (--index-url, etc.) and shell injection
+        # Allowlist regex - rejects pip flags (--index-url, etc.) and shell injection
         import re
         _DEP_RE = re.compile(
             r"^[a-zA-Z0-9]"               # must start with alphanumeric
@@ -600,7 +600,7 @@ class ModuleInstaller:
         invalid = [d for d in deps if not _DEP_RE.match(d)]
         if invalid:
             raise ValueError(
-                f"Dependency validation failed — rejected unsafe dep string(s): {invalid}. "
+                f"Dependency validation failed - rejected unsafe dep string(s): {invalid}. "
                 "Only PEP 508 package specifiers are allowed (no flags, no URLs, no shell)."
             )
 
@@ -610,7 +610,7 @@ class ModuleInstaller:
             [sys.executable, "-m", "pip", "install", "--quiet",
              "--break-system-packages", *deps],
             check=True,
-            timeout=300,  # 5 minutes max — prevents hang on network issues
+            timeout=300,  # 5 minutes max - prevents hang on network issues
         )
 
     def _infer_manifest_from_file(self, path: Path, source_url: str = "") -> ModuleManifest:
@@ -649,7 +649,7 @@ class ModuleInstaller:
     def _detect_source(source: str) -> str:
         if source.startswith(("./", "/", "../")) or Path(source).exists():
             return "local"
-        if source.startswith("https://"):   # http:// rejected — MITM risk
+        if source.startswith("https://"):   # http:// rejected - MITM risk
             return "url"
         if source.startswith("github.com/"):
             return "github"
@@ -662,7 +662,7 @@ class ModuleInstaller:
 
         Priority:
           1. Live GitHub index (only when ARES_MARKETPLACE_LIVE=true)
-          2. Bundled offline index (always available — shipped with ARES)
+          2. Bundled offline index (always available - shipped with ARES)
 
         The bundled index contains all 22 built-in modules so `ares module search`
         and `ares module list` work fully offline without any internet access.
@@ -685,5 +685,5 @@ class ModuleInstaller:
             except Exception as exc:
                 logger.warning("marketplace_live_index_failed", error=str(exc)[:100],
                                fallback="bundled_index")
-        # Offline fallback — always works
+        # Offline fallback - always works
         return _BUNDLED_INDEX

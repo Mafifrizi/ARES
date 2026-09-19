@@ -1,5 +1,5 @@
 """
-ARES — modules.linux
+ARES - modules.linux
 Linux privilege escalation and container escape modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

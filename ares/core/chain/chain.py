@@ -24,7 +24,7 @@ Manual chains can also be defined explicitly:
 
 AI suggestion integration:
   The ChainAdvisor analyzes confirmed findings
-  and suggests what to run next — "found SPN → suggest kerberoast".
+  and suggests what to run next - "found SPN → suggest kerberoast".
 """
 from __future__ import annotations
 
@@ -67,9 +67,9 @@ class DependencyResolver:
 
         Example output:
           [
-            ["ad.enum_users", "ad.enum_computers"],   # Stage 1 — parallel
-            ["ad.enum_spn", "ad.enum_acl"],            # Stage 2 — parallel
-            ["ad.kerberoast", "ad.asreproast"],        # Stage 3 — parallel
+            ["ad.enum_users", "ad.enum_computers"],   # Stage 1 - parallel
+            ["ad.enum_spn", "ad.enum_acl"],            # Stage 2 - parallel
+            ["ad.kerberoast", "ad.asreproast"],        # Stage 3 - parallel
           ]
         """
         ids   = {n.module_id for n in nodes}
@@ -244,7 +244,7 @@ class AttackChain:
     def auto(cls, registry: "ModuleRegistry", module_ids: list[str], name: str = "auto") -> "AttackChain":
         """
         Build a chain automatically from module REQUIRES/OUTPUTS metadata.
-        The engine will figure out the right order — you just list module IDs.
+        The engine will figure out the right order - you just list module IDs.
         """
         cap_resolver = CapabilityResolver(registry)
         nodes = cap_resolver.build_nodes(module_ids)
@@ -290,7 +290,7 @@ class ChainAdvisor:
     """
     Analyzes confirmed findings and suggests next attack modules.
 
-    This is rule-based, not ML — but structured so an LLM could
+    This is rule-based, not ML - but structured so an LLM could
     replace the rule engine later.
 
     Example:
@@ -313,7 +313,7 @@ class ChainAdvisor:
         rules = [
             (
                 any("spn" in t for t in titles),
-                Suggestion("ad.kerberoast", "SPN accounts found — request TGS hashes", 0.95, 1),
+                Suggestion("ad.kerberoast", "SPN accounts found - request TGS hashes", 0.95, 1),
             ),
             (
                 any("pre-auth disabled" in t or "asrep" in t for t in titles),
@@ -325,52 +325,52 @@ class ChainAdvisor:
             ),
             (
                 any("docker socket" in t for t in titles),
-                Suggestion("linux.container", "Docker socket found — container escape possible", 0.90, 1),
+                Suggestion("linux.container", "Docker socket found - container escape possible", 0.90, 1),
             ),
             (
                 any("suid" in t or "sudo nopasswd" in t for t in titles),
-                Suggestion("linux.privesc", "Privilege escalation vector found — enumerate further", 0.85, 1),
+                Suggestion("linux.privesc", "Privilege escalation vector found - enumerate further", 0.85, 1),
             ),
             (
                 any("s3 public" in t or "imds" in t for t in titles),
-                Suggestion("cloud.aws", "AWS misconfiguration found — expand AWS enumeration", 0.80, 2),
+                Suggestion("cloud.aws", "AWS misconfiguration found - expand AWS enumeration", 0.80, 2),
             ),
             (
                 "T1558.003" in mitre_seen and "ad.dcsync" in {f.module_id for f in findings if hasattr(f, "module_id")},
-                Suggestion("ad.dcsync", "Kerberoast hashes obtained — if cracked, attempt DCSync", 0.70, 3),
+                Suggestion("ad.dcsync", "Kerberoast hashes obtained - if cracked, attempt DCSync", 0.70, 3),
             ),
             (
                 "critical" in severities,
-                Suggestion("ad.enum_acl", "Critical findings present — check for ACL abuse paths", 0.75, 2),
+                Suggestion("ad.enum_acl", "Critical findings present - check for ACL abuse paths", 0.75, 2),
             ),
             # ── New rules for Roadmap modules ─────────────────────────────────
             (
                 any("genericwrite" in t and "computer" in t for t in titles),
                 Suggestion("ad.delegation_abuse",
-                           "GenericWrite on computer found — RBCD attack to local admin", 0.90, 2),
+                           "GenericWrite on computer found - RBCD attack to local admin", 0.90, 2),
             ),
             (
                 any("smb relay" in t or "smb_relay" in t for t in titles) and
                 any("domain controller" in t or "is_dc" in t for t in titles),
                 Suggestion("ad.coerce",
-                           "SMB relay active + DC in scope — force DC authentication via coercion", 0.88, 1),
+                           "SMB relay active + DC in scope - force DC authentication via coercion", 0.88, 1),
             ),
             (
                 any("kerberoast" in t or "asrep" in t or "ntlm hash" in t for t in titles) and
                 not any("cracked" in t for t in titles),
                 Suggestion("credential.crack",
-                           "Uncracked hashes in vault — run hashcat/john to recover plaintext", 0.95, 1),
+                           "Uncracked hashes in vault - run hashcat/john to recover plaintext", 0.95, 1),
             ),
             (
                 any("mssql" in t or "sql server" in t or "1433" in t for t in titles),
                 Suggestion("lateral.mssql",
-                           "MSSQL detected — attempt xp_cmdshell lateral movement", 0.80, 2),
+                           "MSSQL detected - attempt xp_cmdshell lateral movement", 0.80, 2),
             ),
             (
                 any("esc1" in t or "esc2" in t or "adcs" in t or "certificate template" in t
                     for t in titles),
                 Suggestion("ad.adcs",
-                           "ADCS vulnerability found — exploit ESC1 for Domain Admin certificate", 0.92, 1),
+                           "ADCS vulnerability found - exploit ESC1 for Domain Admin certificate", 0.92, 1),
             ),
         ]
 

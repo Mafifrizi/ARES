@@ -1,5 +1,5 @@
 """
-ARES API Integration Tests — POST body endpoints.
+ARES API Integration Tests - POST body endpoints.
 
 Uses full FastAPI lifespan with an in-memory SQLite database.
 Tests JSON body parsing, business logic, and DB persistence end-to-end
@@ -9,14 +9,14 @@ Each test class creates its own TestClient to avoid lru_cache(get_settings)
 cross-contamination when run in the same process as unit tests.
 
 Coverage:
-  POST /auth/token (form)          — login, get tokens
-  POST /auth/refresh               — refresh token rotation
-  POST /auth/register              — register new user
-  POST /auth/change-password       — password change
-  POST /campaigns                  — create campaign + DB persist
-  POST /campaigns/{id}/run (body)  — run plan (dry_run=True)
-  GET  /campaigns/{id}             — verify persist after POST
-  GET  /campaigns/{id}/findings    — findings list
+  POST /auth/token (form)          - login, get tokens
+  POST /auth/refresh               - refresh token rotation
+  POST /auth/register              - register new user
+  POST /auth/change-password       - password change
+  POST /campaigns                  - create campaign + DB persist
+  POST /campaigns/{id}/run (body)  - run plan (dry_run=True)
+  GET  /campaigns/{id}             - verify persist after POST
+  GET  /campaigns/{id}/findings    - findings list
   Security headers on POST responses
 
 Run: pytest tests/integration/test_api_post.py -v --timeout=30
@@ -67,7 +67,7 @@ def _fresh_client() -> TestClient:
     Called once per test class so lru_cache doesn't bleed from unit tests.
     """
     from ares.core.config import get_settings
-    get_settings.cache_clear()   # clear lru_cache — force re-read from env
+    get_settings.cache_clear()   # clear lru_cache - force re-read from env
     from ares.api.server import app
     return TestClient(app, base_url="http://localhost:5173", raise_server_exceptions=False)
 

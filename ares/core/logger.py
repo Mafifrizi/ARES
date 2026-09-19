@@ -1,6 +1,6 @@
 """
 ARES Structured Logger
-JSON-first logging using structlog — SIEM-ingestible NDJSON output.
+JSON-first logging using structlog - SIEM-ingestible NDJSON output.
 
 Every log line on disk is a complete JSON object:
 {
@@ -16,7 +16,7 @@ Every log line on disk is a complete JSON object:
 }
 
 Console stays human-readable (colored).
-Disk output: NDJSON (one JSON object per line — Splunk/ELK/Grafana Loki compatible).
+Disk output: NDJSON (one JSON object per line - Splunk/ELK/Grafana Loki compatible).
 Separate audit.ndjson for append-only action trail.
 """
 from __future__ import annotations

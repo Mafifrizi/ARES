@@ -1,19 +1,19 @@
 """
-Azure AD / Entra ID Identity Attacks — cloud.azure_ad
-MITRE: T1528 — Steal Application Access Token
-       T1606 — Forge Web Credentials
+Azure AD / Entra ID Identity Attacks - cloud.azure_ad
+MITRE: T1528 - Steal Application Access Token
+       T1606 - Forge Web Credentials
 
 Azure AD identity attack techniques not covered by cloud.azure (resource enum):
-  1. Device code flow phishing — request device code, poll for user auth
-  2. Service principal credential exposure — SP secrets visible to overprivileged apps
-  3. Guest account enumeration — external identities that may have excessive access
-  4. Seamless SSO silver ticket — Kerberos ticket for AZUREADSSOACC$ machine account
+  1. Device code flow phishing - request device code, poll for user auth
+  2. Service principal credential exposure - SP secrets visible to overprivileged apps
+  3. Guest account enumeration - external identities that may have excessive access
+  4. Seamless SSO silver ticket - Kerberos ticket for AZUREADSSOACC$ machine account
   5. PRT (Primary Refresh Token) detection paths
 
 cloud.azure (existing) handles resource enumeration.
 cloud.azure_ad handles identity-specific attacks.
 
-OPSEC: LOW to MEDIUM — token-based auth, not credential spray.
+OPSEC: LOW to MEDIUM - token-based auth, not credential spray.
        Device code flow: legitimate OAuth2 flow, not blocked by CA policies.
        Does not trigger sign-in risk if using valid PRT.
 
@@ -65,7 +65,7 @@ _ENUM_SCOPES = [
 )
 class AzureADModule(BaseModule):
     """
-    cloud.azure_ad — Azure AD / Entra ID identity attack techniques: device code flow, service principal exposure.
+    cloud.azure_ad - Azure AD / Entra ID identity attack techniques: device code flow, service principal exposure.
 
     OPSEC: LOW
     MITRE: "T1528", "T1606"
@@ -102,7 +102,7 @@ class AzureADModule(BaseModule):
         tenant_id = pdict.get("tenant_id", "")
         if not tenant_id:
             raise ModuleValidationError(
-                "cloud.azure_ad requires 'tenant_id' — Azure AD tenant ID (UUID). "
+                "cloud.azure_ad requires 'tenant_id' - Azure AD tenant ID (UUID). "
                 "Find via: az account show --query tenantId",
                 module_id=self.MODULE_ID, field="tenant_id",
             )
@@ -228,7 +228,7 @@ class AzureADModule(BaseModule):
     @trace_module("cloud.azure_ad")
     async def run(self, tenant_id: str, client_id: str = "", client_secret: str = "",
                   access_token: str = "", technique: str = "enumerate", **kwargs: Any):
-        # Note: before_request() intentionally not called — cloud modules use
+        # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
         logger.info("azure_ad_start", tenant=tenant_id[:8] + "...", technique=technique)
@@ -402,7 +402,7 @@ class AzureADModule(BaseModule):
                 "message":          flow.get("message"),
             }
         except ImportError:
-            return {"error": "msal not installed — pip install ares-redteam[cloud]"}
+            return {"error": "msal not installed - pip install ares-redteam[cloud]"}
         except Exception as exc:
             return {"error": str(exc)[:150]}
 

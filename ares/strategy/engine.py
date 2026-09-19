@@ -1,5 +1,5 @@
 """
-ares.strategy.engine — Autonomous Engagement Strategy Engine
+ares.strategy.engine - Autonomous Engagement Strategy Engine
 
 Orchestrates strategic modules in a continuous adaptive engagement loop.
 Extracted from strategy/__init__.py for maintainability.
@@ -32,7 +32,7 @@ class StrategyEngine:
     Orchestrates all 4 strategic modules in an adaptive engagement loop.
 
     Each round:
-      1. Check detection probability — stop if too hot
+      1. Check detection probability - stop if too hot
       2. Gather EDR context for bypass planning
       3. AI re-plans with full accumulated context
       4. Execute plan with bypass techniques applied
@@ -419,7 +419,7 @@ class StrategyEngine:
                 final_status = "low_confidence"
                 break
 
-            # ── ConstitutionEnforcer — Python-layer safety, cannot be bypassed ─
+            # ── ConstitutionEnforcer - Python-layer safety, cannot be bypassed ─
             # Build AIPlan object from raw planner output for enforcer
             from ares.modules.ai.autonomous_planner import AIPlan
             ai_plan = AIPlan(
@@ -459,7 +459,7 @@ class StrategyEngine:
                 for s in ai_plan.stages
             ]
 
-            # Notify operator — plan ready for review
+            # Notify operator - plan ready for review
             await self._notifier.send("plan_ready", {
                 "round":          round_num,
                 "confidence":     plan_confidence,
@@ -504,7 +504,7 @@ class StrategyEngine:
                             **round_extra_context,
                             "rejected_plan_reason": (
                                 f"Plan rejected: projected detection "
-                                f"{projection['projected_score']:.0%} — too high. "
+                                f"{projection['projected_score']:.0%} - too high. "
                                 "Use STEALTH techniques only. "
                                 "Avoid HIGH_NOISE modules. "
                                 f"Flagged modules: "
@@ -515,7 +515,7 @@ class StrategyEngine:
                     replan_conf  = replan_result.get("confidence_score", 0.0)
                     replan_plan  = replan_result.get("execution_plan", [])
                     if replan_conf >= confidence_threshold and replan_plan:
-                        # Accept revised plan — re-enforce and re-check projection
+                        # Accept revised plan - re-enforce and re-check projection
                         ai_plan.stages = replan_plan
                         ai_plan, _ = enforcer.enforce(ai_plan, campaign)
                         exec_plan = [
@@ -526,7 +526,7 @@ class StrategyEngine:
                         logger.info("pre_exec_replan_accepted",
                                     round=round_num, confidence=replan_conf)
                     else:
-                        # Replan also failed — stop this round
+                        # Replan also failed - stop this round
                         logger.warning("pre_exec_replan_failed",
                                        round=round_num, confidence=replan_conf)
                         rounds.append(RoundResult(
@@ -775,7 +775,7 @@ class StrategyEngine:
 
     def _build_base_params(self, campaign: "Any") -> dict:
         """
-        Return base params that all modules inherit — intentionally minimal.
+        Return base params that all modules inherit - intentionally minimal.
         DO NOT set "target" here: CIDR network address (e.g. 10.0.0.0) is not
         a valid scan target. LLM stage_params must specify the actual host.
         If LLM omits target, the module will fail with a validation error

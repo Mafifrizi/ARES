@@ -1,11 +1,11 @@
 """
-cloud.identity_federation_abuse — Cross-Cloud Identity Federation Abuse
+cloud.identity_federation_abuse - Cross-Cloud Identity Federation Abuse
 
 Enumerates and abuses federated identity trust relationships between
 cloud providers and on-premises Active Directory.
 
 Attack scenarios:
-  1. Golden SAML — forge SAML assertion after AD krbtgt/ADFS private key compromise
+  1. Golden SAML - forge SAML assertion after AD krbtgt/ADFS private key compromise
   2. Azure AD → AWS via federated identity (SAML assertion abuse)
   3. Google Workspace → GCP service accounts (OIDC token forging)
   4. Cross-tenant OAuth2 token abuse (Business Email Compromise chain)
@@ -15,12 +15,12 @@ Requires: AD or cloud credentials obtained from prior compromise.
 Best used after: ad.dcsync, cloud.azure, cloud.aws
 
 MITRE:
-  T1606.002 — SAML Tokens (Golden SAML)
-  T1528     — Steal Application Access Token
-  T1550.001 — Use Alternate Authentication Material: Application Access Token
-  T1484.002 — Domain Trust Modification: Trust Modification
+  T1606.002 - SAML Tokens (Golden SAML)
+  T1528     - Steal Application Access Token
+  T1550.001 - Use Alternate Authentication Material: Application Access Token
+  T1484.002 - Domain Trust Modification: Trust Modification
 
-OPSEC: MEDIUM — queries Azure/AWS APIs (low noise) but SAML forgery is high risk
+OPSEC: MEDIUM - queries Azure/AWS APIs (low noise) but SAML forgery is high risk
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ logger = get_logger("ares.modules.cloud.identity_federation")
 )
 class CloudIdentityFederationModule(BaseModule):
     """
-    cloud.identity_federation_abuse — Cross-cloud identity federation enumeration and abuse.
+    cloud.identity_federation_abuse - Cross-cloud identity federation enumeration and abuse.
 
     OPSEC: MEDIUM
     MITRE: T1606.002, T1528, T1550.001, T1484.002
@@ -261,7 +261,7 @@ class CloudIdentityFederationModule(BaseModule):
         **kwargs: Any,
     ) -> tuple[list[Finding], dict[str, Any]]:
         """
-        Note: before_request() not called — cloud modules use API creds, not host IPs.
+        Note: before_request() not called - cloud modules use API creds, not host IPs.
         Scope/jitter checks do not apply to cloud API endpoints.
         """
         audit("cloud_federation_abuse", actor="operator",
@@ -439,7 +439,7 @@ class CloudIdentityFederationModule(BaseModule):
                     result["graph_enum_error"] = str(e)[:150]
 
         except ImportError:
-            result["error"] = "httpx not installed — pip install httpx"
+            result["error"] = "httpx not installed - pip install httpx"
         except Exception as e:
             result["error"] = str(e)[:200]
 
@@ -496,7 +496,7 @@ class CloudIdentityFederationModule(BaseModule):
                 result["roles_error"] = str(e)[:100]
 
         except ImportError:
-            result["error"] = "boto3 not installed — pip install ares-redteam[cloud]"
+            result["error"] = "boto3 not installed - pip install ares-redteam[cloud]"
         except Exception as e:
             result["error"] = str(e)[:200]
 
@@ -862,11 +862,11 @@ class CloudIdentityFederationModule(BaseModule):
                                 "provider":     _DANGEROUS_ISSUERS[issuer],
                                 "issuer":       issuer,
                                 "unrestricted": is_unrestricted,
-                                "condition":    cond or "(none — unrestricted)",
+                                "condition":    cond or "(none - unrestricted)",
                                 "attack": (
                                     f"{_DANGEROUS_ISSUERS[issuer]} can impersonate "
                                     f"service accounts in project {project_id}"
-                                    + (" — NO repo/org filter!" if is_unrestricted else "")
+                                    + (" - NO repo/org filter!" if is_unrestricted else "")
                                 ),
                                 "risk": risk_label,
                             })
@@ -998,13 +998,13 @@ class CloudIdentityFederationModule(BaseModule):
         if adfs.get("federation_metadata_found"):
             rps = adfs.get("relying_parties", [])
             self.finding(
-                title=f"ADFS Federation Metadata Found — {len(rps)} Relying Parties",
+                title=f"ADFS Federation Metadata Found - {len(rps)} Relying Parties",
                 description=(
                     f"Active ADFS deployment detected at {adfs.get('adfs_url', 'unknown')}. "
                     f"Federation metadata accessible with {len(rps)} relying parties. "
                     "Golden SAML attack is viable after obtaining the ADFS token signing certificate. "
                     "This allows forging SAML assertions for any federated service "
-                    "without knowing user passwords — and does NOT trigger AD authentication logs."
+                    "without knowing user passwords - and does NOT trigger AD authentication logs."
                 ),
                 severity=Severity.CRITICAL,
                 mitre_technique="T1606.002",
@@ -1015,7 +1015,7 @@ class CloudIdentityFederationModule(BaseModule):
                     "endpoints_found": [e for e in adfs.get("endpoints", []) if e.get("active")],
                 },
                 remediation=(
-                    "1. Restrict access to ADFS server — only Domain Controllers should reach it. "
+                    "1. Restrict access to ADFS server - only Domain Controllers should reach it. "
                     "2. Enable ADFS Extranet Lockout. "
                     "3. Monitor for ADFS token signing certificate export. "
                     "4. Consider migrating to Azure AD Managed domains (no ADFS)."
@@ -1028,7 +1028,7 @@ class CloudIdentityFederationModule(BaseModule):
         saml_sps = azure.get("saml_service_principals", [])
         if saml_sps:
             self.finding(
-                title=f"Azure AD SAML Applications — {len(saml_sps)} Apps with SSO",
+                title=f"Azure AD SAML Applications - {len(saml_sps)} Apps with SSO",
                 description=(
                     f"Found {len(saml_sps)} Azure AD applications configured with SAML SSO. "
                     "A compromised Global Admin or Application Admin can modify SAML configurations "
@@ -1051,7 +1051,7 @@ class CloudIdentityFederationModule(BaseModule):
         fed_roles = aws.get("federated_roles", [])
         if fed_roles:
             self.finding(
-                title=f"AWS SAML Federated Roles — {len(fed_roles)} Roles Assuming via Federation",
+                title=f"AWS SAML Federated Roles - {len(fed_roles)} Roles Assuming via Federation",
                 description=(
                     f"Found {len(fed_roles)} AWS IAM roles that trust SAML federation. "
                     "If the SAML identity provider is compromised, an attacker can assume "
@@ -1063,7 +1063,7 @@ class CloudIdentityFederationModule(BaseModule):
                 evidence={"federated_roles": [r["role_name"] for r in fed_roles[:15]]},
                 remediation=(
                     "Review trust policies for all federated roles. "
-                    "Apply least-privilege — federated roles should not have Admin permissions. "
+                    "Apply least-privilege - federated roles should not have Admin permissions. "
                     "Enable AWS CloudTrail and alert on AssumeRoleWithSAML events."
                 ),
                 host="aws",
@@ -1098,7 +1098,7 @@ class CloudIdentityFederationModule(BaseModule):
                 title=f"B2B Cross-Tenant Attack Surface: {len(guests)} Guest Accounts",
                 description=(
                     f"Found {len(guests)} B2B guest accounts in this tenant. "
-                    "Each guest represents a potential pivot point — if their home tenant "
+                    "Each guest represents a potential pivot point - if their home tenant "
                     "is compromised, an attacker can use their guest credentials to access "
                     "this tenant's resources. This is the Midnight Blizzard attack vector "
                     "(Microsoft breach 2024)."
@@ -1131,7 +1131,7 @@ class CloudIdentityFederationModule(BaseModule):
                     f"{len(mi_data.get('system_assigned',[]))} system-assigned and "
                     f"{len(mi_data.get('user_assigned',[]))} user-assigned Managed Identities found. "
                     f"{len(hvp)} with high-privilege roles (Owner/Contributor/Key Vault). "
-                    "This is a zero-credential attack path — no password needed. "
+                    "This is a zero-credential attack path - no password needed. "
                     "A compromised VM with MI can directly access Key Vault secrets, "
                     "Storage blobs, or perform administrative actions."
                 ),

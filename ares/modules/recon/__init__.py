@@ -1,5 +1,5 @@
 """
-ARES — modules.recon
+ARES - modules.recon
 Reconnaissance and fingerprinting modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

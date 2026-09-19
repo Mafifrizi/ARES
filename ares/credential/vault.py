@@ -1,5 +1,5 @@
 """
-ARES Credential Intelligence Engine — Vault
+ARES Credential Intelligence Engine - Vault
 Encrypted, scored, deduplicated credential store.
 
 Credential lifecycle:
@@ -78,7 +78,7 @@ class PrivilegeLevel(str, Enum):
 class Credential:
     """
     A single credential entry in the vault.
-    Secret value is NEVER stored in plaintext — always Fernet-encrypted.
+    Secret value is NEVER stored in plaintext - always Fernet-encrypted.
     """
     id:             str = field(default_factory=lambda: str(uuid.uuid4()))
     campaign_id:    str = ""
@@ -160,7 +160,7 @@ class Credential:
 # ── Scoring engine ─────────────────────────────────────────────────────────────
 
 class CredentialScorer:
-    """Deterministic scorer — assigns 0.0–10.0 intelligence score."""
+    """Deterministic scorer - assigns 0.0–10.0 intelligence score."""
 
     # Base scores by credential type
     TYPE_SCORES: dict[CredentialType, float] = {
@@ -224,8 +224,8 @@ class CredentialVault:
     Thread-safe for async use (single asyncio event loop).
     """
 
-    # Legacy salt — only for decrypting old credential entries (backward compat)
-    # Legacy fixed salt — ONLY for decrypting vault records written before v6.
+    # Legacy salt - only for decrypting old credential entries (backward compat)
+    # Legacy fixed salt - ONLY for decrypting vault records written before v6.
     # Security rationale: static because it was the global salt in v5 and earlier.
     # All new writes use per-record random salts (see store()).
     # Override via ARES_VAULT_LEGACY_SALT env var if you rotated this in your deployment.
@@ -249,7 +249,7 @@ class CredentialVault:
                 if isinstance(encryption_key, str)
                 else bytes(encryption_key)
             )
-            # Instance-level random salt — used for encrypt(); embedded as prefix in ciphertext
+            # Instance-level random salt - used for encrypt(); embedded as prefix in ciphertext
             self._salt     = _os.urandom(16)
             self._salt_hex = self._salt.hex()
             self._fernet   = self._derive_fernet(self._salt)
@@ -281,7 +281,7 @@ class CredentialVault:
 
         Args:
             cred:   Credential metadata (no plaintext secret)
-            secret: The actual secret — encrypted immediately on entry
+            secret: The actual secret - encrypted immediately on entry
         """
         if not secret:
             raise ValueError("Cannot store credential with empty secret")
@@ -332,7 +332,7 @@ class CredentialVault:
         return cred.id
 
     def add(self, cred: "Any" = None, secret: str = "", **kwargs: Any) -> str:
-        """Alias for store() — supports both Credential model and kwargs."""
+        """Alias for store() - supports both Credential model and kwargs."""
         if isinstance(cred, Credential):
             return self.store(cred, secret)
         username = str(kwargs.get("username") or (cred if isinstance(cred, str) else ""))
@@ -391,7 +391,7 @@ class CredentialVault:
                 salt         = bytes.fromhex(token_str[:32])
                 fernet_token = token_str[33:].encode()
                 return self._derive_fernet(salt).decrypt(fernet_token).decode()
-            # Legacy fallback — fixed salt
+            # Legacy fallback - fixed salt
             return self._derive_fernet(self._LEGACY_SALT).decrypt(raw).decode()
         return self._fernet.decrypt(raw).decode()
 
@@ -412,7 +412,7 @@ class CredentialVault:
             cred.reuse_targets.append(target_host)
 
     def mark_cracked(self, cred_id: str, plaintext: str) -> None:
-        """Update hash credential when cracked — rescore and store plaintext."""
+        """Update hash credential when cracked - rescore and store plaintext."""
         cred = self._store.get(cred_id)
         if not cred:
             return
@@ -440,7 +440,7 @@ class CredentialVault:
         min_score: float = 2.0,
     ) -> list[Credential]:
         """
-        Return credentials suitable for reuse/spray — scored, active, usable.
+        Return credentials suitable for reuse/spray - scored, active, usable.
         Sorted by score descending (highest value first).
         """
         creds = [
@@ -474,7 +474,7 @@ class CredentialVault:
         """
         Re-hydrate vault from DB records after engine restart or crash.
 
-        Records come from db.load_credentials_raw() — secrets are already
+        Records come from db.load_credentials_raw() - secrets are already
         Fernet-encrypted by this vault's key so reveal() works correctly.
 
         Usage:

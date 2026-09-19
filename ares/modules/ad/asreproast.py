@@ -2,16 +2,16 @@ from __future__ import annotations
 import asyncio
 import re
 """
-ASREPRoasting — impacket.krb5.kerberosv5 low-level API (impacket >=0.11 compatible)
-MITRE: T1558.004 — Works fully unauthenticated with username list.
+ASREPRoasting - impacket.krb5.kerberosv5 low-level API (impacket >=0.11 compatible)
+MITRE: T1558.004 - Works fully unauthenticated with username list.
 
 3 input modes:
-  1. AUTHENTICATED — have creds -> LDAP query for noPreauth accounts (precise)
-  2. USERFILE      — have file   -> spray usernames from file (no creds needed)
-  3. USERNAMES     — have list   -> spray usernames from params (no creds needed)
+  1. AUTHENTICATED - have creds -> LDAP query for noPreauth accounts (precise)
+  2. USERFILE      - have file   -> spray usernames from file (no creds needed)
+  3. USERNAMES     - have list   -> spray usernames from params (no creds needed)
 
 Fix Bug 1: Drop GetNPUsers (impacket example script, broken in >=0.11).
-           Use getKerberosTGT with password=\'\' directly — unauthenticated AS-REQ.
+           Use getKerberosTGT with password=\'\' directly - unauthenticated AS-REQ.
 Fix Bug 2: Implement all 3 modes. No credentials required for userfile/usernames.
 Fix Bug 3: Per-request jitter via noise.jitter.sleep(), not post-hoc batch sleep.
 """
@@ -67,7 +67,7 @@ def _capture_asrep_raw(dc: str, domain: str, username: str) -> bytes | None:
             username,
             type=constants.PrincipalNameType.NT_PRINCIPAL.value,
         )
-        # No padata — no pre-auth. If account has DONT_REQUIRE_PREAUTH, KDC responds with AS-REP.
+        # No padata - no pre-auth. If account has DONT_REQUIRE_PREAUTH, KDC responds with AS-REP.
 
         raw_rep, _cipher, _key, _session_key = getKerberosTGT(
             client,
@@ -218,7 +218,7 @@ def classify_asrep_request_error(exc: BaseException) -> tuple[str, str]:
 )
 class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
     """
-    ad.asreproast — Capture AS-REP hashes from accounts without Kerberos pre-auth
+    ad.asreproast - Capture AS-REP hashes from accounts without Kerberos pre-auth
 
     OPSEC: LOW
     MITRE: "T1558.004"
@@ -495,7 +495,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         self, dc, domain, username, password, userfile, usernames, mode
     ):
         """
-        Low-level impacket implementation — no wrapper scripts.
+        Low-level impacket implementation - no wrapper scripts.
 
         For unauthenticated AS-REQ: send getKerberosTGT with password=''.
           KDC_ERR_PREAUTH_REQUIRED  -> account exists, NOT vulnerable
@@ -541,7 +541,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
             def _try_asreq(u=uname):
                 """
                 Issue #4 fix: use sendReceive directly to capture raw AS-REP wire bytes.
-                getKerberosTGT() parses the response before returning — tgt[0] is
+                getKerberosTGT() parses the response before returning - tgt[0] is
                 a parsed TGT object, not raw AS-REP bytes. _format_krb5asrep_hash()
                 needs raw bytes to extract enc-part for hashcat.
                 """
@@ -710,7 +710,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         self.finding(
             title       = f"ASREPRoast Hashes Captured ({len(hashes)})",
             description = (
-                f"Captured {len(hashes)} AS-REP hashes — crackable offline without "
+                f"Captured {len(hashes)} AS-REP hashes - crackable offline without "
                 "domain credentials. hashcat mode 18200."
             ),
             severity        = Severity.HIGH,

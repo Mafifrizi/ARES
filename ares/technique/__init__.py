@@ -1,5 +1,5 @@
 """
-ARES — technique
+ARES - technique
 MITRE ATT&CK technique library
 
 Public API for this package. Import from here in production code:

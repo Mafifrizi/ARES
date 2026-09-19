@@ -40,7 +40,7 @@ from ares.sdk import (
 )
 class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
     """
-    linux.container — Docker socket abuse, privileged escape, K8s RBAC misconfigs
+    linux.container - Docker socket abuse, privileged escape, K8s RBAC misconfigs
 
     OPSEC: MEDIUM
     MITRE: "T1611", "T1552.007", "T1613"
@@ -66,7 +66,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
                 target = ctx.params.get("target") or ctx.params.get("host", "")
             if not target:
                 raise ModuleValidationError(
-                    "linux.container requires 'target' — IP or hostname of container host.",
+                    "linux.container requires 'target' - IP or hostname of container host.",
                     module_id=self.MODULE_ID, field="target",
                 )
             if isinstance(ctx.params, dict):
@@ -174,7 +174,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
 
     @trace_module("linux.container")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
-        # Note: before_request() intentionally not called — this module runs
+        # Note: before_request() intentionally not called - this module runs
         # entirely locally inside the container (no remote network calls to a target host).
         # Scope/jitter checks apply to remote targets, not local filesystem/socket reads.
         raw: dict[str, Any] = {
@@ -214,7 +214,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
         elif exists:
             self.finding(
                 title="Docker Socket Mounted (Read-Only)",
-                description="Docker socket mounted but not writable — limited exploitation.",
+                description="Docker socket mounted but not writable - limited exploitation.",
                 severity=Severity.MEDIUM,
                 mitre_technique="T1611",
                 mitre_tactic="Privilege Escalation",
@@ -249,7 +249,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
                     evidence={"CapEff": cap_eff},
                     remediation=(
                         "Remove --privileged. Use specific --cap-add for required capabilities. "
-                        "Principle of least privilege — no container should be privileged in prod."
+                        "Principle of least privilege - no container should be privileged in prod."
                     ),
                 )
             return {"privileged": privileged, "CapEff": cap_eff}
@@ -295,7 +295,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
         try:
             with open(token_path) as f:
                 token = f.read().strip()
-            logger.info("[container] K8s service account token found — checking RBAC")
+            logger.info("[container] K8s service account token found - checking RBAC")
 
             # Production:
             # from kubernetes import client, config
@@ -328,7 +328,7 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
         try:
             with open("/proc/net/tcp") as f:
                 lines = f.readlines()
-            # If we see ports like 22, 80, 443 listening — likely host network
+            # If we see ports like 22, 80, 443 listening - likely host network
             host_network = len(lines) > 50  # Heuristic: many open ports = host net
             if host_network:
                 self.finding(

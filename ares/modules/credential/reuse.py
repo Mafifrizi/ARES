@@ -1,12 +1,12 @@
 """
-ARES Credential Module — Credential Reuse (T1078 / T1550.002)
+ARES Credential Module - Credential Reuse (T1078 / T1550.002)
 
 Wraps ReuseEngine as a proper BaseModule so it can be registered in
 the plugin loader and called as ``credential.reuse`` in chains/plans.
 
 MITRE ATT&CK:
-  T1078   — Valid Accounts
-  T1550.002 — Pass the Hash
+  T1078   - Valid Accounts
+  T1550.002 - Pass the Hash
 """
 from __future__ import annotations
 
@@ -70,13 +70,13 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "credential.reuse requires 'target' — IP or hostname to test credentials against.",
+                "credential.reuse requires 'target' - IP or hostname to test credentials against.",
                 module_id=self.MODULE_ID, field="target",
             )
         vault = getattr(ctx, "vault", None)
         if not vault or not getattr(vault, "_store", None):
             raise ModuleValidationError(
-                "credential.reuse requires credentials in vault — "
+                "credential.reuse requires credentials in vault - "
                 "run ad.kerberoast/dcsync/pass_the_hash first.",
                 module_id=self.MODULE_ID, field="vault",
             )
@@ -88,7 +88,7 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
         if getattr(ctx, "dry_run", False):
             return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
                                 raw={"dry_run": True})
-        # Pass vault from ctx — it lives on ctx, NOT in ctx.params
+        # Pass vault from ctx - it lives on ctx, NOT in ctx.params
         params = dict(ctx.params)
         params.pop("target", None)
         params.pop("vault", None)
@@ -188,7 +188,7 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
                 "dry_run": True,
                 "valid_credentials": [],
                 "owned_hosts": [],
-                "note": "dry-run — no credentials sprayed",
+                "note": "dry-run - no credentials sprayed",
             }
 
         if vault is None:

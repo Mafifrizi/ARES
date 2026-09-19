@@ -1,5 +1,5 @@
 """
-ARES — api
+ARES - api
 ARES REST API (FastAPI application)
 
 Public API for this package. Import from here in production code:

@@ -1,7 +1,7 @@
 """
 ARES Simulation Tests
 End-to-end campaign simulations using dry_run=True.
-No real network calls — verifies the full automation logic:
+No real network calls - verifies the full automation logic:
   Engine → GoalEngine → ModuleRegistry → Module → ModuleResult → StateUpdate
 
 These tests prove:
@@ -110,7 +110,7 @@ class StubKerberoastModule(BaseModule):
         if ctx.dry_run:
             f = self.finding(
                 title="[DRY RUN] Kerberoastable SPN",
-                description="Simulated kerberoast — svc_sql",
+                description="Simulated kerberoast - svc_sql",
                 severity=Severity.HIGH,
                 mitre_technique="T1558.003",
                 host=ctx.target,
@@ -141,8 +141,8 @@ class StubDCSyncModule(BaseModule):
     async def execute(self, ctx: ExecutionContext) -> ModuleResult:
         if ctx.dry_run:
             f = self.finding(
-                title="[DRY RUN] DCSync — all hashes",
-                description="Simulated DCSync — retrieved 150 hashes",
+                title="[DRY RUN] DCSync - all hashes",
+                description="Simulated DCSync - retrieved 150 hashes",
                 severity=Severity.CRITICAL,
                 mitre_technique="T1003.006",
                 host=ctx.target,
@@ -256,7 +256,7 @@ class TestScenario01BasicADChain:
             module_id="ad.kerberoast", domain="CORP",
             dry_run=True,
         )
-        # No exception even with public IP — dry_run bypasses scope
+        # No exception even with public IP - dry_run bypasses scope
         result = await module.execute(ctx)
         assert result.success
 
@@ -499,11 +499,11 @@ class TestScenario05GuardrailEnforcement:
     def test_simulate_dangerous_module_gate(self) -> None:
         from ares.knowledge import CampaignGuardrail
         g = CampaignGuardrail(["10.0.0.0/8"])
-        # DCSync without confirmation — blocked
+        # DCSync without confirmation - blocked
         ok1, msg1 = g.check("ad.dcsync", "10.0.0.1", confirmed=False)
         assert not ok1
         assert "HIGH-RISK" in msg1
-        # After confirmation — allowed
+        # After confirmation - allowed
         g.confirm_dangerous("ad.dcsync", "10.0.0.1")
         ok2, _ = g.check("ad.dcsync", "10.0.0.1", confirmed=True)
         assert ok2
@@ -808,7 +808,7 @@ class TestScenario10MultiOperatorCollaboration:
         ok1, lock1 = mgr.acquire_lock(op1.operator_id, "10.0.0.1", "ad.kerberoast")
         assert ok1
 
-        # Op2 tries same target+module — locked
+        # Op2 tries same target+module - locked
         ok2, msg2 = mgr.acquire_lock(op2.operator_id, "10.0.0.1", "ad.kerberoast")
         assert not ok2
         assert "locked" in msg2.lower()

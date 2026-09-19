@@ -1,5 +1,5 @@
 """
-ARES — modules
+ARES - modules
 Module base class and result types.
 
 Public API:

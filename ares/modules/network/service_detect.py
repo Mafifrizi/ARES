@@ -1,5 +1,5 @@
 """
-Network Service Detection — Banner Grabbing + Version Fingerprinting
+Network Service Detection - Banner Grabbing + Version Fingerprinting
 MITRE: T1046, T1590.004
 
 Connects to open ports, reads banner/response, identifies:
@@ -45,7 +45,7 @@ _PROBES: dict[str, bytes] = {
     "generic": b"",
 }
 
-# Version patterns — (service, pattern, severity, cve_hint)
+# Version patterns - (service, pattern, severity, cve_hint)
 _VULN_PATTERNS: list[tuple[str, str, str, str]] = [
     ("openssh",   r"OpenSSH[_\s]([0-9]\.[0-9])",   "INFO",     ""),
     ("vsftpd",    r"vsftpd\s([0-9]\.[0-9]\.[0-9])", "MEDIUM",   "CVE-2011-2523 if 2.3.4"),
@@ -107,7 +107,7 @@ async def _grab_banner(host: str, port: int, timeout: float = 4.0,
 )
 class ServiceDetectModule(BaseModule):
     """
-    network.service_detect — Banner grabbing and version fingerprinting on open ports — identifies service versions and flags potentially vulnerable services
+    network.service_detect - Banner grabbing and version fingerprinting on open ports - identifies service versions and flags potentially vulnerable services
 
     OPSEC: LOW
     MITRE: "T1046", "T1590.004"
@@ -117,7 +117,7 @@ class ServiceDetectModule(BaseModule):
     MODULE_NAME        = "Service Detection"
     MODULE_CATEGORY    = "network"
     MODULE_DESCRIPTION = (
-        "Banner grabbing and version fingerprinting on open ports — "
+        "Banner grabbing and version fingerprinting on open ports - "
         "identifies service versions and flags potentially vulnerable services"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -139,7 +139,7 @@ class ServiceDetectModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)

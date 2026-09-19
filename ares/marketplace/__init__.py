@@ -1,5 +1,5 @@
 """
-ARES — marketplace
+ARES - marketplace
 Module marketplace installer
 
 Public API for this package. Import from here in production code:

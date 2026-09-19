@@ -1,5 +1,5 @@
 """
-ARES — network
+ARES - network
 Network topology model
 
 Public API for this package. Import from here in production code:
@@ -19,7 +19,7 @@ except ImportError:
 
 
 try:
-    from ares.network import model  # noqa: F401 — submodule re-export
+    from ares.network import model  # noqa: F401 - submodule re-export
 except ImportError:
     pass
 

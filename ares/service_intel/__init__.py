@@ -1,5 +1,5 @@
 """
-ARES — service_intel
+ARES - service_intel
 Service intelligence and vulnerability mapping
 
 Public API for this package. Import from here in production code:

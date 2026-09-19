@@ -4,18 +4,18 @@ MITRE: T1574.006 (Dynamic Linker Hijacking)
 
 Detects conditions that allow library hijacking via:
   1. LD_PRELOAD allowed in sudoers (env_keep += LD_PRELOAD)
-     — run arbitrary code as sudo target user via preloaded .so
+     - run arbitrary code as sudo target user via preloaded .so
   2. RPATH pointing to writable directories in SUID/sudo binaries
-     — attacker-controlled .so loaded before system libraries
+     - attacker-controlled .so loaded before system libraries
   3. Writable directories in /etc/ld.so.conf or ld.so.conf.d/
-     — affects all dynamically linked binaries run by any user
+     - affects all dynamically linked binaries run by any user
   4. Writable /etc/ld.so.preload
-     — forces preload of attacker .so for every dynamic binary
+     - forces preload of attacker .so for every dynamic binary
 
-Detection only — no .so files are created or injected.
+Detection only - no .so files are created or injected.
 All checks run via SSH or local shell, read-only commands.
 
-OPSEC: LOW — reads config files and runs readelf/ldd on existing binaries.
+OPSEC: LOW - reads config files and runs readelf/ldd on existing binaries.
 """
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ _CMD_SUID_BINS = (
 )
 class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     """
-    linux.ld_preload — Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths —
+    linux.ld_preload - Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths  - 
 
     OPSEC: LOW
     MITRE: "T1574.006", "T1082"
@@ -85,7 +85,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     MODULE_CATEGORY    = "linux"
     MODULE_DESCRIPTION = (
         "Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, "
-        "and writable ld.so config paths — library hijack escalation vectors"
+        "and writable ld.so config paths - library hijack escalation vectors"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
@@ -102,7 +102,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                 target = ctx.params.get("target") or ctx.params.get("host", "")
             if not target:
                 raise ModuleValidationError(
-                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                     module_id=self.MODULE_ID, field="target",
                 )
             ssh_user = None
@@ -294,7 +294,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                     "environment variable (env_keep += LD_PRELOAD). "
                     "An attacker can compile a malicious shared library, set "
                     "LD_PRELOAD to point to it, and run any command allowed by "
-                    "sudo — causing the library to execute as the sudo target user "
+                    "sudo - causing the library to execute as the sudo target user "
                     "(often root) before the actual command runs."
                 ),
                 severity=Severity.CRITICAL,
@@ -306,7 +306,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                     "exploitation": (
                         "1. Compile: gcc -shared -fPIC -o /tmp/evil.so evil.c. "
                         "2. Set: export LD_PRELOAD=/tmp/evil.so. "
-                        "3. Run any allowed sudo command — evil.so executes as root."
+                        "3. Run any allowed sudo command - evil.so executes as root."
                     ),
                 },
                 remediation=(
@@ -320,7 +320,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
 
         # ── Check 2: Writable /etc/ld.so.preload ──────────────────────────
         if preload_file_out:
-            # File exists — check if writable by current user
+            # File exists - check if writable by current user
             writable_preload = await run_cmd(
                 "[ -w /etc/ld.so.preload ] && echo writable || echo readonly"
             ) if not isinstance(preload_file_out, Exception) else ""
@@ -467,7 +467,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                         "1. Run ldd <suid_binary> to find loaded libraries. "
                         "2. Compile a fake version of one library as a shared object. "
                         "3. Place it in the writable RPATH dir with the exact library name. "
-                        "4. Execute the SUID binary — your .so runs as root."
+                        "4. Execute the SUID binary - your .so runs as root."
                     ),
                 },
                 remediation=(
@@ -490,7 +490,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
         raw["privesc_vectors"] = self._findings  # OUTPUTS key
         return self._findings[:], raw
 
-    # ── SSH / local runner helpers — identical pattern to linux.privesc ────
+    # ── SSH / local runner helpers - identical pattern to linux.privesc ────
 
     async def _make_ssh_runner(
         self,
@@ -504,7 +504,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed — pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

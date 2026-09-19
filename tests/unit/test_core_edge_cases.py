@@ -1,5 +1,5 @@
 """
-Step 1B — Edge Case Tests: Core Infrastructure
+Step 1B - Edge Case Tests: Core Infrastructure
 
 Tests for non-happy-path scenarios, boundary conditions, and failure modes.
 Supplements test_core_infrastructure.py (happy path tests).
@@ -24,7 +24,7 @@ if str(_ROOT) not in sys.path:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1. AresDatabase — Edge Cases
+# 1. AresDatabase - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestDatabaseEdgeCases:
@@ -213,7 +213,7 @@ class TestDatabaseEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. Campaign — Edge Cases
+# 2. Campaign - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestCampaignEdgeCases:
@@ -256,7 +256,7 @@ class TestCampaignEdgeCases:
         assert c.is_in_scope("10.0.0.6") is False
 
     def test_scope_multiple_entries(self):
-        """Multiple scope entries — IP in any should be in scope."""
+        """Multiple scope entries - IP in any should be in scope."""
         from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
         c = Campaign(name="T", scope=[
             ScopeEntry(cidr="10.0.0.0/24"),
@@ -310,7 +310,7 @@ class TestCampaignEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 3. CredentialVault — Edge Cases
+# 3. CredentialVault - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestVaultEdgeCases:
@@ -348,7 +348,7 @@ class TestVaultEdgeCases:
     def test_store_very_long_secret(self, vault):
         """Very long secret (NTLM hash dump) should roundtrip."""
         from ares.credential.vault import Credential, CredentialType, PrivilegeLevel
-        long_secret = "A" * 50000  # 50K chars — simulates large credential dump
+        long_secret = "A" * 50000  # 50K chars - simulates large credential dump
         cred = Credential(
             username="longcred", domain="CORP",
             cred_type=CredentialType.NTLM,
@@ -375,7 +375,7 @@ class TestVaultEdgeCases:
         )
         id1 = vault.store(cred1, secret="old_pass")
         id2 = vault.store(cred2, secret="new_pass")
-        # Same dedup key — should update existing
+        # Same dedup key - should update existing
         assert id1 == id2
         # Higher privilege should win
         stored = vault._store[id1]
@@ -433,7 +433,7 @@ class TestVaultEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. Security — Edge Cases
+# 4. Security - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSecurityEdgeCases:
@@ -441,7 +441,7 @@ class TestSecurityEdgeCases:
     def test_sanitize_path_null_byte_injection(self):
         """Null byte in path should be handled."""
         from ares.core.security import sanitize_path
-        # Null byte injection — common attack vector
+        # Null byte injection - common attack vector
         try:
             result = sanitize_path("/home/user/data\x00/etc/shadow")
             # Should either strip null or raise
@@ -524,7 +524,7 @@ class TestSecurityEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 5. NoiseController — Edge Cases
+# 5. NoiseController - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestNoiseEdgeCases:
@@ -561,7 +561,7 @@ class TestNoiseEdgeCases:
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.AGGRESSIVE)
         nc = NoiseController(c)
-        # AGGRESSIVE allows 200 req/min — 5 rapid acquires should be instant
+        # AGGRESSIVE allows 200 req/min - 5 rapid acquires should be instant
         t0 = time.monotonic()
         for _ in range(5):
             await nc.rate_limiter.acquire("test")
@@ -582,7 +582,7 @@ class TestNoiseEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 6. AresContainer — Edge Cases
+# 6. AresContainer - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestContainerEdgeCases:
@@ -634,7 +634,7 @@ class TestContainerEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 7. CVSS / Compliance — Edge Cases
+# 7. CVSS / Compliance - Edge Cases
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestCVSSEdgeCases:
@@ -687,7 +687,7 @@ class TestCVSSEdgeCases:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 8. HIGH IMPACT — Concurrency Stress Tests
+# 8. HIGH IMPACT - Concurrency Stress Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestConcurrencyStress:
@@ -703,7 +703,7 @@ class TestConcurrencyStress:
 
     @pytest.mark.asyncio
     async def test_concurrent_campaign_writes_no_data_loss(self, db):
-        """50 concurrent campaign saves must all persist — zero data loss."""
+        """50 concurrent campaign saves must all persist - zero data loss."""
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 
         async def save_one(i):
@@ -794,7 +794,7 @@ class TestConcurrencyStress:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 9. HIGH IMPACT — Encryption Integrity Tests
+# 9. HIGH IMPACT - Encryption Integrity Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestEncryptionIntegrity:
@@ -875,7 +875,7 @@ class TestEncryptionIntegrity:
 
     @pytest.mark.asyncio
     async def test_db_credential_encrypted_at_rest(self, db):
-        """Credential secret in DB must be encrypted — NOT plaintext."""
+        """Credential secret in DB must be encrypted - NOT plaintext."""
         from ares.db.database import DBCredential
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="EncTest", scope=[ScopeEntry(cidr="10.0.0.0/8")],
@@ -885,7 +885,7 @@ class TestEncryptionIntegrity:
         cred = DBCredential(campaign_id=c.id, username="enc_user",
                             cred_type="password", secret=plain_secret)
         await db.save_credential(cred)
-        # Read raw from DB — secret_enc column must NOT contain plaintext
+        # Read raw from DB - secret_enc column must NOT contain plaintext
         raw_creds = await db.load_credentials_raw(c.id)
         assert len(raw_creds) >= 1
         for rc in raw_creds:
@@ -910,19 +910,19 @@ class TestEncryptionIntegrity:
         await db_a.save_credential(cred)
         await db_a.close()
 
-        # Read with key B — decryption must fail or return garbage
+        # Read with key B - decryption must fail or return garbage
         db_b = await AresDatabase.create(db_path, "key-bbb-32-chars-padded-xxxxxxxx")
         creds = await db_b.get_credentials(c.id, decrypt=True)
         await db_b.close()
         for cr in creds:
             secret = cr.get("secret_enc", cr.get("secret", ""))
-            # Must either be empty, garbage, or raise — never the original plaintext
+            # Must either be empty, garbage, or raise - never the original plaintext
             assert secret != "RealSecret!", \
                 "CRITICAL: Wrong encryption key decrypted to correct plaintext!"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 10. HIGH IMPACT — Security Boundary Tests
+# 10. HIGH IMPACT - Security Boundary Tests
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSecurityBoundaries:
@@ -994,7 +994,7 @@ class TestSecurityBoundaries:
         from ares.core.security import hash_password
         # A valid bcrypt hash that would match if the prefix check wasn't there
         fake_key = "not_ares_prefix_but_valid_otherwise"
-        # The verify_api_key method checks prefix first — we verify that pattern
+        # The verify_api_key method checks prefix first - we verify that pattern
         assert not fake_key.startswith("ares_")
 
     @pytest.mark.asyncio
@@ -1009,9 +1009,9 @@ class TestSecurityBoundaries:
             user = await db.get_user("admin")
             uid = user["id"]
             key_id, raw = await db.create_api_key(uid, "temp", "admin")
-            # First revoke — should succeed
+            # First revoke - should succeed
             assert await db.revoke_api_key(key_id, uid) is True
-            # Second revoke — already revoked, should return False
+            # Second revoke - already revoked, should return False
             assert await db.revoke_api_key(key_id, uid) is False
             await db.close()
 
@@ -1036,11 +1036,11 @@ class TestSecurityBoundaries:
             await db.close()
 
     def test_scope_empty_means_deny_all(self):
-        """Empty scope must deny everything — this is the fail-closed invariant."""
+        """Empty scope must deny everything - this is the fail-closed invariant."""
         from ares.core.campaign import Campaign, NoiseProfile
         c = Campaign(name="DenyAll", scope=[], noise_profile=NoiseProfile.NORMAL)
         # MUST deny every possible IP
         for ip in ["0.0.0.0", "10.0.0.1", "127.0.0.1", "192.168.1.1",
                     "255.255.255.255", "8.8.8.8"]:
             assert c.is_in_scope(ip) is False, \
-                f"CRITICAL: Empty scope allowed {ip} — fail-open bug!"
+                f"CRITICAL: Empty scope allowed {ip} - fail-open bug!"

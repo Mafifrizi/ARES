@@ -1,5 +1,5 @@
 """
-ARES — replay
+ARES - replay
 Attack scenario replay engine
 
 Public API for this package. Import from here in production code:

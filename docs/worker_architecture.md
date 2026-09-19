@@ -40,7 +40,7 @@ Operator/API  ──→   │  AresEngine → ClusterController         │
 | Redis         | Redis available at `ARES_REDIS_URL`    | Production / multi-node |
 | In-process    | No Redis (default)                     | Dev / single-node       |
 
-Both backends have identical API — engine never knows which is active.
+Both backends have identical API - engine never knows which is active.
 
 **Redis task format:**
 
@@ -184,7 +184,7 @@ If not declared, defaults are inferred from `MODULE_CATEGORY`.
 | `CAP_EXEC`    | execve, fork, vfork, clone, pipe, wait4, ...       |
 | `CAP_FS`      | mkdir, unlink, rename, chmod, truncate, ...        |
 | `CAP_PROCESS` | ptrace, kill, tkill, getdents, ...                 |
-| `CAP_UNSAFE`  | all syscalls (no filter — builtin only)            |
+| `CAP_UNSAFE`  | all syscalls (no filter - builtin only)            |
 
 **Capability allowed per trust level:**
 

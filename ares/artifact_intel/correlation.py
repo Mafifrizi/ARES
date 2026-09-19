@@ -361,7 +361,7 @@ class ArtifactCorrelationEngine:
                 title          = f"Public cloud resource: {res.provider}/{res.resource_type} {res.resource_id!r}",
                 description    = (
                     f"Public {res.provider} {res.resource_type} discovered. "
-                    f"{'Credentials available for deeper access.' if cloud_creds else 'No credentials yet — enumerate.'}"
+                    f"{'Credentials available for deeper access.' if cloud_creds else 'No credentials yet - enumerate.'}"
                 ),
                 severity       = "medium",
                 confidence     = 0.85,

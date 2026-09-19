@@ -75,7 +75,7 @@ class FindingValidator:
                 finding_id=finding.id,
                 passed=True,
                 confidence=0.6,
-                notes=["No validators registered — manual review recommended"],
+                notes=["No validators registered - manual review recommended"],
             )
 
         stage_results: dict[str, tuple[bool, float, str]] = {}
@@ -169,9 +169,9 @@ async def _check_docker_socket_exploitable(
     readable = os.access(socket_path, os.R_OK)
     writable = os.access(socket_path, os.W_OK)
     if writable:
-        return True, 1.0, "Docker socket is read+write — full container escape possible"
+        return True, 1.0, "Docker socket is read+write - full container escape possible"
     if readable:
-        return True, 0.6, "Docker socket readable — limited exploitation"
+        return True, 0.6, "Docker socket readable - limited exploitation"
     return False, 0.1, "Docker socket exists but not accessible"
 
 

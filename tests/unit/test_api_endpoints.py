@@ -1,5 +1,5 @@
 """
-API endpoint tests — auth, RBAC, pagination, security headers.
+API endpoint tests - auth, RBAC, pagination, security headers.
 
 Approach: httpx.ASGITransport + dependency_overrides (no lifespan needed).
   - base_url="http://localhost" passes TrustedHostMiddleware
@@ -709,7 +709,7 @@ class TestAuthFlow:
 
     @pytest.mark.asyncio
     async def test_login_invalid_credentials_returns_401(self, aclient):
-        """Login with mocked OAuth2PasswordRequestForm — invalid creds → 401."""
+        """Login with mocked OAuth2PasswordRequestForm - invalid creds → 401."""
         c, db, _app = aclient
         _reset_rate_limiter()
         db.verify_user.return_value = None
@@ -730,7 +730,7 @@ class TestAuthFlow:
 
     @pytest.mark.asyncio
     async def test_login_valid_credentials_returns_tokens(self, aclient):
-        """Login with mocked OAuth2PasswordRequestForm — valid creds → 200 + tokens."""
+        """Login with mocked OAuth2PasswordRequestForm - valid creds → 200 + tokens."""
         c, db, _app = aclient
         _reset_rate_limiter()
         db.create_login_session.return_value = _issued_session()
@@ -1287,7 +1287,7 @@ class TestRBACEnforcement:
 
     @pytest.mark.asyncio
     async def test_security_audit_requires_team_lead(self, aclient):
-        """GET /security/audit — operator role → 403."""
+        """GET /security/audit - operator role → 403."""
         c, db, _ = aclient
         db.is_access_token_revoked.return_value = False
         r = await c.get("/security/audit", headers=_auth("op_user", "operator"))
@@ -1295,7 +1295,7 @@ class TestRBACEnforcement:
 
     @pytest.mark.asyncio
     async def test_security_audit_accessible_to_team_lead(self, aclient):
-        """GET /security/audit — team_lead → 200."""
+        """GET /security/audit - team_lead → 200."""
         c, db, _ = aclient
         _reset_rate_limiter()
         db.is_access_token_revoked.return_value = False
@@ -1885,7 +1885,7 @@ class TestHighNoiseAuthorizationPolicy:
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == (
-            "'plugin.dynamic-high' is HIGH_NOISE — team_lead only."
+            "'plugin.dynamic-high' is HIGH_NOISE - team_lead only."
         )
 
     def test_shared_policy_allows_team_lead_for_high_noise_module(self) -> None:
@@ -1936,7 +1936,7 @@ class TestHighNoiseAuthorizationPolicy:
         detail = str(exc_info.value.detail)
         assert detail == (
             "'plugin.alpha-high', 'plugin.zeta-high' "
-            "are HIGH_NOISE — team_lead only."
+            "are HIGH_NOISE - team_lead only."
         )
         assert [call.args[0] for call in engine.registry.get.call_args_list] == [
             "plugin.alpha-high",

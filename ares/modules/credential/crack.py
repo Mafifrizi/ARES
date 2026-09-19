@@ -1,12 +1,12 @@
 """
-Hash Cracking Interface — credential.crack
-MITRE: T1110.002 — Brute Force: Password Cracking
+Hash Cracking Interface - credential.crack
+MITRE: T1110.002 - Brute Force: Password Cracking
 
 Thin wrapper around ares/credential/cracker.py (720 lines, fully implemented).
 Runs hashcat (GPU) or john (CPU fallback) against uncracked hashes in the vault.
 Cracked plaintext is encrypted and stored back to vault via vault.mark_cracked().
 
-OPSEC: LOCAL — cracking happens entirely on the operator machine.
+OPSEC: LOCAL - cracking happens entirely on the operator machine.
        Zero network traffic to target. Not included in campaign noise budget.
 
 Hash types supported (hashcat modes):
@@ -73,7 +73,7 @@ _CRACK_PRIORITY: dict[str, int] = {
 )
 class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
     """
-    credential.crack — "Crack hashes in CredentialVault using hashcat (GPU
+    credential.crack - "Crack hashes in CredentialVault using hashcat (GPU
 
     OPSEC: LOCAL
     MITRE: "T1110.002"
@@ -87,7 +87,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
         "Crack hashes in CredentialVault using hashcat (GPU) or john (CPU fallback). "
         "Cracked plaintext is stored back to vault, immediately available for reuse."
     )
-    OPSEC_LEVEL        = OpsecLevel.LOCAL   # local only — zero network traffic
+    OPSEC_LEVEL        = OpsecLevel.LOCAL   # local only - zero network traffic
     REQUIRES           = ["vault"]
     OUTPUTS            = ["cracked_credentials"]
     MITRE_TECHNIQUES   = ["T1110.002"]
@@ -104,7 +104,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
         vault = getattr(ctx, "vault", None)
         if not vault:
             raise ModuleValidationError(
-                "credential.crack requires a CredentialVault — "
+                "credential.crack requires a CredentialVault - "
                 "run ad.kerberoast, ad.asreproast, or ad.dcsync first.",
                 module_id=self.MODULE_ID, field="vault",
             )
@@ -217,7 +217,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
     @trace_module("credential.crack")
     async def run(self, vault: "Any" = None, timeout_s: int = 3600,
                   use_gpu: bool = True, wordlist: str = "", **kwargs: Any):
-        # Note: before_request() intentionally not called — credential.crack is
+        # Note: before_request() intentionally not called - credential.crack is
         # OpsecLevel.LOCAL (offline hash cracking, no network calls).
         # Scope, jitter, and rate-limit checks apply only to network-facing operations.
         from ares.credential.cracker import CrackingWorker, CrackingQueue, CrackJob, CrackStatus
@@ -301,7 +301,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
         logger.info("crack_complete",
                     cracked=len(cracked), failed=len(failed), skipped=len(skipped))
 
-        # Generate findings — one per cracked credential (no plaintext in finding)
+        # Generate findings - one per cracked credential (no plaintext in finding)
         if cracked:
             usernames = [r.username for r in cracked if r.username]
             self.finding(
@@ -309,7 +309,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
                 description = (
                     f"Successfully cracked {len(cracked)} of {len(results)} hashes "
                     f"using {cracked[0].tool_used if cracked else 'hashcat/john'}. "
-                    "Plaintext credentials stored in vault — "
+                    "Plaintext credentials stored in vault - "
                     "immediately available for credential.reuse and lateral movement."
                 ),
                 severity    = Severity.CRITICAL,
@@ -327,7 +327,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
                 remediation = (
                     "Enforce strong password policy (min 15 chars, complexity). "
                     "Migrate Kerberos service accounts to gMSA (auto-rotating, "
-                    "240-char random passwords — uncrackable). "
+                    "240-char random passwords - uncrackable). "
                     "Enable AES-256 Kerberos encryption, disable RC4."
                 ),
             )

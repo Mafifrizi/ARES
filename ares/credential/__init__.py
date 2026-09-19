@@ -1,5 +1,5 @@
 """
-ARES — credential
+ARES - credential
 Credential storage, management, and reuse testing.
 
 Public API for this package. Import from here in production code:

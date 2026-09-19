@@ -3,8 +3,8 @@ import asyncio
 import multiprocessing
 import time
 """
-Kerberoasting — impacket.krb5.kerberosv5 low-level API (impacket ≥0.11 compatible)
-MITRE: T1558.003 — Jitter + rate-limited TGS requests, hashcat-ready output.
+Kerberoasting - impacket.krb5.kerberosv5 low-level API (impacket ≥0.11 compatible)
+MITRE: T1558.003 - Jitter + rate-limited TGS requests, hashcat-ready output.
 """
 from typing import Any
 from ares.core.logger import get_logger
@@ -251,7 +251,7 @@ def classify_kerberoast_outcome(
 )
 class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
     """
-    ad.kerberoast — Request TGS tickets for SPN accounts — hashcat-ready hashes
+    ad.kerberoast - Request TGS tickets for SPN accounts - hashcat-ready hashes
 
     OPSEC: MEDIUM
     MITRE: "T1558.003"
@@ -261,7 +261,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
     MODULE_ID          = "ad.kerberoast"
     MODULE_NAME        = "Kerberoasting"
     MODULE_CATEGORY    = "ad"
-    MODULE_DESCRIPTION = "Request TGS tickets for SPN accounts — hashcat-ready hashes"
+    MODULE_DESCRIPTION = "Request TGS tickets for SPN accounts - hashcat-ready hashes"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
     REQUIRES           = ["domain_creds"]
@@ -327,7 +327,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
     async def validate(self, ctx: "Any") -> None:
         """
         Enforce dc, domain, and domain credentials.
-        Also block early in STEALTH profile — each TGS request logs Event ID 4769.
+        Also block early in STEALTH profile - each TGS request logs Event ID 4769.
         """
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
@@ -347,7 +347,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.kerberoast requires domain credentials to request TGS tickets — "
+                "ad.kerberoast requires domain credentials to request TGS tickets - "
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
@@ -355,7 +355,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "ad.kerberoast is blocked in STEALTH profile — "
+                "ad.kerberoast is blocked in STEALTH profile - "
                 "TGS requests generate Event ID 4769 per ticket and are trivially "
                 "detected by SIEM. Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -526,7 +526,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         """
         Fix Bug 1: Drop GetUserSPNs (impacket example script, unstable API).
                    Use getKerberosTGT + getKerberosTGS from impacket.krb5.kerberosv5 directly.
-        Fix Bug 2: Jitter after every single TGS request — not burst then sleep.
+        Fix Bug 2: Jitter after every single TGS request - not burst then sleep.
         Fix Bug 3: Explicit per-noise-profile rate limit (10/min NORMAL, 50/min AGGRESSIVE).
         """
         ensure_ad_dependencies(
@@ -701,7 +701,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         if not hashes:
             return
         self.finding(title=f"Kerberoast Hashes Captured ({len(hashes)})",
-            description=(f"{len(hashes)} TGS hashes captured — crackable offline. "
+            description=(f"{len(hashes)} TGS hashes captured - crackable offline. "
                          "hashcat mode 13100 (RC4) or 19700 (AES256)."),
             severity=Severity.CRITICAL, mitre_technique="T1558.003", mitre_tactic="Credential Access",
             evidence={"hash_count":len(hashes), "accounts":[a["name"] for a in raw.get("accounts",[])[:10]],

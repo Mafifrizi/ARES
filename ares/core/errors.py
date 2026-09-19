@@ -12,9 +12,9 @@ Error categories and engine behavior:
 
   AresError                   (base)
   ├─ ModuleError              retry up to max_attempts, then skip
-  │   ├─ ModuleValidationError  abort immediately — bad config, skip module
+  │   ├─ ModuleValidationError  abort immediately - bad config, skip module
   │   ├─ ModuleTimeoutError     retry with backoff
-  │   └─ ModuleNotFoundError    abort — no retry possible
+  │   └─ ModuleNotFoundError    abort - no retry possible
   ├─ NetworkError             retry with jitter
   │   ├─ ConnectionRefused      retry × 3, then fallback module
   │   ├─ ConnectionTimeout      retry with exponential backoff
@@ -28,7 +28,7 @@ Error categories and engine behavior:
   │   ├─ SandboxError           log + skip module
   │   ├─ WorkerCrashed          requeue task
   │   └─ PayloadError           log + skip
-  ├─ ScopeError               abort immediately — never retry out-of-scope
+  ├─ ScopeError               abort immediately - never retry out-of-scope
   ├─ OpsecError               engine pauses or switches profile
   │   ├─ DetectionSignal        escalate opsec profile
   │   └─ HoneypotDetected       abort campaign, alert operator
@@ -106,7 +106,7 @@ class ModuleError(AresError):
 class ModuleValidationError(ModuleError):
     """
     Module metadata or parameter validation failed.
-    Engine aborts immediately — bad config means retry won't help.
+    Engine aborts immediately - bad config means retry won't help.
 
     Raised by:
       BaseModule.validate()
@@ -138,7 +138,7 @@ class ModuleTimeoutError(ModuleError):
 class ModuleNotFoundError(ModuleError):
     """
     Module ID not in registry.
-    Engine aborts — cannot retry a missing module.
+    Engine aborts - cannot retry a missing module.
     """
 
     default_action = AresError.ABORT
@@ -320,7 +320,7 @@ class PayloadError(ExecutionError):
 class InvalidContext(ExecutionError):
     """
     ExecutionContext is missing required fields.
-    Engine aborts module — bad context means logic error, not transient failure.
+    Engine aborts module - bad context means logic error, not transient failure.
     """
 
     default_action = AresError.ABORT
@@ -337,7 +337,7 @@ class ScopeError(AresError):
     """
     Operation would target an out-of-scope host or resource.
     Engine ABORTS immediately. Never retries or falls back.
-    The guardrail caught this — the operator must fix scope config.
+    The guardrail caught this - the operator must fix scope config.
     """
 
     default_action = AresError.ABORT
@@ -387,7 +387,7 @@ class HoneypotDetected(OpsecError):
     """
     High-confidence honeypot detection.
     Engine ABORTS the campaign and alerts the operator.
-    Do NOT retry — further interaction makes IR worse.
+    Do NOT retry - further interaction makes IR worse.
     """
 
     default_action = AresError.ABORT

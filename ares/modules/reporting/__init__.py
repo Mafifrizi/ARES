@@ -1,5 +1,5 @@
 """
-ARES — modules.reporting
+ARES - modules.reporting
 Campaign report generation
 
 Public API for this package. Import from here in production code:

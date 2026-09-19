@@ -3,7 +3,7 @@ Linux Kernel Exploit Suggester
 MITRE: T1068 (Exploitation for Privilege Escalation)
 
 Reads kernel version from target and maps it to known local privilege
-escalation CVEs. Does NOT exploit — detection and suggestion only.
+escalation CVEs. Does NOT exploit - detection and suggestion only.
 Operator must obtain and compile the PoC separately.
 """
 from __future__ import annotations
@@ -29,12 +29,12 @@ from ares.sdk import (
 logger = get_logger("ares.modules.linux.kernel_suggester")
 
 # kernel_version_regex → (CVE, description, severity, affected_range)
-# Ranges are illustrative — real check via uname -r parsing
+# Ranges are illustrative - real check via uname -r parsing
 _KERNEL_CVES: list[tuple[str, str, str, str, str]] = [
     (r"[345]\.[0-9]+",       "CVE-2021-4034", "Polkit pkexec LPE (PwnKit)", "CRITICAL", "< 0.120-3"),
     (r"[345]\.[0-9]+",       "CVE-2021-3156", "Sudo heap-overflow LPE (Baron Samedit)", "CRITICAL", "< 1.9.5p2"),
-    (r"5\.[0-9]+\.[0-9]+",   "CVE-2022-0847", "Dirty Pipe — arbitrary write via pipe", "HIGH", "5.8–5.16.11"),
-    (r"[34]\.[0-9]+\.[0-9]+","CVE-2016-5195", "Dirty COW — race condition write", "HIGH", "< 4.8.3"),
+    (r"5\.[0-9]+\.[0-9]+",   "CVE-2022-0847", "Dirty Pipe - arbitrary write via pipe", "HIGH", "5.8–5.16.11"),
+    (r"[34]\.[0-9]+\.[0-9]+","CVE-2016-5195", "Dirty COW - race condition write", "HIGH", "< 4.8.3"),
     (r"5\.[0-9]+\.[0-9]+",   "CVE-2021-33909", "seq_file LPE (size_t-to-int overflow)", "HIGH", "< 5.13.4"),
     (r"[345]\.[0-9]+",       "CVE-2019-13272", "ptrace PTRACE_TRACEME LPE", "HIGH", "< 5.1.17"),
     (r"[345]\.[0-9]+",       "CVE-2017-16995", "eBPF verifier integer overflow LPE", "HIGH", "3.18–4.14"),
@@ -52,7 +52,7 @@ _KERNEL_CVES: list[tuple[str, str, str, str, str]] = [
 )
 class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
     """
-    linux.kernel_suggester — Read kernel version via SSH and map to known LPE CVEs — detection and suggestion only, no exploitation
+    linux.kernel_suggester - Read kernel version via SSH and map to known LPE CVEs - detection and suggestion only, no exploitation
 
     OPSEC: LOW
     MITRE: "T1068", "T1082"
@@ -63,7 +63,7 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
     MODULE_NAME        = "Linux Kernel Exploit Suggester"
     MODULE_CATEGORY    = "linux"
     MODULE_DESCRIPTION = (
-        "Read kernel version via SSH and map to known LPE CVEs — "
+        "Read kernel version via SSH and map to known LPE CVEs - "
         "detection and suggestion only, no exploitation"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -82,7 +82,7 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
                 target = ctx.params.get("target") or ctx.params.get("host", "")
             if not target:
                 raise ModuleValidationError(
-                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                     module_id=self.MODULE_ID, field="target",
                 )
             ssh_user = None
@@ -281,7 +281,7 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
                 sev = {"CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH,
                        "MEDIUM": Severity.MEDIUM}.get(severity_str, Severity.INFO)
                 self.finding(
-                    title=f"Potential Kernel LPE: {cve} — {description}",
+                    title=f"Potential Kernel LPE: {cve} - {description}",
                     description=(
                         f"Kernel {kernel_ver} on {target} may be vulnerable to {cve} "
                         f"({description}). Affected range: {affected}. "

@@ -5,17 +5,17 @@ Cryptographic signing ensures community modules are authentic and unmodified.
 Design:
   - Each module file is signed with the author's Ed25519 private key
   - Signature stored in module.sig file or embedded in __module_signature__
-  - Verification at load time — unsigned/invalid modules rejected (configurable)
+  - Verification at load time - unsigned/invalid modules rejected (configurable)
 
 Trust model:
-  TRUSTED    — ARES official modules (bundled, pre-verified)
-  COMMUNITY  — Author-signed modules (verify with author's public key)
-  UNSIGNED   — No signature (warn or reject based on policy)
-  REVOKED    — Key has been revoked (always reject)
+  TRUSTED    - ARES official modules (bundled, pre-verified)
+  COMMUNITY  - Author-signed modules (verify with author's public key)
+  UNSIGNED   - No signature (warn or reject based on policy)
+  REVOKED    - Key has been revoked (always reject)
 
 Key storage:
-  ~/.ares/keys/trusted_keys.json    — trusted public keys registry
-  ~/.ares/keys/<key_id>.pub         — individual public key file
+  ~/.ares/keys/trusted_keys.json    - trusted public keys registry
+  ~/.ares/keys/<key_id>.pub         - individual public key file
 
 Usage:
     # Generate a key pair (module author)
@@ -190,7 +190,7 @@ class KeyRegistry:
         logger.info("trusted_key_added", key_id=key_id, author=author)
 
     def revoke_key(self, key_id: str, reason: str = "", operator: str = "") -> None:
-        """Revoke a key — all modules signed with this key will be rejected."""
+        """Revoke a key - all modules signed with this key will be rejected."""
         self._revoked.add(key_id)
         self._keys.pop(key_id, None)
         self._save()
@@ -371,7 +371,7 @@ class ModuleVerifier:
                 trust_level = TrustLevel.INVALID,
                 key_id      = sig.key_id,
                 author      = sig.author,
-                error       = "File hash mismatch — module may have been tampered with",
+                error       = "File hash mismatch - module may have been tampered with",
             )
 
         # Verify cryptographic signature
@@ -420,7 +420,7 @@ class ModuleVerifier:
         """
         if result.trust_level == TrustLevel.INVALID:
             raise ValueError(
-                f"Module {result.module_path.name!r} has invalid signature — "
+                f"Module {result.module_path.name!r} has invalid signature - "
                 f"possible tampering. Refusing to load."
             )
         if result.trust_level == TrustLevel.REVOKED:

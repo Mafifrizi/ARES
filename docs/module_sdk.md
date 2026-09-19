@@ -217,7 +217,7 @@ class MyModule(BaseModule):
         )
 
     async def run(self, **kwargs):
-        # Legacy interface — engine calls execute(ctx) instead
+        # Legacy interface - engine calls execute(ctx) instead
         ctx = ExecutionContext.for_test(**kwargs)
         result = await self.execute(ctx)
         return result.findings, result.raw
@@ -232,7 +232,7 @@ Every module must implement 3 methods:
 ### `validate(ctx: ExecutionContext) → None`
 
 Called **before** execution. Check that all required params and context fields are present.
-Raise `ModuleValidationError` if context is insufficient — engine aborts immediately.
+Raise `ModuleValidationError` if context is insufficient - engine aborts immediately.
 
 ```python
 async def validate(self, ctx: ExecutionContext) -> None:
@@ -256,7 +256,7 @@ Main execution. Receives typed context, returns structured result.
 ```python
 async def execute(self, ctx: ExecutionContext) -> ModuleResult:
     if ctx.dry_run:
-        # Always support dry_run — no real network calls
+        # Always support dry_run - no real network calls
         return ModuleResult(status="dry_run", module_id=self.MODULE_ID)
 
     # Use before_request hook (scope check + rate limit + opsec jitter)
@@ -309,7 +309,7 @@ MODULE_AUTHOR      = "alice@myorg.com"     # optional but recommended
 **MODULE_ID rules:**
 - Must use dotted format: `category.name` or `org.category.name`
 - Lowercase, alphanumeric + `.` + `_` only
-- Must be globally unique — prefix with your org name
+- Must be globally unique - prefix with your org name
 
 ---
 
@@ -358,15 +358,15 @@ class MyModule(BaseModule):
 ```
 
 **Community module limits:**
-- `CAP_NET`, `CAP_DB`, `CAP_FS` — allowed
-- `CAP_EXEC`, `CAP_PROCESS`, `CAP_UNSAFE` — **not allowed for community modules**
+- `CAP_NET`, `CAP_DB`, `CAP_FS` - allowed
+- `CAP_EXEC`, `CAP_PROCESS`, `CAP_UNSAFE` - **not allowed for community modules**
 - If you declare forbidden caps, module is rejected at load time
 
 ---
 
 ## Error Handling
 
-Always raise typed SDK errors — engine uses the type to decide retry/fallback/abort:
+Always raise typed SDK errors - engine uses the type to decide retry/fallback/abort:
 
 ```python
 from ares.sdk import (
@@ -422,7 +422,7 @@ if ctx.dry_run:
 if ctx.has("session"):
     host_state = ctx.host_state()
     if host_state and host_state.is_dc:
-        logger.info("Target is a DC — running full enumeration")
+        logger.info("Target is a DC - running full enumeration")
 ```
 
 ---

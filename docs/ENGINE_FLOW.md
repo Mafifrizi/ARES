@@ -29,8 +29,8 @@ Operator Input (CLI / API)
          │       AresEngine.run_module(module_id, campaign, params)
          │              │
          │              ├── Plugin loader resolves module class
-         │              ├── ScopeGuard.check(target) — blocks out-of-scope
-         │              ├── NoiseController.jitter() — random delay
+         │              ├── ScopeGuard.check(target) - blocks out-of-scope
+         │              ├── NoiseController.jitter() - random delay
          │              ├── module.run(**params)
          │              │       └── module.execute(ctx) → findings, raw
          │              ├── CVSS enrichment on each finding
@@ -79,7 +79,7 @@ repository-test seam may invoke it.
 
 **Chain resolution priority:**
 1. `preferred_chain` from GoalDefinition (if all modules available)
-2. `CapabilityGraph.resolve_chain()` — backward-chain from `required_outputs`
+2. `CapabilityGraph.resolve_chain()` - backward-chain from `required_outputs`
 3. `fallback_chains` from GoalDefinition
 4. Best-effort: available modules from preferred_chain
 

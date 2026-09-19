@@ -1,28 +1,28 @@
 """
-Round 4 tests — solidification pass.
+Round 4 tests - solidification pass.
 
 Covers every secondary module plus cross-cutting concerns:
-  1.  State layer          — HostState, OperatorSession, TargetHost alias,
+  1.  State layer          - HostState, OperatorSession, TargetHost alias,
                              update_host, from_snapshot, to_json, serialisation
-  2.  AttackGraph          — node/edge construction, path-finding, high-value nodes
-  3.  Fingerprinting       — EnvironmentFingerprinter, OSType, EDRVendor
-  4.  ServiceIntel         — ServiceIntelEngine, port mapping, CVE tagging
-  5.  Execution            — RemoteExecutor, ExecutionMethod, ExecutionResult
-  6.  Collaboration        — CollaborationManager, TargetLock, OperatorRole
-  7.  Knowledge base       — AttackKnowledgeBase, suggestions, EvidenceStore
-  8.  Normalizer           — ArtifactStore CRUD, HostArtifact, UserArtifact
-  9.  Replay               — AttackReplayEngine session management
-  10. Technique library    — TechniqueLibrary CRUD, MITRETactic
-  11. Checkpoint           — CheckpointManager save/load/list/purge
-  12. Worker/Cluster       — InProcessTaskQueue, ClusterController, disconnect
-  13. Marketplace          — ModuleInstaller install_as_dict, LocalRegistry
-  14. Tracing              — NoOp tracer, span, trace_module decorator
-  15. Telemetry            — MetricsCollector record + aggregate
-  16. API __init__ exports — all packages export __all__ correctly
-  17. Cross-module smoke   — import chain + symbol resolution
-  18. Data integrity       — Campaign→Finding→Report round-trip
-  19. Security/config      — AresSettings defaults, JWT config
-  20. CLI store            — verify new methods (update/from_snapshot/to_json)
+  2.  AttackGraph          - node/edge construction, path-finding, high-value nodes
+  3.  Fingerprinting       - EnvironmentFingerprinter, OSType, EDRVendor
+  4.  ServiceIntel         - ServiceIntelEngine, port mapping, CVE tagging
+  5.  Execution            - RemoteExecutor, ExecutionMethod, ExecutionResult
+  6.  Collaboration        - CollaborationManager, TargetLock, OperatorRole
+  7.  Knowledge base       - AttackKnowledgeBase, suggestions, EvidenceStore
+  8.  Normalizer           - ArtifactStore CRUD, HostArtifact, UserArtifact
+  9.  Replay               - AttackReplayEngine session management
+  10. Technique library    - TechniqueLibrary CRUD, MITRETactic
+  11. Checkpoint           - CheckpointManager save/load/list/purge
+  12. Worker/Cluster       - InProcessTaskQueue, ClusterController, disconnect
+  13. Marketplace          - ModuleInstaller install_as_dict, LocalRegistry
+  14. Tracing              - NoOp tracer, span, trace_module decorator
+  15. Telemetry            - MetricsCollector record + aggregate
+  16. API __init__ exports - all packages export __all__ correctly
+  17. Cross-module smoke   - import chain + symbol resolution
+  18. Data integrity       - Campaign→Finding→Report round-trip
+  19. Security/config      - AresSettings defaults, JWT config
+  20. CLI store            - verify new methods (update/from_snapshot/to_json)
 """
 from __future__ import annotations
 
@@ -1493,7 +1493,7 @@ class TestCrossModuleIntegration:
 
         # Bob tries to lock same target
         lock2 = mgr.acquire_lock("10.0.0.1", "op-002", "ad.dcsync")
-        assert lock2 is None  # should fail — already locked
+        assert lock2 is None  # should fail - already locked
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1532,7 +1532,7 @@ class TestCoreConfig:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 21. CLI STORE v2 — new methods
+# 21. CLI STORE v2 - new methods
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestCLIStoreV2:

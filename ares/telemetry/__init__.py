@@ -1,5 +1,5 @@
 """
-ARES — telemetry
+ARES - telemetry
 Telemetry and metrics collection
 
 Public API for this package. Import from here in production code:

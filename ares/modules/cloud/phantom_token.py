@@ -1,8 +1,8 @@
 """
-cloud.phantom_token — Hybrid Entra ID & Primary Refresh Token (PRT) Hijack
+cloud.phantom_token - Hybrid Entra ID & Primary Refresh Token (PRT) Hijack
 MITRE ATT&CK:
-  T1528 — Steal Application Access Token
-  T1606 — Forge Web Credentials
+  T1528 - Steal Application Access Token
+  T1606 - Forge Web Credentials
 
 Autonomous adversary emulation vector for hybrid cloud environments:
   1. Inspects Windows endpoint session artifacts for Primary Refresh Token (PRT) state.
@@ -48,7 +48,7 @@ logger = get_logger("ares.modules.cloud.phantom_token")
 )
 class PhantomTokenModule(BaseModule[PhantomTokenParams, ModuleResult]):
     """
-    cloud.phantom_token — Hybrid Entra ID PRT extraction and cross-boundary session takeover.
+    cloud.phantom_token - Hybrid Entra ID PRT extraction and cross-boundary session takeover.
     """
     MODULE_ID          = "cloud.phantom_token"
     MODULE_NAME        = "Hybrid Entra ID PRT Hijack"

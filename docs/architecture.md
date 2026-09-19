@@ -78,23 +78,23 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 
 | File | Purpose |
 |------|---------|
-| `engine.py` | `AresEngine` — async orchestrator, runs `ExecutionPlan` |
-| `context.py` | `ExecutionContext` — unified module input object |
+| `engine.py` | `AresEngine` - async orchestrator, runs `ExecutionPlan` |
+| `context.py` | `ExecutionContext` - unified module input object |
 | `errors.py` | Unified error hierarchy (`ModuleError`, `NetworkError`, etc.) |
-| `di.py` | `AresContainer` — dependency injection / service locator |
+| `di.py` | `AresContainer` - dependency injection / service locator |
 | `campaign.py` | `Campaign`, `Finding`, `ScopeEntry`, `NoiseProfile` |
 | `config.py` | `AresSettings` (Pydantic), `@lru_cache` singleton |
 | `noise.py` | `NoiseController`, `JitterEngine`, `RateLimiter`, `ScopeGuard` |
 | `security.py` | JWT, `DataEncryptor` (Fernet), bcrypt, sanitize_* helpers |
 | `logger.py` | structlog NDJSON, sensitive data masking |
-| `sandbox.py` | `SandboxRunner` — 4-tier module isolation |
+| `sandbox.py` | `SandboxRunner` - 4-tier module isolation |
 | `chain/chain.py` | `AttackChain`, Kahn's dependency resolver, `ChainAdvisor` |
 | `opsec/opsec.py` | UA rotation, beacon scheduler, traffic shaping |
-| `opsec/adaptive.py` | `AdaptiveOpsecEngine` — sliding window signal detection |
+| `opsec/adaptive.py` | `AdaptiveOpsecEngine` - sliding window signal detection |
 | `plugin/loader.py` | `PluginLoader`, `ModuleRegistry` |
 | `validator.py` | `FindingValidator`, confidence scoring, FP filtering |
 
-### 2. `ares/modules/base.py` — SDK Contract
+### 2. `ares/modules/base.py` - SDK Contract
 
 Every module MUST implement this interface:
 
@@ -154,12 +154,12 @@ AresError
 │   └── RateLimited (pause)
 ├── CredentialError (try next cred)
 │   ├── AuthenticationFailed (try next)
-│   ├── AccountLocked (ABORT — never retry)
+│   ├── AccountLocked (ABORT - never retry)
 │   └── CredentialExpired (skip)
 ├── ExecutionError
 │   ├── SandboxError (skip)
 │   └── WorkerCrashed (requeue)
-├── ScopeError (ABORT — never retry)
+├── ScopeError (ABORT - never retry)
 ├── OpsecError (pause/adjust profile)
 │   ├── DetectionSignal (escalate profile)
 │   └── HoneypotDetected (ABORT campaign)

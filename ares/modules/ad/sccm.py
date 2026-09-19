@@ -1,5 +1,5 @@
 """
-ad.sccm — SCCM/MECM Abuse Module
+ad.sccm - SCCM/MECM Abuse Module
 MITRE: T1078.002 (Valid Accounts: Domain Accounts)
        T1021.006 (Remote Services: WinRM)
 
@@ -25,7 +25,7 @@ Exploits Microsoft Endpoint Configuration Manager (MECM/SCCM) for:
      - This account often has local admin on ALL domain computers
      - Capture push credentials via SMB relay or by reading site config
 
-OPSEC: MEDIUM — WMI/LDAP queries are relatively quiet.
+OPSEC: MEDIUM - WMI/LDAP queries are relatively quiet.
        Application deployment is HIGH_NOISE.
 
 Dependencies: impacket (WMI, SMB), ldap3 (AD enumeration)
@@ -65,7 +65,7 @@ logger = get_logger("ares.modules.ad.sccm")
 )
 class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
     """
-    ad.sccm — SCCM/MECM enumeration and credential extraction
+    ad.sccm - SCCM/MECM enumeration and credential extraction
 
     OPSEC: MEDIUM
     MITRE: T1078.002, T1021.006
@@ -283,7 +283,7 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
                     f"Network Access Account credentials extracted from SCCM client "
                     f"policy on {naa_target}: {naa_info['naa_username']}. "
                     "NAA accounts are used by SCCM clients to access distribution points. "
-                    "They frequently have excessive privileges — test for domain admin access."
+                    "They frequently have excessive privileges - test for domain admin access."
                 ),
                 severity=Severity.CRITICAL,
                 mitre_technique="T1078.002", mitre_tactic="Credential Access",
@@ -291,7 +291,7 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
                           "source": naa_target, "encrypted": naa_info.get("encrypted", True)},
                 host=naa_target, confidence=0.95,
                 remediation=(
-                    "1. Remove NAA configuration — use Enhanced HTTP instead. "
+                    "1. Remove NAA configuration - use Enhanced HTTP instead. "
                     "2. If NAA is required, use a dedicated account with minimal permissions. "
                     "3. Rotate NAA password immediately. "
                     "4. Audit NAA account permissions in Active Directory."
@@ -546,7 +546,7 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         except Exception as exc:
             err = str(exc).lower()
             if "access denied" in err or "access_denied" in err:
-                result["error"] = f"Access denied on {target} — need local admin"
+                result["error"] = f"Access denied on {target} - need local admin"
             else:
                 result["error"] = str(exc)[:200]
         return result
@@ -562,7 +562,7 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     sock.settimeout(3)
-                    # DHCP PXE discovery — send DHCP DISCOVER with PXE vendor class
+                    # DHCP PXE discovery - send DHCP DISCOVER with PXE vendor class
                     # Check if port 4011 (PXE) or 67 (DHCP) responds
                     for port in [4011, 67]:
                         try:

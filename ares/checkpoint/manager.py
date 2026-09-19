@@ -80,7 +80,7 @@ class CheckpointManifest:
 class CheckpointData:
     """Full serialized campaign state."""
     manifest:      CheckpointManifest = field(default_factory=CheckpointManifest)
-    campaign_id:   str = ""          # convenience field — mirrors manifest.campaign_id
+    campaign_id:   str = ""          # convenience field - mirrors manifest.campaign_id
     vault:         dict[str, Any] = field(default_factory=dict)  # encrypted credential store
     campaign:      dict[str, Any]         = field(default_factory=dict)
     session:       dict[str, Any]         = field(default_factory=dict)  # OperatorSession.snapshot()
@@ -124,7 +124,7 @@ class CheckpointManager:
         data = mgr.load(campaign_id)
     """
 
-    # Fixed salt for checkpoint key derivation — deterministic so same key always
+    # Fixed salt for checkpoint key derivation - deterministic so same key always
     # produces same Fernet key across restarts (no salt storage required).
     _KDF_SALT = b"ares-checkpoint-manager-v1-salt"
 
@@ -141,7 +141,7 @@ class CheckpointManager:
         else:
             raise TypeError(f"encryption_key must be str or bytes, got {type(encryption_key)}")
 
-        # PBKDF2-HMAC-SHA256 — consistent with security.DataEncryptor (100k iterations)
+        # PBKDF2-HMAC-SHA256 - consistent with security.DataEncryptor (100k iterations)
         kdf = PBKDF2HMAC(
             algorithm=_hashes.SHA256(),
             length=32,
@@ -175,7 +175,7 @@ class CheckpointManager:
 
         ckpt_path.write_bytes(encrypted)
 
-        # Update "latest" pointer — use a regular file copy (Windows doesn't always support symlinks)
+        # Update "latest" pointer - use a regular file copy (Windows doesn't always support symlinks)
         latest = campaign_dir / f"latest{CHECKPOINT_EXT}"
         try:
             import shutil as _shutil
@@ -336,7 +336,7 @@ def _build_checkpoint_full(
         manifest        = manifest,
         session         = session_snapshot,
         campaign        = {"id": campaign_id, "name": campaign_name},
-        credential_ids  = [],   # IDs only — secrets stay in vault
+        credential_ids  = [],   # IDs only - secrets stay in vault
         pending_tasks   = pending_tasks or [],
         completed_steps = completed_steps or [],
         timeline        = timeline or [],
@@ -352,8 +352,8 @@ def build_checkpoint(
 ) -> "CheckpointData":
     """
     Flexible checkpoint builder. Accepts:
-      build_checkpoint(session)                           — unit test style
-      build_checkpoint(campaign_id=..., operator=..., ...) — integration style
+      build_checkpoint(session)                           - unit test style
+      build_checkpoint(campaign_id=..., operator=..., ...) - integration style
     """
     from ares.state.target_state import OperatorSession
 

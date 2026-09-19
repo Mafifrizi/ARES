@@ -236,7 +236,7 @@
   overflow: hidden;
 }
 
-/* CRT Scanline Overlay — Industrial-Brutalist requirement */
+/* CRT Scanline Overlay - Industrial-Brutalist requirement */
 .cobalt-canvas-area::before {
   content: "";
   position: absolute;

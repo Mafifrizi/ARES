@@ -187,7 +187,7 @@ class TaskQueue:
             self._done[task_id] = task
             # Remove from worker's current tasks
             if task.assigned_to:
-                for w in []:   # injected reference needed — see WorkerController
+                for w in []:   # injected reference needed - see WorkerController
                     if w.worker_id == task.assigned_to:
                         w.current_tasks = [t for t in w.current_tasks if t != task_id]
         logger.info("task_complete", task_id=task_id)
@@ -210,7 +210,7 @@ class TaskQueue:
                 logger.error("task_permanently_failed", task_id=task_id, error=error)
 
     async def requeue_worker_tasks(self, worker_id: str) -> int:
-        """Called when a worker dies — requeue all its active tasks."""
+        """Called when a worker dies - requeue all its active tasks."""
         async with self._lock:
             requeued = 0
             for task_id, task in list(self._active.items()):

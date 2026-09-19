@@ -1,5 +1,5 @@
 """
-ARES — modules.cloud
+ARES - modules.cloud
 Cloud attack modules (AWS, Azure, GCP)
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

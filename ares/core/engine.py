@@ -437,7 +437,7 @@ class AresEngine:
             self.load_modules()
         if self._registry is None:
             raise RuntimeError(
-                "ModuleRegistry not initialised — call load_modules() before accessing registry"
+                "ModuleRegistry not initialised - call load_modules() before accessing registry"
             )
         return self._registry
 
@@ -506,7 +506,7 @@ class AresEngine:
                 error=f"Module '{module_id}' not found. Run: ares module list",
             )
 
-        # ── RBAC check — role must be allowed to run this module ──────────
+        # ── RBAC check - role must be allowed to run this module ──────────
         from ares.collab.manager import can_role_run_module
 
         if not can_role_run_module(actor_role, module_id, self.registry):
@@ -524,8 +524,8 @@ class AresEngine:
                 ),
             )
 
-        # ── Scope pre-check — enforce before any module code runs ────────
-        # Cloud/reporting modules use API credentials, not host IPs — skip scope check
+        # ── Scope pre-check - enforce before any module code runs ────────
+        # Cloud/reporting modules use API credentials, not host IPs - skip scope check
         _NO_SCOPE_CATEGORIES = {"cloud", "reporting", "recon"}
         _target = params.get("target", "") or params.get("dc", "") or params.get("host", "")
         _module_category = (
@@ -566,7 +566,7 @@ class AresEngine:
         t0 = time.monotonic()
 
         try:
-            # Build ExecutionContext — new v0.9.0+ interface
+            # Build ExecutionContext - new v0.9.0+ interface
             ctx = ExecutionContext.build(
                 campaign=campaign,
                 target=params.get("dc") or params.get("host") or params.get("target", ""),
@@ -585,7 +585,7 @@ class AresEngine:
             )
 
             # ── validate() before execute() ───────────────────────────
-            # Always call validate() first — lets modules fail fast with
+            # Always call validate() first - lets modules fail fast with
             # informative errors before any network activity happens.
             # skip_validation=True is an escape hatch for tests / retries.
             if not skip_validation:
@@ -626,7 +626,7 @@ class AresEngine:
                     )
             # ── end validate ───────────────────────────────────────────
 
-            # Call execute(ctx) — preferred interface.
+            # Call execute(ctx) - preferred interface.
             # Falls back to run(**ctx.params) via BaseModule.execute() default
             # for modules that haven't migrated yet.
             mark_effect_started(admitted_context)
@@ -830,7 +830,7 @@ class AresEngine:
             except Exception as teardown_exc:
                 logger.warning("engine_pivot_teardown_failed", error=str(teardown_exc)[:80])
 
-        # ALWAYS clean up credential artifacts — regardless of which modules ran.
+        # ALWAYS clean up credential artifacts - regardless of which modules ran.
         # This runs unconditionally to prevent accumulation in 24/7 operation.
         try:
             from ares.core.security import cleanup_credential_artifacts
@@ -853,7 +853,7 @@ class AresEngine:
         """
         Validate each module's REQUIRES are satisfied by earlier stages.
         Returns list of warning dicts with module_id, missing_requirement, suggested_provider.
-        Called automatically in run_plan — warnings logged, never blocking.
+        Called automatically in run_plan - warnings logged, never blocking.
         """
         warnings_out: list[dict[str, Any]] = []
         available_outputs: set[str] = set()
@@ -878,7 +878,7 @@ class AresEngine:
                                 "missing_requirement": req,
                                 "suggested_provider": suggested,
                                 "message": (
-                                    f"'{mid}' requires '{req}' — "
+                                    f"'{mid}' requires '{req}' - "
                                     f"add '{suggested}' to an earlier stage first"
                                 ),
                             }
@@ -896,7 +896,7 @@ class AresEngine:
         global_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
-        Validate a plan without executing — pre-flight check.
+        Validate a plan without executing - pre-flight check.
 
         Returns:
             dry_run:          True
@@ -1447,7 +1447,7 @@ class AresEngine:
     ) -> EngineModuleResult:
         if self._semaphore is None:
             raise RuntimeError(
-                "Engine semaphore not initialised — engine was not started correctly"
+                "Engine semaphore not initialised - engine was not started correctly"
             )
         async with self._semaphore:
             if on_progress:
@@ -1533,7 +1533,7 @@ CAMPAIGN_TEMPLATES: dict[str, dict] = {
         ],
     },
     "ad_full_compromise": {
-        "description": "Full Active Directory compromise — recon to domain admin",
+        "description": "Full Active Directory compromise - recon to domain admin",
         "stages": [
             {
                 "name": "recon",
@@ -1579,7 +1579,7 @@ CAMPAIGN_TEMPLATES: dict[str, dict] = {
         ],
     },
     "cloud_assessment": {
-        "description": "Multi-cloud security assessment — AWS, Azure, GCP",
+        "description": "Multi-cloud security assessment - AWS, Azure, GCP",
         "stages": [
             {
                 "name": "cloud_enum",
@@ -1605,7 +1605,7 @@ CAMPAIGN_TEMPLATES: dict[str, dict] = {
         ],
     },
     "assumed_breach": {
-        "description": "Assumed breach — start with valid creds, test lateral + escalation",
+        "description": "Assumed breach - start with valid creds, test lateral + escalation",
         "stages": [
             {
                 "name": "situational_awareness",

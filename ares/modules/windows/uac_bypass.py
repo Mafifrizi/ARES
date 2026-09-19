@@ -3,9 +3,9 @@ Windows UAC Configuration Audit & Bypass Technique Enumeration
 MITRE: T1548.002 (Bypass User Account Control)
 
 Connects to target via impacket remote registry to read UAC configuration:
-  - EnableLUA         — whether UAC is enabled at all
-  - ConsentPromptBehaviorAdmin  — UAC consent level (0–5)
-  - PromptOnSecureDesktop       — whether secure desktop is used
+  - EnableLUA         - whether UAC is enabled at all
+  - ConsentPromptBehaviorAdmin  - UAC consent level (0–5)
+  - PromptOnSecureDesktop       - whether secure desktop is used
 
 Based on OS version and UAC level, reports which bypass techniques
 are applicable (fodhelper, sdclt, eventvwr, etc.).
@@ -14,7 +14,7 @@ This module is DETECTION AND ENUMERATION ONLY.
 It does NOT perform any bypass or privilege escalation.
 Operator must assess findings and decide on further action.
 
-OPSEC: LOW — reads registry remotely, no process execution on target.
+OPSEC: LOW - reads registry remotely, no process execution on target.
 Generates: Event 4688 (process creation, if auditing enabled) when
 impacket opens SMB connection. No more.
 """
@@ -44,12 +44,12 @@ logger = get_logger("ares.modules.windows.uac_bypass")
 
 # ── UAC consent level descriptions ────────────────────────────────────────────
 _CONSENT_LEVEL: dict[int, tuple[str, str]] = {
-    0: ("No UAC prompt — silently elevates",              "CRITICAL"),
+    0: ("No UAC prompt - silently elevates",              "CRITICAL"),
     1: ("Prompt for credentials on secure desktop",       "MEDIUM"),
     2: ("Prompt for consent on secure desktop",           "MEDIUM"),
     3: ("Prompt for credentials (no secure desktop)",     "HIGH"),
     4: ("Prompt for consent (no secure desktop)",         "HIGH"),
-    5: ("Default — prompt only for non-Windows binaries", "HIGH"),
+    5: ("Default - prompt only for non-Windows binaries", "HIGH"),
 }
 
 # ── Bypass techniques per Windows version & UAC level ─────────────────────────
@@ -110,7 +110,7 @@ _BYPASS_TECHNIQUES: list[dict[str, Any]] = [
 )
 class UACBypassModule(BaseModule):
     """
-    windows.uac_bypass — Read UAC configuration via remote registry and enumerate applicable bypass techniques — detectio
+    windows.uac_bypass - Read UAC configuration via remote registry and enumerate applicable bypass techniques - detectio
 
     OPSEC: LOW
     MITRE: "T1548.002", "T1082"
@@ -122,7 +122,7 @@ class UACBypassModule(BaseModule):
     MODULE_CATEGORY    = "windows"
     MODULE_DESCRIPTION = (
         "Read UAC configuration via remote registry and enumerate "
-        "applicable bypass techniques — detection and enumeration only"
+        "applicable bypass techniques - detection and enumeration only"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
@@ -149,7 +149,7 @@ class UACBypassModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -289,7 +289,7 @@ class UACBypassModule(BaseModule):
                 hBaseRegCloseKey,
             )
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("uac_bypass_audit_start", target=target, username=username)
         audit("uac_audit", actor=username, source="operator",
@@ -412,7 +412,7 @@ class UACBypassModule(BaseModule):
                     f"User Account Control (UAC) is completely disabled on {target} "
                     f"({product}). "
                     "Any process run by a local administrator already runs with "
-                    "full elevation — no bypass needed. "
+                    "full elevation - no bypass needed. "
                     "This is a severe misconfiguration on any server or workstation."
                 ),
                 severity=Severity.CRITICAL,
@@ -449,7 +449,7 @@ class UACBypassModule(BaseModule):
             extra = ""
             if not secure_desktop:
                 extra = (
-                    " PromptOnSecureDesktop is DISABLED — "
+                    " PromptOnSecureDesktop is DISABLED - "
                     "UAC prompt appears on regular desktop, "
                     "making it susceptible to UI spoofing attacks."
                 )
@@ -457,7 +457,7 @@ class UACBypassModule(BaseModule):
             self.finding(
                 title=(
                     f"UAC Level {consent_level} on {target}: "
-                    f"{desc_text.split(' — ')[0]}"
+                    f"{desc_text.split(' - ')[0]}"
                 ),
                 description=(
                     f"{target} ({product} build {build}) has UAC enabled "
@@ -515,7 +515,7 @@ class UACBypassModule(BaseModule):
                     remediation=(
                         "Set UAC to 'Always notify' (ConsentPromptBehaviorAdmin=2) "
                         "and enable Secure Desktop (PromptOnSecureDesktop=1). "
-                        "Patch Windows regularly — many bypass techniques are "
+                        "Patch Windows regularly - many bypass techniques are "
                         "periodically patched by Microsoft."
                     ),
                     host=target, confidence=0.9,

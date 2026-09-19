@@ -4,15 +4,15 @@ ARES Security Critical Path Tests
 Test suite for security-critical paths that must pass before every release.
 
 Coverage:
-    1. Token revocation  — logout → blacklist → reuse rejected
-    2. Dashboard auth    — every API endpoint requires valid token
-    3. RBAC enforcement  — per-role, per-endpoint access control
-    4. Refresh rate limit — 429 after N rapid refresh attempts
-    5. Vault persistence  — save/restore credential cycle
-    6. validate() enforcement — engine calls validate() before execute()
+    1. Token revocation  - logout → blacklist → reuse rejected
+    2. Dashboard auth    - every API endpoint requires valid token
+    3. RBAC enforcement  - per-role, per-endpoint access control
+    4. Refresh rate limit - 429 after N rapid refresh attempts
+    5. Vault persistence  - save/restore credential cycle
+    6. validate() enforcement - engine calls validate() before execute()
 
 Pattern: httpx.ASGITransport + dependency_overrides (no lifespan needed).
-All tests are self-contained — no shared mutable state between classes.
+All tests are self-contained - no shared mutable state between classes.
 """
 
 from __future__ import annotations
@@ -271,14 +271,14 @@ def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 1 — TOKEN REVOCATION
+# TEST CLASS 1 - TOKEN REVOCATION
 # ══════════════════════════════════════════════════════════════════════
 
 
 class TestTokenRevocation:
     """
     After logout, a still-valid (not-expired) access token must be rejected.
-    The JTI blacklist is the mechanism — these tests verify it is enforced.
+    The JTI blacklist is the mechanism - these tests verify it is enforced.
     """
 
     def setup_method(self):
@@ -302,7 +302,7 @@ class TestTokenRevocation:
                 r = await c.get("/auth/me", headers=_auth("alice", "operator"))
             assert r.status_code == 401, (
                 f"Revoked token must return 401, got {r.status_code}. "
-                "Logout is ineffective — token still works after revocation!"
+                "Logout is ineffective - token still works after revocation!"
             )
 
         _run(_run_test())
@@ -349,14 +349,14 @@ class TestTokenRevocation:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 2 — DASHBOARD AUTHENTICATION
+# TEST CLASS 2 - DASHBOARD AUTHENTICATION
 # ══════════════════════════════════════════════════════════════════════
 
 
 class TestDashboardAuthentication:
     """
     Every dashboard /api/* endpoint must return 401 without a valid token.
-    GET / (HTML shell) is deliberately public — SPA pattern, no sensitive data.
+    GET / (HTML shell) is deliberately public - SPA pattern, no sensitive data.
     """
 
     PROTECTED = [
@@ -424,7 +424,7 @@ class TestDashboardAuthentication:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 3 — RBAC ENFORCEMENT PER ROLE
+# TEST CLASS 3 - RBAC ENFORCEMENT PER ROLE
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -614,7 +614,7 @@ class TestRBACEnforcement:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 4 — REFRESH TOKEN RATE LIMITING
+# TEST CLASS 4 - REFRESH TOKEN RATE LIMITING
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -665,13 +665,13 @@ class TestRefreshTokenRateLimit:
                             "429 response must include Retry-After header"
                         )
                         return
-            pytest.fail("Never received 429 — rate limiting not working")
+            pytest.fail("Never received 429 - rate limiting not working")
 
         _run(_run_test())
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 5 — CREDENTIAL VAULT PERSISTENCE
+# TEST CLASS 5 - CREDENTIAL VAULT PERSISTENCE
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -754,7 +754,7 @@ class TestCredentialVaultPersistence:
             }
         ]
 
-        # Vault B: restore from DB — share salt/fernet for compatibility
+        # Vault B: restore from DB - share salt/fernet for compatibility
         vault_b = CredentialVault(encryption_key=enc_key)
         vault_b._salt = vault_a._salt
         vault_b._salt_hex = vault_a._salt_hex
@@ -820,7 +820,7 @@ class TestCredentialVaultPersistence:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# TEST CLASS 6 — validate() ENFORCEMENT
+# TEST CLASS 6 - validate() ENFORCEMENT
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -888,7 +888,7 @@ class TestValidateEnforcement:
                 dispatch_context=_mint_test_dispatch_context(
                     engine, campaign.id, "test.strict_validate"
                 ),
-                # No required_param — validate() must fail
+                # No required_param - validate() must fail
             )
             assert len(validate_calls) == 1, "validate() must be called exactly once"
             assert len(execute_calls) == 0, "execute() must NOT run when validate() raises"

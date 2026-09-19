@@ -1,18 +1,18 @@
 """
-ARES Persistence Module — Windows Scheduled Task (T1053.005)
+ARES Persistence Module - Windows Scheduled Task (T1053.005)
                         + Registry Run Key  (T1547.001)
 
 Scheduled Task (ScheduledTaskPersistence):
-  impacket dcerpc.v5.tsch — connect \\pipe\\atsvc, bind TSCHS UUID,
+  impacket dcerpc.v5.tsch - connect \\pipe\\atsvc, bind TSCHS UUID,
   hSchRpcRegisterTask() with XML task definition that runs hidden at LOGON.
 
 Registry Run Key (RegistryRunKeyPersistence):
-  impacket dcerpc.v5.rrp — connect \\pipe\\winreg, bind RRP UUID,
+  impacket dcerpc.v5.rrp - connect \\pipe\\winreg, bind RRP UUID,
   hOpenLocalMachine() → hBaseRegOpenKey(Run key) → hBaseRegSetValue() → hBaseRegCloseKey().
 
 MITRE ATT&CK:
-  T1053.005 — Scheduled Task/Job: Scheduled Task
-  T1547.001 — Boot or Logon Autostart: Registry Run Keys
+  T1053.005 - Scheduled Task/Job: Scheduled Task
+  T1547.001 - Boot or Logon Autostart: Registry Run Keys
 """
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ _TASK_XML_TEMPLATE = """\
 def _tsch_register_sync(target: str, username: str, password: str,
                         domain: str, lmhash: str, nthash: str,
                         task_name: str, command: str) -> None:
-    """Register a scheduled task via impacket tsch RPC. Sync — call from run_in_executor."""
+    """Register a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
     from impacket.dcerpc.v5 import transport, tsch     # type: ignore[import]
     from impacket.dcerpc.v5.dtypes import NULL
 
@@ -110,7 +110,7 @@ def _tsch_register_sync(target: str, username: str, password: str,
 )
 class ScheduledTaskPersistence(BaseModule):
     """
-    persistence.scheduled_task — Register a Windows scheduled task that executes at user logon via impacket tsch RPC (T1053.005)
+    persistence.scheduled_task - Register a Windows scheduled task that executes at user logon via impacket tsch RPC (T1053.005)
 
     OPSEC: MEDIUM
     MITRE: "T1053.005"
@@ -163,7 +163,7 @@ class ScheduledTaskPersistence(BaseModule):
         if noise == NoiseProfile.STEALTH:
             score = 0.3
             risk = "high_noise"
-            blockers.append("Scheduled task registration generates Windows Security Event ID 4698 — blocked in STEALTH")
+            blockers.append("Scheduled task registration generates Windows Security Event ID 4698 - blocked in STEALTH")
             recommendations.append("persistence.wmi_subscription")
 
         session = getattr(ctx, "session", None)
@@ -202,7 +202,7 @@ class ScheduledTaskPersistence(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "persistence.scheduled_task requires 'target' — IP of Windows host.",
+                "persistence.scheduled_task requires 'target' - IP of Windows host.",
                 module_id=self.MODULE_ID, field="target",
             )
         if not ctx.params.get("username"):
@@ -444,7 +444,7 @@ def _rrp_set_run_key(target: str, username: str, password: str,
 )
 class RegistryRunKeyPersistence(BaseModule):
     """
-    persistence.registry_run — Add payload to HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
+    persistence.registry_run - Add payload to HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
 
     OPSEC: MEDIUM
     MITRE: T1547.001

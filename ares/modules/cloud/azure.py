@@ -1,10 +1,10 @@
 """
-Azure Recon & Attack Module — Production Implementation
+Azure Recon & Attack Module - Production Implementation
 AAD users, storage misconfig, RBAC over-permission, NSG rules.
 
 Authentication (automatic priority order):
-  1. ClientSecretCredential — if tenant_id + client_id + client_secret supplied
-  2. DefaultAzureCredential — env vars / managed identity / Azure CLI / VS Code
+  1. ClientSecretCredential - if tenant_id + client_id + client_secret supplied
+  2. DefaultAzureCredential - env vars / managed identity / Azure CLI / VS Code
 
 Required optional extras:
     pip install ares-redteam[cloud]
@@ -56,7 +56,7 @@ def _get_credential(tenant_id=None, client_id=None, client_secret=None):
 )
 class AzureModule(BaseModule):
     """
-    cloud.azure — AAD enum, storage misconfig, RBAC audit, NSG rules
+    cloud.azure - AAD enum, storage misconfig, RBAC audit, NSG rules
 
     OPSEC: LOW
     MITRE: "T1526", "T1530", "T1580", "T1078.004"
@@ -92,7 +92,7 @@ class AzureModule(BaseModule):
                         __import__("os").environ.get("AZURE_CLIENT_ID"))
         if not has_cred:
             raise ModuleValidationError(
-                "cloud.azure requires Azure credentials — set subscription_id or "
+                "cloud.azure requires Azure credentials - set subscription_id or "
                 "AZURE_CLIENT_ID/AZURE_CLIENT_SECRET/AZURE_TENANT_ID env vars.",
                 module_id=self.MODULE_ID, field="subscription_id",
             )
@@ -208,7 +208,7 @@ class AzureModule(BaseModule):
     async def run(self, subscription_id: str, tenant_id: str | None = None,
                   client_id: str | None = None, client_secret: str | None = None,
                   **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
-        # Note: before_request() intentionally not called — cloud modules use
+        # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
         logger.info("azure_recon_start", subscription_id=subscription_id[:8] + "...")

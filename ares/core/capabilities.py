@@ -12,13 +12,13 @@ The sandbox enforces these at runtime:
     - CAP_FS     → allowed to read/write local filesystem
     - CAP_DB     → allowed to query ARES internal database
     - CAP_PROCESS → allowed to inspect/kill local processes (linux privesc)
-    - CAP_UNSAFE  → no restrictions (HIGH_NOISE modules only — must be explicit)
+    - CAP_UNSAFE  → no restrictions (HIGH_NOISE modules only - must be explicit)
 
 Policy enforcement points:
-    1. PluginLoader  — verifies declared capabilities are acceptable for trust level
-    2. SandboxRunner — enforces caps via seccomp + resource limits
-    3. WorkerNode    — worker dispatches to capability-matched workers
-    4. API endpoint  — operator role must have >= module's required caps
+    1. PluginLoader  - verifies declared capabilities are acceptable for trust level
+    2. SandboxRunner - enforces caps via seccomp + resource limits
+    3. WorkerNode    - worker dispatches to capability-matched workers
+    4. API endpoint  - operator role must have >= module's required caps
 
 Principles:
     - Default: DENY ALL capabilities not explicitly declared
@@ -96,10 +96,10 @@ class CapabilityPolicy:
     Enforces capability policy at module load time and execution time.
 
     Trust levels:
-        builtin    — full capabilities including CAP_UNSAFE
-        community  — CAP_NET, CAP_DB, CAP_FS only
-        external   — CAP_NET, CAP_DB only (no filesystem writes)
-        unsigned   — CAP_NET only (strictest)
+        builtin    - full capabilities including CAP_UNSAFE
+        community  - CAP_NET, CAP_DB, CAP_FS only
+        external   - CAP_NET, CAP_DB only (no filesystem writes)
+        unsigned   - CAP_NET only (strictest)
     """
 
     TRUST_LEVEL_CAPS: dict[str, frozenset[Capability]] = {

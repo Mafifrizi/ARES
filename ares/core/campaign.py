@@ -1,5 +1,5 @@
 """
-Campaign — tracks engagements, findings, scope, and audit trail.
+Campaign - tracks engagements, findings, scope, and audit trail.
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class Finding(BaseModel):
         """
         Weighted risk = severity.score × confidence.
 
-        This is the legacy/operational metric — higher means more urgent.
+        This is the legacy/operational metric - higher means more urgent.
         It is used by the AttackPlanner to prioritize suggested next steps
         and in CLI/dashboard summaries.
 
@@ -89,7 +89,7 @@ class Finding(BaseModel):
         return enrich_finding_with_cvss(self)
 
     def to_dict(self) -> dict:
-        """Serialize to dict — compatible with sandbox/engine code that calls .to_dict()."""
+        """Serialize to dict - compatible with sandbox/engine code that calls .to_dict()."""
         return self.model_dump(mode="json")
 
     def mark_false_positive(self, reason: str) -> None:
@@ -121,7 +121,7 @@ class ScopeEntry(BaseModel):
 
 
 class AuditEntry(BaseModel):
-    """Immutable audit log entry — tracks every action."""
+    """Immutable audit log entry - tracks every action."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     actor: str = "system"
@@ -225,7 +225,7 @@ class Campaign(BaseModel):
             if target and target in explicit_hosts:
                 return True
 
-            # Not a valid IP literal — attempt DNS resolution
+            # Not a valid IP literal - attempt DNS resolution
             import socket as _socket
             import logging as _logging
             _log = _logging.getLogger("ares.campaign")
@@ -235,7 +235,7 @@ class Campaign(BaseModel):
                 try:
                     _loop = _asyncio.get_event_loop()
                     if _loop.is_running():
-                        # Running inside async context — use run_in_executor to avoid blocking
+                        # Running inside async context - use run_in_executor to avoid blocking
                         import concurrent.futures as _cf
                         with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
                             results = _pool.submit(
@@ -247,7 +247,7 @@ class Campaign(BaseModel):
                 except RuntimeError:
                     results = _socket.getaddrinfo(ip, None, _socket.AF_INET, _socket.SOCK_STREAM)
                 if not results:
-                    _log.warning("scope_check_dns_no_result: hostname %r resolved to nothing — BLOCKING", ip)
+                    _log.warning("scope_check_dns_no_result: hostname %r resolved to nothing - BLOCKING", ip)
                     return False  # Fail closed
                 resolved_ip = results[0][4][0]
                 from netaddr import IPAddress as _IPAddr
@@ -263,14 +263,14 @@ class Campaign(BaseModel):
                 return in_scope
             except (_socket.gaierror, TimeoutError, Exception) as dns_exc:
                 _log.warning(
-                    "scope_check_dns_failed: hostname %r could not be resolved (%s) — BLOCKING "
+                    "scope_check_dns_failed: hostname %r could not be resolved (%s) - BLOCKING "
                     "(add explicit IP to scope or ensure DNS is available)",
                     ip, str(dns_exc)[:80],
                 )
-                return False  # Fail closed — unresolvable hostname is not in scope
+                return False  # Fail closed - unresolvable hostname is not in scope
 
     def check(self, ip: str) -> bool:
-        """Alias for is_in_scope — used by guardrail consumers."""
+        """Alias for is_in_scope - used by guardrail consumers."""
         return self.is_in_scope(ip)
 
     def summary(self) -> dict[str, int]:

@@ -1,14 +1,14 @@
 """
-ares.strategy — Autonomous Engagement Strategy Engine
+ares.strategy - Autonomous Engagement Strategy Engine
 
 Re-exports all public symbols from submodules for backward compatibility.
 Internal structure:
-  strategy/models.py         — ModuleOutcome, RoundResult, EngagementResult, DetectionSpikeError
-  strategy/knowledge_base.py — OutcomeKnowledgeBase
-  strategy/notifier.py       — OperatorNotifier
-  strategy/engine.py         — StrategyEngine
-  strategy/enforcer.py       — ConstitutionEnforcer
-  strategy/target_state.py   — TargetStateMap
+  strategy/models.py         - ModuleOutcome, RoundResult, EngagementResult, DetectionSpikeError
+  strategy/knowledge_base.py - OutcomeKnowledgeBase
+  strategy/notifier.py       - OperatorNotifier
+  strategy/engine.py         - StrategyEngine
+  strategy/enforcer.py       - ConstitutionEnforcer
+  strategy/target_state.py   - TargetStateMap
 """
 
 from ares.strategy.models import (           # noqa: F401

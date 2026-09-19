@@ -52,7 +52,7 @@ class TestContainerEscape:
         with patch("builtins.open", create=True) as mock_open:
             mock_open.return_value.__enter__.return_value.read.return_value = fake_status
             result = await module._check_privileged()
-        # Not fully privileged (not 0x3FFFFFFFFF) — just a check the method runs
+        # Not fully privileged (not 0x3FFFFFFFFF) - just a check the method runs
         assert "CapEff" in result or "error" in result
 
     @pytest.mark.asyncio

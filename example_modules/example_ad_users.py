@@ -52,14 +52,14 @@ class ExampleADUserModule(BaseModule):
     Performs LDAP user enumeration against an Active Directory domain.
 
     Parameters (in ctx.params):
-        dc      — IP or hostname of a Domain Controller
-        domain  — AD domain name (CORP.LOCAL)
-        ldap_filter — optional custom LDAP filter (default: all users)
-        max_results — max users to return (default: 1000)
+        dc      - IP or hostname of a Domain Controller
+        domain  - AD domain name (CORP.LOCAL)
+        ldap_filter - optional custom LDAP filter (default: all users)
+        max_results - max users to return (default: 1000)
 
     Outputs:
         Findings: one Finding per sensitive user found
-        ModuleResult.new_credentials — cleared accounts (no pre-auth)
+        ModuleResult.new_credentials - cleared accounts (no pre-auth)
     """
 
     async def validate(self, ctx: ExecutionContext) -> None:
@@ -228,7 +228,7 @@ class ExampleADUserModule(BaseModule):
             module_id = self.MODULE_ID,
         )
 
-    # Legacy interface — engine calls execute(ctx) but run(**kwargs) kept for compat
+    # Legacy interface - engine calls execute(ctx) but run(**kwargs) kept for compat
     async def run(self, **kwargs: Any):
         ctx = ExecutionContext.for_test(
             target    = kwargs.get("dc", ""),

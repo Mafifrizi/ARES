@@ -1,5 +1,5 @@
 """
-ARES — worker
+ARES - worker
 Distributed worker cluster
 
 Public API for this package. Import from here in production code:

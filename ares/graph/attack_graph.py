@@ -130,7 +130,7 @@ class AttackGraph:
         "cloud":      "#06b6d4",   # cyan
     }
 
-    # High-value targets — finding a path to these is the goal
+    # High-value targets - finding a path to these is the goal
     HIGH_VALUE_LABELS = {
         "Domain Admins", "Enterprise Admins", "Schema Admins",
         "Administrators", "krbtgt", "NTDS.dit",
@@ -296,7 +296,7 @@ class AttackGraph:
     def build_from_store(self, store: ArtifactStore) -> "AttackGraph":
         """
         Automatically build graph from all artifacts in a store.
-        This is the main entry point — call after a campaign run.
+        This is the main entry point - call after a campaign run.
         """
         for host in store.hosts():
             self._add_host(host)
@@ -527,7 +527,7 @@ class AttackGraph:
         return self.shortest_attack_path(src_id, tgt_id)
 
     def _find_node_by_label(self, label: str) -> str | None:
-        """Fuzzy label lookup — returns first matching node ID."""
+        """Fuzzy label lookup - returns first matching node ID."""
         label_lower = label.lower()
         # Exact match first
         for nid, data in self._g.nodes(data=True):
@@ -627,7 +627,7 @@ class AttackGraph:
         ]
 
     def riskiest_users(self, top_n: int = 10) -> list[GraphNode]:
-        """Users sorted by risk score — best attack starting points."""
+        """Users sorted by risk score - best attack starting points."""
         users = [
             n for n in self._nodes.values()
             if n.node_type in ("user", "service_account")

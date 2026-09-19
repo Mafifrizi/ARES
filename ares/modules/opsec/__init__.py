@@ -1,5 +1,5 @@
 """
-ARES — modules.opsec
+ARES - modules.opsec
 OPSEC and detection analysis modules.
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

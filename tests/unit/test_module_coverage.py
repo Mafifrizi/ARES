@@ -6,7 +6,7 @@ Strategy: each module gets 3 tests minimum:
   2. dry_run=True returns ModuleResult(status='dry_run') without network
   3. MODULE_ID, OPSEC_LEVEL, MITRE_TECHNIQUES are correctly declared
 
-These are not integration tests — no real network calls, no real AD/SSH/cloud.
+These are not integration tests - no real network calls, no real AD/SSH/cloud.
 They verify the module can be imported, instantiated, and wired correctly.
 """
 from __future__ import annotations
@@ -486,11 +486,11 @@ class TestLocalAdminCredsConsistency:
                 cls = getattr(mod, cls_name)
                 requires = getattr(cls, "REQUIRES", [])
                 assert "local_admin_cred" not in requires, (
-                    f"{cls_name}.REQUIRES contains 'local_admin_cred' (singular) — "
+                    f"{cls_name}.REQUIRES contains 'local_admin_cred' (singular) - "
                     f"must be 'local_admin_creds' (plural) to match planner.py capability map"
                 )
             except ImportError:
-                pass   # optional deps not installed — skip
+                pass   # optional deps not installed - skip
 
 
 class TestDashboardModuleSchemaContracts:

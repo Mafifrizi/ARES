@@ -1,5 +1,5 @@
 """
-ai.autonomous_planner — LLM-Powered Attack Chain Orchestration
+ai.autonomous_planner - LLM-Powered Attack Chain Orchestration
 
 Reads all campaign context (artifacts, credentials, findings, failed modules,
 network topology) and sends to an LLM API to dynamically plan the next attack
@@ -14,20 +14,20 @@ This module connects all existing ARES building blocks:
   CredentialVault → available credentials with privilege scores
   ModuleChain    → execution of the AI-generated plan
 
-LLM operates in SUGGEST mode (not autonomous executor) — every plan
+LLM operates in SUGGEST mode (not autonomous executor) - every plan
 requires operator review before execution unless auto_approve=True.
 
-MITRE: T1591 (Gather Victim Org Info — context aggregation)
+MITRE: T1591 (Gather Victim Org Info - context aggregation)
 OPSEC: LOCAL (LLM API call only, no direct target network contact)
 
 Supported LLM backends:
-  - claude    (Anthropic Claude — default)
+  - claude    (Anthropic Claude - default)
   - openai    (OpenAI GPT-4)
   - local     (Ollama local LLM)
 
 Note: LLM API key must be set in environment:
-  ANTHROPIC_API_KEY  — for Claude
-  OPENAI_API_KEY     — for OpenAI GPT
+  ANTHROPIC_API_KEY  - for Claude
+  OPENAI_API_KEY     - for OpenAI GPT
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ class AIPlan:
 def _build_round_narrative(completed_rounds: list) -> str:
     """Build LLM-readable narrative of completed rounds for memory injection."""
     if not completed_rounds:
-        return "Round 1 — no prior history."
+        return "Round 1 - no prior history."
 
     lines = ["=== PREVIOUS ROUNDS HISTORY ==="]
     for r in completed_rounds[-3:]:   # max 3 rounds back
@@ -138,8 +138,8 @@ class CampaignContextBuilder:
                 "privilege":       priv,
                 "cracked":         cracked,
                 "recommended_use": can_use[:4],
-                "note": ("Cracked — ready to use" if cracked
-                         else "Hash available — crack first before use"),
+                "note": ("Cracked - ready to use" if cracked
+                         else "Hash available - crack first before use"),
             })
         return result
 
@@ -333,7 +333,7 @@ class LocalOllamaBackend(LLMBackend):
 
 
 def _score_plan(plan: dict) -> float:
-    """Score a raw plan dict for consensus merging — higher = better."""
+    """Score a raw plan dict for consensus merging - higher = better."""
     stages     = plan.get("stages", [])
     confidence = float(plan.get("confidence", 0.5))
     modules    = [m for s in stages for m in s.get("modules", [])]
@@ -363,14 +363,14 @@ def _merge_plans(plan_a: dict, plan_b: dict) -> dict:
         sb = stages_b.get(name)
 
         if sa and sb:
-            # Both LLMs suggested this stage — high agreement
+            # Both LLMs suggested this stage - high agreement
             agreement_count += 1
             mods_a = set(sa.get("modules", []))
             mods_b = set(sb.get("modules", []))
             agreed_mods   = list(mods_a & mods_b)
             disputed_mods = list((mods_a | mods_b) - (mods_a & mods_b))
 
-            # Merge params — prefer plan_a for conflicts
+            # Merge params - prefer plan_a for conflicts
             merged_params = {**sb.get("params", {}), **sa.get("params", {})}
 
             merged_stages.append({
@@ -400,7 +400,7 @@ def _merge_plans(plan_a: dict, plan_b: dict) -> dict:
     ))
     if agreement_ratio < 1.0:
         warnings.append(
-            f"LOW CONSENSUS: LLMs agreed on only {agreement_ratio:.0%} of stages — "
+            f"LOW CONSENSUS: LLMs agreed on only {agreement_ratio:.0%} of stages - "
             "operator review strongly recommended before execution."
         )
 
@@ -488,26 +488,26 @@ async def _run_adversarial_simulation(
 
 # ── Prompt builder ────────────────────────────────────────────────────────────
 
-# ── Red Team Constitution — injected into every LLM call ────────────────────
+# ── Red Team Constitution - injected into every LLM call ────────────────────
 # Engagement rules that constrain what the LLM can recommend.
 # Operators can override soft rules per-engagement via params.
 
 DEFAULT_CONSTITUTION = """
-=== ENGAGEMENT RULES (injected by ARES — do not violate) ===
+=== ENGAGEMENT RULES (injected by ARES - do not violate) ===
 
-HARD RULES — NEVER recommend actions that:
+HARD RULES - NEVER recommend actions that:
 1. Target hosts/CIDRs outside the campaign scope list
 2. Execute data destruction (rm -rf, format, wipe, ransomware-style)
 3. Create outbound connections to non-operator IPs not in scope
 4. Exfil data over 10MB without explicit operator confirmation param
 
-SOFT RULES — WARN the operator but allow if they set override=True:
-1. DCSync (T1003.006) — requires prior written authorization note
-2. Persistence modules — only if engagement type explicitly includes persistence
-3. Any module against a production DC (dc01, dc1, prod*) — confirm first
-4. credential.golden_ticket — requires written authorization
+SOFT RULES - WARN the operator but allow if they set override=True:
+1. DCSync (T1003.006) - requires prior written authorization note
+2. Persistence modules - only if engagement type explicitly includes persistence
+3. Any module against a production DC (dc01, dc1, prod*) - confirm first
+4. credential.golden_ticket - requires written authorization
 
-SCOPE REMINDER — only recommend modules targeting:
+SCOPE REMINDER - only recommend modules targeting:
 {scope_cidrs}
 
 Engagement type: {engagement_type}
@@ -518,7 +518,7 @@ SYSTEM_PROMPT = """You are an expert red team attack planner for the ARES framew
 Your task: given a campaign context, generate the optimal next attack chain.
 
 Rules:
-1. Output ONLY valid JSON — no markdown, no explanation outside JSON
+1. Output ONLY valid JSON - no markdown, no explanation outside JSON
 2. Only recommend modules that exist in available_modules list
 3. Respect noise_profile: stealth=avoid HIGH_NOISE modules, aggressive=use all
 4. Order stages logically: recon → credential_access → lateral → persistence
@@ -532,7 +532,7 @@ Flag any SOFT RULE violations in the warnings field.
 
 Output JSON schema:
 {
-  "reasoning": "string — why this plan, what evidence supports it",
+  "reasoning": "string - why this plan, what evidence supports it",
   "confidence": 0.0-1.0,
   "stages": [
     {
@@ -591,14 +591,14 @@ def _build_user_prompt(context: dict, completed_rounds: list | None = None) -> s
     # BUG 9 FIX: render target_states so LLM sees per-host failure history
     if context.get("target_states"):
         parts += [
-            "Per-host state (CRITICAL — do NOT repeat techniques that FAILED on the same host):",
+            "Per-host state (CRITICAL - do NOT repeat techniques that FAILED on the same host):",
             json.dumps(context["target_states"], indent=2),
             "",
         ]
     # Surface rejected plan reason when re-planning
     if context.get("rejected_plan_reason"):
         parts += [
-            f"WARNING — PREVIOUS PLAN REJECTED: {context['rejected_plan_reason']}",
+            f"WARNING - PREVIOUS PLAN REJECTED: {context['rejected_plan_reason']}",
             "",
         ]
     parts += ["Generate the optimal next attack plan as JSON."]
@@ -637,12 +637,12 @@ def _build_system_prompt_with_constitution(
 )
 class AIAutonomousPlannerModule(BaseModule):
     """
-    ai.autonomous_planner — LLM-powered attack chain orchestration.
+    ai.autonomous_planner - LLM-powered attack chain orchestration.
 
     Aggregates campaign context and uses an LLM to generate the optimal
     next attack steps. Outputs a structured ExecutionPlan for operator review.
 
-    OPSEC: LOCAL (LLM API call — no direct target network contact from this module)
+    OPSEC: LOCAL (LLM API call - no direct target network contact from this module)
     MITRE: T1591
     REQUIRES: active_campaign
     OUTPUTS:  execution_plan, ai_reasoning, confidence_score, warnings
@@ -802,7 +802,7 @@ class AIAutonomousPlannerModule(BaseModule):
         **kwargs: Any,
     ) -> tuple[list, dict]:
         """
-        Note: before_request() intentionally not called — LOCAL module.
+        Note: before_request() intentionally not called - LOCAL module.
         LLM API call has no scope relevance (calls Anthropic/OpenAI, not target).
         """
         audit("ai_planner_invoked", actor="operator",
@@ -917,7 +917,7 @@ class AIAutonomousPlannerModule(BaseModule):
         # Generate findings
         self._generate_findings(ai_plan, goal, context)
 
-        # Adversarial simulation — what would defender see?
+        # Adversarial simulation - what would defender see?
         adversarial_result = {}
         if kwargs.get("adversarial_sim", False) and ai_plan.stages:
             try:
@@ -975,7 +975,7 @@ class AIAutonomousPlannerModule(BaseModule):
                 reasoning=  f"LLM response parse failed: {str(exc)[:100]}. Raw: {content[:200]}",
                 stages=     [],
                 confidence= 0.0,
-                warnings=   ["LLM response was not valid JSON — manual planning required"],
+                warnings=   ["LLM response was not valid JSON - manual planning required"],
                 llm_model=  model,
                 tokens_used=tokens,
             )
@@ -993,7 +993,7 @@ class AIAutonomousPlannerModule(BaseModule):
                 mitre_technique="T1591",
                 mitre_tactic="Reconnaissance",
                 evidence={"goal": goal, "warnings": plan.warnings},
-                remediation="Add more recon data — run ad.enum_users, recon.fingerprint first.",
+                remediation="Add more recon data - run ad.enum_users, recon.fingerprint first.",
                 host="ai_planner",
                 confidence=0.50,
             )
@@ -1004,7 +1004,7 @@ class AIAutonomousPlannerModule(BaseModule):
         all_modules  = [m for s in plan.stages for m in s.get("modules", [])]
 
         self.finding(
-            title=f"AI Attack Plan Generated — {len(plan.stages)} Stages, "
+            title=f"AI Attack Plan Generated - {len(plan.stages)} Stages, "
                   f"{len(all_modules)} Modules, {plan.confidence:.0%} Confidence",
             description=(
                 f"Goal: {goal}. "

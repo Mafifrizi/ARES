@@ -4,8 +4,8 @@
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile.prod` | **Production** — Node frontend build, Python runtime, non-root user, healthcheck |
-| `Dockerfile.dev`  | **Development** — single-stage, editable install (`pip install -e ".[dev]"`), source mount |
+| `Dockerfile.prod` | **Production** - Node frontend build, Python runtime, non-root user, healthcheck |
+| `Dockerfile.dev`  | **Development** - single-stage, editable install (`pip install -e ".[dev]"`), source mount |
 | `docker-compose.prod.yml` | Production compose (use with `Dockerfile.prod`) |
 | `docker-compose.dev.yml`  | Development compose (use with `Dockerfile.dev`, mounts source for hot-reload) |
 

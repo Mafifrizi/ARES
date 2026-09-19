@@ -1,12 +1,12 @@
 """
-ARES Plugin Sandbox — Restricted Module Execution
+ARES Plugin Sandbox - Restricted Module Execution
 Prevents third-party modules from damaging the core engine.
 
 Isolation tiers:
-  TIER_0  NONE       — core modules, run in-process (trusted)
-  TIER_1  SUBPROCESS — separate process, resource limits (default)
-  TIER_2  SECCOMP    — subprocess + seccomp syscall filter (Linux)
-  TIER_3  DOCKER     — fully isolated container (maximum isolation)
+  TIER_0  NONE       - core modules, run in-process (trusted)
+  TIER_1  SUBPROCESS - separate process, resource limits (default)
+  TIER_2  SECCOMP    - subprocess + seccomp syscall filter (Linux)
+  TIER_3  DOCKER     - fully isolated container (maximum isolation)
 
 Resource limits (TIER_1+):
   - CPU:    30 seconds max
@@ -177,7 +177,7 @@ class SandboxRunner:
             return SandboxResult(module_id=module_id, sandbox_tier=IsolationTier.NONE,
                                   success=False, error=f"Module {module_id!r} not registered")
 
-        # Look up real campaign scope from DB — same pattern as _run_subprocess.
+        # Look up real campaign scope from DB - same pattern as _run_subprocess.
         # Do NOT default to 0.0.0.0/0 (wildcard) as that bypasses scope enforcement.
         scope_entries: list[ScopeEntry] = []
         try:
@@ -199,11 +199,11 @@ class SandboxRunner:
             pass  # fallback: empty scope = nothing in scope, fails closed
 
         # If DB lookup failed and no scope found, use empty scope (deny-all).
-        # Modules will fail validation — this is safer than allowing everything.
+        # Modules will fail validation - this is safer than allowing everything.
         if not scope_entries:
             logger.warning("sandbox_inprocess_no_scope",
                            campaign_id=campaign_id, module_id=module_id,
-                           note="No campaign scope found — using deny-all. "
+                           note="No campaign scope found - using deny-all. "
                                 "Pass a valid campaign_id or use subprocess mode.")
             scope_entries = []
 
@@ -252,7 +252,7 @@ class SandboxRunner:
                         if e.get("cidr")
                     ]
             except Exception:
-                pass  # fallback handled in wrapper — fails closed
+                pass  # fallback handled in wrapper - fails closed
             payload = json.dumps({
                 "module_id":   module_id,
                 "params":      params,
@@ -402,7 +402,7 @@ class SandboxRunner:
                 resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
                 resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
             except (OSError, ValueError, AttributeError):
-                pass  # best-effort — don't fail the child
+                pass  # best-effort - don't fail the child
 
         return _limits
 
@@ -422,7 +422,7 @@ class SandboxRunner:
                 "import ctypes as _ct, ctypes.util as _cu, os as _so\n"
                 "try:\n"
                 "    _libc = _ct.CDLL(_cu.find_library('c'), use_errno=True)\n"
-                "    _libc.prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS — child cannot gain privs\n"
+                "    _libc.prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS - child cannot gain privs\n"
                 "except Exception as _pe:\n"
                 "    import sys as _ps; print(f'[sandbox] prctl failed: {_pe}', file=_ps.stderr)\n"
                 "if _so.environ.get('ARES_SECCOMP_BPF') == '1':\n"
@@ -436,7 +436,7 @@ class SandboxRunner:
                 "        _f.load()\n"
                 "    except ImportError:\n"
                 "        import sys as _s2\n"
-                "        print('[sandbox] pyseccomp not installed — BPF filter skipped', file=_s2.stderr)\n"
+                "        print('[sandbox] pyseccomp not installed - BPF filter skipped', file=_s2.stderr)\n"
                 "    except Exception as _be:\n"
                 "        import sys as _s3\n"
                 "        print(f'[sandbox] BPF filter failed: {_be}', file=_s3.stderr)\n"
@@ -468,7 +468,7 @@ class SandboxRunner:
             "        _scope_cidrs = payload.get(\"scope_cidrs\", [])\n"
             "        if not _scope_cidrs:\n"
             "            print(json.dumps({\"success\": False, \"error\":\n"
-            "                \"Sandbox scope not provided — refusing to run with unbounded scope\",\n"
+            "                \"Sandbox scope not provided - refusing to run with unbounded scope\",\n"
             "                \"findings\": [], \"extra\": {}}))\n"
             "            return\n"
             "        campaign = Campaign(\n"
@@ -524,7 +524,7 @@ class SandboxRunner:
             '        _scope_cidrs = payload.get("scope_cidrs", [])\n'
             '        if not _scope_cidrs:\n'
             '            return {"success": False,\n'
-            '                    "error": "Sandbox scope not provided — refusing to run with unbounded scope",\n'
+            '                    "error": "Sandbox scope not provided - refusing to run with unbounded scope",\n'
             '                    "findings": [], "extra": {}}\n'
             '        campaign = Campaign(\n'
             '            id=campaign_id or str(uuid.uuid4()),\n'

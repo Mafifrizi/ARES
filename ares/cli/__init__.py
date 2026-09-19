@@ -1,5 +1,5 @@
 """
-ARES CLI — Typer-based command line interface.
+ARES CLI - Typer-based command line interface.
 
 Entry point: ``ares`` console script → ares.cli.main:cli
 

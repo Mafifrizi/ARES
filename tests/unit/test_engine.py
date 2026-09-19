@@ -1,5 +1,5 @@
 """
-Tests for ARES AresEngine — execution, timeout, retry, concurrency.
+Tests for ARES AresEngine - execution, timeout, retry, concurrency.
 
 Modules used in engine tests are mocked to return instantly.
 This tests ENGINE behavior (planning, parallelism, semaphore, timeout, retry)
@@ -56,7 +56,7 @@ def campaign() -> Campaign:
 
 
 def _fast_run(**kwargs: Any):
-    """Instant async mock run — returns no findings, no raw data."""
+    """Instant async mock run - returns no findings, no raw data."""
 
     async def _inner(**kw: Any):
         return [], {}
@@ -487,7 +487,7 @@ class TestAsyncEngine:
     async def test_execution_plan_parallel(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:
-        """All modules in a stage are attempted — mocked to return instantly."""
+        """All modules in a stage are attempted - mocked to return instantly."""
         engine = AresEngine(settings=settings)
         engine.load_modules()
 
@@ -546,7 +546,7 @@ class TestAsyncEngine:
     async def test_semaphore_limits_concurrency(
         self, settings: AresSettings, campaign: Campaign
     ) -> None:
-        """Engine respects max_parallel — mocked to avoid filesystem scans."""
+        """Engine respects max_parallel - mocked to avoid filesystem scans."""
         engine = AresEngine(settings=settings, max_parallel=2)
         engine.load_modules()
 

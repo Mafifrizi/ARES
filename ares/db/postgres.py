@@ -1,5 +1,5 @@
 """
-ARES Database — PostgreSQL async backend via asyncpg.
+ARES Database - PostgreSQL async backend via asyncpg.
 
 Used when ARES_DATABASE_URL starts with postgresql+asyncpg:// or postgresql://.
 
@@ -13,11 +13,11 @@ Configuration (.env):
     ARES_ENCRYPTION_KEY=<fernet-key>
 
 Design:
-  - Same public API as AresDatabase (SQLite) — zero changes to server.py or engine.py
+  - Same public API as AresDatabase (SQLite) - zero changes to server.py or engine.py
   - asyncpg connection pool (min=2, max=10)
   - All credential/token content encrypted at rest via Fernet (same as SQLite backend)
   - Alembic-managed migrations: `alembic -x db_url=<url> upgrade head`
-  - Parameterized queries throughout — no string interpolation
+  - Parameterized queries throughout - no string interpolation
 
 Production checklist:
   □ Create ares_user with CREATEDB privilege or pre-create ares_db
@@ -2276,7 +2276,7 @@ def _classify_postgres_revision(values: tuple[object, ...]) -> str:
 class PostgresDatabase:
     """
     Async PostgreSQL database backend via asyncpg.
-    Public API is identical to AresDatabase (SQLite) — drop-in replacement.
+    Public API is identical to AresDatabase (SQLite) - drop-in replacement.
 
     Usage:
         db = await PostgresDatabase.create(
@@ -2293,7 +2293,7 @@ class PostgresDatabase:
         pool_min: int = 2,
         pool_max: int = 10,
     ) -> None:
-        # Strip SQLAlchemy dialect prefix — asyncpg uses plain postgres:// DSN
+        # Strip SQLAlchemy dialect prefix - asyncpg uses plain postgres:// DSN
         self._dsn = dsn.replace("postgresql+asyncpg://", "postgresql://").replace(
             "postgres+asyncpg://", "postgres://"
         )
@@ -5431,7 +5431,7 @@ class PostgresDatabase:
         """
         Persist a credential whose secret is ALREADY Fernet-encrypted by
         CredentialVault. Skips _enc_val() to prevent double-encryption.
-        Mirrors database.py implementation — required by engine._persist_vault_credentials().
+        Mirrors database.py implementation - required by engine._persist_vault_credentials().
         """
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -5448,7 +5448,7 @@ class PostgresDatabase:
                 cred.campaign_id,
                 cred.host_id,
                 cred.username,
-                cred.secret,  # already vault-encrypted — store verbatim, no _enc_val()
+                cred.secret,  # already vault-encrypted - store verbatim, no _enc_val()
                 cred.cred_type,
                 cred.domain,
                 cred.source_module,
@@ -5458,7 +5458,7 @@ class PostgresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign as raw dicts.
-        Secrets returned as-is (Fernet-encrypted by CredentialVault) —
+        Secrets returned as-is (Fernet-encrypted by CredentialVault)  - 
         use CredentialVault.restore_from_db_records() to re-hydrate.
         Required by server.py POST /campaigns/{id}/restore-vault endpoint.
         """
@@ -6671,7 +6671,7 @@ class PostgresDatabase:
             )
 
     async def checkpoint_wal(self) -> None:
-        """No-op for PostgreSQL — WAL is managed by the server."""
+        """No-op for PostgreSQL - WAL is managed by the server."""
 
     async def export_json(self, output_path: str | None = None) -> str:
         """Export all campaigns + findings to JSON (same interface as SQLite backend)."""

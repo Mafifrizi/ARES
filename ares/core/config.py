@@ -1,7 +1,7 @@
 """
 ARES Configuration
 Typed settings loaded from environment / .env file.
-No hardcoded secrets — ever.
+No hardcoded secrets - ever.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class LogSettings(BaseSettings):
 
 
 class AresSettings(BaseSettings):
-    """Master settings — loads from .env automatically."""
+    """Master settings - loads from .env automatically."""
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -98,7 +98,7 @@ class AresSettings(BaseSettings):
     ares_default_jitter_min_ms: int = Field(500, ge=0)
     ares_default_jitter_max_ms: int = Field(3000, ge=0)
 
-    # Redis (optional — enables multi-pod rate limiting)
+    # Redis (optional - enables multi-pod rate limiting)
     # Set to empty string or omit to use in-process fallback
     ares_redis_url: str = Field(
         default="",
@@ -111,7 +111,7 @@ class AresSettings(BaseSettings):
     ares_webhook_timeout:       float = Field(default=5.0, description="HTTP timeout seconds")
     ares_webhook_retry:         int   = Field(default=2, ge=0, le=5, description="Max retries on failure")
 
-    # OpenTelemetry (optional — distributed tracing)
+    # OpenTelemetry (optional - distributed tracing)
     ares_otel_endpoint:    str   = Field(default="", description="OTLP gRPC endpoint e.g. http://jaeger:4317")
     ares_otel_service:     str   = Field(default="ares-api", description="Service name in traces")
     ares_otel_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Trace sampling rate")
@@ -140,7 +140,7 @@ class AresSettings(BaseSettings):
     def trusted_hosts_list(self) -> list[str]:
         return [h.strip() for h in self.ares_trusted_hosts.split(",") if h.strip()]
 
-    # Bootstrap — initial admin password, must be set via ARES_DEFAULT_ADMIN_PASSWORD env var.
+    # Bootstrap - initial admin password, must be set via ARES_DEFAULT_ADMIN_PASSWORD env var.
     # No default is provided; ARES will refuse to start if this is unset.
     # Rotate immediately after first login via POST /auth/change-password.
     ares_default_admin_password: str = Field(
@@ -173,7 +173,7 @@ class AresSettings(BaseSettings):
                     "ARES_JWT_ALGORITHM=RS256 requires ARES_JWT_PRIVATE_KEY_PATH. "
                     "Generate: openssl genrsa -out jwt_private.pem 2048"
                 )
-            return self.ares_jwt_private_key_path   # path — security.py loads the file
+            return self.ares_jwt_private_key_path   # path - security.py loads the file
         return self.secret_key_value
 
     @property
@@ -189,7 +189,7 @@ class AresSettings(BaseSettings):
                     "ARES_JWT_ALGORITHM=RS256 requires ARES_JWT_PUBLIC_KEY_PATH. "
                     "Generate: openssl rsa -in jwt_private.pem -pubout -out jwt_public.pem"
                 )
-            return self.ares_jwt_public_key_path   # path — security.py loads the file
+            return self.ares_jwt_public_key_path   # path - security.py loads the file
         return self.secret_key_value
 
     @property
@@ -209,7 +209,7 @@ class AresSettings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> AresSettings:
     """
-    Cached settings instance — call this everywhere.
+    Cached settings instance - call this everywhere.
     Raises a clean, actionable error if required env vars are missing.
     """
     try:
@@ -221,10 +221,10 @@ def get_settings() -> AresSettings:
                 "\n\033[1m\033[31m❌ ARES not configured.\033[0m\n"
                 "\n"
                 "   Required environment variables are missing:\n"
-                "     ARES_SECRET_KEY              — generate: openssl rand -hex 32\n"
-                "     ARES_ENCRYPTION_KEY          — generate: python -c "
+                "     ARES_SECRET_KEY              - generate: openssl rand -hex 32\n"
+                "     ARES_ENCRYPTION_KEY          - generate: python -c "
                 "'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'\n"
-                "     ARES_DEFAULT_ADMIN_PASSWORD  — min 12 chars, rotate after first login\n"
+                "     ARES_DEFAULT_ADMIN_PASSWORD  - min 12 chars, rotate after first login\n"
                 "\n"
                 "   \033[1mQuickest fix:\033[0m\n"
                 "     bash scripts/setup.sh\n"

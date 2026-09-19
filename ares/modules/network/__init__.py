@@ -1,5 +1,5 @@
 """
-ARES — modules.network
+ARES - modules.network
 Network reconnaissance and pivot modules
 
 Note: Primary module discovery uses PluginLoader (inspect.getmembers).

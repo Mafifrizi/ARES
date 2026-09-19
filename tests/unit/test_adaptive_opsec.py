@@ -1,5 +1,5 @@
 """
-Unit tests — AdaptiveOpsecEngine (ares/core/opsec/adaptive.py)
+Unit tests - AdaptiveOpsecEngine (ares/core/opsec/adaptive.py)
 
 Every detection signal type and every response action is tested.
 Also tests thresholds, sliding window, blacklist expiry, and edge cases.
@@ -61,14 +61,14 @@ class TestSignalRegistration:
     def test_signal_returns_empty_list_below_threshold(self):
         engine = make_engine(timeout_threshold=3)
         result = engine.signal(DetectionLevel.TIMEOUT, host="10.0.0.1")
-        # Only 1 timeout, threshold is 3 — no adaptations yet
+        # Only 1 timeout, threshold is 3 - no adaptations yet
         assert result == []
 
     def test_multiple_signal_types(self):
         engine = make_engine()
         for sig in DetectionLevel:
             engine.signal(sig, host="10.0.0.1", username="test")
-        # No assertion on count — just verify no crash
+        # No assertion on count - just verify no crash
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -93,7 +93,7 @@ class TestTimeoutRule:
         adaptations = engine.signal(DetectionLevel.TIMEOUT, host="10.0.0.1")
         escalations = [a for a in adaptations if a.action == ResponseAction.ESCALATE_PROFILE]
         if escalations:
-            # stealth is already max — stays stealth
+            # stealth is already max - stays stealth
             assert escalations[0].new_profile == "stealth"
 
     def test_jitter_increases_with_timeout(self):
@@ -112,7 +112,7 @@ class TestTimeoutRule:
         engine = make_engine(timeout_threshold=2, window_s=0.1)
         engine.signal(DetectionLevel.TIMEOUT, host="10.0.0.1")
         time.sleep(0.2)  # let them expire
-        # New signal — count should be 1, below threshold 2
+        # New signal - count should be 1, below threshold 2
         adaptations = engine.signal(DetectionLevel.TIMEOUT, host="10.0.0.1")
         assert not any(a.action == ResponseAction.ESCALATE_PROFILE for a in adaptations)
 
@@ -287,7 +287,7 @@ class TestAdaptationTracking:
 
     def test_next_stealth_profile_from_stealth(self):
         engine = make_engine(current_profile="stealth")
-        # Already at max — stays stealth
+        # Already at max - stays stealth
         assert engine._next_stealth_profile() == "stealth"
 
 

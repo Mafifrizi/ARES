@@ -1,5 +1,5 @@
 """
-Linux Privilege Escalation — Next-Gen Sovereign SDK v2 Implementation
+Linux Privilege Escalation - Next-Gen Sovereign SDK v2 Implementation
 Local & Remote SSH with Capability-Based Sandboxing & Merkle Audit Trails.
 MITRE: T1548.001, T1053.003, T1574.006
 """
@@ -48,7 +48,7 @@ GTFOBINS_SUID = {
 )
 class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
     """
-    linux.privesc — SUID, sudo, cron, capabilities, writable PATH — local or remote SSH
+    linux.privesc - SUID, sudo, cron, capabilities, writable PATH - local or remote SSH
 
     OPSEC: MEDIUM
     MITRE: "T1548.001", "T1053.003", "T1574.006"
@@ -58,7 +58,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
     MODULE_ID          = "linux.privesc"
     MODULE_NAME        = "Linux Privilege Escalation"
     MODULE_CATEGORY    = "linux"
-    MODULE_DESCRIPTION = "SUID, sudo, cron, capabilities, writable PATH — local or remote SSH"
+    MODULE_DESCRIPTION = "SUID, sudo, cron, capabilities, writable PATH - local or remote SSH"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.MEDIUM
     REQUIRES           = []
@@ -83,7 +83,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
 
         if not target:
             raise ModuleValidationError(
-                "linux.privesc requires 'target' — IP or hostname of Linux host.",
+                "linux.privesc requires 'target' - IP or hostname of Linux host.",
                 module_id=self.MODULE_ID,
                 field="target",
             )
@@ -399,7 +399,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         sudo_rules = raw.get("sudo", [])
         if any("ALL" in line and "NOPASSWD" in line for line in sudo_rules):
             self.finding(
-                title="NOPASSWD Sudo — Immediate Root",
+                title="NOPASSWD Sudo - Immediate Root",
                 description="Can run commands as root without password.",
                 severity=Severity.CRITICAL,
                 mitre_technique="T1548.003",
@@ -431,7 +431,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         if writable:
             self.finding(
                 title=f"Writable PATH Dirs ({len(writable)})",
-                description="Current user can write to $PATH dirs — PATH hijacking possible.",
+                description="Current user can write to $PATH dirs - PATH hijacking possible.",
                 severity=Severity.HIGH,
                 mitre_technique="T1574.006",
                 mitre_tactic="Privilege Escalation",

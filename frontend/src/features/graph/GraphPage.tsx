@@ -1340,7 +1340,7 @@ export default function GraphPage({
         <div className="cobalt-dialog-overlay" onClick={() => setShowHelpDialog(false)}>
           <div className="cobalt-dialog-window" style={{ width: "680px" }} onClick={(e) => e.stopPropagation()}>
             <div className="cobalt-dialog-titlebar">
-              <span>Cobalt Strike C2 — Operator Reference & Help Manual</span>
+              <span>Cobalt Strike C2 - Operator Reference & Help Manual</span>
               <button className="cobalt-win-btn close" onClick={() => setShowHelpDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">

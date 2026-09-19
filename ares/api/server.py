@@ -1,13 +1,13 @@
 """
 ARES API Server v6.0.0
-FastAPI — DB-persistent, WebSocket events, refresh tokens, API key auth, pagination.
+FastAPI - DB-persistent, WebSocket events, refresh tokens, API key auth, pagination.
 
 v6.0.0 changes vs v1.0.0:
-  ✓ AresDatabase injected via app.state — no more in-memory dicts
+  ✓ AresDatabase injected via app.state - no more in-memory dicts
   ✓ Persistent user store (users table, DB-backed)
   ✓ Refresh token endpoint + rotation on use
   ✓ API key auth (X-API-Key header) for CI/CD automation
-  ✓ WebSocket /ws/campaigns/{id}/events — real-time module progress
+  ✓ WebSocket /ws/campaigns/{id}/events - real-time module progress
   ✓ Pagination on /campaigns, /campaigns/{id}/findings
   ✓ X-RateLimit-Remaining + X-Total-Count response headers
   ✓ JWT-only account management and API-key lifecycle endpoints
@@ -473,7 +473,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _dash_app.state.db = _db
     except Exception as exc:
         logger.debug("legacy_dashboard_db_share_skipped", error=str(exc))
-        pass  # dashboard not loaded — silently skip
+        pass  # dashboard not loaded - silently skip
 
     # Wire ARES_RATE_LIMIT_RPM setting into global rate limit bucket
     # Without this, operator changes to ARES_RATE_LIMIT_RPM have no effect
@@ -543,7 +543,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Graceful shutdown — cancel background task before closing DB
+    # Graceful shutdown - cancel background task before closing DB
     _cleanup_task.cancel()
     await asyncio.gather(_cleanup_task, return_exceptions=True)
     app.state.c_live_runtime = None
@@ -559,7 +559,7 @@ except Exception as exc:
 
 app = FastAPI(
     title="ARES API",
-    description="Automated Red team Engagement System — v6.0.0",
+    description="Automated Red team Engagement System - v6.0.0",
     version=_ares_version,
     lifespan=lifespan,
     docs_url="/docs" if _debug else None,
@@ -583,7 +583,7 @@ _mount_dashboard(app)
 @app.middleware("http")
 async def _block_docs_in_production(request: Request, call_next: Any) -> Any:
     """Return 404 for /docs, /redoc, /openapi.json when ares_debug=False.
-    Evaluated at request time — not baked at import.
+    Evaluated at request time - not baked at import.
     """
     if request.url.path in ("/docs", "/redoc", "/openapi.json"):
         try:
@@ -600,8 +600,8 @@ async def _block_docs_in_production(request: Request, call_next: Any) -> Any:
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 
-# ── Request body size limit — prevent DoS via oversized payloads ──────────────
-_MAX_BODY_MB = 10  # 10 MB — enough for module payloads, rejects abuse
+# ── Request body size limit - prevent DoS via oversized payloads ──────────────
+_MAX_BODY_MB = 10  # 10 MB - enough for module payloads, rejects abuse
 _MAX_BODY_BYTES = _MAX_BODY_MB * 1024 * 1024
 
 
@@ -668,9 +668,9 @@ app.add_middleware(
 )
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=_trusted_hosts,  # No wildcard — must be explicit
+    allowed_hosts=_trusted_hosts,  # No wildcard - must be explicit
 )
-# Body size limit — registered after TrustedHost so it runs on trusted requests only.
+# Body size limit - registered after TrustedHost so it runs on trusted requests only.
 # BaseHTTPMiddleware approach (vs @app.middleware) works in both uvicorn and TestClient.
 app.add_middleware(_BodySizeLimitMiddleware)
 
@@ -705,7 +705,7 @@ async def security_headers(request: Request, call_next: Any) -> Any:
             "base-uri 'self'; "
             "frame-ancestors 'none'"
         )
-    # HSTS is only meaningful on HTTPS — don't send on plain HTTP
+    # HSTS is only meaningful on HTTPS - don't send on plain HTTP
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = (
             "max-age=31536000; includeSubDomains"
@@ -764,7 +764,7 @@ async def _require_campaign_access(
     campaign: dict,
     actor: AuthenticatedUser,
 ) -> None:
-    """Raise 404 (not 403) if actor cannot access campaign — avoids campaign enumeration."""
+    """Raise 404 (not 403) if actor cannot access campaign - avoids campaign enumeration."""
     if actor.role != "team_lead" and campaign.get("operator") != actor.username:
         raise HTTPException(404, "Campaign not found")
 
@@ -1051,7 +1051,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Catch-all handler — prevents stack trace leaking in 500 responses."""
+    """Catch-all handler - prevents stack trace leaking in 500 responses."""
     logger.error(
         "unhandled_exception",
         path=request.url.path,
@@ -1153,7 +1153,7 @@ async def login(
             headers={"Retry-After": "60"},
         )
 
-    # Guard against bcrypt DoS — OAuth2PasswordRequestForm has no max_length
+    # Guard against bcrypt DoS - OAuth2PasswordRequestForm has no max_length
     if len(form.password) > 128:
         raise HTTPException(status_code=400, detail="Password too long")
 
@@ -1337,7 +1337,7 @@ async def register(
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
     """Register new operator. Requires: team_lead role + rate limit."""
-    # Rate-limit registration even for team_leads — prevents abuse if token stolen
+    # Rate-limit registration even for team_leads - prevents abuse if token stolen
     ip = request.client.host if request.client else "unknown"
     await _limiter.check_or_raise_async(
         f"register:{ip}",
@@ -1391,7 +1391,7 @@ async def change_password(
     )
     if not changed:
         raise HTTPException(401, "Not authenticated")
-    # Revoke the current access token by jti — same as logout() —
+    # Revoke the current access token by jti - same as logout()  - 
     # so the old token cannot be reused within its remaining expiry window.
     return {"status": "ok", "note": "All existing sessions revoked"}
 
@@ -1418,7 +1418,7 @@ async def create_api_key(
     actor: AuthenticatedUser = Depends(require_any_auth()),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
-    """Create API key for CI/CD automation. Key is shown ONCE — save it."""
+    """Create API key for CI/CD automation. Key is shown ONCE - save it."""
     user = await db.get_user(actor.username)
     if not user:
         raise HTTPException(404, "User not found")
@@ -1429,7 +1429,7 @@ async def create_api_key(
     return {
         "id": key_id,
         "key": raw_key,
-        "note": "Save this key — it will NOT be shown again.",
+        "note": "Save this key - it will NOT be shown again.",
         "prefix": raw_key[:12],
     }
 
@@ -2362,11 +2362,11 @@ def _require_high_noise_module_access(
         return
 
     if len(rejected) == 1:
-        detail = f"{rejected[0]!r} is HIGH_NOISE — team_lead only."
+        detail = f"{rejected[0]!r} is HIGH_NOISE - team_lead only."
     else:
         detail = (
             f"{', '.join(repr(module_id) for module_id in rejected)} "
-            "are HIGH_NOISE — team_lead only."
+            "are HIGH_NOISE - team_lead only."
         )
     raise HTTPException(status_code=403, detail=detail)
 
@@ -2651,7 +2651,7 @@ async def report_bypass_outcome(
         if rate is not None and rate < 0.25:
             warning = (
                 f"Technique '{body.technique_id}' success rate is only {rate:.0%} "
-                f"against {body.edr_vendor} — likely patched or detected."
+                f"against {body.edr_vendor} - likely patched or detected."
             )
         return {"saved": True, "historical_rate": rate, "warning": warning}
     return {"saved": False, "error": "Database not available"}
@@ -3135,7 +3135,7 @@ async def campaign_events(
         ):
             return
         while True:
-            # Keep alive — wait for disconnect or ping
+            # Keep alive - wait for disconnect or ping
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 if data == "ping":
@@ -3174,7 +3174,7 @@ async def get_cvss_summary(
     actor: AuthenticatedUser = _api_key_read_dep,
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
-    """CVSS v3.1 score summary for a campaign — for compliance reports (PCI-DSS, ISO 27001)."""
+    """CVSS v3.1 score summary for a campaign - for compliance reports (PCI-DSS, ISO 27001)."""
     campaign = await db.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
@@ -3634,7 +3634,7 @@ async def campaign_attack_paths(
     if not graph.stats()["nodes"]:
         return {
             "campaign_id": campaign_id,
-            "message": "No artifact data yet — run recon modules first",
+            "message": "No artifact data yet - run recon modules first",
             "paths": [],
             "stats": graph.stats(),
         }
@@ -3934,10 +3934,10 @@ async def campaign_diff(
     Delta report comparing two campaigns.
 
     Returns:
-        new_findings    — in campaign_id but not other_id (new issues)
-        fixed_findings  — in other_id but not campaign_id (remediated)
-        severity_changed — same finding, CVSS score changed ≥ 1.0
-        summary         — risk_improved bool, delta counts per severity
+        new_findings    - in campaign_id but not other_id (new issues)
+        fixed_findings  - in other_id but not campaign_id (remediated)
+        severity_changed - same finding, CVSS score changed ≥ 1.0
+        summary         - risk_improved bool, delta counts per severity
 
     Findings matched by normalized title (case-insensitive).
     Useful for: "what changed since last month's engagement?"
@@ -4179,7 +4179,7 @@ async def ingest_bloodhound(
             "graph_stats": graph.stats(),
         }
     except ImportError:
-        raise HTTPException(503, "networkx required — pip install networkx")
+        raise HTTPException(503, "networkx required - pip install networkx")
     except HTTPException:
         raise
     except Exception as exc:

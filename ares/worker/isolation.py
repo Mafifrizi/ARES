@@ -10,7 +10,7 @@ Architecture:
                                        load module
                                        run module
                                        serialize findings → stdout (JSON)
-  ← receive JSON result            exit (clean or crash — engine unaffected)
+  ← receive JSON result            exit (clean or crash - engine unaffected)
 
 Communication: stdin/stdout JSON (no shared memory, no IPC sockets).
 Timeout:       enforced by asyncio.wait_for + proc.kill()

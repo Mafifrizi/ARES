@@ -1,5 +1,5 @@
 """
-ARES — state
+ARES - state
 Session/host state tracking
 
 Public API for this package. Import from here in production code:

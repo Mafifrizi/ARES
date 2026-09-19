@@ -1,5 +1,5 @@
 """
-HTTP Fingerprinting — Web Server, Framework, CMS Detection
+HTTP Fingerprinting - Web Server, Framework, CMS Detection
 MITRE: T1592.002, T1046
 
 Identifies: server software, web framework, CMS, admin interfaces,
@@ -32,17 +32,17 @@ logger = get_logger("ares.modules.network.http_fingerprint")
 _SENSITIVE_PATHS: list[tuple[str, str]] = [
     ("/admin",              "Admin interface"),
     ("/admin/login",        "Admin login"),
-    ("/.env",               "Environment file — may expose secrets"),
+    ("/.env",               "Environment file - may expose secrets"),
     ("/.git/HEAD",          "Git repository exposed"),
     ("/wp-admin/",          "WordPress admin panel"),
     ("/wp-login.php",       "WordPress login"),
     ("/phpmyadmin/",        "phpMyAdmin database manager"),
     ("/manager/html",       "Tomcat Manager"),
     ("/api/v1/",            "API endpoint"),
-    ("/api/swagger.json",   "Swagger/OpenAPI spec — enumerate endpoints"),
+    ("/api/swagger.json",   "Swagger/OpenAPI spec - enumerate endpoints"),
     ("/swagger-ui.html",    "Swagger UI"),
-    ("/actuator",           "Spring Boot Actuator — may expose internals"),
-    ("/actuator/env",       "Spring Boot env — may expose credentials"),
+    ("/actuator",           "Spring Boot Actuator - may expose internals"),
+    ("/actuator/env",       "Spring Boot env - may expose credentials"),
     ("/console",            "Admin console"),
     ("/jenkins",            "Jenkins CI"),
     ("/solr/",              "Apache Solr admin"),
@@ -50,8 +50,8 @@ _SENSITIVE_PATHS: list[tuple[str, str]] = [
     ("/grafana",            "Grafana dashboard"),
     ("/.htpasswd",          "Apache password file"),
     ("/server-status",      "Apache server status"),
-    ("/elmah.axd",          "ELMAH error log — .NET"),
-    ("/trace.axd",          "ASP.NET trace — may expose internals"),
+    ("/elmah.axd",          "ELMAH error log - .NET"),
+    ("/trace.axd",          "ASP.NET trace - may expose internals"),
 ]
 
 # Server/framework fingerprints in response headers
@@ -80,7 +80,7 @@ _HEADER_FINGERPRINTS: list[tuple[str, str, str]] = [
 )
 class HttpFingerprintModule(BaseModule):
     """
-    network.http_fingerprint — Fingerprint web servers and applications — detect server software, frameworks, CMS, admin interfaces, and exposed sensitive paths
+    network.http_fingerprint - Fingerprint web servers and applications - detect server software, frameworks, CMS, admin interfaces, and exposed sensitive paths
 
     OPSEC: LOW
     MITRE: "T1592.002", T1046 := "T1046"
@@ -90,7 +90,7 @@ class HttpFingerprintModule(BaseModule):
     MODULE_NAME        = "HTTP Fingerprinting"
     MODULE_CATEGORY    = "network"
     MODULE_DESCRIPTION = (
-        "Fingerprint web servers and applications — detect server software, "
+        "Fingerprint web servers and applications - detect server software, "
         "frameworks, CMS, admin interfaces, and exposed sensitive paths"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -112,7 +112,7 @@ class HttpFingerprintModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -235,7 +235,7 @@ class HttpFingerprintModule(BaseModule):
         try:
             import httpx
         except ImportError:
-            return [], {"error": "httpx not installed — run: pip install httpx"}
+            return [], {"error": "httpx not installed - run: pip install httpx"}
 
         logger.info("http_fingerprint_start", target=target, ports=ports)
         await self.noise.rate_limiter.acquire("network_scan")

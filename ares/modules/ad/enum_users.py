@@ -1,5 +1,5 @@
 """
-AD User Enumeration — Production Implementation
+AD User Enumeration - Production Implementation
 MITRE: T1087.002, T1201
 
 ldap3 with NTLM auth, paged search, UAC flag parsing.
@@ -63,7 +63,7 @@ def _days_since(dt: datetime.datetime | None) -> int | None:
 )
 class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
     """
-    ad.enum_users — Enumerate domain users, attributes, dormant accounts, password policy
+    ad.enum_users - Enumerate domain users, attributes, dormant accounts, password policy
 
     OPSEC: LOW
     MITRE: "T1087.002", "T1201"
@@ -101,7 +101,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
             )
         if not ad["username"]:
             raise ModuleValidationError(
-                "ad.enum_users requires domain credentials — "
+                "ad.enum_users requires domain credentials - "
                 "pass 'username'/'password' in params or provide a vault credential.",
                 module_id=self.MODULE_ID, field="username",
             )
@@ -250,9 +250,9 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
 
     def _ldap_query_sync(self, dc, username, password, domain, use_ldaps, page_size):
         """
-        Sync (non-async) — runs in executor so it never blocks the event loop.
+        Sync (non-async) - runs in executor so it never blocks the event loop.
         Fix Issue #1: moved from async def to sync def + run_in_executor call above.
-        Fix Issue #2: conn.unbind() in try/finally — always closes even on exception.
+        Fix Issue #2: conn.unbind() in try/finally - always closes even on exception.
         """
         import ssl
         import ldap3
@@ -397,7 +397,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         dormant = [u for u in users if u.get("enabled") and (u.get("days_since_login") or 0) > 90]
         if dormant:
             self.finding(title=f"Dormant Active Accounts ({len(dormant)})",
-                description=f"{len(dormant)} enabled accounts unused 90+ days — low-detection targets.",
+                description=f"{len(dormant)} enabled accounts unused 90+ days - low-detection targets.",
                 severity=Severity.MEDIUM, mitre_technique="T1078.002", mitre_tactic="Initial Access",
                 evidence={"accounts":[u["samAccountName"] for u in dormant[:15]]},
                 remediation="Auto-disable after 90 days inactivity.")
@@ -423,7 +423,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
                 evidence={"policy":policy},
                 remediation="Set minimum password length to 14+.")
         if policy.get("lockoutThreshold", 0) == 0:
-            self.finding(title="No Account Lockout — Password Spray Possible",
+            self.finding(title="No Account Lockout - Password Spray Possible",
                 description="No lockout threshold allows unlimited spray attempts.",
                 severity=Severity.HIGH, mitre_technique="T1110.003", mitre_tactic="Credential Access",
                 evidence={"lockoutThreshold":0},

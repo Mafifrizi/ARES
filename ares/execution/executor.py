@@ -103,7 +103,7 @@ class RemoteExecutor:
         """
         target = sanitize_hostname(target)
 
-        # Scope enforcement — reject targets outside campaign scope before any
+        # Scope enforcement - reject targets outside campaign scope before any
         # network activity. Mirrors the before_request() guard used in modules.
         if self.campaign is not None and not self.campaign.is_in_scope(target):
             logger.warning(
@@ -114,7 +114,7 @@ class RemoteExecutor:
                 target=target, method=method,
                 payload_type=payload_type, command=command[:200],
                 operator=self.operator,
-                stderr=f"Target '{target}' is outside campaign scope — execution blocked.",
+                stderr=f"Target '{target}' is outside campaign scope - execution blocked.",
                 exit_code=-1, success=False,
             )
 
@@ -280,14 +280,14 @@ class RemoteExecutor:
 
     async def _run_psexec(self, target, command, username, domain, secret) -> tuple[str, str, int]:
         """
-        PsExec execution — delegates to canonical implementation in lateral.modules.PsExecLateral.
+        PsExec execution - delegates to canonical implementation in lateral.modules.PsExecLateral.
         Canonical code lives in ares/modules/lateral/modules.py.
         """
         # Check optional dep before instantiating module (avoids masking ImportError)
         try:
             import impacket  # noqa: F401
         except ImportError:
-            return "", "impacket not installed — run: pip install impacket", 1
+            return "", "impacket not installed - run: pip install impacket", 1
         try:
             from ares.modules.lateral.modules import PsExecLateral
             from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
@@ -304,7 +304,7 @@ class RemoteExecutor:
             return "", str(exc)[:300], 1
     async def _run_winrm(self, target, command, username, domain, secret) -> tuple[str, str, int]:
         """
-        WinRM / PowerShell Remoting execution — delegates to WinRMLateral.move().
+        WinRM / PowerShell Remoting execution - delegates to WinRMLateral.move().
         Canonical implementation lives in ares/modules/lateral/modules.py.
 
         Supports both HTTP (port 5985, NTLM) and HTTPS (port 5986, SSL).
@@ -314,7 +314,7 @@ class RemoteExecutor:
         try:
             import winrm  # noqa: F401
         except ImportError:
-            return "", "pywinrm not installed — run: pip install pywinrm", 1
+            return "", "pywinrm not installed - run: pip install pywinrm", 1
         try:
             from ares.modules.lateral.modules import WinRMLateral
             from ares.core.campaign import Campaign
@@ -329,7 +329,7 @@ class RemoteExecutor:
                 secret=secret,
                 command=command,
             )
-            # LateralResult uses .output/.error — map to stdout/stderr contract
+            # LateralResult uses .output/.error - map to stdout/stderr contract
             return (
                 result.output or "",
                 result.error  or "",
@@ -340,14 +340,14 @@ class RemoteExecutor:
 
     async def _run_wmiexec(self, target, command, username, domain, secret) -> tuple[str, str, int]:
         """
-        WMIExec execution — delegates to canonical implementation in lateral.modules.WMIExecLateral.
+        WMIExec execution - delegates to canonical implementation in lateral.modules.WMIExecLateral.
         Canonical code lives in ares/modules/lateral/modules.py.
         """
         # Check optional dep before instantiating module (avoids masking ImportError)
         try:
             import impacket  # noqa: F401
         except ImportError:
-            return "", "impacket not installed — run: pip install impacket", 1
+            return "", "impacket not installed - run: pip install impacket", 1
         try:
             from ares.modules.lateral.modules import WMIExecLateral
             from ares.core.campaign import Campaign
@@ -367,7 +367,7 @@ class RemoteExecutor:
         try:
             import paramiko
         except ImportError:
-            return "", "paramiko not installed — run: pip install paramiko", 1
+            return "", "paramiko not installed - run: pip install paramiko", 1
 
         loop = asyncio.get_running_loop()
         known_hosts_file = self.known_hosts_file
@@ -376,11 +376,11 @@ class RemoteExecutor:
             client = paramiko.SSHClient()
 
             if known_hosts_file:
-                # Strict verification — reject unknown hosts
+                # Strict verification - reject unknown hosts
                 client.set_missing_host_key_policy(paramiko.RejectPolicy())
                 client.load_host_keys(known_hosts_file)
             else:
-                # No known_hosts supplied — auto-accept but warn loudly.
+                # No known_hosts supplied - auto-accept but warn loudly.
                 # Risk: MITM can steal credentials on untrusted networks (hotel
                 # wifi, compromised VPN, pivot host). Supply known_hosts_file to
                 # the RemoteExecutor constructor to enable host verification.

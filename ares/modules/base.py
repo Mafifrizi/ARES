@@ -9,18 +9,18 @@ Metadata system enables:
   - engine capability querying (list all modules that output 'spn_list')
 
 Required class attributes:
-    MODULE_ID          str  — unique dotted ID, e.g. "ad.kerberoast"
-    MODULE_NAME        str  — human name
-    MODULE_CATEGORY    str  — "ad" | "linux" | "cloud" | "reporting"
-    MODULE_DESCRIPTION str  — one-liner for CLI list
+    MODULE_ID          str  - unique dotted ID, e.g. "ad.kerberoast"
+    MODULE_NAME        str  - human name
+    MODULE_CATEGORY    str  - "ad" | "linux" | "cloud" | "reporting"
+    MODULE_DESCRIPTION str  - one-liner for CLI list
 
 Optional class attributes (defaults shown):
-    OPSEC_LEVEL        OpsecLevel  — SILENT | LOW | MEDIUM | HIGH_NOISE
-    REQUIRES           list[str]   — capabilities/outputs this module needs as input
-    OUTPUTS            list[str]   — what this module produces (feeds downstream modules)
-    MITRE_TECHNIQUES   list[str]   — ATT&CK technique IDs
+    OPSEC_LEVEL        OpsecLevel  - SILENT | LOW | MEDIUM | HIGH_NOISE
+    REQUIRES           list[str]   - capabilities/outputs this module needs as input
+    OUTPUTS            list[str]   - what this module produces (feeds downstream modules)
+    MITRE_TECHNIQUES   list[str]   - ATT&CK technique IDs
     MODULE_AUTHOR      str
-    MIN_NOISE_PROFILE  str | None  — block execution below this profile
+    MIN_NOISE_PROFILE  str | None  - block execution below this profile
 """
 from __future__ import annotations
 
@@ -139,10 +139,10 @@ def normalize_module_metadata(
 
 class OpsecLevel(str, Enum):
     SILENT     = "silent"      # passive/local only, zero network traffic
-    LOCAL      = "local"       # alias for SILENT — cracking, local-only ops
+    LOCAL      = "local"       # alias for SILENT - cracking, local-only ops
     LOW        = "low"         # read-only LDAP, basic API calls
     MEDIUM     = "medium"      # active queries, Kerberos TGS
-    HIGH_NOISE = "high_noise"  # DCSync, brute force — blocked in stealth
+    HIGH_NOISE = "high_noise"  # DCSync, brute force - blocked in stealth
 
 
 # ── Feasibility Report ────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ class BaseModule(abc.ABC, Generic[P, R]):
         async def run(self, **kwargs) -> tuple[list[Finding], dict[str, Any]]:
             ...
 
-    Formal SDK contract (v0.9.0+) — see validate(), before_request(), finding().
+    Formal SDK contract (v0.9.0+) - see validate(), before_request(), finding().
     """
 
     PARAMS_MODEL: Any = None
@@ -225,12 +225,12 @@ class BaseModule(abc.ABC, Generic[P, R]):
     async def validate(self, ctx: "Any") -> None:
         """
         Validate the execution context BEFORE running the module.
-        Called automatically by the engine — do not call manually.
+        Called automatically by the engine - do not call manually.
         Raise ModuleValidationError if context is insufficient.
 
         Default: checks target is set and all REQUIRES entries are available.
         Override to add module-specific validation (format checks, etc.).
-        Do NOT make network calls here — validate() must complete in < 10s.
+        Do NOT make network calls here - validate() must complete in < 10s.
 
         Example override:
             async def validate(self, ctx):
@@ -245,14 +245,14 @@ class BaseModule(abc.ABC, Generic[P, R]):
         from ares.core.errors import ModuleValidationError
 
         if not isinstance(ctx, ExecutionContext):
-            return  # legacy context — skip validation
+            return  # legacy context - skip validation
 
         if getattr(self, "PARAMS_MODEL", None) is not None:
             from ares.sdk.params import validate_params
 
             ctx.params = validate_params(self.PARAMS_MODEL, ctx.params, module_id=self.MODULE_ID)
 
-        # Categories that use API credentials instead of a target IP — skip target check
+        # Categories that use API credentials instead of a target IP - skip target check
         _NO_TARGET_CATEGORIES = {"cloud", "reporting", "recon"}
         if getattr(self.__class__, "MODULE_CATEGORY", "") in _NO_TARGET_CATEGORIES:
             return
@@ -260,13 +260,13 @@ class BaseModule(abc.ABC, Generic[P, R]):
         # Check target is set
         if not ctx.target:
             raise ModuleValidationError(
-                f"Module {self.MODULE_ID!r} requires 'target' — "
+                f"Module {self.MODULE_ID!r} requires 'target' - "
                 "set via params['target'], params['dc'], or params['host']",
                 module_id=self.MODULE_ID,
                 field="target",
             )
 
-        # Check REQUIRES list — each item must be present in params or context
+        # Check REQUIRES list - each item must be present in params or context
         requires = getattr(self.__class__, "REQUIRES", [])
         if requires:
             raw_params = ctx.params.model_dump() if hasattr(ctx.params, "model_dump") else (ctx.params or {})
@@ -323,7 +323,7 @@ class BaseModule(abc.ABC, Generic[P, R]):
         New modules should override execute() directly.
 
         Returns:
-            ModuleResult — structured result consumed by engine
+            ModuleResult - structured result consumed by engine
         """
         raw_params = getattr(ctx, "params", {})
         if hasattr(raw_params, "model_dump"):
@@ -428,16 +428,16 @@ class BaseModule(abc.ABC, Generic[P, R]):
         Execute the module.
 
         Returns:
-            findings  — list of Finding objects (unvalidated)
-            raw       — raw output dict (evidence, debug info)
+            findings  - list of Finding objects (unvalidated)
+            raw       - raw output dict (evidence, debug info)
 
         Subclasses should override this method. The default implementation
         raises NotImplementedError to catch unimplemented modules at runtime.
         """
-        # Abstract method — enforced by abc.ABC inheritance on BaseModule.
+        # Abstract method - enforced by abc.ABC inheritance on BaseModule.
         # Subclasses must override this.  Using raise rather than @abstractmethod
         # here preserves Mypy compatibility with the dynamic MODULE_ID attribute.
-        raise NotImplementedError(  # abstract — subclasses must implement run()
+        raise NotImplementedError(  # abstract - subclasses must implement run()
             f"Module '{self.MODULE_ID}' must implement run()"
         )
 
@@ -519,7 +519,7 @@ class BaseModule(abc.ABC, Generic[P, R]):
         if any(s in msg for s in ("rate limit", "too many requests", "429", "throttl")):
             return RateLimited(f"{self.MODULE_ID} rate limited: {exc}")
 
-        # Fallback — general network error (engine will retry)
+        # Fallback - general network error (engine will retry)
         return NetworkError(f"{self.MODULE_ID} network error on {target}: {exc}")
 
     # ── Finding helper ─────────────────────────────────────────────────────
@@ -628,7 +628,7 @@ class BaseModule(abc.ABC, Generic[P, R]):
     def _extract_ad_params(self, ctx: "Any") -> dict:
         """
         Extract common AD module params from ExecutionContext.
-        Pulls dc, domain, username, password — trying vault first.
+        Pulls dc, domain, username, password - trying vault first.
         Safe to call even when ctx is a bare namespace (test mode).
         """
         cred = getattr(ctx, "best_credential", lambda: None)()
@@ -675,7 +675,7 @@ class ModuleResult:
     error:            str   = ""
     module_id:        str   = ""
     execution_id:     str   = ""
-    # Outcome quality — 0.0=failed/empty, 0.5=partial, 1.0=full success
+    # Outcome quality - 0.0=failed/empty, 0.5=partial, 1.0=full success
     # Enables accurate learning in OutcomeKnowledgeBase (not just status string)
     outcome_quality:  float = -1.0   # -1.0 = not set by module (auto-computed)
     outcome_evidence: str   = ""     # e.g. "3 TGS tickets from corp.local"

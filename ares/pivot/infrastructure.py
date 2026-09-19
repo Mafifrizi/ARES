@@ -57,11 +57,11 @@ class PivotTunnel:
     pivot_host:     str = ""
     pivot_port:     int = 22        # SSH port on pivot
 
-    # Listener (local side — operator machine)
+    # Listener (local side - operator machine)
     local_host:     str = "127.0.0.1"
     local_port:     int = 0         # 0 = auto-assigned
 
-    # Target (remote side — what we're reaching through pivot)
+    # Target (remote side - what we're reaching through pivot)
     remote_host:    str = ""        # for port-forward tunnels
     remote_port:    int = 0         # for port-forward tunnels
 
@@ -80,7 +80,7 @@ class PivotTunnel:
     # Reachable subnets through this tunnel
     reachable_subnets: list[str] = field(default_factory=list)
 
-    # Runtime handles — typed as Any to avoid hard dependency on asyncssh/subprocess
+    # Runtime handles - typed as Any to avoid hard dependency on asyncssh/subprocess
     # These are populated during establish_* methods and cleaned up in teardown()
     _conn:      Any = field(default=None, repr=False, compare=False)
     _forwarder: Any = field(default=None, repr=False, compare=False)
@@ -257,7 +257,7 @@ class PivotManager:
                         logger.info("socks5_subprocess_established",
                                     pivot=pivot_host, local_port=local_port)
                 else:
-                    # asyncssh not installed and no ssh binary — record as active
+                    # asyncssh not installed and no ssh binary - record as active
                     # (operator must establish tunnel externally)
                     tunnel.state = TunnelState.ACTIVE
                     logger.warning("socks5_no_backend_available",
@@ -403,7 +403,7 @@ class PivotManager:
         return fwd
 
     def teardown(self, tunnel_id: str) -> bool:
-        """Close and remove a tunnel — closes asyncssh conn or subprocess."""
+        """Close and remove a tunnel - closes asyncssh conn or subprocess."""
         tunnel = self._tunnels.get(tunnel_id)
         if not tunnel:
             return False

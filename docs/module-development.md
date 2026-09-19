@@ -93,7 +93,7 @@ class MssqlEnumModule(BaseModule[MssqlEnumParams, ModuleResult]):
         port   = ctx.params.port
 
         if ctx.dry_run:
-            # Simulation mode — return dry-run result
+            # Simulation mode - return dry-run result
             return ModuleResult.ok(
                 f"Dry-run validated: {target}:{port} inside approved scope.",
                 module_id=self.MODULE_ID,
@@ -140,7 +140,7 @@ class MssqlEnumModule(BaseModule[MssqlEnumParams, ModuleResult]):
     # ── Private helpers ─────────────────────────────────────────────────
 
     async def _enumerate(self, target: str, port: int, ctx: ExecutionContext) -> list[dict]:
-        # Stub — real implementation connects to MSSQL service
+        # Stub - real implementation connects to MSSQL service
         return [{"version": "MSSQL 2019", "auth_method": "SQL_AND_WINDOWS"}]
 ```
 
@@ -272,7 +272,7 @@ async def validate(self, ctx: ExecutionContext) -> None:
         )
 ```
 
-### `execute(ctx)` — The attack logic
+### `execute(ctx)` - The attack logic
 
 ```python
 async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
@@ -320,7 +320,7 @@ async def execute(self, ctx: ExecutionContext[MssqlEnumParams]) -> ModuleResult:
     return result
 ```
 
-### `report(result)` — Report formatting
+### `report(result)` - Report formatting
 
 ```python
 def report(self, result: ModuleResult) -> dict:
@@ -381,7 +381,7 @@ from ares.core.errors import (
     ConnectionTimeout,        # TCP timeout
     HostUnreachable,          # no route
     AuthenticationFailed,     # bad creds
-    AccountLocked,            # lockout — CRITICAL
+    AccountLocked,            # lockout - CRITICAL
     InsufficientPrivilege,    # need higher priv
     ScopeError,               # out of scope
     SandboxError,             # module crashed
@@ -505,7 +505,7 @@ ares module install ./mymodule/
 
 -  Must define all required metadata (`MODULE_ID`, `MODULE_NAME`, `MODULE_CATEGORY`, `MODULE_DESCRIPTION`).
 -  Must declare `PARAMS_MODEL` for robust type validation and clean UI parameter rendering.
--  Must respect `ctx.dry_run` — zero unauthorized side-effects or network traffic when True.
+-  Must respect `ctx.dry_run` - zero unauthorized side-effects or network traffic when True.
 -  Must call `await self.before_request(target)` before network interactions.
 -  Must raise native ARES exceptions rather than raw socket or OS exceptions.
 -  Must include unit tests using `ModuleTestHarness`.

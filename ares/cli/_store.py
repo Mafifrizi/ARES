@@ -1,5 +1,5 @@
 """
-Shared CLI persistence helpers — campaign JSON store on local disk.
+Shared CLI persistence helpers - campaign JSON store on local disk.
 Used by typer_main.py for all campaign read/write operations.
 """
 from __future__ import annotations

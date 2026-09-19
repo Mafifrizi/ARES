@@ -1,5 +1,5 @@
 """
-SNMP Enumeration — Community String Testing + OID Walk
+SNMP Enumeration - Community String Testing + OID Walk
 MITRE: T1046, T1590
 
 Tests common SNMP community strings (v1/v2c) and enumerates system information
@@ -9,13 +9,13 @@ via SNMP GET/WALK on standard OIDs:
   hrStorageTable (disk info)
 
 Flags:
-  - Default community string "public" or "private" — HIGH severity
-  - System info disclosure — MEDIUM
-  - Network interface enumeration — INFO
+  - Default community string "public" or "private" - HIGH severity
+  - System info disclosure - MEDIUM
+  - Network interface enumeration - INFO
 
 Requires: pip install ares-redteam[network] (adds pysnmp)
 
-OpSec: LOW — SNMP UDP is low-noise but creates log entries on managed devices.
+OpSec: LOW - SNMP UDP is low-noise but creates log entries on managed devices.
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def _snmp_get_sync(host: str, community: str, port: int,
             ContextData, ObjectType, ObjectIdentity,
         )
     except ImportError:
-        return {"_error": "pysnmp not installed — run: pip install pysnmp"}
+        return {"_error": "pysnmp not installed - run: pip install pysnmp"}
 
     results: dict[str, str] = {}
     engine = SnmpEngine()
@@ -146,7 +146,7 @@ def _snmp_walk_sync(host: str, community: str, port: int,
 )
 class SnmpEnumModule(BaseModule):
     """
-    network.snmp_enum — Test common SNMP community strings and enumerate system info via OID walk — identifies default credentials, system details, interfaces, and running processes
+    network.snmp_enum - Test common SNMP community strings and enumerate system info via OID walk - identifies default credentials, system details, interfaces, and running processes
 
     OPSEC: LOW
     MITRE: "T1046", "T1590"
@@ -156,7 +156,7 @@ class SnmpEnumModule(BaseModule):
     MODULE_NAME        = "SNMP Enumeration"
     MODULE_CATEGORY    = "network"
     MODULE_DESCRIPTION = (
-        "Test common SNMP community strings and enumerate system info via OID walk — "
+        "Test common SNMP community strings and enumerate system info via OID walk - "
         "identifies default credentials, system details, interfaces, and running processes"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -178,7 +178,7 @@ class SnmpEnumModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -315,7 +315,7 @@ class SnmpEnumModule(BaseModule):
             )
 
             if result.get("_error"):
-                # pysnmp not installed — stop here
+                # pysnmp not installed - stop here
                 return [], {"error": result["_error"]}
 
             if not result:
@@ -353,7 +353,7 @@ class SnmpEnumModule(BaseModule):
                 description=(
                     f"SNMP community string '{community}' is accepted by {target}. "
                     f"{'This is a DEFAULT community string.' if is_default else ''} "
-                    f"System: {result.get('sysName', 'unknown')} — "
+                    f"System: {result.get('sysName', 'unknown')} - "
                     f"{result.get('sysDescr', '')[:150]}"
                 ),
                 severity=sev,
@@ -378,7 +378,7 @@ class SnmpEnumModule(BaseModule):
             )
 
             # Don't spray all community strings if we found one
-            # (stay low-noise — operator can re-run with specific communities if needed)
+            # (stay low-noise - operator can re-run with specific communities if needed)
             break
 
         # ── System info finding if sysLocation/sysContact found ───────────────

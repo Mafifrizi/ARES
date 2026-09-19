@@ -1,6 +1,6 @@
 version: "3.9"
 
-# Production compose — uses multi-stage Dockerfile.prod
+# Production compose - uses multi-stage Dockerfile.prod
 # Start: docker compose -f docker/docker-compose.prod.yml up -d
 
 services:
@@ -8,7 +8,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.prod
-    # Do NOT expose port directly — nginx terminates TLS
+    # Do NOT expose port directly - nginx terminates TLS
     expose:
       - "8080"
     env_file:
@@ -34,7 +34,7 @@ services:
       timeout: 10s
       start_period: 15s
       retries: 3
-    # ares-api has no service dependencies — it starts independently
+    # ares-api has no service dependencies - it starts independently
 
   nginx:
     image: nginx:1.25-alpine@sha256:a59278fd22a9d411121e190b8cec8aa57b306aa3332459197777583beb728f59  # pinned 2024-03

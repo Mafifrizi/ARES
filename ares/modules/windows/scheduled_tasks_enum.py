@@ -1,5 +1,5 @@
 """
-Windows Scheduled Tasks Enumeration — Privilege Escalation Path Analysis
+Windows Scheduled Tasks Enumeration - Privilege Escalation Path Analysis
 MITRE: T1053.005 (Scheduled Task/Job), T1574.001 (DLL Search Order Hijacking)
 
 Enumerates scheduled tasks on the target via impacket TSCH RPC and identifies:
@@ -10,10 +10,10 @@ Enumerates scheduled tasks on the target via impacket TSCH RPC and identifies:
   4. Misconfigured task permissions (task itself writable by low-priv users)
   5. Tasks that run at logon or on a schedule that could be abused for persistence
 
-This module is ENUMERATION ONLY — it reads task XML and checks paths.
+This module is ENUMERATION ONLY - it reads task XML and checks paths.
 No tasks are created, modified, or triggered.
 
-OPSEC: LOW-MEDIUM — connects via SMB + TSCH RPC (\\pipe\\atsvc).
+OPSEC: LOW-MEDIUM - connects via SMB + TSCH RPC (\\pipe\\atsvc).
 Generates: SMB connection events. No process execution on target.
 """
 from __future__ import annotations
@@ -154,7 +154,7 @@ def _parse_task_xml(xml_str: str) -> dict[str, Any]:
 )
 class ScheduledTasksEnumModule(BaseModule):
     """
-    windows.scheduled_tasks_enum — Enumerate scheduled tasks via TSCH RPC and identify high-privilege tasks with writable binary pa
+    windows.scheduled_tasks_enum - Enumerate scheduled tasks via TSCH RPC and identify high-privilege tasks with writable binary pa
 
     OPSEC: LOW
     MITRE: "T1053.005", "T1082"
@@ -166,7 +166,7 @@ class ScheduledTasksEnumModule(BaseModule):
     MODULE_CATEGORY    = "windows"
     MODULE_DESCRIPTION = (
         "Enumerate scheduled tasks via TSCH RPC and identify high-privilege tasks "
-        "with writable binary paths — privilege escalation path analysis"
+        "with writable binary paths - privilege escalation path analysis"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
@@ -193,7 +193,7 @@ class ScheduledTasksEnumModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
         await super().validate(ctx)
@@ -322,7 +322,7 @@ class ScheduledTasksEnumModule(BaseModule):
                 TASK_ENUM_HIDDEN,
             )
         except ImportError:
-            return [], {"error": "impacket not installed — pip install ares-redteam[ad]"}
+            return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("scheduled_tasks_enum_start", target=target, username=username)
         audit("scheduled_tasks_enum", actor=username, source="operator",

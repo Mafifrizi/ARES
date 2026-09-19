@@ -1,15 +1,15 @@
 """
-Property-based tests — input sanitizers (ares/core/security.py)
+Property-based tests - input sanitizers (ares/core/security.py)
 
 Uses Hypothesis to fuzz sanitize_ldap(), sanitize_hostname(), sanitize_path(),
 and validate_ip_or_cidr() with thousands of auto-generated inputs.
 
 Properties verified:
-  1. IDEMPOTENCY    — sanitize(sanitize(x)) == sanitize(x)  [always]
-  2. SAFETY         — dangerous chars never present in output  [always]
-  3. NO CRASH       — function never raises on any string input  [always]
-  4. VALID OUTPUT   — output type matches expected  [always]
-  5. CORRECTNESS    — known-good inputs pass, known-bad inputs are stripped  [spot-check]
+  1. IDEMPOTENCY    - sanitize(sanitize(x)) == sanitize(x)  [always]
+  2. SAFETY         - dangerous chars never present in output  [always]
+  3. NO CRASH       - function never raises on any string input  [always]
+  4. VALID OUTPUT   - output type matches expected  [always]
+  5. CORRECTNESS    - known-good inputs pass, known-bad inputs are stripped  [spot-check]
 
 Run: pytest tests/unit/test_sanitizers_property.py -v
      (hypothesis runs 100 examples per test by default;
@@ -39,10 +39,10 @@ from ares.core.security import (
 
 # ── Shared strategies ─────────────────────────────────────────────────────────
 
-# Full Unicode text — any string hypothesis can generate
+# Full Unicode text - any string hypothesis can generate
 any_text = st.text(min_size=0, max_size=200)
 
-# Printable ASCII only — subset for readable test output
+# Printable ASCII only - subset for readable test output
 printable = st.text(
     alphabet=st.characters(whitelist_categories=("Lu", "Ll", "Nd", "Po", "Zs")),
     min_size=0, max_size=100,
@@ -108,11 +108,11 @@ class TestSanitizeLDAPProperties:
     @settings(max_examples=200)
     def test_dangerous_chars_stripped_or_escaped(self, value: str):
         """
-        Raw null bytes must not survive sanitization — they are used in
+        Raw null bytes must not survive sanitization - they are used in
         LDAP injection to truncate filter expressions.
         """
         result = sanitize_ldap(value)
-        # Null byte is the most dangerous — must not be in output as-is
+        # Null byte is the most dangerous - must not be in output as-is
         # (ldap3 escapes it to \00, which is safe; raw \x00 is not)
         assert "\x00" not in result, (
             f"Raw null byte survived sanitize_ldap({repr(value)!r}) → {repr(result)}"
@@ -134,7 +134,7 @@ class TestSanitizeLDAPProperties:
         """Wildcard * used in LDAP injection must be escaped, not raw."""
         result = sanitize_ldap("*)(uid=*")
         # After escaping, the raw unescaped wildcard should not form valid injection
-        # The exact escaping depends on ldap3 — just verify no crash
+        # The exact escaping depends on ldap3 - just verify no crash
         assert isinstance(result, str)
 
 
@@ -303,7 +303,7 @@ class TestValidateIPOrCIDRProperties:
     @given(any_text)
     @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
     def test_never_raises(self, value: str):
-        """validate_ip_or_cidr must never raise — always return bool."""
+        """validate_ip_or_cidr must never raise - always return bool."""
         try:
             result = validate_ip_or_cidr(value)
             assert isinstance(result, bool)
@@ -318,7 +318,7 @@ class TestValidateIPOrCIDRProperties:
     @given(valid_ipv4_cidr)
     @settings(max_examples=200)
     def test_valid_cidr_accepted(self, cidr: str):
-        # netaddr is strict about host bits — allow either True or False
+        # netaddr is strict about host bits - allow either True or False
         # but must not raise
         result = validate_ip_or_cidr(cidr)
         assert isinstance(result, bool)

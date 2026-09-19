@@ -1,4 +1,4 @@
-"""Tests for ARES v6 — DB layer, plugin loader, and report generation.
+"""Tests for ARES v6 - DB layer, plugin loader, and report generation.
 
 Note: AresEngine tests are in tests/unit/test_engine.py
 """

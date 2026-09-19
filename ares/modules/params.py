@@ -1,5 +1,5 @@
 """
-ARES Module Parameter Validation — Pydantic-based
+ARES Module Parameter Validation - Pydantic-based
 
 Replaces the weak dict-based PARAM_SCHEMA with a proper Pydantic model
 that enforces types, lengths, patterns, and secret handling.
@@ -315,7 +315,7 @@ class LinuxPrivescParams(ModuleParams):
 
 
 class ADCSParams(DomainAuthParams):
-    """ad.adcs — ADCS ESC1-ESC8 enumeration and exploitation."""
+    """ad.adcs - ADCS ESC1-ESC8 enumeration and exploitation."""
 
     exploit_esc1: bool = param(
         "Attempt ESC1 certificate request if vulnerable",
@@ -331,7 +331,7 @@ class ADCSParams(DomainAuthParams):
 
 
 class GhostForgeParams(DomainAuthParams):
-    """ad.ghost_forge — Autonomous ADCS Cryptographic Identity & Kerberos PKINIT Takeover."""
+    """ad.ghost_forge - Autonomous ADCS Cryptographic Identity & Kerberos PKINIT Takeover."""
 
     ca_server: str = param(
         "Certificate Authority (CA) server hostname or IP",
@@ -385,7 +385,7 @@ class GhostForgeParams(DomainAuthParams):
 
 
 class CoerceParams(DomainAuthParams):
-    """ad.coerce — PetitPotam/PrinterBug/DFSCoerce NTLM coercion."""
+    """ad.coerce - PetitPotam/PrinterBug/DFSCoerce NTLM coercion."""
 
     listener_ip: str = param(
         "Attacker IP to receive NTLM auth", min_length=7, max_length=45
@@ -399,7 +399,7 @@ class CoerceParams(DomainAuthParams):
 
 
 class SCCMParams(DomainAuthParams):
-    """ad.sccm — SCCM/MECM enumeration and credential extraction."""
+    """ad.sccm - SCCM/MECM enumeration and credential extraction."""
 
     sccm_server: str = param(
         "SCCM site server hostname (auto-discover if empty)",
@@ -416,7 +416,7 @@ class SCCMParams(DomainAuthParams):
 
 
 class NTLMRelayParams(DomainAuthParams):
-    """lateral.ntlm_relay — Full NTLM relay attack chain."""
+    """lateral.ntlm_relay - Full NTLM relay attack chain."""
 
     targets: list[str] = param(
         "Target hosts to check for relay (auto-discover if empty)",
@@ -444,7 +444,7 @@ class NTLMRelayParams(DomainAuthParams):
 
 
 class DelegationAbuseParams(DomainAuthParams):
-    """ad.delegation_abuse — Unconstrained/constrained/RBCD delegation abuse."""
+    """ad.delegation_abuse - Unconstrained/constrained/RBCD delegation abuse."""
 
     mode: str = param(
         "Mode: enumerate|unconstrained|constrained|rbcd",
@@ -473,7 +473,7 @@ class DelegationAbuseParams(DomainAuthParams):
 
 
 class LAPSEnumParams(DomainAuthParams):
-    """ad.laps_enum — LAPS v1/v2 password retrieval."""
+    """ad.laps_enum - LAPS v1/v2 password retrieval."""
 
     computer_filter: str = param(
         "LDAP filter for target computers", required=False, default="", max_length=512
@@ -484,7 +484,7 @@ class LAPSEnumParams(DomainAuthParams):
 
 
 class AWSPrivescParams(ModuleParams):
-    """cloud.aws_privesc — AWS IAM privilege escalation."""
+    """cloud.aws_privesc - AWS IAM privilege escalation."""
 
     access_key: str | None = param(
         "AWS Access Key ID", required=False, default=None, max_length=128
@@ -518,7 +518,7 @@ class AWSPrivescParams(ModuleParams):
 
 
 class AzureParams(ModuleParams):
-    """cloud.azure — Azure resource enumeration."""
+    """cloud.azure - Azure resource enumeration."""
 
     subscription_id: str | None = param(
         "Azure subscription ID", required=False, default=None
@@ -533,7 +533,7 @@ class AzureParams(ModuleParams):
 
 
 class AzureADParams(ModuleParams):
-    """cloud.azure_ad — Azure AD enumeration via Graph API."""
+    """cloud.azure_ad - Azure AD enumeration via Graph API."""
 
     tenant_id: str | None = param("Azure tenant ID", required=False, default=None)
     client_id: str | None = param("App client ID", required=False, default=None)
@@ -555,7 +555,7 @@ class AzureADParams(ModuleParams):
 
 
 class GCPParams(ModuleParams):
-    """cloud.gcp — GCP resource enumeration."""
+    """cloud.gcp - GCP resource enumeration."""
 
     project_id: str | None = param(
         "GCP project ID (lowercase letters, digits, hyphens)",
@@ -573,7 +573,7 @@ class GCPParams(ModuleParams):
 
 
 class CredentialCrackParams(ModuleParams):
-    """credential.crack — Offline hash cracking via hashcat/john."""
+    """credential.crack - Offline hash cracking via hashcat/john."""
 
     hashcat_path: str = param(
         "Path to hashcat binary", required=False, default="hashcat", max_length=512
@@ -587,7 +587,7 @@ class CredentialCrackParams(ModuleParams):
 
 
 class GoldenTicketParams(ModuleParams):
-    """credential.golden_ticket — Kerberos golden ticket forging."""
+    """credential.golden_ticket - Kerberos golden ticket forging."""
 
     domain: str = param("Target domain FQDN", min_length=3, pattern=r"^[\w.-]+$")
     domain_sid: str = param(
@@ -603,7 +603,7 @@ class GoldenTicketParams(ModuleParams):
 
 
 class PassSprayParams(ModuleParams):
-    """credential.pass_spray — Password spraying against LDAP/SMB."""
+    """credential.pass_spray - Password spraying against LDAP/SMB."""
 
     target: str = param("DC or target IP/hostname", min_length=3, max_length=253)
     domain: str = param("Domain FQDN", required=False, default="", max_length=253)
@@ -622,7 +622,7 @@ class PassSprayParams(ModuleParams):
 
 
 class PassTheHashParams(ModuleParams):
-    """credential.pass_the_hash — SMB pass-the-hash authentication."""
+    """credential.pass_the_hash - SMB pass-the-hash authentication."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("Username", min_length=1, max_length=256)
@@ -643,7 +643,7 @@ class PassTheHashParams(ModuleParams):
 
 
 class CredentialReuseParams(ModuleParams):
-    """credential.reuse — Test captured credentials against a target."""
+    """credential.reuse - Test captured credentials against a target."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     protocol: str = param(
@@ -658,7 +658,7 @@ class CredentialReuseParams(ModuleParams):
 
 
 class SecretsScanParams(ModuleParams):
-    """exfil.secrets_scan — SSH remote scan for credential patterns."""
+    """exfil.secrets_scan - SSH remote scan for credential patterns."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("SSH username", min_length=1, max_length=256)
@@ -677,7 +677,7 @@ class SecretsScanParams(ModuleParams):
 
 
 class SmbSharesParams(ModuleParams):
-    """exfil.smb_shares — Enumerate SMB shares and search for sensitive files."""
+    """exfil.smb_shares - Enumerate SMB shares and search for sensitive files."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("Username", min_length=1, max_length=256)
@@ -691,7 +691,7 @@ class SmbSharesParams(ModuleParams):
 
 
 class StagedCollectionParams(ModuleParams):
-    """exfil.staged_collection — Collect files matching patterns via SSH."""
+    """exfil.staged_collection - Collect files matching patterns via SSH."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("SSH username", min_length=1, max_length=256)
@@ -714,7 +714,7 @@ class StagedCollectionParams(ModuleParams):
 
 
 class LateralBaseParams(ModuleParams):
-    """Shared params for lateral movement modules (remote execution — command runs on target)."""
+    """Shared params for lateral movement modules (remote execution - command runs on target)."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("Username", min_length=1, max_length=256)
@@ -731,7 +731,7 @@ class LateralBaseParams(ModuleParams):
 
 
 class DCOMParams(LateralBaseParams):
-    """lateral.dcom — DCOM lateral movement via MMC20/ShellWindows."""
+    """lateral.dcom - DCOM lateral movement via MMC20/ShellWindows."""
 
     method: str = param(
         "DCOM method: auto|mmc20|shellwindows|shellbrowserwindow",
@@ -742,7 +742,7 @@ class DCOMParams(LateralBaseParams):
 
 
 class PsExecParams(LateralBaseParams):
-    """lateral.psexec — PsExec-style lateral movement via SMB + SCM."""
+    """lateral.psexec - PsExec-style lateral movement via SMB + SCM."""
 
     service_name: str = param(
         "Temporary service name", required=False, default="", max_length=256
@@ -750,25 +750,25 @@ class PsExecParams(LateralBaseParams):
 
 
 class WmiExecParams(LateralBaseParams):
-    """lateral.wmiexec — WMI remote execution."""
+    """lateral.wmiexec - WMI remote execution."""
 
     pass
 
 
 class WinRMParams(LateralBaseParams):
-    """lateral.winrm — WinRM PowerShell remote execution."""
+    """lateral.winrm - WinRM PowerShell remote execution."""
 
     pass
 
 
 class RDPLateralParams(LateralBaseParams):
-    """lateral.rdp — RDP lateral movement (HIGH_NOISE)."""
+    """lateral.rdp - RDP lateral movement (HIGH_NOISE)."""
 
     pass
 
 
 class SSHPivotParams(ModuleParams):
-    """lateral.ssh_pivot — SSH tunnel SOCKS5 pivot."""
+    """lateral.ssh_pivot - SSH tunnel SOCKS5 pivot."""
 
     target: str = param("SSH server IP or hostname", min_length=3, max_length=253)
     username: str = param("SSH username", min_length=1, max_length=256)
@@ -785,7 +785,7 @@ class SSHPivotParams(ModuleParams):
 
 
 class SMBRelayParams(ModuleParams):
-    """lateral.smb_relay — SMB signing audit and relay candidate detection."""
+    """lateral.smb_relay - SMB signing audit and relay candidate detection."""
 
     target: str | None = param(
         "Single target to check", required=False, default=None, max_length=253
@@ -812,31 +812,31 @@ class LinuxSSHParams(ModuleParams):
 
 
 class ContainerEscapeParams(LinuxSSHParams):
-    """linux.container — Docker/K8s container escape techniques."""
+    """linux.container - Docker/K8s container escape techniques."""
 
     pass
 
 
 class KernelSuggesterParams(LinuxSSHParams):
-    """linux.kernel_suggester — Kernel exploit suggester via uname."""
+    """linux.kernel_suggester - Kernel exploit suggester via uname."""
 
     pass
 
 
 class LDPreloadParams(LinuxSSHParams):
-    """linux.ld_preload — LD_PRELOAD privilege escalation."""
+    """linux.ld_preload - LD_PRELOAD privilege escalation."""
 
     pass
 
 
 class NFSEscapeParams(LinuxSSHParams):
-    """linux.nfs_escape — NFS no_root_squash escape."""
+    """linux.nfs_escape - NFS no_root_squash escape."""
 
     pass
 
 
 class ServiceHijackParams(LinuxSSHParams):
-    """linux.service_hijack — Writable systemd service hijack."""
+    """linux.service_hijack - Writable systemd service hijack."""
 
     pass
 
@@ -845,7 +845,7 @@ class ServiceHijackParams(LinuxSSHParams):
 
 
 class PortScanParams(ModuleParams):
-    """network.port_scan — TCP port scan."""
+    """network.port_scan - TCP port scan."""
 
     target: str = param("Target IP, hostname, or CIDR", min_length=3, max_length=253)
     ports: str = param(
@@ -863,7 +863,7 @@ class PortScanParams(ModuleParams):
 
 
 class DNSEnumParams(ModuleParams):
-    """network.dns_enum — DNS enumeration and zone transfer attempt."""
+    """network.dns_enum - DNS enumeration and zone transfer attempt."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     domain: str = param(
@@ -873,7 +873,7 @@ class DNSEnumParams(ModuleParams):
 
 
 class HTTPFingerprintParams(ModuleParams):
-    """network.http_fingerprint — HTTP service and tech fingerprinting."""
+    """network.http_fingerprint - HTTP service and tech fingerprinting."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     ports: list[int] = param(
@@ -887,7 +887,7 @@ class HTTPFingerprintParams(ModuleParams):
 
 
 class SNMPEnumParams(ModuleParams):
-    """network.snmp_enum — SNMP community brute-force and OID walk."""
+    """network.snmp_enum - SNMP community brute-force and OID walk."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     port: int = param("SNMP UDP port", required=False, default=161, ge=1, le=65535)
@@ -899,7 +899,7 @@ class SNMPEnumParams(ModuleParams):
 
 
 class ServiceDetectParams(ModuleParams):
-    """network.service_detect — Banner-grab service version detection."""
+    """network.service_detect - Banner-grab service version detection."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     ports: list[int] = param("Ports to check", required=False, default=[])
@@ -909,7 +909,7 @@ class ServiceDetectParams(ModuleParams):
 
 
 class PivotParams(ModuleParams):
-    """network.pivot — SSH tunnel SOCKS5 pivot infrastructure."""
+    """network.pivot - SSH tunnel SOCKS5 pivot infrastructure."""
 
     target: str = param("Pivot host IP or hostname", min_length=3, max_length=253)
     username: str = param("SSH username", min_length=1, max_length=256)
@@ -941,7 +941,7 @@ class PersistenceBaseParams(ModuleParams):
 
 
 class ScheduledTaskParams(PersistenceBaseParams):
-    """persistence.scheduled_task — Windows scheduled task persistence."""
+    """persistence.scheduled_task - Windows scheduled task persistence."""
 
     task_name: str = param(
         "Scheduled task name",
@@ -959,7 +959,7 @@ class ScheduledTaskParams(PersistenceBaseParams):
 
 
 class RegistryRunParams(PersistenceBaseParams):
-    """persistence.registry_run — Registry Run key persistence."""
+    """persistence.registry_run - Registry Run key persistence."""
 
     key_name: str = param(
         "Run key value name",
@@ -977,7 +977,7 @@ class RegistryRunParams(PersistenceBaseParams):
 
 
 class WMISubscriptionParams(PersistenceBaseParams):
-    """persistence.wmi_subscription — WMI event subscription persistence."""
+    """persistence.wmi_subscription - WMI event subscription persistence."""
 
     subscription_name: str = param(
         "WMI subscription name",
@@ -998,7 +998,7 @@ class WMISubscriptionParams(PersistenceBaseParams):
 
 
 class FingerprintParams(ModuleParams):
-    """recon.fingerprint — Environment fingerprinting (EDR, OS, domain)."""
+    """recon.fingerprint - Environment fingerprinting (EDR, OS, domain)."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     timeout: float = param(
@@ -1031,7 +1031,7 @@ class WindowsBaseParams(ModuleParams):
 
 
 class AppLockerBypassParams(WindowsBaseParams):
-    """windows.applocker_bypass — AppLocker policy enumeration and bypass."""
+    """windows.applocker_bypass - AppLocker policy enumeration and bypass."""
 
     command: str = param(
         "Command to execute if bypass found",
@@ -1042,7 +1042,7 @@ class AppLockerBypassParams(WindowsBaseParams):
 
 
 class DPAPIParams(WindowsBaseParams):
-    """windows.dpapi — DPAPI credential and browser password decryption."""
+    """windows.dpapi - DPAPI credential and browser password decryption."""
 
     targets: list[str] = param(
         "DPAPI target types: chrome|wifi|rdp|credentials",
@@ -1052,13 +1052,13 @@ class DPAPIParams(WindowsBaseParams):
 
 
 class LSASecretsParams(WindowsBaseParams):
-    """windows.lsa_secrets — LSA secrets and cached credential extraction."""
+    """windows.lsa_secrets - LSA secrets and cached credential extraction."""
 
     pass
 
 
 class LsassDumpParams(WindowsBaseParams):
-    """windows.lsass_dump — LSASS process memory dump and parsing."""
+    """windows.lsass_dump - LSASS process memory dump and parsing."""
 
     technique: str = param(
         "Dump technique: comsvcs|secretsdump",
@@ -1069,19 +1069,19 @@ class LsassDumpParams(WindowsBaseParams):
 
 
 class RegistryEnumParams(WindowsBaseParams):
-    """windows.registry_enum — Registry credential hunting."""
+    """windows.registry_enum - Registry credential hunting."""
 
     pass
 
 
 class ScheduledTasksEnumParams(WindowsBaseParams):
-    """windows.scheduled_tasks_enum — Scheduled task enumeration for privesc."""
+    """windows.scheduled_tasks_enum - Scheduled task enumeration for privesc."""
 
     pass
 
 
 class TokenImpersonationParams(ModuleParams):
-    """windows.token_impersonation — Token impersonation via named pipe."""
+    """windows.token_impersonation - Token impersonation via named pipe."""
 
     target: str = param("Target IP or hostname", min_length=3, max_length=253)
     username: str = param("Username", min_length=1, max_length=256)
@@ -1092,7 +1092,7 @@ class TokenImpersonationParams(ModuleParams):
 
 
 class UACBypassParams(WindowsBaseParams):
-    """windows.uac_bypass — UAC configuration check and bypass."""
+    """windows.uac_bypass - UAC configuration check and bypass."""
 
     technique: str = param(
         "Bypass technique: auto|fodhelper|eventvwr",
@@ -1103,7 +1103,7 @@ class UACBypassParams(WindowsBaseParams):
 
 
 class CoveragePredictorParams(ModuleParams):
-    """opsec.coverage_predictor — Detection probability scoring."""
+    """opsec.coverage_predictor - Detection probability scoring."""
 
     noise_profile: str = param(
         "Campaign noise profile for scoring",
@@ -1114,7 +1114,7 @@ class CoveragePredictorParams(ModuleParams):
 
 
 class CloudFederationParams(ModuleParams):
-    """cloud.identity_federation_abuse — Cross-cloud SAML/OIDC federation abuse."""
+    """cloud.identity_federation_abuse - Cross-cloud SAML/OIDC federation abuse."""
 
     tenant_id: str | None = param("Azure tenant ID", required=False, default=None)
     client_id: str | None = param("Azure client ID", required=False, default=None)
@@ -1146,7 +1146,7 @@ class CloudFederationParams(ModuleParams):
 
 
 class PhantomTokenParams(ModuleParams):
-    """cloud.phantom_token — Hybrid Entra ID & Primary Refresh Token (PRT) Hijack."""
+    """cloud.phantom_token - Hybrid Entra ID & Primary Refresh Token (PRT) Hijack."""
 
     tenant_id: str = param(
         "Target Azure AD / Entra ID Tenant ID or domain name (e.g. corp.onmicrosoft.com)",
@@ -1201,7 +1201,7 @@ class PhantomTokenParams(ModuleParams):
 
 
 class EDRBypassParams(ModuleParams):
-    """edr.bypass_adaptive — Adaptive EDR evasion."""
+    """edr.bypass_adaptive - Adaptive EDR evasion."""
 
     edr_vendor: str = param(
         "EDR vendor: crowdstrike|sentinelone|defender_atp|defender_av|carbon_black|cylance|unknown",
@@ -1216,7 +1216,7 @@ class EDRBypassParams(ModuleParams):
 
 
 class AIPlannerParams(ModuleParams):
-    """ai.autonomous_planner — LLM-powered attack chain planning."""
+    """ai.autonomous_planner - LLM-powered attack chain planning."""
 
     goal: str = param(
         "Attack goal: domain_admin|cloud_admin|data_exfil|persistence|full_compromise",
@@ -1247,7 +1247,7 @@ class AIPlannerParams(ModuleParams):
 
 
 class MSSQLParams(ModuleParams):
-    """Parameters for lateral.mssql — validated before execution."""
+    """Parameters for lateral.mssql - validated before execution."""
 
     target: str = Field(
         ..., min_length=1, max_length=253, description="MSSQL server IP or hostname"
@@ -1261,7 +1261,7 @@ class MSSQLParams(ModuleParams):
     command: str = Field(
         default="whoami",
         max_length=500,
-        # Allow alphanumeric, spaces, and common cmd chars — block quotes and semicolons
+        # Allow alphanumeric, spaces, and common cmd chars - block quotes and semicolons
         pattern=r"^[a-zA-Z0-9 /\.\-_=@:,\(\)\[\]\*\?]+$",
         description="OS command to execute (no quotes or semicolons)",
     )

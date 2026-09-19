@@ -25,7 +25,7 @@ FROM python:3.11-slim AS runtime
 # Security: non-root user
 RUN groupadd --system ares && useradd --system --gid ares --no-create-home ares
 
-# OS deps for weasyprint PDF generation only — curl removed (use Python healthcheck)
+# OS deps for weasyprint PDF generation only - curl removed (use Python healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangoft2-1.0-0 libgdk-pixbuf2.0-0 \
     libffi-dev libcairo2 \
@@ -64,7 +64,7 @@ ENV ARES_API_HOST=0.0.0.0 \
 
 EXPOSE 8080
 
-# Python-based healthcheck — no curl needed in runtime image
+# Python-based healthcheck - no curl needed in runtime image
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 

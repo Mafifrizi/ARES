@@ -1,8 +1,8 @@
 """
-ares/strategy/enforcer.py — ConstitutionEnforcer
+ares/strategy/enforcer.py - ConstitutionEnforcer
 
 Hard Python-layer enforcement between LLM output and engine execution.
-LLM prompt-based constitution can be ignored by hallucinating LLMs —
+LLM prompt-based constitution can be ignored by hallucinating LLMs  - 
 this layer CANNOT be bypassed by any prompt.
 
 Removes violating modules from plan BEFORE it reaches engine.run_module().
@@ -38,7 +38,7 @@ ALWAYS_REQUIRE_AUTH: frozenset[str] = frozenset({
 # Modules that are absolutely never allowed (data destructive / ransomware-adjacent)
 ALWAYS_FORBIDDEN: frozenset[str] = frozenset({
     # Add any engagement-universal hard blocks here
-    # Currently empty — per-engagement forbidden_modules handles this
+    # Currently empty - per-engagement forbidden_modules handles this
 })
 
 
@@ -174,7 +174,7 @@ class ConstitutionEnforcer:
             if clean_mods:
                 clean_stages.append({**stage, "modules": clean_mods})
             elif raw_modules:
-                # All modules in stage were removed — log clearly
+                # All modules in stage were removed - log clearly
                 logger.warning("constitution_stage_emptied",
                                stage=stage_name,
                                removed=raw_modules)

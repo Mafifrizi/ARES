@@ -50,7 +50,7 @@ def enc_key() -> bytes:
 # ── Stub modules for integration ──────────────────────────────────────────────
 
 class StubEnumUsersModule(BaseModule):
-    """Stub AD user enumeration — returns fake users for integration tests."""
+    """Stub AD user enumeration - returns fake users for integration tests."""
     MODULE_ID          = "ad.enum_users"
     MODULE_NAME        = "AD User Enumeration"
     MODULE_CATEGORY    = "ad"
@@ -87,7 +87,7 @@ class StubEnumUsersModule(BaseModule):
                 module_id = self.MODULE_ID,
                 execution_id = ctx.execution_id,
             )
-        raise NotImplementedError("Integration stub — dry_run only")
+        raise NotImplementedError("Integration stub - dry_run only")
 
 
 class StubKerberoastModule(BaseModule):
@@ -534,7 +534,7 @@ class TestEndToEndCampaignSimulation:
 
     @pytest.mark.asyncio
     async def test_account_locked_stops_campaign(self, campaign) -> None:
-        """Simulates account lockout — engine behavior should abort."""
+        """Simulates account lockout - engine behavior should abort."""
         from ares.core.errors import AccountLocked, resolve_action, AresError
 
         def simulate_lockout():

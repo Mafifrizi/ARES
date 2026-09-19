@@ -227,7 +227,7 @@ def _build_mitre_map(findings: list[Any]) -> dict[str, list[dict[str, Any]]]:
             tactic_map[tactic] = []
         tactic_map[tactic].append(
             {
-                "technique": f.mitre_technique or "—",
+                "technique": f.mitre_technique or " - ",
                 "title": f.title,
                 "severity": f.severity.value,
             }
@@ -661,7 +661,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ARES Report — {{ campaign.name }}</title>
+<title>ARES Report - {{ campaign.name }}</title>
 <style>
 :root{--red:#e94560;--dark:#0a0f1e;--card:#111827;--border:#1e293b;--text:#e2e8f0;--muted:#6b7280}
 *{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--dark);color:var(--text);line-height:1.6}
@@ -866,7 +866,7 @@ footer{margin-top:3rem;color:var(--muted);font-size:.82rem;border-top:1px solid 
   {% else %}
   <div class="tactic-cell">
     <div class="tactic-name">{{ tactic }}</div>
-    <span style="font-size:.75rem;color:var(--muted)">—</span>
+    <span style="font-size:.75rem;color:var(--muted)"> - </span>
   </div>
   {% endif %}
 {% endfor %}
@@ -898,7 +898,7 @@ footer{margin-top:3rem;color:var(--muted);font-size:.82rem;border-top:1px solid 
 </div>
 {% endif %}
 
-<!-- Attack Graph — vanilla Canvas force-directed layout (no external deps) -->
+<!-- Attack Graph - vanilla Canvas force-directed layout (no external deps) -->
 <h2>Attack Graph</h2>
 <div id="graph-container">
   <canvas id="gc" width="1060" height="490" style="width:100%;border-radius:8px;background:#0a0f1e"></canvas>
@@ -1950,7 +1950,7 @@ class ReportGenerator:
         return out
 
         lines: list[str] = [
-            f"# ARES Report — {campaign.name}\n",
+            f"# ARES Report - {campaign.name}\n",
             f"> **Client:** {campaign.client} · **Operator:** {campaign.operator} · **Generated:** {ctx['generated_at']}",
             f"\n**Risk Score:** `{ctx['risk_score']:.1f}` · **Confirmed:** `{ctx['total_findings']}`\n",
             "---\n",

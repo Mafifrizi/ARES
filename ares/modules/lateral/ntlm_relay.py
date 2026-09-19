@@ -1,5 +1,5 @@
 """
-lateral.ntlm_relay — NTLM Relay Attack Automation
+lateral.ntlm_relay - NTLM Relay Attack Automation
 MITRE: T1557.001 (LLMNR/NBT-NS Poisoning and SMB Relay)
 
 Full relay attack chain:
@@ -13,7 +13,7 @@ Requires: domain creds (for LDAP operations), network access to target DCs.
 This module orchestrates the full chain. Individual steps can also be
 called independently for manual operation.
 
-OPSEC: HIGH — coercion triggers Event ID 5145, relay triggers LDAP writes.
+OPSEC: HIGH - coercion triggers Event ID 5145, relay triggers LDAP writes.
               Use only in NORMAL or AGGRESSIVE noise profiles.
 
 Dependencies: impacket (LDAP, Kerberos, SMB), ldap3 (LDAP signing check)
@@ -92,7 +92,7 @@ class RBCDResult:
 )
 class NTLMRelayModule(BaseModule):
     """
-    lateral.ntlm_relay — Full NTLM relay attack automation
+    lateral.ntlm_relay - Full NTLM relay attack automation
 
     Chain: discover_targets → coerce_auth → relay_to_ldap → rbcd_attack
 
@@ -137,7 +137,7 @@ class NTLMRelayModule(BaseModule):
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "lateral.ntlm_relay is blocked in STEALTH profile — "
+                "lateral.ntlm_relay is blocked in STEALTH profile - "
                 "coercion and LDAP writes are HIGH_NOISE operations.",
                 module_id=self.MODULE_ID, field="noise_profile",
             )
@@ -244,9 +244,9 @@ class NTLMRelayModule(BaseModule):
         Run the NTLM relay attack chain.
 
         Modes:
-            "discover"  — only discover relay targets (safe, no writes)
-            "coerce"    — discover + attempt coercion (triggers auth)
-            "full"      — discover + coerce + relay + RBCD (full attack)
+            "discover"  - only discover relay targets (safe, no writes)
+            "coerce"    - discover + attempt coercion (triggers auth)
+            "full"      - discover + coerce + relay + RBCD (full attack)
         """
         dc = sanitize_hostname(dc)
         await self.before_request(dc, "ldap")
@@ -279,7 +279,7 @@ class NTLMRelayModule(BaseModule):
                 severity=Severity.INFO,
                 mitre_technique="T1557.001", mitre_tactic="Credential Access",
                 evidence=raw["relay_targets"], host=dc, confidence=0.95,
-                remediation="Good — signing enforcement prevents relay attacks.",
+                remediation="Good - signing enforcement prevents relay attacks.",
             )
             return self._findings[:], raw
 
@@ -709,7 +709,7 @@ class NTLMRelayModule(BaseModule):
                     desc = conn.result.get("description", "")
                     if "unwillingToPerform" in str(desc):
                         result.error = (
-                            "ms-DS-MachineAccountQuota is 0 — cannot create machine account. "
+                            "ms-DS-MachineAccountQuota is 0 - cannot create machine account. "
                             "This is a hardened configuration."
                         )
                     else:

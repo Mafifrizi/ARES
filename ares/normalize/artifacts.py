@@ -10,16 +10,16 @@ This enables:
   - Data deduplication (same host reported by two modules = one node)
 
 Artifact taxonomy:
-  Host         — IP address, hostname, OS, open ports
-  Domain       — AD domain with trust relationships
-  User         — domain/local user account
-  Credential   — NTLM hash, cleartext, ticket, key
-  Service      — SPN-registered service
-  Permission   — ACE (who can do what to whom)
-  Finding      — vulnerability/misconfiguration
-  Hash         — crackable hash (KRB5TGS, KRB5ASREP, NTLM)
-  Secret       — plaintext secret (API key, password, token)
-  CloudResource — S3 bucket, IAM role, storage account
+  Host         - IP address, hostname, OS, open ports
+  Domain       - AD domain with trust relationships
+  User         - domain/local user account
+  Credential   - NTLM hash, cleartext, ticket, key
+  Service      - SPN-registered service
+  Permission   - ACE (who can do what to whom)
+  Finding      - vulnerability/misconfiguration
+  Hash         - crackable hash (KRB5TGS, KRB5ASREP, NTLM)
+  Secret       - plaintext secret (API key, password, token)
+  CloudResource - S3 bucket, IAM role, storage account
 
 Usage in a module:
     from ares.normalize.artifacts import NormalizedArtifact, User, Host, Credential
@@ -79,7 +79,7 @@ class NormalizedArtifact:
 
     @property
     def uid(self) -> str:
-        """Deterministic UID — same content = same ID (enables deduplication)."""
+        """Deterministic UID - same content = same ID (enables deduplication)."""
         if self._uid:
             return self._uid
         key = f"{self.artifact_type.value}:{self._dedup_key()}"
@@ -290,7 +290,7 @@ class HashArtifact(NormalizedArtifact):
 
 @dataclass
 class PermissionArtifact(NormalizedArtifact):
-    """An ACE (Access Control Entry) — who can do what to whom."""
+    """An ACE (Access Control Entry) - who can do what to whom."""
     principal:   str = ""   # who holds the right
     target:      str = ""   # object the right is on
     right:       str = ""   # GenericAll, WriteDACL, etc.

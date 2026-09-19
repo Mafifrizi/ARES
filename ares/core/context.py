@@ -55,15 +55,15 @@ class ExecutionContext(Generic[P]):
     Immutable after construction (fields are set once by the engine).
 
     Required fields:
-        target      — IP address or hostname being attacked
-        campaign_id — which campaign this belongs to
-        module_id   — which module will consume this context
+        target      - IP address or hostname being attacked
+        campaign_id - which campaign this belongs to
+        module_id   - which module will consume this context
 
     Optional but strongly recommended:
-        credentials     — ordered list of credentials to try
-        session         — shared operator session (host states, attack history)
-        params          — module-specific parameters
-        operator        — operator username for audit logging
+        credentials     - ordered list of credentials to try
+        session         - shared operator session (host states, attack history)
+        params          - module-specific parameters
+        operator        - operator username for audit logging
     """
 
     # ── Identity ──────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ class ExecutionContext(Generic[P]):
     primary_credential: Any = None    # best credential to try first
 
     # ── Shared state ──────────────────────────────────────────────────────
-    # These are references — mutations visible to engine after execution
+    # These are references - mutations visible to engine after execution
     session:    Any = None    # OperatorSession
     vault:      Any = None    # CredentialVault
     artifact_store: Any = None  # ArtifactStore
@@ -105,7 +105,7 @@ class ExecutionContext(Generic[P]):
 
     # ── Audit ─────────────────────────────────────────────────────────────
     created_at:    float = field(default_factory=time.time)
-    dry_run:       bool  = False   # simulation mode — no real network calls
+    dry_run:       bool  = False   # simulation mode - no real network calls
 
     # ── Metadata ──────────────────────────────────────────────────────────
     tags:     list[str] = field(default_factory=list)
@@ -318,7 +318,7 @@ class ExecutionContext(Generic[P]):
         tags:         list[str] | None = None,
     ) -> "ExecutionContext":
         """
-        Factory method — preferred way to create an ExecutionContext.
+        Factory method - preferred way to create an ExecutionContext.
         Derives campaign_id and operator from the Campaign object.
         """
         return cls(

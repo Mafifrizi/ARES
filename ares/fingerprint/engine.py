@@ -10,7 +10,7 @@ Results feed into:
 
 Fingerprint techniques (passive-first, then active):
   1. Banner grabbing (TCP services)
-  2. SMB OS fingerprint (via impacket — reads version/domain/hostname)
+  2. SMB OS fingerprint (via impacket - reads version/domain/hostname)
   3. LDAP rootDSE query (domain role, DC functional level)
   4. DNS PTR lookup (hostname/domain)
   5. HTTP User-Agent probing (web panels, Defender APIs)
@@ -305,7 +305,7 @@ class EnvironmentFingerprinter:
         self, result: FingerprintResult, username: str, domain: str, secret: str
     ) -> None:
         """
-        SMB protocol fingerprint — reveals Windows version via negotiate response.
+        SMB protocol fingerprint - reveals Windows version via negotiate response.
         Uses impacket's NMBSession (no credentials needed for version info).
         """
         # Production:
@@ -336,7 +336,7 @@ class EnvironmentFingerprinter:
         self, result: FingerprintResult, username: str, domain: str, secret: str
     ) -> None:
         """
-        LDAP rootDSE anonymous bind — reveals domain name, DC functional level.
+        LDAP rootDSE anonymous bind - reveals domain name, DC functional level.
         No credentials required for rootDSE.
         """
         # Production:
@@ -358,7 +358,7 @@ class EnvironmentFingerprinter:
     async def _winrm_fingerprint(
         self, result: FingerprintResult, username: str, domain: str, secret: str
     ) -> None:
-        """WinRM HTTP negotiate — reveals OS version in WWW-Authenticate header."""
+        """WinRM HTTP negotiate - reveals OS version in WWW-Authenticate header."""
         # Production:
         # async with httpx.AsyncClient() as client:
         #     r = await client.get(f"http://{result.host}:5985/wsman",
@@ -415,7 +415,7 @@ class EnvironmentFingerprinter:
         if result.stealth_required:
             # Disable HIGH_NOISE modules in EDR environments
             disabled.extend([
-                "lateral.psexec",   # EventID 7045 — very noisy
+                "lateral.psexec",   # EventID 7045 - very noisy
                 "lateral.rdp",      # multiple 4624 events
             ])
         if result.recommended_profile == "stealth":

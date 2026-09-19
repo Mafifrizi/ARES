@@ -1,23 +1,23 @@
 """
-SOCKS5 / SSH Tunnel Management — network.pivot
-MITRE: T1090.001 — Proxy: Internal Proxy
-       T1021.004 — Remote Services: SSH
+SOCKS5 / SSH Tunnel Management - network.pivot
+MITRE: T1090.001 - Proxy: Internal Proxy
+       T1021.004 - Remote Services: SSH
 
 Thin wrapper around ares/pivot/infrastructure.py (580 lines, fully implemented).
 Creates and manages SSH SOCKS5 tunnels through compromised pivot hosts.
 
 Once established, ALL subsequent ARES modules can reach internal network
-segments through the tunnel — transparent to the module.
+segments through the tunnel - transparent to the module.
 
 PivotManager auto-routes: request to 10.0.0.x → tunnel with matching subnet.
 Generates proxychains.conf automatically.
 
 Tunnel types supported:
-  SOCKS5 / SSH_DYNAMIC   — SSH -D (most common)
-  SSH_LOCAL_FWD          — SSH -L for specific port forwards
-  REVERSE_TCP            — for outbound-only pivot hosts
+  SOCKS5 / SSH_DYNAMIC   - SSH -D (most common)
+  SSH_LOCAL_FWD          - SSH -L for specific port forwards
+  REVERSE_TCP            - for outbound-only pivot hosts
 
-OPSEC: LOW — SSH dynamic port forward uses encrypted SSH protocol.
+OPSEC: LOW - SSH dynamic port forward uses encrypted SSH protocol.
        Appears as normal SSH connection. No new tools on target.
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ _PIVOT_MANAGERS: dict[str, "Any"] = {}   # campaign_id → PivotManager
 )
 class PivotModule(BaseModule):
     """
-    network.pivot — Create SOCKS5/SSH tunnels through compromised hosts. All subsequent modules route through tunnel automatically. Generates proxychains.conf. Supports chained pivots.
+    network.pivot - Create SOCKS5/SSH tunnels through compromised hosts. All subsequent modules route through tunnel automatically. Generates proxychains.conf. Supports chained pivots.
 
     OPSEC: LOW
     MITRE: "T1090.001", "T1021.004"
@@ -95,7 +95,7 @@ class PivotModule(BaseModule):
         target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
         if not target:
             raise ModuleValidationError(
-                "network.pivot requires 'target' — IP or hostname of the pivot host "
+                "network.pivot requires 'target' - IP or hostname of the pivot host "
                 "(a host where you have SSH access).",
                 module_id=self.MODULE_ID, field="target",
             )
@@ -117,7 +117,7 @@ class PivotModule(BaseModule):
                                getattr(getattr(ctx, "vault", None), "_store", None)))
         if not has_secret:
             raise ModuleValidationError(
-                "network.pivot requires SSH credentials — "
+                "network.pivot requires SSH credentials - "
                 "pass 'password', 'key_path', or provide a vault credential.",
                 module_id=self.MODULE_ID, field="password",
             )

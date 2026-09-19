@@ -2,17 +2,17 @@
 Unit tests for ARES Roadmap modules (Tier 1, 2, 3).
 
 Coverage:
-  1.  credential.crack         — OpsecLevel.LOCAL, validate() no hashes, CrackJob submission
-  2.  recon.fingerprint        — validate() no target, EDR finding trigger, DC finding trigger
-  3.  network.pivot            — validate() no target/no creds, dry_run, teardown
-  4.  ad.adcs                  — validate() no dc/domain/creds, template parsing, ESC1 detection
-  5.  ad.delegation_abuse      — validate() RBCD needs target_computer, LDAP enum mock
-  6.  ad.coerce                — STEALTH block, validate() no listener, dry_run
-  7.  windows.lsass_dump       — STEALTH block, validate(), error classification
-  8.  windows.dpapi            — validate(), error classification (auth/network), dry_run
-  9.  ad.laps_enum             — validate(), vault.store() called with password, dry_run
-  10. lateral.mssql            — validate(), error classification (auth 18456 vs network)
-  11. cloud.azure_ad           — validate() no tenant_id, dry_run
+  1.  credential.crack         - OpsecLevel.LOCAL, validate() no hashes, CrackJob submission
+  2.  recon.fingerprint        - validate() no target, EDR finding trigger, DC finding trigger
+  3.  network.pivot            - validate() no target/no creds, dry_run, teardown
+  4.  ad.adcs                  - validate() no dc/domain/creds, template parsing, ESC1 detection
+  5.  ad.delegation_abuse      - validate() RBCD needs target_computer, LDAP enum mock
+  6.  ad.coerce                - STEALTH block, validate() no listener, dry_run
+  7.  windows.lsass_dump       - STEALTH block, validate(), error classification
+  8.  windows.dpapi            - validate(), error classification (auth/network), dry_run
+  9.  ad.laps_enum             - validate(), vault.store() called with password, dry_run
+  10. lateral.mssql            - validate(), error classification (auth 18456 vs network)
+  11. cloud.azure_ad           - validate() no tenant_id, dry_run
 """
 from __future__ import annotations
 
@@ -72,13 +72,13 @@ def _mock_ctx(params=None, target="10.0.0.1", domain="corp.local",
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 1 — credential.crack
+# 1 - credential.crack
 # ══════════════════════════════════════════════════════════════════════
 
 class TestCredentialCrack:
 
     def test_opsec_level_local_exists(self):
-        """OpsecLevel.LOCAL must exist — crash fixed in BUG-01."""
+        """OpsecLevel.LOCAL must exist - crash fixed in BUG-01."""
         from ares.modules.base import OpsecLevel
         assert OpsecLevel.LOCAL == "local"
         assert OpsecLevel.LOCAL is not None
@@ -134,7 +134,7 @@ class TestCredentialCrack:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 2 — recon.fingerprint
+# 2 - recon.fingerprint
 # ══════════════════════════════════════════════════════════════════════
 
 class TestReconFingerprint:
@@ -187,7 +187,7 @@ class TestReconFingerprint:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 3 — network.pivot
+# 3 - network.pivot
 # ══════════════════════════════════════════════════════════════════════
 
 class TestNetworkPivot:
@@ -243,7 +243,7 @@ class TestNetworkPivot:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 4 — ad.adcs
+# 4 - ad.adcs
 # ══════════════════════════════════════════════════════════════════════
 
 class TestADADCS:
@@ -284,7 +284,7 @@ class TestADADCS:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 5 — ad.delegation_abuse
+# 5 - ad.delegation_abuse
 # ══════════════════════════════════════════════════════════════════════
 
 class TestADDelegationAbuse:
@@ -319,7 +319,7 @@ class TestADDelegationAbuse:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 6 — ad.coerce
+# 6 - ad.coerce
 # ══════════════════════════════════════════════════════════════════════
 
 class TestADCoerce:
@@ -370,7 +370,7 @@ class TestADCoerce:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 7 — windows.lsass_dump
+# 7 - windows.lsass_dump
 # ══════════════════════════════════════════════════════════════════════
 
 class TestWindowsLsassDump:
@@ -427,7 +427,7 @@ class TestWindowsLsassDump:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 8 — windows.dpapi
+# 8 - windows.dpapi
 # ══════════════════════════════════════════════════════════════════════
 
 class TestWindowsDPAPI:
@@ -495,7 +495,7 @@ class TestWindowsDPAPI:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 9 — ad.laps_enum
+# 9 - ad.laps_enum
 # ══════════════════════════════════════════════════════════════════════
 
 class TestADLAPSEnum:
@@ -562,7 +562,7 @@ class TestADLAPSEnum:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 10 — lateral.mssql
+# 10 - lateral.mssql
 # ══════════════════════════════════════════════════════════════════════
 
 class TestLateralMSSQL:
@@ -604,7 +604,7 @@ class TestLateralMSSQL:
         _run(_test())
 
     def test_auth_error_18456_classified(self):
-        """SQL Server error 18456 = wrong credentials — must raise AuthenticationFailed."""
+        """SQL Server error 18456 = wrong credentials - must raise AuthenticationFailed."""
         from ares.modules.lateral.mssql import MSSQLModule
         from ares.core.errors import AuthenticationFailed
         mod, _ = _make_module(MSSQLModule)
@@ -637,7 +637,7 @@ class TestLateralMSSQL:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 11 — cloud.azure_ad
+# 11 - cloud.azure_ad
 # ══════════════════════════════════════════════════════════════════════
 
 class TestCloudAzureAD:
@@ -680,7 +680,7 @@ class TestCloudAzureAD:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# 12 — Cross-cutting: OpsecLevel enum completeness
+# 12 - Cross-cutting: OpsecLevel enum completeness
 # ══════════════════════════════════════════════════════════════════════
 
 class TestOpsecLevelEnum:

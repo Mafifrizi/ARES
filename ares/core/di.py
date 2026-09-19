@@ -10,7 +10,7 @@ Why DI:
   - Swapping Redis for in-process queue = one line change in container config
 
 Design: Service Locator pattern (explicit registration, no magic reflection).
-Not a full IoC container — ARES is a CLI tool, not a web server.
+Not a full IoC container - ARES is a CLI tool, not a web server.
 
 Usage:
     # Production setup (in cli/main.py or api/server.py)
@@ -54,18 +54,18 @@ class AresContainer:
     Supports both singletons (built once, reused) and factories (built on demand).
 
     Services registered by name:
-        "settings"    — AresSettings
-        "registry"    — ModuleRegistry
-        "engine"      — AresEngine
-        "db"          — AresDatabase
-        "vault"       — CredentialVault
-        "telemetry"   — TelemetryCollector
-        "cluster"     — ClusterController
-        "collab"      — CollaborationManager
-        "guardrail"   — CampaignGuardrail
-        "sandbox"     — SandboxRunner
-        "fingerprint" — EnvironmentFingerprinter
-        "kb"          — AttackKnowledgeBase
+        "settings"    - AresSettings
+        "registry"    - ModuleRegistry
+        "engine"      - AresEngine
+        "db"          - AresDatabase
+        "vault"       - CredentialVault
+        "telemetry"   - TelemetryCollector
+        "cluster"     - ClusterController
+        "collab"      - CollaborationManager
+        "guardrail"   - CampaignGuardrail
+        "sandbox"     - SandboxRunner
+        "fingerprint" - EnvironmentFingerprinter
+        "kb"          - AttackKnowledgeBase
     """
 
     def __init__(self) -> None:
@@ -109,7 +109,7 @@ class AresContainer:
         if name in self._singletons:
             return self._singletons[name]
 
-        # Lazy factories — build and cache as singleton
+        # Lazy factories - build and cache as singleton
         if name in self._factories:
             instance = self._factories[name]()
             self._singletons[name] = instance

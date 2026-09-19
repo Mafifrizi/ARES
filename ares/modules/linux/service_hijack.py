@@ -3,7 +3,7 @@ Linux Service Binary Hijack Detection
 MITRE: T1574.010 (Services File Permissions Weakness)
 
 Detects system services where the binary (ExecStart) is writable
-by the current user — replacing it executes arbitrary code the
+by the current user - replacing it executes arbitrary code the
 next time the service restarts or the system reboots.
 
 Checks:
@@ -17,10 +17,10 @@ Also checks:
      (modifying the unit file is equivalent to modifying the binary)
   5. Services running as root with binaries in user-writable locations
 
-Detection only — no service files or binaries are modified.
+Detection only - no service files or binaries are modified.
 All checks are read-only (stat, test -w).
 
-OPSEC: LOW — reads unit files, no process execution or service interaction.
+OPSEC: LOW - reads unit files, no process execution or service interaction.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ _SYSTEMD_DIRS: list[str] = [
 # Max services to check (avoid very long scans)
 _MAX_SERVICES = 60
 
-# User-controlled path indicators — binaries here are suspicious
+# User-controlled path indicators - binaries here are suspicious
 _USER_WRITABLE_PATHS: list[str] = [
     "/tmp/",
     "/var/tmp/",
@@ -109,7 +109,7 @@ def _parse_exec_start(unit_content: str) -> list[str]:
 )
 class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
     """
-    linux.service_hijack — Detect systemd/init services with writable binaries or unit files —
+    linux.service_hijack - Detect systemd/init services with writable binaries or unit files  - 
     replacing the binary escalates privileges at next service restart
 
     OPSEC: LOW
@@ -120,7 +120,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
     MODULE_NAME        = "Service Binary Hijack Detection"
     MODULE_CATEGORY    = "linux"
     MODULE_DESCRIPTION = (
-        "Detect systemd/init services with writable binaries or unit files — "
+        "Detect systemd/init services with writable binaries or unit files - "
         "replacing the binary escalates privileges at next service restart"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -139,7 +139,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
                 target = ctx.params.get("target") or ctx.params.get("host", "")
             if not target:
                 raise ModuleValidationError(
-                    f"{self.MODULE_ID} requires 'target' — IP or hostname.",
+                    f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                     module_id=self.MODULE_ID, field="target",
                 )
             ssh_user = None
@@ -347,7 +347,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             if "writable" in unit_writable:
                 writable_unit_files.append({
                     "unit": unit_path,
-                    "reason": "Unit file writable — modify ExecStart to run arbitrary command",
+                    "reason": "Unit file writable - modify ExecStart to run arbitrary command",
                 })
 
             # Extract ExecStart paths and check writability
@@ -470,7 +470,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
                 description=(
                     f"{len(suspicious_paths)} service(s) on {host} execute binaries "
                     "from user-writable directories (/tmp, /home, /var/tmp, /dev/shm). "
-                    "These paths are trivially writable by unprivileged users — "
+                    "These paths are trivially writable by unprivileged users - "
                     "placing a file with the expected name in these directories "
                     "causes the service to execute it."
                 ),
@@ -526,7 +526,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
         raw["privesc_vectors"] = self._findings  # OUTPUTS key
         return self._findings[:], raw
 
-    # ── SSH / local runner helpers — identical pattern to linux.privesc ────
+    # ── SSH / local runner helpers - identical pattern to linux.privesc ────
 
     async def _make_ssh_runner(
         self,
@@ -540,7 +540,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed — pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

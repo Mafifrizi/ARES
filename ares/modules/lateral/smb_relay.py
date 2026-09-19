@@ -8,7 +8,7 @@ to NTLM relay attacks (NTLM authentication captured from one host
 can be relayed to authenticate against this host without knowing the password).
 
 This module is DETECTION ONLY.
-It checks the SMB dialect negotiation response to read the signing flags —
+It checks the SMB dialect negotiation response to read the signing flags  - 
 exactly what tools like nmap (smb-security-mode script) and
 Nessus (plugin 57608) do during a security assessment.
 
@@ -25,7 +25,7 @@ Also optionally checks LDAP signing (ldap_signing param=True):
   - Queries LDAP rootDSE serverName attribute
   - Reports if LDAP signing is not enforced (prerequisite for LDAP relay)
 
-OPSEC: LOW — one TCP connection to port 445, reads negotiate response,
+OPSEC: LOW - one TCP connection to port 445, reads negotiate response,
        immediately disconnects. No authentication attempted.
 """
 from __future__ import annotations
@@ -53,7 +53,7 @@ from ares.sdk import (
 
 logger = get_logger("ares.modules.lateral.smb_relay")
 
-# SMB2 NEGOTIATE request — minimal valid packet to elicit a response
+# SMB2 NEGOTIATE request - minimal valid packet to elicit a response
 # Header: Protocol ID + StructureSize + CreditCharge + Status + Command=0 (NEGOTIATE)
 # Body: StructureSize + DialectCount=3 + SecurityMode=0 + Reserved + Capabilities
 #       ClientGuid + NegotiateContextOffset + NegotiateContextCount
@@ -127,7 +127,7 @@ async def _check_smb_signing(target: str, port: int = 445, timeout: float = 8.0)
         writer.write(_SMB2_NEGOTIATE)
         await writer.drain()
 
-        # Read response — SMB2 response is at least 68 bytes (4 NetBIOS + 64 SMB2 header)
+        # Read response - SMB2 response is at least 68 bytes (4 NetBIOS + 64 SMB2 header)
         data = await asyncio.wait_for(reader.read(256), timeout=timeout)
         writer.close()
         try:
@@ -189,7 +189,7 @@ class SMBRelayAuditModule(BaseModule):
     MODULE_NAME        = "SMB Signing Audit (Relay Prerequisite)"
     MODULE_CATEGORY    = "lateral"
     MODULE_DESCRIPTION = (
-        "Check whether SMB signing is required on target hosts — "
+        "Check whether SMB signing is required on target hosts - "
         "signing not required = potential NTLM relay attack surface"
     )
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -209,7 +209,7 @@ class SMBRelayAuditModule(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                "lateral.smb_relay requires 'target' — IP or subnet to audit.",
+                "lateral.smb_relay requires 'target' - IP or subnet to audit.",
                 module_id=self.MODULE_ID, field="target",
             )
 
@@ -370,7 +370,7 @@ class SMBRelayAuditModule(BaseModule):
         if relay_candidates:
             self.finding(
                 title=(
-                    f"SMB Signing Not Required — "
+                    f"SMB Signing Not Required - "
                     f"{len(relay_candidates)} Host(s) Vulnerable to NTLM Relay"
                 ),
                 description=(
@@ -420,7 +420,7 @@ class SMBRelayAuditModule(BaseModule):
                 description=(
                     f"{len(signing_disabled)} host(s) have SMB signing disabled entirely "
                     f"(SecurityMode=0x0000): {', '.join(signing_disabled[:10])}. "
-                    "This is more severe than 'not required' — no signing capability "
+                    "This is more severe than 'not required' - no signing capability "
                     "is advertised at all, making these hosts easy relay targets "
                     "and indicating a non-default (weakened) SMB configuration."
                 ),
@@ -431,7 +431,7 @@ class SMBRelayAuditModule(BaseModule):
                     "signing_disabled_hosts": signing_disabled,
                 },
                 remediation=(
-                    "Investigate why signing was disabled on these hosts — "
+                    "Investigate why signing was disabled on these hosts - "
                     "this is a non-default configuration and may indicate intentional "
                     "weakening or a misconfigured NAS/appliance. "
                     "Re-enable signing as described above."
@@ -445,7 +445,7 @@ class SMBRelayAuditModule(BaseModule):
             for target in targets:
                 try:
                     await self.before_request(target, "ldap")
-                    # Query rootDSE — if LDAP returns without requiring signing, it's unsigned
+                    # Query rootDSE - if LDAP returns without requiring signing, it's unsigned
                     loop = asyncio.get_running_loop()
 
                     def _check_ldap(host: str) -> bool:
@@ -479,7 +479,7 @@ class SMBRelayAuditModule(BaseModule):
             if ldap_unsigned:
                 self.finding(
                     title=(
-                        f"LDAP Signing Not Enforced — "
+                        f"LDAP Signing Not Enforced - "
                         f"{len(ldap_unsigned)} Host(s)"
                     ),
                     description=(
@@ -509,5 +509,5 @@ class SMBRelayAuditModule(BaseModule):
             "signing_disabled":  signing_disabled,
             "per_host_results":  results,
         }
-        raw["smb_signing_config"] = {k: v for k, v in raw.items()}  # OUTPUTS key — shallow copy to avoid circular ref
+        raw["smb_signing_config"] = {k: v for k, v in raw.items()}  # OUTPUTS key - shallow copy to avoid circular ref
         return self._findings[:], raw

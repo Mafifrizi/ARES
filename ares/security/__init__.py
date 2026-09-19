@@ -1,5 +1,5 @@
 """
-ARES — security
+ARES - security
 Security hardening utilities, dependency auditing, and vulnerability scanning.
 
 Public API for this package. Import from here in production code:

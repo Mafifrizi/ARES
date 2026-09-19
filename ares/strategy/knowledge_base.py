@@ -1,5 +1,5 @@
 """
-ares.strategy.knowledge_base — Per-session outcome tracking for autonomous engagements.
+ares.strategy.knowledge_base - Per-session outcome tracking for autonomous engagements.
 
 Tracks module success rates per EDR vendor across rounds.
 Feeds context to AI planner for better decision-making in subsequent rounds.
@@ -16,7 +16,7 @@ logger = get_logger("ares.strategy.knowledge_base")
 class OutcomeKnowledgeBase:
     """
     Per-session knowledge base tracking module success rates per EDR vendor.
-    Persists in memory across rounds — feeds AI planner for better decisions.
+    Persists in memory across rounds - feeds AI planner for better decisions.
     """
 
     def __init__(self) -> None:

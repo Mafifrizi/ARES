@@ -3,11 +3,11 @@ ARES Lateral Movement Framework
 Production-grade lateral movement modules.
 
 Available techniques:
-  PsExecLateral   — SMB + RemComSvc / SCM (T1569.002)
-  WmiExecLateral  — WMI command execution (T1047)
-  WinRMLateral    — WinRM / PS-Remoting (T1021.006)
-  SSHPivot        — SSH ProxyJump / port forward (T1021.004)
-  RDPLateral      — RDP session hijack / new session (T1021.001)
+  PsExecLateral   - SMB + RemComSvc / SCM (T1569.002)
+  WmiExecLateral  - WMI command execution (T1047)
+  WinRMLateral    - WinRM / PS-Remoting (T1021.006)
+  SSHPivot        - SSH ProxyJump / port forward (T1021.004)
+  RDPLateral      - RDP session hijack / new session (T1021.001)
 
 All modules:
   - Validate scope before any connection
@@ -101,7 +101,7 @@ class BaseLateralModule(BaseModule):
         Subclasses **must** implement this method.  The default raises
         ``NotImplementedError`` to surface unimplemented transports early.
         """
-        raise NotImplementedError(  # abstract — subclasses must override
+        raise NotImplementedError(  # abstract - subclasses must override
             f"{self.__class__.__name__} must implement move()"
         )
 
@@ -171,7 +171,7 @@ class BaseLateralModule(BaseModule):
         target = getattr(ctx, "target", "") or ctx.params.get("target", "")
         if not target:
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires 'target' — "
+                f"{self.MODULE_ID} requires 'target' - "
                 "provide the IP or hostname of the remote host.",
                 module_id=self.MODULE_ID, field="target",
             )
@@ -184,7 +184,7 @@ class BaseLateralModule(BaseModule):
         )
         if not (has_password or has_hash or has_vault):
             raise ModuleValidationError(
-                f"{self.MODULE_ID} requires credentials — "
+                f"{self.MODULE_ID} requires credentials - "
                 "pass 'password', 'nt_hash' (NTLM), or provide a vault credential.",
                 module_id=self.MODULE_ID, field="password",
             )
@@ -193,7 +193,7 @@ class BaseLateralModule(BaseModule):
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """
         ExecutionContext-based entry point (v0.9.0+).
-        Pulls target, credentials, and params from ctx — including vault reveal.
+        Pulls target, credentials, and params from ctx - including vault reveal.
         Subclasses inherit this; override only if custom logic is needed.
         """
         from ares.modules.base import ModuleResult
@@ -381,7 +381,7 @@ class PsExecLateral(BaseLateralModule):
     """
     PsExec-style lateral movement via SMB + Service Control Manager.
     Creates a temporary service, executes command, removes service.
-    MITRE T1569.002 — Service Execution.
+    MITRE T1569.002 - Service Execution.
     """
     MODULE_ID          = "lateral.psexec"
     MODULE_NAME        = "PsExec Lateral"
@@ -414,7 +414,7 @@ class PsExecLateral(BaseLateralModule):
         target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
-            blockers.append("PsExec SCM service installation generates Event ID 7045 — strictly blocked under STEALTH profile")
+            blockers.append("PsExec SCM service installation generates Event ID 7045 - strictly blocked under STEALTH profile")
             score = 0.05
             risk = "critical_alarm"
 
@@ -457,7 +457,7 @@ class PsExecLateral(BaseLateralModule):
                 source_host="operator", target_host=target,
                 username=username, domain=domain,
                 success=False,
-                error="impacket not installed — run: pip install impacket",
+                error="impacket not installed - run: pip install impacket",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
@@ -522,7 +522,7 @@ class PsExecLateral(BaseLateralModule):
                 try:
                     scmr.hRStartServiceW(dce, svc_handle)
                 except Exception:
-                    pass   # service process exits immediately, may raise — that's OK
+                    pass   # service process exits immediately, may raise - that's OK
 
                 # Step 5: read output file via SMB
                 import time as _time
@@ -548,7 +548,7 @@ class PsExecLateral(BaseLateralModule):
             except Exception as exc:
                 err = str(exc).lower()
                 if "access_denied" in err or "access denied" in err:
-                    # Valid creds but no SCM access — try just verifying ADMIN$ access
+                    # Valid creds but no SCM access - try just verifying ADMIN$ access
                     try:
                         smb2 = SMBConnection(target, target, timeout=10)
                         smb2.login(username, password, domain, lmhash, nthash)
@@ -622,8 +622,8 @@ class PsExecLateral(BaseLateralModule):
 class WmiExecLateral(BaseLateralModule):
     """
     WMI-based lateral movement via Win32_Process.Create.
-    Stealthier than PsExec — no service creation, less EDR detectable.
-    MITRE T1047 — Windows Management Instrumentation.
+    Stealthier than PsExec - no service creation, less EDR detectable.
+    MITRE T1047 - Windows Management Instrumentation.
     """
     MODULE_ID          = "lateral.wmiexec"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -774,7 +774,7 @@ class WmiExecLateral(BaseLateralModule):
             except Exception as exc:
                 err = str(exc).lower()
                 if "access denied" in err or "access_denied" in err:
-                    return False, "", f"Access denied — insufficient privileges on {target}"
+                    return False, "", f"Access denied - insufficient privileges on {target}"
                 if "logon failure" in err or "invalid credentials" in err:
                     return False, "", f"Authentication failed for {username}@{target}"
                 return False, "", str(exc)[:300]
@@ -833,7 +833,7 @@ class WinRMLateral(BaseLateralModule):
     """
     WinRM / PowerShell Remoting lateral movement.
     Uses port 5985 (HTTP) or 5986 (HTTPS).
-    MITRE T1021.006 — Remote Services: Windows Remote Management.
+    MITRE T1021.006 - Remote Services: Windows Remote Management.
     """
     MODULE_ID          = "lateral.winrm"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -928,7 +928,7 @@ class WinRMLateral(BaseLateralModule):
                 technique=LateralTechnique.WINRM,
                 source_host="operator", target_host=target,
                 username=username, domain=domain, success=False,
-                error="pywinrm not installed — run: pip install pywinrm",
+                error="pywinrm not installed - run: pip install pywinrm",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
         except Exception as exc:
@@ -959,7 +959,7 @@ class SSHPivot(BaseLateralModule):
       - Direct command execution (T1021.004)
       - Dynamic SOCKS5 proxy via SSH -D
       - Port forwarding via SSH -L / -R
-    MITRE T1021.004 — Remote Services: SSH.
+    MITRE T1021.004 - Remote Services: SSH.
     """
     MODULE_ID          = "lateral.ssh_pivot"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
@@ -986,13 +986,13 @@ class SSHPivot(BaseLateralModule):
             known_hosts_file = kwargs.get("known_hosts_file") or None
             client = paramiko.SSHClient()
             if known_hosts_file:
-                # Strict host-key verification — recommended for production use.
+                # Strict host-key verification - recommended for production use.
                 client.set_missing_host_key_policy(paramiko.RejectPolicy())
                 client.load_host_keys(known_hosts_file)
                 logger.info("ssh_host_key_verification_enabled",
                             target=target, known_hosts=known_hosts_file)
             else:
-                # AutoAddPolicy — operator explicitly accepted MITM risk by not
+                # AutoAddPolicy - operator explicitly accepted MITM risk by not
                 # supplying known_hosts_file. Acceptable when pivoting through
                 # already-compromised internal hosts on an isolated lab network.
                 # NEVER use on untrusted networks (hotel wifi, shared VPN, etc.).
@@ -1001,7 +1001,7 @@ class SSHPivot(BaseLateralModule):
                     "ssh_host_key_unverified",
                     target=target,
                     risk=(
-                        "Host key not verified — MITM possible on untrusted networks. "
+                        "Host key not verified - MITM possible on untrusted networks. "
                         "Provide known_hosts_file=<path> to enable strict verification."
                     ),
                 )
@@ -1076,7 +1076,7 @@ class SSHPivot(BaseLateralModule):
                 username=username,
                 domain=domain,
                 success=False,
-                error="paramiko not installed — run: pip install paramiko",
+                error="paramiko not installed - run: pip install paramiko",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
         except Exception as exc:
@@ -1131,13 +1131,13 @@ class SSHPivot(BaseLateralModule):
 class RDPLateral(BaseLateralModule):
     """
     RDP-based lateral movement.
-    MITRE T1021.001 — Remote Desktop Protocol.
-    Note: High noise — triggers RDP EventID 4624/4625.
+    MITRE T1021.001 - Remote Desktop Protocol.
+    Note: High noise - triggers RDP EventID 4624/4625.
     """
     MODULE_ID          = "lateral.rdp"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     MODULE_NAME        = "RDP Lateral"
-    MODULE_DESCRIPTION = "RDP lateral movement (T1021.001) — high noise"
+    MODULE_DESCRIPTION = "RDP lateral movement (T1021.001) - high noise"
     OPSEC_LEVEL        = OpsecLevel.HIGH_NOISE
     REQUIRES           = ["rdp_access", "domain_creds"]
     OUTPUTS            = ["lateral_session"]
@@ -1179,7 +1179,7 @@ class RDPLateral(BaseLateralModule):
         )
 
     async def validate(self, ctx: "Any") -> None:
-        """RDP lateral blocked in STEALTH — triggers EventID 4624/4625 immediately."""
+        """RDP lateral blocked in STEALTH - triggers EventID 4624/4625 immediately."""
         await super().validate(ctx)
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
@@ -1189,7 +1189,7 @@ class RDPLateral(BaseLateralModule):
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             raise ModuleValidationError(
-                "lateral.rdp is blocked in STEALTH profile — "
+                "lateral.rdp is blocked in STEALTH profile - "
                 "RDP authentication generates EventID 4624/4625 immediately. "
                 "Use NORMAL or AGGRESSIVE profile.",
                 module_id=self.MODULE_ID, field="noise_profile",
@@ -1230,7 +1230,7 @@ class RDPLateral(BaseLateralModule):
                     sock.close()
                     return False, "", f"Port {port} closed (errno {result})"
 
-                # Read RDP cookie/banner — RDP sends x.224 Connection Request
+                # Read RDP cookie/banner - RDP sends x.224 Connection Request
                 # Just confirm the port is open and responding
                 try:
                     # Send minimal RDP preamble and check response
@@ -1250,7 +1250,7 @@ class RDPLateral(BaseLateralModule):
                     return False, "", "Unexpected banner response"
                 except (OSError, socket.timeout):
                     sock.close()
-                    # Port open but no valid response — still likely RDP
+                    # Port open but no valid response - still likely RDP
                     return True, "rdp_port_open", ""
 
             except (OSError, socket.timeout) as exc:
@@ -1291,5 +1291,5 @@ class RDPLateral(BaseLateralModule):
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
-# Backward-compat alias — canonical name is WmiExecLateral
+# Backward-compat alias - canonical name is WmiExecLateral
 WMIExecLateral = WmiExecLateral  # noqa: N816

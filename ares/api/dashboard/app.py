@@ -40,7 +40,7 @@ async def _require_dashboard_auth(
     """
     Validate JWT or API key. Raises 401 if missing/invalid.
     Accepts: Authorization: Bearer <token>  OR  X-API-Key: <key>
-    Deliberately minimal — dashboard is read-only, any authenticated user is allowed.
+    Deliberately minimal - dashboard is read-only, any authenticated user is allowed.
     """
     from ares.core.config import get_settings
     from ares.core.security import decode_access_token
@@ -65,7 +65,7 @@ async def _require_dashboard_auth(
                 except HTTPException:
                     raise
                 except Exception:
-                    pass  # DB unavailable — still accept if token signature valid
+                    pass  # DB unavailable - still accept if token signature valid
             return
 
     # Check X-API-Key header
@@ -110,7 +110,7 @@ dashboard_app = FastAPI(
 )
 
 # WebSocket connections for live streaming
-live_connections: list[WebSocket] = []  # public — exported for testing
+live_connections: list[WebSocket] = []  # public - exported for testing
 _live_connections = live_connections  # private alias for internal use
 
 
@@ -212,13 +212,13 @@ select,input{background:var(--card);color:var(--text);border:1px solid var(--bor
 
     <!-- Stats row -->
     <div class="stat-row" id="stats-row">
-      <div class="stat-card score"><div class="val" id="stat-risk">—</div><div class="label">Risk Score</div></div>
-      <div class="stat-card critical"><div class="val" id="stat-critical">—</div><div class="label">Critical</div></div>
-      <div class="stat-card high"><div class="val" id="stat-high">—</div><div class="label">High</div></div>
-      <div class="stat-card medium"><div class="val" id="stat-medium">—</div><div class="label">Medium</div></div>
-      <div class="stat-card low"><div class="val" id="stat-low">—</div><div class="label">Low</div></div>
-      <div class="stat-card"><div class="val" id="stat-hosts" style="color:var(--blue)">—</div><div class="label">Hosts</div></div>
-      <div class="stat-card"><div class="val" id="stat-creds" style="color:var(--yellow)">—</div><div class="label">Credentials</div></div>
+      <div class="stat-card score"><div class="val" id="stat-risk"> - </div><div class="label">Risk Score</div></div>
+      <div class="stat-card critical"><div class="val" id="stat-critical"> - </div><div class="label">Critical</div></div>
+      <div class="stat-card high"><div class="val" id="stat-high"> - </div><div class="label">High</div></div>
+      <div class="stat-card medium"><div class="val" id="stat-medium"> - </div><div class="label">Medium</div></div>
+      <div class="stat-card low"><div class="val" id="stat-low"> - </div><div class="label">Low</div></div>
+      <div class="stat-card"><div class="val" id="stat-hosts" style="color:var(--blue)"> - </div><div class="label">Hosts</div></div>
+      <div class="stat-card"><div class="val" id="stat-creds" style="color:var(--yellow)"> - </div><div class="label">Credentials</div></div>
     </div>
 
     <!-- Findings tab -->
@@ -355,10 +355,10 @@ function renderFindings(findings) {
     <tr>
       <td><span class="badge ${escCssToken(f.severity)}">${escHtml(String(f.severity || 'info').toUpperCase())}</span></td>
       <td>${escHtml(f.title)}</td>
-      <td>${f.mitre_technique ? `<span class="mitre">${escHtml(f.mitre_technique)}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${f.mitre_technique ? `<span class="mitre">${escHtml(f.mitre_technique)}</span>` : '<span style="color:var(--muted)"> - </span>'}</td>
       <td style="font-family:monospace;font-size:.78rem">${escHtml(f.module_id || '')}</td>
       <td class="conf">${Math.round((f.confidence||1)*100)}%</td>
-      <td style="font-family:monospace;font-size:.78rem">${escHtml(f.host||'—')}</td>
+      <td style="font-family:monospace;font-size:.78rem">${escHtml(f.host||' - ')}</td>
     </tr>
   `).join('');
 }
@@ -401,7 +401,7 @@ function connectLiveFeed() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/live`);
   ws.onopen  = () => { appendLive('🟢 Connected to live feed'); };
-  ws.onclose = () => { appendLive('🔴 Disconnected — reconnecting in 5s...'); setTimeout(connectLiveFeed, 5000); };
+  ws.onclose = () => { appendLive('🔴 Disconnected - reconnecting in 5s...'); setTimeout(connectLiveFeed, 5000); };
   ws.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data);
@@ -499,7 +499,7 @@ def _get_db() -> "AresDatabase":
     db = getattr(dashboard_app.state, "db", None)
     if db is not None:
         return db
-    # Standalone fallback — create per-request (not ideal, but safe)
+    # Standalone fallback - create per-request (not ideal, but safe)
     from ares.core.config import get_settings
     from ares.db.database import AresDatabase as _DB
     s = get_settings()
@@ -619,17 +619,17 @@ async def websocket_live(websocket: WebSocket) -> None:
     except (RuntimeError, ConnectionError):
         pass
     finally:
-        # Always clean up — regardless of which exception disconnected the client
+        # Always clean up - regardless of which exception disconnected the client
         if websocket in _live_connections:
             _live_connections.remove(websocket)
         logger.info("dashboard_ws_disconnect", total=len(_live_connections))
 
 
 async def broadcast_finding(finding_dict: dict[str, Any]) -> None:
-    """Call this from the engine when a finding is confirmed — pushes to all dashboard clients."""
+    """Call this from the engine when a finding is confirmed - pushes to all dashboard clients."""
     import json
     dead: list[WebSocket] = []
-    for ws in list(_live_connections):  # snapshot — prevent concurrent modification
+    for ws in list(_live_connections):  # snapshot - prevent concurrent modification
         try:
             await ws.send_text(json.dumps(finding_dict, default=str))
         except (RuntimeError, ConnectionError):

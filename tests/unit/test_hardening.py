@@ -92,7 +92,7 @@ class TestNoPlaintextCredentials:
         description = row["description"]
         evidence_raw = row.get("evidence_json", "")
 
-        # CRITICAL ASSERTIONS — these FAIL on old code
+        # CRITICAL ASSERTIONS - these FAIL on old code
         assert real_password not in description, \
             f"BLOCKER-001 FAIL: Plaintext password found in description: {description}"
         assert real_password not in evidence_raw, \
@@ -138,7 +138,7 @@ class TestNoPlaintextCredentials:
     def test_pass_spray_evidence_schema_has_redacted(self):
         """
         BLOCKER-001: Verify pass_spray source code uses REDACTED in evidence.
-        This is a code-level assertion — if someone reverts the fix, this breaks.
+        This is a code-level assertion - if someone reverts the fix, this breaks.
         """
         source = Path("ares/modules/credential/pass_spray.py").read_text(encoding="utf-8")
 
@@ -156,7 +156,7 @@ class TestNoPlaintextCredentials:
         BLOCKER-001: Verify raw output dict also has passwords redacted.
         """
         source = Path("ares/modules/credential/pass_spray.py").read_text(encoding="utf-8")
-        # Find the raw dict construction — must use REDACTED
+        # Find the raw dict construction - must use REDACTED
         assert '"password": "***REDACTED***"' in source, \
             "BLOCKER-001 FAIL: raw output dict still has plaintext password"
 
@@ -448,7 +448,7 @@ class TestSubprocessTimeout:
     """
     Old behavior: isolation.py _spawn() called proc.communicate() without
     timeout. If subprocess hung, the worker hung forever. When wait_for
-    timed out, subprocess was NOT killed — became zombie.
+    timed out, subprocess was NOT killed - became zombie.
 
     New behavior: _spawn() catches CancelledError, kills process, re-raises.
     """
@@ -456,7 +456,7 @@ class TestSubprocessTimeout:
     def test_isolation_spawn_has_cancel_handler(self):
         """
         HIGH-001: _spawn() must catch CancelledError and kill the process.
-        Old code had no CancelledError handler — zombie risk.
+        Old code had no CancelledError handler - zombie risk.
         """
         source = Path("ares/worker/isolation.py").read_text(encoding="utf-8")
         assert "CancelledError" in source, \
@@ -467,7 +467,7 @@ class TestSubprocessTimeout:
     def test_linux_modules_have_wait_for(self):
         """
         HIGH-001: All linux modules must use asyncio.wait_for on proc.communicate.
-        Old code called proc.communicate() directly — hang risk.
+        Old code called proc.communicate() directly - hang risk.
         """
         for module in [
             "ares/modules/linux/privesc.py",
@@ -484,7 +484,7 @@ class TestSubprocessTimeout:
     def test_pip_install_has_timeout(self):
         """
         HIGH-001: marketplace installer pip install must have timeout.
-        Old code: subprocess.run([...pip...], check=True) — no timeout.
+        Old code: subprocess.run([...pip...], check=True) - no timeout.
         """
         source = Path("ares/marketplace/installer.py").read_text(encoding="utf-8")
         # Find the subprocess.run line with pip
@@ -503,7 +503,7 @@ class TestSubprocessTimeout:
     async def test_subprocess_killed_on_timeout(self):
         """
         HIGH-001: Prove that a hanging subprocess is killed after timeout.
-        This is the behavioral test — simulates what isolation.py does.
+        This is the behavioral test - simulates what isolation.py does.
         """
         # Spawn a process that sleeps forever
         proc = await asyncio.create_subprocess_exec(
@@ -532,7 +532,7 @@ class TestSubprocessTimeout:
                 os.kill(pid, 0)  # signal 0 = check if alive
                 pytest.fail(f"HIGH-001 FAIL: PID {pid} still exists after kill")
             except ProcessLookupError: pass
-            pass  # correct — process is gone
+            pass  # correct - process is gone
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

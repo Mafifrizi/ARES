@@ -3,12 +3,12 @@ ARES OpSec Layer
 Professional-grade operational security controls for red team engagements.
 
 Components:
-  UserAgentRotator   — realistic browser/tool UA pool, weighted random selection
-  HeaderMutator      — randomize HTTP header order + add realistic noise headers
-  ProtocolSelector   — SMB→HTTP, LDAP→LDAPS, automatic protocol fallback chain
-  BeaconScheduler    — jittered sleep profiles (uniform, gaussian, triangular, pareto)
-  TrafficShaper      — token bucket + burst control per protocol
-  OpSecProfile       — master config object tying all controls together
+  UserAgentRotator   - realistic browser/tool UA pool, weighted random selection
+  HeaderMutator      - randomize HTTP header order + add realistic noise headers
+  ProtocolSelector   - SMB→HTTP, LDAP→LDAPS, automatic protocol fallback chain
+  BeaconScheduler    - jittered sleep profiles (uniform, gaussian, triangular, pareto)
+  TrafficShaper      - token bucket + burst control per protocol
+  OpSecProfile       - master config object tying all controls together
 
 Usage in a module:
     opsec = OpSecProfile.from_noise_profile(campaign.noise_profile)
@@ -37,7 +37,7 @@ logger = get_logger("ares.opsec")
 # Weighted pool: (user_agent_string, weight)
 # Higher weight = more likely to be selected. Real-world browser share as weights.
 _UA_POOL: list[tuple[str, int]] = [
-    # Chrome (most common — highest weight)
+    # Chrome (most common - highest weight)
     ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 35),
     ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36", 20),
     ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 15),
@@ -48,7 +48,7 @@ _UA_POOL: list[tuple[str, int]] = [
     ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0", 8),
     # Safari
     ("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15", 5),
-    # Curl / tool-like (used in aggressive profile only — lower weight)
+    # Curl / tool-like (used in aggressive profile only - lower weight)
     ("python-requests/2.31.0", 1),
     ("curl/7.88.1", 1),
 ]
@@ -114,7 +114,7 @@ class HeaderMutator:
 
         if self.inject_noise:
             for header, values in _NOISE_HEADERS:
-                # random.random/choice here is intentional — used for OpSec HTTP
+                # random.random/choice here is intentional - used for OpSec HTTP
                 # header noise injection (probabilistic mutation), NOT for any
                 # cryptographic or authentication purpose.  # noqa: S311
                 if header not in result and random.random() < 0.6:  # noqa: S311
@@ -174,7 +174,7 @@ class ProtocolSelector:
         return protocol  # last resort
 
     def mark_unavailable(self, protocol: str) -> None:
-        """Call this when a connection attempt fails — removes from future selection."""
+        """Call this when a connection attempt fails - removes from future selection."""
         self._unavailable.add(protocol)
         logger.info("protocol_marked_unavailable", protocol=protocol)
 
@@ -185,9 +185,9 @@ class ProtocolSelector:
 # ── Beacon Scheduler ──────────────────────────────────────────────────────────
 
 class BeaconDistribution(str, Enum):
-    UNIFORM    = "uniform"     # flat random — obvious in logs
+    UNIFORM    = "uniform"     # flat random - obvious in logs
     GAUSSIAN   = "gaussian"    # normal distribution around mean
-    TRIANGULAR = "triangular"  # triangular — ARES default, realistic
+    TRIANGULAR = "triangular"  # triangular - ARES default, realistic
     PARETO     = "pareto"      # long-tail: mostly short, occasional long pause
 
 
@@ -242,7 +242,7 @@ class BeaconScheduler:
         elif dist == BeaconDistribution.TRIANGULAR:
             t = random.triangular(p.min_sleep, p.max_sleep, p.mean_sleep)
         elif dist == BeaconDistribution.PARETO:
-            # Pareto: heavy tail — mostly fast, occasionally very long pauses
+            # Pareto: heavy tail - mostly fast, occasionally very long pauses
             alpha = 1.5
             t = (random.paretovariate(alpha) - 1) * p.mean_sleep + p.min_sleep
         else:

@@ -1,5 +1,5 @@
 """
-ares/modules/ai/plan_validator.py — LLM Plan Validator
+ares/modules/ai/plan_validator.py - LLM Plan Validator
 
 Validates AI-generated attack plans before execution:
   1. All module IDs must exist in registry
@@ -28,7 +28,7 @@ _MIN_CONFIDENCE = 0.40
 class PlanValidator:
     """
     Validates an AIPlan before it reaches engine.run_module().
-    Returns list of error strings — empty = plan is valid.
+    Returns list of error strings - empty = plan is valid.
     """
 
     def validate(
@@ -41,12 +41,12 @@ class PlanValidator:
 
         if plan.confidence < _MIN_CONFIDENCE:
             errors.append(
-                f"Confidence {plan.confidence:.0%} below minimum {_MIN_CONFIDENCE:.0%} — "
+                f"Confidence {plan.confidence:.0%} below minimum {_MIN_CONFIDENCE:.0%} - "
                 "plan too uncertain to execute safely."
             )
 
         if not plan.stages:
-            errors.append("Plan has no stages — LLM returned empty plan.")
+            errors.append("Plan has no stages - LLM returned empty plan.")
             return errors  # Nothing else to check
 
         for stage in plan.stages:
@@ -66,17 +66,17 @@ class PlanValidator:
                            else None)
                     if not cls:
                         errors.append(
-                            f"Unknown module: '{mid}' (stage: {stage_name}) — "
+                            f"Unknown module: '{mid}' (stage: {stage_name}) - "
                             "not in registry. LLM hallucinated module ID."
                         )
                         continue
                 else:
-                    # No registry available — check technique library as fallback
+                    # No registry available - check technique library as fallback
                     try:
                         from ares.technique.library import _MODULE_TECHNIQUE_MAP
                         if mid not in _MODULE_TECHNIQUE_MAP:
                             errors.append(
-                                f"Unknown module: '{mid}' — not in technique library."
+                                f"Unknown module: '{mid}' - not in technique library."
                             )
                             continue
                     except ImportError:
@@ -120,7 +120,7 @@ class PlanValidator:
                                 if plan.warnings is None:
                                     plan.warnings = []
                                 plan.warnings.append(
-                                    f"{mid} is HIGH_NOISE — will generate significant IOCs. "
+                                    f"{mid} is HIGH_NOISE - will generate significant IOCs. "
                                     "Verify SOC shift timing before executing."
                                 )
                 except Exception:

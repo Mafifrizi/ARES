@@ -16,8 +16,8 @@ ares module create ad.my_attack \
 ```
 
 This creates two files:
-- `my_attack.py` — module implementation
-- `test_my_attack.py` — test scaffold
+- `my_attack.py` - module implementation
+- `test_my_attack.py` - test scaffold
 
 ---
 

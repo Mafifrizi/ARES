@@ -1,5 +1,5 @@
 """
-ARES Webhook Notifier — v1.0.0
+ARES Webhook Notifier - v1.0.0
 
 Sends real-time alerts to Slack / Teams / generic webhook endpoints
 when findings above a configured severity threshold are discovered.
@@ -104,14 +104,14 @@ class WebhookNotifier:
         except ValueError as exc:
             if "not allowed" in str(exc) or "private" in str(exc) or "SSRF" in str(exc):
                 raise
-            # Not a bare IP literal — resolve hostname now and check all returned addresses.
+            # Not a bare IP literal - resolve hostname now and check all returned addresses.
             # This prevents SSRF via internal hostnames like `internal.corp.local` that would
             # otherwise only be DNS-resolved at request time, bypassing the IP blocklist above.
             import socket
             try:
                 resolved = socket.getaddrinfo(hostname, None)
             except socket.gaierror:
-                # Unresolvable at config time — reject to be safe; DNS may resolve later
+                # Unresolvable at config time - reject to be safe; DNS may resolve later
                 # to a private IP, and we cannot verify it is safe.
                 raise ValueError(
                     f"Webhook hostname {hostname!r} could not be resolved at configuration "
@@ -162,12 +162,12 @@ class WebhookNotifier:
                            module=getattr(finding, "module_id", "?"))
 
     def _build_payload(self, finding: Any, campaign: Any) -> dict[str, Any]:
-        """Build notification payload — auto-detects Slack vs Teams vs generic."""
+        """Build notification payload - auto-detects Slack vs Teams vs generic."""
         sev   = finding.severity.value if hasattr(finding.severity, "value") else str(finding.severity)
         score = getattr(finding, "cvss_score", 0.0) or 0.0
-        mitre = getattr(finding, "mitre_technique", None) or "—"
+        mitre = getattr(finding, "mitre_technique", None) or " - "
         tid   = getattr(finding, "trace_id", "") or ""
-        host  = getattr(finding, "host", None) or "—"
+        host  = getattr(finding, "host", None) or " - "
         mod   = getattr(finding, "module_id", "?")
         cname = getattr(campaign, "name", str(getattr(campaign, "id", "?")))
 
