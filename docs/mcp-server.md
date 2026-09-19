@@ -28,7 +28,7 @@ Unlike basic MCP servers that blindly expose raw shell execution or dangerous en
 
 ---
 
-## 2. 🚀 Step-by-Step Guide: Where Do I Start First?
+## 2. Step-by-Step Guide: Where Do I Start First?
 
 For operators or developers getting started with ARES MCP for the first time, follow these 6 guided steps:
 
@@ -106,7 +106,7 @@ The AI Agent will call `ares_scope_check` and `ares_dry_run_module`, streaming r
 
 ---
 
-## 3. 🛡️ The 7 Security Guarantees
+## 3. The 7 Security Guarantees
 
 | # | Security Guarantee | Threat Mitigated | Technical Mechanism |
 | :- | :--- | :--- | :--- |
@@ -120,7 +120,7 @@ The AI Agent will call `ares_scope_check` and `ares_dry_run_module`, streaming r
 
 ---
 
-## 4. 🧰 Operational Tools Reference (9 Registered Tools)
+## 4. Operational Tools Reference (9 Registered Tools)
 
 ### Tier 1: Read-Only, Diagnostics, & Pre-Flight (Autonomous)
 1. **`ares_list_campaigns`**: Lists all active engagements with client names, operational status, and target scope rules.
@@ -137,7 +137,7 @@ The AI Agent will call `ares_scope_check` and `ares_dry_run_module`, streaming r
 
 ---
 
-## 5. 💻 Product-Grade CLI & Scripting Reference
+## 5. Product-Grade CLI & Scripting Reference
 
 The ARES MCP CLI (`mcp.bat`, `mcp.ps1`, or `python -m ares.cli.main mcp`) is designed for both interactive operator use and headless CI/CD pipeline automation:
 
@@ -182,7 +182,7 @@ The ARES MCP CLI (`mcp.bat`, `mcp.ps1`, or `python -m ares.cli.main mcp`) is des
 
 ---
 
-## 6. ❓ Troubleshooting & FAQ
+## 6. Troubleshooting & FAQ
 
 #### Q1: Error `mcp.bat : The term 'mcp.bat' is not recognized` in PowerShell?
 **Solution:** In Windows PowerShell, scripts in the current working directory require the `.\` prefix for security reasons.  

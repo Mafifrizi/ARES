@@ -58,11 +58,11 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ### Core Value Pillars
 
-1. **🛡️ Zero-Collateral Scope Governance**: Every campaign runs inside an isolated cryptographic boundary. Hard target IP and CIDR validations at the network socket layer guarantee that no packet ever touches out-of-scope infrastructure.
-2. **🧠 Autonomous Goal-Directed Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine autonomously synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama).
-3. **🕸️ Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
-4. **🔐 Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM encrypted local vaults protect harvested hashes and sensitive client evidence.
-5. **📑 Automated Deliverables Pipeline**: One-click generation of branded, audit-ready compliance deliverables in PDF, HTML, Markdown, and JSON formats. Features automated headless browser PDF rendering on Windows/Linux without external GTK dependencies.
+1. **Zero-Collateral Scope Governance**: Every campaign runs inside an isolated cryptographic boundary. Hard target IP and CIDR validations at the network socket layer guarantee that no packet ever touches out-of-scope infrastructure.
+2. **Autonomous Goal-Directed Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine autonomously synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama).
+3. **Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
+4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM encrypted local vaults protect harvested hashes and sensitive client evidence.
+5. **Automated Deliverables Pipeline**: One-click generation of branded, audit-ready compliance deliverables in PDF, HTML, Markdown, and JSON formats. Features automated headless browser PDF rendering on Windows/Linux without external GTK dependencies.
 
 ---
 
@@ -71,18 +71,18 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 | Operational Capability | Traditional Manual Pentest | Legacy Vulnerability Scanners | ARES Autonomous Platform |
 | :--- | :---: | :---: | :---: |
 | **Testing Frequency** | Annual / Semi-Annual | Scheduled Daily / Weekly | **Continuous / On-Demand** |
-| **Exploitability Validation** | Manual & Labor Intensive | ❌ Theoretical CVE Matching | **Deterministic Multi-Stage Proof** |
-| **Multi-Hop Attack Paths** | Manual Drawing | ❌ None | **Real-Time Interactive DAG** |
+| **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
+| **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
 | **Scope Enclave & Egress Firewall** | Operator Discipline Only | Network Firewalls Only | **Hard Socket-Level CIDR Enforcement** |
-| **Active Directory Lateral Paths** | Slow Script Execution | ❌ No Active Paths | **Native BloodHound & Kerberos Suite** |
+| **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound & Kerberos Suite** |
 | **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Encrypted Vault** |
 | **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |
-| **Delivery Time for Reports** | 1–2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
+| **Delivery Time for Reports** | 1-2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
 | **Deployment Footprint** | External Consultants | Bulky Cloud Agents | **Air-Gapped Local / Self-Hosted** |
 
 ---
 
-## 🖥️ Platform Showcase & Control Surfaces
+## Platform Showcase & Control Surfaces
 
 The ARES Platform features a high-performance, responsive operator dashboard engineered with dark-tech aesthetics, low cognitive load, and audited operational control.
 
@@ -699,8 +699,8 @@ If ARES has accelerated your security assessments, helped protect your enterpris
 
 | Platform | Type | Link |
 | :--- | :--- | :--- |
-| **GitHub Sponsors** | 🌍 International (Recurring / One-time) | [![Sponsor](https://img.shields.io/badge/GitHub_Sponsors-Support-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi) |
-| **Saweria** | 🇮🇩 Indonesia (QRIS / GoPay / OVO / Dana) | [![Saweria](https://img.shields.io/badge/Saweria-Donasi_Lokal-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi) |
+| **GitHub Sponsors** | International (Recurring / One-time) | [![Sponsor](https://img.shields.io/badge/GitHub_Sponsors-Support-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi) |
+| **Saweria** | Indonesia (QRIS / GoPay / OVO / Dana) | [![Saweria](https://img.shields.io/badge/Saweria-Donasi_Lokal-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi) |
 
 </div>
 

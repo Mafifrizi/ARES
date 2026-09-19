@@ -19,7 +19,8 @@ This document provides a comprehensive guide for configuring and utilizing **Ent
 ### Understanding: *"SSO is not configured for this organization. Contact your administrator."*
 
 If you click **"Or continue with SSO"** and an inline warning appears:
-> ⚠️ **SSO is not configured for this organization. Contact your administrator.**
+> [!WARNING]
+> **SSO is not configured for this organization. Contact your administrator.**
 
 **What this means:**
 1. SSO federation (SAML 2.0 or OIDC) has not yet been registered for the target organization, or the configuration is currently disabled (`is_enabled = 0`).
