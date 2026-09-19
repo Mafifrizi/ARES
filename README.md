@@ -123,15 +123,9 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 <div align="center">
 
-![ARES Executive Command Center & Telemetry](docs/assets/screenshots/dashboard-overview.png)
+![ARES Executive Command Center & Telemetry](docs/assets/screenshots/dashboard-overview-v2.png)
 
 *Executive Command Center displaying real-time telemetry, validated findings, attack surface metrics, and activity pulse.*
-
-<br>
-
-![ARES Executive Overview Standby & Fresh-Install Hero](docs/assets/screenshots/dashboard-overview-empty.png)
-
-*Tactical Zero-State Overview - Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
 
 </div>
 

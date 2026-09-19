@@ -195,13 +195,9 @@ Current page tabs:
 
 ### Overview
 
-![Dashboard overview standby zero-state](assets/screenshots/dashboard-overview-empty.png)
+![Dashboard overview active telemetry](assets/screenshots/dashboard-overview-v2.png)
 
-*Tactical Zero-State Overview - Clean onboarding hero with instant readiness strip and initialization actions when running zero active campaigns.*
-
-![Dashboard overview active telemetry](assets/screenshots/dashboard-overview.png)
-
-*Active Telemetry Overview - Real-time telemetry, confirmed findings by severity, queue metrics, and campaign status.*
+*Active Telemetry Overview - Real-time telemetry, validated findings, queue metrics, and campaign status.*
 
 Purpose: quick system status.
 
