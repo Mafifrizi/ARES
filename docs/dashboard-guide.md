@@ -379,6 +379,10 @@ Located directly below the graph canvas, the Beacon Terminal Dock provides a ful
 
 Purpose: generate structured, repeatable, and deterministic campaign execution plans.
 
+![ARES Enterprise Campaign Templates](assets/screenshots/dashboard-templates.png)
+
+*Campaign Templates & Plan Builder - Blueprint catalog, stage planning, and parameterized execution checklist.*
+
 The Templates view provides pre-tested engagement blueprints designed to ensure operational consistency across red-team operators without relying on external LLM calls.
 
 #### Tab 1: Templates (Catalog)
@@ -412,6 +416,10 @@ Actions:
 ### Strategy
 
 Purpose: autonomous, goal-oriented engagement planning and execution powered by graph heuristics and LLM decision agents.
+
+![ARES Autonomous Strategy & AI Planner](assets/screenshots/dashboard-strategy.png)
+
+*Autonomous Strategy & Objective Builder - Goal-directed planning, multi-LLM engine selection, and live cycle telemetry.*
 
 Unlike static templates, the Strategy engine continuously evaluates observed campaign state (discovered hosts, harvested credentials, open ports, and active defenses) to dynamically select and execute the next optimal module toward a specific operational objective.
 
@@ -490,6 +498,10 @@ The AI planner module performs a local planning/LLM call only. It does not conta
 
 Purpose: account and security administration.
 
+![ARES Zero-Trust Security Governance](assets/screenshots/dashboard-security.png)
+
+*Zero-Trust Security Governance - Password rotation, scoped API keys, audit logging, and operator review.*
+
 Use it for:
 
 - Change password.
@@ -520,6 +532,10 @@ API key behavior:
 ### EDR/OPSEC
 
 Purpose: track, record, and evaluate evasion effectiveness across endpoint detection and response (EDR) agents, feeding empirical feedback into the adaptive OPSEC engine.
+
+![ARES EDR and OPSEC Evasion Matrix](assets/screenshots/dashboard-edr.png)
+
+*EDR/OPSEC Evasion Knowledge Base & Outcome Reporting - Empirical bypass statistics, payload inspection, and adaptive feedback.*
 
 #### Tab 1: Knowledge Base
 
@@ -555,6 +571,10 @@ Action:
 ### Live
 
 Purpose: watch campaign WebSocket events.
+
+![ARES Live Operations Stream](assets/screenshots/dashboard-live.png)
+
+*Live Operations Event Stream - Real-time WebSocket telemetry, module lifecycle events, and active execution logs.*
 
 Use it for:
 
