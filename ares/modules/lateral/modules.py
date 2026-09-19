@@ -193,7 +193,7 @@ class BaseLateralModule(BaseModule):
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """
         ExecutionContext-based entry point (v0.9.0+).
-        Pulls target, credentials, and params from ctx - including vault reveal.
+        Pulls target, credentials, and params from ctx — including vault reveal.
         Subclasses inherit this; override only if custom logic is needed.
         """
         from ares.modules.base import ModuleResult
