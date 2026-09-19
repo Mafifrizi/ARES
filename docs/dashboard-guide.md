@@ -377,56 +377,82 @@ Located directly below the graph canvas, the Beacon Terminal Dock provides a ful
 
 ### Templates
 
-Purpose: generate repeatable plans.
+Purpose: generate structured, repeatable, and deterministic campaign execution plans.
 
-Use it for:
+The Templates view provides pre-tested engagement blueprints designed to ensure operational consistency across red-team operators without relying on external LLM calls.
 
-- Listing built-in templates.
-- Generating a plan from template parameters.
-- Keeping campaign execution consistent.
+#### Tab 1: Templates (Catalog)
 
-Templates are deterministic. They do not call an LLM and they do not execute
-modules automatically. Use them when you want a predictable checklist-style
-plan for a common engagement type, then review the returned stages before
-running anything against a campaign.
+Displays all built-in engagement archetypes with stage counts and module totals:
 
-Typical flow:
+- `internal_pentest`: Standard internal network penetration testing workflow (5 stages, 14 modules).
+- `ad_full_compromise`: Complete Active Directory attack chain from network recon to Domain Admin (5 stages, 16 modules).
+- `cloud_assessment`: Multi-cloud posture assessment covering AWS, Azure, and GCP (3 stages, 6 modules).
+- `assumed_breach`: Starts with valid low-privilege credentials to test lateral movement and privilege escalation (4 stages, 17 modules).
+- `linux_pentest`: Targeted assessment of Linux server and container environments (3 stages, 10 modules).
 
-1. Select a built-in template such as `internal_pentest`.
-2. Optionally provide JSON parameters such as domain, DC, or usernames.
-3. Click `Generate Plan`.
-4. Review the returned stages and module IDs.
-5. Run the plan manually through campaign execution only after authorization.
+Clicking any template card selects it and opens the `Plan Builder` tab pre-filled with that template selection.
+
+#### Tab 2: Plan Builder
+
+Configure target-specific variables:
+
+- `Target Campaign`: Associates the generated plan with an active, scoped campaign.
+- `Template Selector`: Dropdown to switch between built-in blueprints.
+- `Custom Parameters (JSON)`: Optional target environment variables (e.g., domain FQDN, domain controller IP, target subnet CIDRs, or specific username lists).
+
+Actions:
+
+1. Select a template and target campaign.
+2. Provide any custom JSON parameters if needed.
+3. Click `Generate Plan` to compile the template.
+4. Review the returned stages and module IDs in the result panel.
+5. The plan is deterministic: it creates an ordered checklist without immediately executing network traffic. Execute modules through campaign workflows only after proper authorization.
 
 ### Strategy
 
-Purpose: start or monitor goal-based engagement planning.
+Purpose: autonomous, goal-oriented engagement planning and execution powered by graph heuristics and LLM decision agents.
 
-Use it for:
+Unlike static templates, the Strategy engine continuously evaluates observed campaign state (discovered hosts, harvested credentials, open ports, and active defenses) to dynamically select and execute the next optimal module toward a specific operational objective.
 
-- Viewing active strategy state.
-- Starting an authorized goal such as `domain_admin`.
-- Providing explicit authorizations.
+#### Tab 1: Objective (Objective Builder)
 
-Backend RBAC still controls whether a user can start or execute sensitive
-flows.
+Form inputs:
 
-Strategy starts a background engagement loop for an existing campaign. It is
-not the same as the Templates page. The backend default LLM backend is Claude,
-so set `ANTHROPIC_API_KEY` before using the default Strategy path, or call the
-API directly with another `llm_backend`.
+- `Target Campaign`: The campaign whose scope, discovered assets, and harvested credentials will be engaged.
+- `Strategic Objective`: The high-level objective to achieve:
+  - `Domain Admin (Active Directory)`: Prioritizes Kerberoasting, AS-REP roasting, ACL abuse, and DCSync.
+  - `Enterprise Admin`: Extends privilege escalation across forest trusts.
+  - `Cloud Audit`: Targets IAM misconfigurations, cloud credentials, and identity federation.
+  - `Full Compromise`: Broad multi-vector objective spanning all discovered infrastructure.
+- `AI Planning Engine`:
+  - `Claude (Anthropic)`: Default provider; requires `ANTHROPIC_API_KEY`.
+  - `OpenAI`: Requires `OPENAI_API_KEY`.
+  - `Local (Ollama)`: Air-gapped and offline engine; connects to local Ollama server at `http://localhost:11434`.
+  - *Notice*: An inline warning banner automatically alerts the operator if the selected provider API key is not detected in the server environment.
+- `Explicit Authorizations`:
+  - Optional line-separated constraints or module approvals (e.g., `allow: credential.pass_spray`, `block: windows.lsass_dump`, or max noise thresholds).
 
-Strategy emits progress events to the campaign WebSocket. Use the `Live` page
-to watch those events while the engagement is running.
+Actions:
 
-Safe usage:
+- Click `Engage Scope` to initiate the autonomous strategy loop in the background.
 
-1. Create a scoped campaign first.
-2. Confirm the campaign has the context needed for planning.
-3. Set the required LLM provider key in the ARES server environment.
-4. Select a goal such as `domain_admin`.
-5. Add authorization notes for sensitive actions.
-6. Click `Engage` and monitor `Live`.
+#### Tab 2: Active (Live Strategy Monitoring)
+
+Displays real-time status of the autonomous engagement loop:
+
+- Current round number and total elapsed duration.
+- Active goal and status (`running`, `paused`, `achieved`, `exhausted`).
+- Next planned action, target host, and module selection rationale.
+- Operator override controls to pause, resume, or abort the autonomous cycle.
+
+#### Tab 3: Result (Outcome & Findings Summary)
+
+Displays structured post-engagement summary:
+
+- Objective status and success confirmation.
+- Full sequence of rounds executed with individual module results.
+- Discovered artifacts, harvested credentials, and privilege escalation milestones.
 
 ### AI Planner Module
 
@@ -439,8 +465,7 @@ Use it from:
 
 Inputs:
 
-- `goal`: `domain_admin`, `enterprise_admin`, `cloud_admin`, `data_exfil`,
-  `persistence`, or `full_compromise`.
+- `goal`: `domain_admin`, `enterprise_admin`, `cloud_admin`, `data_exfil`, `persistence`, or `full_compromise`.
 - `llm_backend`: `claude`, `openai`, or `local`.
 - `llm_model`: optional model override.
 - `auto_approve`: keep this disabled unless you have an explicit review process.
@@ -459,9 +484,7 @@ Output:
 - OPSEC warnings.
 - Alternative plan data when available.
 
-The AI planner module performs a local planning/LLM call only. It does not
-contact the target network by itself. Review its plan before running any
-generated modules.
+The AI planner module performs a local planning/LLM call only. It does not contact the target network by itself. Review its plan before running any generated modules.
 
 ### Security
 
@@ -480,33 +503,54 @@ User management notes:
 - Only `team_lead` can create users.
 - The Security page lists users for review.
 - Assign a role by passing `role` to `POST /auth/register`.
-- The current release does not expose dashboard role editing for existing
-  users.
+- The current release does not expose dashboard role editing for existing users.
 
 API key behavior:
 
-- API keys are created after login; they are not the same thing as
-  `ARES_SECRET_KEY` or `ARES_ENCRYPTION_KEY`.
-- Use API keys for scripts, CI jobs, integrations, or validation labs that need
-  to call ARES with `X-API-Key` instead of a browser login.
+- API keys are created after login; they are not the same thing as `ARES_SECRET_KEY` or `ARES_ENCRYPTION_KEY`.
+- Use API keys for scripts, CI jobs, integrations, or validation labs that need to call ARES with `X-API-Key` instead of a browser login.
 - Creating a key opens the `Save your key` modal.
 - The full secret is shown only once at creation time.
 - The `Copy` button changes to `Copied` after a successful copy.
 - `Done` closes the modal and clears the in-memory new-key state.
-- The list shows metadata and a prefix only; the full secret cannot be
-  retrieved later.
+- The list shows metadata and a prefix only; the full secret cannot be retrieved later.
 - After delete, revoked keys disappear from the list.
 - Deleted keys cannot authenticate.
 
 ### EDR/OPSEC
 
-Purpose: record and review EDR bypass outcomes.
+Purpose: track, record, and evaluate evasion effectiveness across endpoint detection and response (EDR) agents, feeding empirical feedback into the adaptive OPSEC engine.
 
-Use it for:
+#### Tab 1: Knowledge Base
 
-- EDR bypass stats.
-- Reporting bypass outcomes.
-- Feeding adaptive OPSEC decisions.
+Inspect empirical bypass rates and historical evasion statistics by technique and EDR vendor:
+
+- `Technique Selector`: Filter by specific bypass technique (e.g., `edr.bypass_adaptive`, `amsi-patch-reflection`, `hardware-breakpoint-unhook`).
+- `Vendor Selector`: Filter by EDR vendor (`crowdstrike`, `defender_atp`, `sentinelone`, `carbon_black`, `cylance`, or `all`).
+- `Current Rate`: Shows the observed success rate percentage.
+  - *Threshold Rule*: ARES enforces a statistical confidence threshold of minimum 3 samples. Evasion percentages are only calculated and applied to automated module scoring once at least 3 verified outcome samples have been recorded for that technique/vendor pair. Before reaching 3 samples, it displays `not enough data (min 3 samples)`.
+- `Stats Details & Payload`:
+  - Click `Inspect Payload Details` to review technical implementation data, memory unhooking logic, or evasion wrappers.
+  - Click `Copy Payload` to copy the evasion verification payload for controlled lab testing.
+
+#### Tab 2: Report Outcome
+
+Submit live operational feedback when an evasion technique is attempted against an EDR agent in a test lab or engagement:
+
+- `Technique ID` (Required): Identifier of the evaluated technique (e.g., `edr.bypass_adaptive / amsi-patch-reflection`).
+- `EDR Vendor` (Required): Target vendor name (e.g., `crowdstrike`, `defender_atp`, `sentinelone`).
+- `EDR Version` (Optional): Agent build number or sensor version (e.g., `7.14.18204.0`).
+- `Outcome` (Required): Operational result observed:
+  - `Bypassed / Successful`: Technique executed cleanly without alerting or blocking.
+  - `Blocked / Detected`: EDR prevented execution or raised a high-severity alert.
+  - `Partially Bypassed / Telemetry Only`: Command ran but generated defensive telemetry.
+  - `Unsupported / Incompatible`: Target OS or architecture did not support the technique.
+- `Notes` (Optional): Qualitative details such as Event IDs, alert names, behavioral flags, or lab environment context.
+
+Action:
+
+- Click `Report Outcome` to submit.
+- Outcome records are immediately stored in the persistent database and update the Knowledge Base calculations in real time, directly informing the ARES strategy engine which techniques to prioritize or avoid.
 
 ### Live
 
