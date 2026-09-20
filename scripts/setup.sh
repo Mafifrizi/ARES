@@ -38,6 +38,10 @@ pip install -e ".[dev,pdf]" -q
 if [ ! -f ".env" ]; then
     echo "[*] Generating .env from .env.example..."
     cp .env.example .env
+fi
+
+if grep -q "CHANGE_ME" .env 2>/dev/null; then
+    echo "[*] Replacing CHANGE_ME placeholders in .env with secure keys..."
     SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
     ENC=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
     ARES_GENERATED_SECRET="$SECRET" ARES_GENERATED_ENC="$ENC" python3 - <<'PY'
@@ -52,12 +56,12 @@ env_path = Path(".env")
 lines = env_path.read_text(encoding="utf-8").splitlines()
 for index, line in enumerate(lines):
     for prefix, value in updates.items():
-        if line.startswith(prefix):
+        if line.strip().startswith(prefix) and ("CHANGE_ME" in line or line.strip() == prefix):
             lines[index] = value
             break
 env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
-    echo "[!] .env created - set ARES_DEFAULT_ADMIN_PASSWORD before starting"
+    echo "[OK] Secure keys generated in .env"
 fi
 
 echo ""

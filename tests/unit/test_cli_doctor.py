@@ -612,3 +612,91 @@ def test_python_setup_rejects_python_313_before_writing_env(tmp_path, capsys):
     assert "Python 3.10-3.12 is required" in output
     assert "Python 3.12.x" in output
     assert not (tmp_path / ".env").exists()
+
+
+def test_python_setup_replaces_change_me_placeholders_in_existing_env(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    (tmp_path / ".env").write_text(
+        "ARES_SECRET_KEY=CHANGE_ME_USE_openssl_rand_-hex_32\n"
+        "ARES_ENCRYPTION_KEY=CHANGE_ME_USE_Fernet_generate_key\n"
+        "ARES_DEFAULT_ADMIN_PASSWORD=YOUR_STRONG_ADMIN_PASSWORD_HERE\n"
+        "ARES_API_PORT=8080\n",
+        encoding="utf-8",
+    )
+
+    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+
+    output = capsys.readouterr().out
+    assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
+    assert "Admin password:" in output
+
+    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "CHANGE_ME" not in env_content
+    assert "YOUR_STRONG_ADMIN_PASSWORD_HERE" not in env_content
+    assert "ARES_API_PORT=8080" in env_content
+
+
+def test_python_setup_leaves_configured_env_unchanged(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    original = (
+        "ARES_SECRET_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
+        "ARES_ENCRYPTION_KEY=dGVzdF9rZXlfdGhhdF9pc18zMl9ieXRlc19sb25nISE=\n"
+        "ARES_DEFAULT_ADMIN_PASSWORD=CustomAdminPassword123!\n"
+    )
+    (tmp_path / ".env").write_text(original, encoding="utf-8")
+
+    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+
+    output = capsys.readouterr().out
+    assert ".env already exists; leaving it unchanged" in output
+
+    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert env_content == original
+
+
+def test_python_setup_force_regenerates_existing_env(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    original = (
+        "ARES_SECRET_KEY=old_secret\n"
+        "ARES_ENCRYPTION_KEY=old_enc\n"
+        "ARES_DEFAULT_ADMIN_PASSWORD=old_pass\n"
+        "CUSTOM_VAR=keep_me\n"
+    )
+    (tmp_path / ".env").write_text(original, encoding="utf-8")
+
+    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt", force=True)
+
+    output = capsys.readouterr().out
+    assert ".env regenerated with fresh secure keys (--force)" in output
+    assert "Admin password:" in output
+
+    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "old_secret" not in env_content
+    assert "CUSTOM_VAR=keep_me" in env_content
+
+
+def test_setup_entrypoint_parses_force(monkeypatch):
+    import ares.cli.typer_main as typer_main
+
+    calls = []
+    monkeypatch.setattr(typer_main, "_run_python_setup", lambda force=False: calls.append(force))
+    monkeypatch.setattr(sys, "argv", ["ares-setup", "--force"])
+
+    typer_main.setup_entrypoint()
+
+    assert calls == [True]
+
+
+def test_setup_entrypoint_help(monkeypatch, capsys):
+    import ares.cli.typer_main as typer_main
+
+    monkeypatch.setattr(sys, "argv", ["ares-setup", "--help"])
+
+    typer_main.setup_entrypoint()
+
+    output = capsys.readouterr().out
+    assert "Usage: ares-setup" in output
+    assert "--force" in output

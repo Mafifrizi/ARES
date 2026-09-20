@@ -2213,11 +2213,20 @@ def _setup_admin_password(length: int = 20) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _extract_env_value(content: str, key: str) -> str | None:
+    prefix = f"{key}="
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return None
+
+
 def _upsert_env_value(template: str, key: str, value: str) -> str:
     prefix = f"{key}="
     lines = template.splitlines()
     for index, line in enumerate(lines):
-        if line.startswith(prefix):
+        if line.strip().startswith(prefix):
             lines[index] = f"{prefix}{value}"
             break
     else:
@@ -2230,6 +2239,7 @@ def _run_python_setup(
     platform_name: str | None = None,
     os_name: str | None = None,
     version_info: object | None = None,
+    force: bool = False,
 ) -> None:
     import os
     import secrets
@@ -2271,9 +2281,52 @@ def _run_python_setup(
     example_path = root_path / ".env.example"
 
     try:
+        admin_password = None
         if env_path.exists():
-            console.print("[green]OK[/green] .env already exists; leaving it unchanged.")
-            admin_password = None
+            existing = env_path.read_text(encoding="utf-8")
+            secret_val = _extract_env_value(existing, "ARES_SECRET_KEY")
+            enc_val = _extract_env_value(existing, "ARES_ENCRYPTION_KEY")
+            admin_val = _extract_env_value(existing, "ARES_DEFAULT_ADMIN_PASSWORD")
+
+            has_placeholders = (
+                "CHANGE_ME" in existing
+                or (admin_val is not None and "YOUR_STRONG_ADMIN_PASSWORD_HERE" in admin_val)
+            )
+            missing_critical = (
+                secret_val is None or secret_val == "" or "CHANGE_ME" in secret_val
+                or enc_val is None or enc_val == "" or "CHANGE_ME" in enc_val
+            )
+
+            if force or has_placeholders or missing_critical:
+                updated = existing
+
+                # Check ARES_SECRET_KEY
+                if force or secret_val is None or secret_val == "" or "CHANGE_ME" in secret_val:
+                    new_secret = secrets.token_hex(32)
+                    updated = _upsert_env_value(updated, "ARES_SECRET_KEY", new_secret)
+
+                # Check ARES_ENCRYPTION_KEY
+                if force or enc_val is None or enc_val == "" or "CHANGE_ME" in enc_val:
+                    new_enc = _setup_fernet_key()
+                    updated = _upsert_env_value(updated, "ARES_ENCRYPTION_KEY", new_enc)
+
+                # Check ARES_DEFAULT_ADMIN_PASSWORD
+                if force or admin_val is None or admin_val == "" or "CHANGE_ME" in admin_val or "YOUR_STRONG_ADMIN_PASSWORD_HERE" in admin_val:
+                    admin_password = _setup_admin_password()
+                    updated = _upsert_env_value(updated, "ARES_DEFAULT_ADMIN_PASSWORD", admin_password)
+
+                env_path.write_text(updated, encoding="utf-8")
+
+                if force:
+                    console.print(f"[green]OK[/green] .env regenerated with fresh secure keys (--force).")
+                else:
+                    console.print(f"[green]OK[/green] Replaced CHANGE_ME placeholders in .env with secure generated keys.")
+
+                if admin_password is not None:
+                    console.print(f"Admin password: {admin_password}")
+            else:
+                console.print("[green]OK[/green] .env already exists; leaving it unchanged.")
+                admin_password = None
         else:
             if example_path.exists():
                 template = example_path.read_text(encoding="utf-8")
@@ -2306,7 +2359,21 @@ def _run_python_setup(
 
 def setup_entrypoint() -> None:
     """Entry point for `ares-setup` using Python-native cross-platform setup."""
-    _run_python_setup()
+    import sys
+
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        console.print("[bold]ARES Setup[/bold]")
+        console.print("Usage: ares-setup [--force | -f]")
+        console.print("Initializes or updates .env with secure random keys and admin credentials.")
+        console.print("Options:")
+        console.print("  --force, -f  Force regeneration of ARES_SECRET_KEY, ARES_ENCRYPTION_KEY, and admin password.")
+        return
+    force = "--force" in args or "-f" in args
+    if force:
+        _run_python_setup(force=True)
+    else:
+        _run_python_setup()
 
 
 # ── backup command ────────────────────────────────────────────────────────────
