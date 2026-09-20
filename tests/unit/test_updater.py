@@ -64,6 +64,16 @@ def test_secure_resolve_path_rejects_null_bytes():
             secure_resolve_path(base, "ad/test\x00.py")
 
 
+def test_secure_resolve_path_rejects_absolute_and_drive_paths():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        base = Path(tmp_dir)
+        with pytest.raises(SecurityViolationError, match="Absolute path"):
+            secure_resolve_path(base, "/etc/shadow")
+
+        with pytest.raises(SecurityViolationError, match="Absolute path"):
+            secure_resolve_path(base, "C:\\Windows\\System32")
+
+
 # ── 2. Security: User Data Protection & Blacklist ─────────────────────────────
 
 @pytest.mark.parametrize("protected_file", [
@@ -247,6 +257,29 @@ def test_post_modules_reload_loopback():
     finally:
         sys.modules.clear()
         sys.modules.update(saved_modules)
+
+
+def test_notify_running_server_reload_rejects_non_loopback():
+    mgr = PlatformUpdateManager()
+    with pytest.raises(SecurityViolationError, match="Loopback only"):
+        mgr.notify_running_server_reload(host="192.168.1.100")
+
+    with pytest.raises(SecurityViolationError, match="Loopback only"):
+        mgr.notify_running_server_reload(host="attacker.com")
+
+
+def test_platform_update_manager_rejects_malformed_repo_and_branch():
+    with pytest.raises(SecurityViolationError, match="Invalid GitHub repository"):
+        PlatformUpdateManager(github_repo="invalid;rm -rf")
+
+    with pytest.raises(SecurityViolationError, match="Invalid GitHub repository"):
+        PlatformUpdateManager(github_repo="../traversal/repo")
+
+    with pytest.raises(SecurityViolationError, match="Invalid Git branch"):
+        PlatformUpdateManager(branch="--upload-pack=evil")
+
+    with pytest.raises(SecurityViolationError, match="Invalid Git branch"):
+        PlatformUpdateManager(branch="invalid branch with spaces")
 
 
 # ── 8. Platform System Upgrade & Diagnostics ──────────────────────────────────

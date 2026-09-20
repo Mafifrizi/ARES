@@ -105,6 +105,10 @@ def secure_resolve_path(base_dir: Path, relative_path: str | Path) -> Path:
     if not raw_str:
         raise SecurityViolationError("Empty relative path is not permitted.")
 
+    # Guard against absolute paths or drive letters
+    if raw_str.startswith(("/", "\\")) or Path(raw_str).is_absolute() or bool(re.match(r"^[a-zA-Z]:", raw_str)):
+        raise SecurityViolationError(f"Absolute path '{raw_str}' is not permitted.")
+
     # Guard against obvious directory traversal tokens
     parts = re.split(r"[\\/]", raw_str)
     if ".." in parts or "." in parts:
@@ -266,6 +270,11 @@ class PlatformUpdateManager:
 
         self.github_repo = github_repo.strip()
         self.branch = branch.strip()
+
+        if not re.match(r"^[a-zA-Z0-9_\-\.]+/[a-zA-Z0-9_\-\.]+$", self.github_repo):
+            raise SecurityViolationError(f"Invalid GitHub repository identifier '{github_repo}'.")
+        if not re.match(r"^[a-zA-Z0-9_\-\./]+$", self.branch) or self.branch.startswith("-"):
+            raise SecurityViolationError(f"Invalid Git branch identifier '{branch}'.")
 
         # Target directories
         self.builtin_modules_dir = self.project_root / "ares" / "modules"
@@ -739,12 +748,47 @@ class PlatformUpdateManager:
                 "message": "Project is not a Git repository or git binary is unavailable.",
             }
 
+        # Check for detached HEAD state
+        branch_proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(self.project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if branch_proc.returncode == 0 and branch_proc.stdout.strip() == "HEAD":
+            return {
+                "status": "detached_head",
+                "method": "git",
+                "message": "Repository is in a detached HEAD state. Switch to a branch before upgrading.",
+            }
+
+        # Dynamically discover remote (defaulting to 'origin')
+        remote_name = "origin"
+        remotes_proc = subprocess.run(
+            ["git", "remote"],
+            cwd=str(self.project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if remotes_proc.returncode == 0:
+            remotes = [r.strip() for r in remotes_proc.stdout.splitlines() if r.strip()]
+            if remotes and "origin" not in remotes:
+                remote_name = remotes[0]
+
         # Check working tree cleanliness for tracked files
         status_proc = subprocess.run(
             ["git", "status", "--porcelain", "-uno"],
             cwd=str(self.project_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         if status_proc.returncode != 0:
@@ -761,10 +805,12 @@ class PlatformUpdateManager:
 
         # Fetch latest commits from remote
         fetch_proc = subprocess.run(
-            ["git", "fetch", "origin", self.branch],
+            ["git", "fetch", remote_name, self.branch],
             cwd=str(self.project_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=30,
         )
@@ -773,10 +819,12 @@ class PlatformUpdateManager:
 
         # Check commit distance
         rev_proc = subprocess.run(
-            ["git", "rev-list", f"HEAD..origin/{self.branch}", "--count"],
+            ["git", "rev-list", f"HEAD..{remote_name}/{self.branch}", "--count"],
             cwd=str(self.project_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
         behind_count = 0
@@ -790,7 +838,7 @@ class PlatformUpdateManager:
             return {
                 "status": "up_to_date",
                 "method": "git",
-                "message": f"System core engine is already up to date with origin/{self.branch}.",
+                "message": f"System core engine is already up to date with {remote_name}/{self.branch}.",
                 "commits_pulled": 0,
             }
 
@@ -798,15 +846,17 @@ class PlatformUpdateManager:
             return {
                 "status": "dry_run",
                 "method": "git",
-                "message": f"[dry-run] Would fast-forward pull {behind_count} commit(s) from origin/{self.branch}.",
+                "message": f"[dry-run] Would fast-forward pull {behind_count} commit(s) from {remote_name}/{self.branch}.",
                 "commits_available": behind_count,
             }
 
         pull_proc = subprocess.run(
-            ["git", "pull", "--ff-only", "origin", self.branch],
+            ["git", "pull", "--ff-only", remote_name, self.branch],
             cwd=str(self.project_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             timeout=60,
         )
@@ -821,7 +871,7 @@ class PlatformUpdateManager:
         return {
             "status": "ok",
             "method": "git",
-            "message": f"Successfully pulled {behind_count} commit(s) from origin/{self.branch}.",
+            "message": f"Successfully pulled {behind_count} commit(s) from {remote_name}/{self.branch}.",
             "commits_pulled": behind_count,
         }
 
@@ -900,11 +950,21 @@ class PlatformUpdateManager:
                 "message": "alembic.ini not found in project root; schema migration skipped.",
             }
 
+        custom_db = (
+            os.environ.get("ARES_DATABASE_URL")
+            or os.environ.get("ARES_POSTGRES_DSN")
+            or os.environ.get("DATABASE_URL")
+        )
+
         try:
+            from types import SimpleNamespace
             from alembic import command as alembic_cmd
             from alembic.config import Config as AlembicConfig
 
             alembic_cfg = AlembicConfig(str(alembic_ini))
+            if custom_db:
+                alembic_cfg.cmd_opts = SimpleNamespace(x=[f"db_url={custom_db}"])
+
             alembic_cmd.upgrade(alembic_cfg, "head")
             logger.info("Alembic database migrations applied successfully")
             return {
@@ -914,12 +974,18 @@ class PlatformUpdateManager:
             }
         except Exception as exc:
             try:
-                cmd = [sys.executable, "-m", "alembic", "upgrade", "head"]
+                cmd = [sys.executable, "-m", "alembic"]
+                if custom_db:
+                    cmd.extend(["-x", f"db_url={custom_db}"])
+                cmd.extend(["upgrade", "head"])
+
                 proc = subprocess.run(
                     cmd,
                     cwd=str(self.project_root),
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=30,
                     check=False,
                 )
@@ -1058,6 +1124,9 @@ class PlatformUpdateManager:
         Send loopback HTTP POST to running ARES API server to trigger in-memory plugin reload.
         Gracefully returns if server is not currently running.
         """
+        if host not in ("127.0.0.1", "::1", "localhost"):
+            raise SecurityViolationError(f"Reload notification target '{host}' rejected: Loopback only.")
+
         url = f"http://{host}:{port}/modules/reload"
         req = urllib.request.Request(
             url,
