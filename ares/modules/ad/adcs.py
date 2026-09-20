@@ -44,24 +44,49 @@ from ares.sdk import (
 
 logger = get_logger("ares.modules.ad.adcs")
 
-# ESC1 flag: CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT = 0x1
-_CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT = 0x1
+# Certificate Name Flags (msPKI-Certificate-Name-Flag)
+_CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT = 0x00000001
+_CT_FLAG_ADD_EMAIL = 0x00000002
+_CT_FLAG_ADD_OBJ_GUID = 0x00000004
+_CT_FLAG_ADD_DIRECTORY_PATH = 0x00000100
+_CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT_ALT_NAME = 0x00010000
+_CT_FLAG_SUBJECT_REQUIRE_DNS_AS_CN = 0x08000000
+_CT_FLAG_SUBJECT_REQUIRE_COMMON_NAME = 0x40000000
 
-# EKU OIDs for authentication
+# Enrollment Flags (msPKI-Enrollment-Flag)
+_CT_FLAG_INCLUDE_SYMMETRIC_ALGORITHMS = 0x00000001
+_CT_FLAG_PEND_ALL_REQUESTS = 0x00000002  # Manager approval required
+_CT_FLAG_PUBLISH_TO_KDC = 0x00000004
+_CT_FLAG_PUBLISH_TO_DS = 0x00000008
+_CT_FLAG_AUTO_ENROLLMENT_CHECK_USER_DS_CERTIFICATE = 0x00000010
+_CT_FLAG_AUTO_ENROLLMENT = 0x00000020
+_CT_FLAG_NO_SECURITY_EXTENSION = 0x00080000  # ESC9: Suppresses szOID_NTDS_CA_SECURITY_EXT (objectSid)
+
+# CA Flags
+_EDITF_ATTRIBUTESUBJECTALTNAME2 = 0x00040000  # ESC6: CA allows user-specified SAN on any cert
+
+# EKU OIDs
 _AUTH_EKUS = {
     "1.3.6.1.5.5.7.3.2":       "Client Authentication",
     "1.3.6.1.5.2.3.4":         "PKINIT Client Authentication",
     "1.3.6.1.4.1.311.20.2.2":  "Smart Card Logon",
     "2.5.29.37.0":              "Any Purpose",
 }
+_ENROLLMENT_AGENT_EKU = "1.3.6.1.4.1.311.20.2.1"  # Certificate Request Agent (ESC3)
+_ANY_PURPOSE_EKU = "2.5.29.37.0"  # Any Purpose (ESC2)
+_SZ_OID_NTDS_CA_SECURITY_EXT = "1.3.6.1.4.1.311.25.2"  # KB5014754 SID Extension
 
-# Dangerous rights on certificate templates (ESC4)
+# Shadow Credentials msDS-KeyCredentialLink Attribute GUID
+_MSDS_KEY_CREDENTIAL_LINK_GUID = "5b47d60f-6090-40b2-9f37-2a4de45f3063"
+
+# Dangerous rights on certificate templates & AD objects
 _DANGEROUS_RIGHTS = {
     0x000F01FF: "GenericAll",
     0x00020028: "WriteDACL",
     0x00020000: "GenericWrite",
     0x00080000: "WriteOwner",
 }
+_RIGHT_WRITE_PROPERTY = 0x00000020
 
 
 @module_contract(
@@ -279,7 +304,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
 
         loop = asyncio.get_running_loop()
 
-        # Step 1: Enumerate templates via LDAP
+        # Step 1: Enumerate templates & CA objects via LDAP
         try:
             templates, ca_list = await loop.run_in_executor(
                 None,
@@ -291,82 +316,28 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
 
         logger.info("adcs_templates_found", count=len(templates), cas=len(ca_list))
 
-        # Step 2: Analyze templates for ESC vulnerabilities
-        esc1_vulns = []
-        esc2_vulns = []
-        esc4_vulns = []
-        all_vulns: list[dict] = []
+        # Step 2: Analyze templates and CAs for ESC1-ESC15 vulnerabilities
+        all_vulns, esc_map = self._analyze_template_misconfigurations(
+            templates=templates,
+            ca_list=ca_list,
+            username=username,
+            domain=domain,
+            target_user=target_user,
+        )
 
-        for tmpl in templates:
-            flags    = tmpl.get("msPKI_Certificate_Name_Flag", 0)
-            ekus     = tmpl.get("ekus", [])
-            name     = tmpl.get("name", "")
-            has_auth_eku = any(e in _AUTH_EKUS for e in ekus)
+        # Step 3: Audit Shadow Credentials posture (msDS-KeyCredentialLink) for target_user
+        shadow_posture: dict[str, Any] = {}
+        try:
+            shadow_posture = await loop.run_in_executor(
+                None,
+                lambda: self._audit_shadow_credentials_sync(dc, username, password, domain, target_user),
+            )
+        except Exception as shadow_err:
+            logger.debug("adcs_shadow_credentials_audit_error", error=str(shadow_err))
+            shadow_posture = {"target_user": target_user, "account_found": False, "error": str(shadow_err)}
 
-            # ESC1: enrollee can supply SAN + has auth EKU
-            if (flags & _CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT) and has_auth_eku:
-                esc1_vulns.append(tmpl)
-                all_vulns.append({"template": name, "esc": "ESC1",
-                                   "reason": "Enrollee-supplied SAN + auth EKU"})
-                logger.info("adcs_esc1_found", template=name)
-
-            # ESC2: Any Purpose EKU
-            if "2.5.29.37.0" in ekus:
-                esc2_vulns.append(tmpl)
-                all_vulns.append({"template": name, "esc": "ESC2",
-                                   "reason": "Any Purpose EKU"})
-
-        # Step 3: Generate findings
-        if esc1_vulns:
-            for tmpl in esc1_vulns:
-                self.finding(
-                    title       = f"ADCS ESC1 - Enrollee SAN in '{tmpl['name']}'",
-                    description = (
-                        f"Certificate template '{tmpl['name']}' allows the enrollee to "
-                        "specify a Subject Alternative Name (SAN). Combined with an "
-                        "authentication EKU, this allows any authenticated domain user to "
-                        "request a certificate impersonating ANY user including Domain Admin. "
-                        "Use with ad.adcs exploit_esc1=true and ad.golden_ticket for persistent access."
-                    ),
-                    severity    = Severity.CRITICAL,
-                    mitre_technique = "T1649",
-                    mitre_tactic    = "Credential Access",
-                    evidence = {
-                        "template_name":  tmpl["name"],
-                        "esc_class":      "ESC1",
-                        "ekus":           [_AUTH_EKUS.get(e, e) for e in tmpl.get("ekus", [])],
-                        "ca_list":        [ca.get("name", "") for ca in ca_list],
-                        "exploit_command": (
-                            f"certipy req -u {username}@{domain} -p <pass> "
-                            f"-ca <CA_NAME> -template '{tmpl['name']}' "
-                            f"-upn {target_user}@{domain}"
-                        ),
-                    },
-                    remediation = (
-                        "1. Disable 'Supply in the request' for Subject Name in the template. "
-                        "2. Enable CA Manager Approval. "
-                        "3. Enable Issuance Requirements (authorized signatures). "
-                        "4. Audit template ACL - restrict enrollment rights."
-                    ),
-                )
-
-        if esc2_vulns:
-            for tmpl in esc2_vulns:
-                self.finding(
-                    title       = f"ADCS ESC2 - Any Purpose EKU in '{tmpl['name']}'",
-                    description = (
-                        f"Template '{tmpl['name']}' has Any Purpose EKU - "
-                        "certificates can be used for any application including authentication."
-                    ),
-                    severity    = Severity.HIGH,
-                    mitre_technique = "T1649",
-                    mitre_tactic    = "Credential Access",
-                    evidence    = {"template_name": tmpl["name"], "esc_class": "ESC2"},
-                    remediation = "Remove Any Purpose EKU. Specify explicit EKUs only.",
-                )
-
-        if not esc1_vulns and not esc2_vulns:
-            logger.info("adcs_no_esc_found", templates_checked=len(templates))
+        esc1_vulns = esc_map.get("ESC1", [])
+        esc2_vulns = esc_map.get("ESC2", [])
 
         # Step 4: ESC1 evaluation (Audit Assessment Mode - non-intrusive)
         cert_path = ""
@@ -398,8 +369,17 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             "templates_checked": len(templates),
             "ca_list":           [ca.get("name", "") for ca in ca_list],
             "vulnerabilities":   all_vulns,
-            "esc1_count":        len(esc1_vulns),
-            "esc2_count":        len(esc2_vulns),
+            "esc1_count":        len(esc_map.get("ESC1", [])),
+            "esc2_count":        len(esc_map.get("ESC2", [])),
+            "esc3_count":        len(esc_map.get("ESC3", [])),
+            "esc4_count":        len(esc_map.get("ESC4", [])),
+            "esc6_count":        len(esc_map.get("ESC6", [])),
+            "esc9_count":        len(esc_map.get("ESC9", [])),
+            "esc10_count":       len(esc_map.get("ESC10", [])),
+            "esc13_count":       len(esc_map.get("ESC13", [])),
+            "esc14_count":       len(esc_map.get("ESC14", [])),
+            "esc15_count":       len(esc_map.get("ESC15", [])),
+            "shadow_credentials_posture": shadow_posture,
             "certificate_path":  cert_path,
             "dc":                dc,
             "domain":            domain,
@@ -408,6 +388,465 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         raw["adcs_findings"] = raw.get("vulnerabilities", [])  # OUTPUTS key
         raw["certificate"] = raw.get("certificate_path", "")  # OUTPUTS key
         return self._findings[:], raw
+
+    def _analyze_template_misconfigurations(
+        self,
+        templates: list[dict],
+        ca_list: list[dict],
+        username: str = "",
+        domain: str = "",
+        target_user: str = "Administrator",
+    ) -> tuple[list[dict], dict[str, list[dict]]]:
+        """
+        Evaluate templates and CAs against ESC1-ESC15 vulnerability definitions.
+        Registers structured findings and returns (all_vulns, esc_map).
+        """
+        all_vulns: list[dict] = []
+        esc_map: dict[str, list[dict]] = {
+            "ESC1": [], "ESC2": [], "ESC3": [], "ESC4": [],
+            "ESC6": [], "ESC9": [], "ESC10": [], "ESC13": [],
+            "ESC14": [], "ESC15": [],
+        }
+
+        # Check CA-level misconfigurations (ESC6: EDITF_ATTRIBUTESUBJECTALTNAME2)
+        for ca in ca_list:
+            ca_flags = ca.get("flags", 0)
+            if ca_flags & _EDITF_ATTRIBUTESUBJECTALTNAME2:
+                esc_map["ESC6"].append(ca)
+                all_vulns.append({
+                    "ca": ca.get("name", ""),
+                    "esc": "ESC6",
+                    "reason": "EDITF_ATTRIBUTESUBJECTALTNAME2 flag enabled on CA",
+                })
+                self.finding(
+                    title=f"ADCS ESC6 - User-Supplied SAN Flag Enabled on CA '{ca.get('name')}'",
+                    description=(
+                        f"Certification Authority '{ca.get('name')}' has the EDITF_ATTRIBUTESUBJECTALTNAME2 "
+                        f"flag enabled. This configuration permits enrollees to supply custom Subject Alternative "
+                        f"Names (SAN) on ANY certificate template issued by this CA, enabling domain escalation."
+                    ),
+                    severity=Severity.CRITICAL,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={"ca_name": ca.get("name"), "flags": hex(ca_flags)},
+                    remediation="Remove the EDITF_ATTRIBUTESUBJECTALTNAME2 flag: certutil -config '<CA>' -setreg policy\\EditFlags -EDITF_ATTRIBUTESUBJECTALTNAME2",
+                )
+
+        # Check template-level misconfigurations
+        for tmpl in templates:
+            name = tmpl.get("name", "")
+            name_flag = tmpl.get("msPKI_Certificate_Name_Flag", 0)
+            enroll_flag = tmpl.get("msPKI_Enrollment_Flag", 0)
+            ra_sig = tmpl.get("msPKI_RA_Signature", 0)
+            schema_ver = tmpl.get("schema_version", 1)
+            ekus = tmpl.get("ekus", [])
+            policy_oids = tmpl.get("policy_oids", [])
+            linked_groups = tmpl.get("linked_groups", [])
+            dangerous_acls = tmpl.get("dangerous_acls", [])
+
+            has_auth_eku = any(e in _AUTH_EKUS for e in ekus)
+            requires_approval = bool(enroll_flag & _CT_FLAG_PEND_ALL_REQUESTS)
+            requires_signatures = ra_sig > 0
+
+            # ESC1: Enrollee supplies SAN + Auth EKU + No Manager Approval + No Signatures Required
+            if (name_flag & _CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT) and has_auth_eku and not requires_approval and not requires_signatures:
+                esc_map["ESC1"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC1",
+                    "reason": "Enrollee-supplied SAN + auth EKU",
+                })
+                logger.info("adcs_esc1_found", template=name)
+                self.finding(
+                    title       = f"ADCS ESC1 - Enrollee SAN in '{name}'",
+                    description = (
+                        f"Certificate template '{name}' allows the enrollee to "
+                        "specify a Subject Alternative Name (SAN). Combined with an "
+                        "authentication EKU, this allows any authenticated domain user to "
+                        "request a certificate impersonating ANY user including Domain Admin. "
+                        "Use with ad.adcs exploit_esc1=true and ad.golden_ticket for persistent access."
+                    ),
+                    severity    = Severity.CRITICAL,
+                    mitre_technique = "T1649",
+                    mitre_tactic    = "Credential Access",
+                    evidence = {
+                        "template_name":  name,
+                        "esc_class":      "ESC1",
+                        "ekus":           [_AUTH_EKUS.get(e, e) for e in ekus],
+                        "ca_list":        [ca.get("name", "") for ca in ca_list],
+                        "exploit_command": (
+                            f"certipy req -u {username}@{domain} -p <pass> "
+                            f"-ca <CA_NAME> -template '{name}' "
+                            f"-upn {target_user}@{domain}"
+                        ) if username and domain else "",
+                    },
+                    remediation = (
+                        "1. Disable 'Supply in the request' for Subject Name in the template. "
+                        "2. Enable CA Manager Approval. "
+                        "3. Enable Issuance Requirements (authorized signatures). "
+                        "4. Audit template ACL - restrict enrollment rights."
+                    ),
+                )
+
+            # ESC2: Any Purpose EKU or Unconstrained EKU
+            if (_ANY_PURPOSE_EKU in ekus or not ekus) and not requires_approval and not requires_signatures:
+                esc_map["ESC2"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC2",
+                    "reason": "Any Purpose EKU",
+                })
+                self.finding(
+                    title       = f"ADCS ESC2 - Any Purpose EKU in '{name}'",
+                    description = (
+                        f"Template '{name}' has Any Purpose EKU - "
+                        "certificates can be used for any application including authentication."
+                    ),
+                    severity    = Severity.HIGH,
+                    mitre_technique = "T1649",
+                    mitre_tactic    = "Credential Access",
+                    evidence    = {"template_name": name, "esc_class": "ESC2", "ekus": ekus},
+                    remediation = "Remove Any Purpose EKU. Specify explicit EKUs only.",
+                )
+
+            # ESC3: Certificate Request Agent EKU (Enrollment Agent)
+            if _ENROLLMENT_AGENT_EKU in ekus and not requires_approval:
+                esc_map["ESC3"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC3",
+                    "reason": "Certificate Request Agent EKU (Enrollment Agent)",
+                })
+                self.finding(
+                    title=f"ADCS ESC3 - Enrollment Agent EKU in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' specifies the Certificate Request Agent EKU "
+                        f"({_ENROLLMENT_AGENT_EKU}). An attacker can obtain an enrollment agent certificate and "
+                        f"use it to co-sign certificate requests on behalf of other domain principals, "
+                        f"escalating privileges across the forest."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={"template_name": name, "esc_class": "ESC3", "ekus": ekus},
+                    remediation="Restrict enrollment permissions on the template, require CA manager approval, or constrain enrollment agent policies on the CA.",
+                )
+
+            # ESC4: Dangerous Template Permissions (WriteDACL / GenericWrite / GenericAll)
+            if dangerous_acls:
+                esc_map["ESC4"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC4",
+                    "reason": "Dangerous write permissions on template object",
+                    "details": dangerous_acls,
+                })
+                self.finding(
+                    title=f"ADCS ESC4 - Vulnerable Template Access Control in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' has dangerous permissions ({', '.join(a['right'] for a in dangerous_acls)}) "
+                        f"granted to audited identities. An attacker with write access can overwrite template settings "
+                        f"(e.g., enable SAN supply or add auth EKUs) to perform ESC1 escalation."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1649",
+                    mitre_tactic="Privilege Escalation",
+                    evidence={"template_name": name, "esc_class": "ESC4", "dangerous_acls": dangerous_acls},
+                    remediation="Audit and remove WriteDACL, WriteOwner, GenericWrite, and GenericAll permissions from non-administrative users and groups on the template.",
+                )
+
+            # ESC9: CT_FLAG_NO_SECURITY_EXTENSION with Authentication EKU (KB5014754 bypass)
+            if (enroll_flag & _CT_FLAG_NO_SECURITY_EXTENSION) and has_auth_eku and not requires_approval:
+                esc_map["ESC9"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC9",
+                    "reason": "CT_FLAG_NO_SECURITY_EXTENSION suppresses objectSid - bypasses KB5014754 strong mapping",
+                })
+                self.finding(
+                    title=f"ADCS ESC9 - No Security Extension Flag in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' has the CT_FLAG_NO_SECURITY_EXTENSION flag (0x80000) set "
+                        f"with an authentication EKU. The CA omits the szOID_NTDS_CA_SECURITY_EXT (objectSid) "
+                        f"extension from issued certificates. An attacker who can write to another account's "
+                        f"userPrincipalName or dNSHostName can enrol and authenticate as that target because the KDC "
+                        f"cannot enforce strong certificate mapping, bypassing KB5014754 defenses."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={
+                        "template_name": name,
+                        "esc_class": "ESC9",
+                        "enrollment_flags": hex(enroll_flag),
+                        "ekus": [_AUTH_EKUS.get(e, e) for e in ekus],
+                    },
+                    remediation="Remove the CT_FLAG_NO_SECURITY_EXTENSION flag from msPKI-Enrollment-Flag and enforce StrongCertificateBindingEnforcement = 2 on all Domain Controllers.",
+                )
+
+            # ESC10: Weak Certificate Name Mapping / StrongNTLMFallback
+            if (
+                has_auth_eku
+                and not requires_approval
+                and (name_flag & (_CT_FLAG_SUBJECT_REQUIRE_COMMON_NAME | _CT_FLAG_SUBJECT_REQUIRE_DNS_AS_CN))
+            ):
+                esc_map["ESC10"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC10",
+                    "reason": "Weak Subject Name mapping flag with authentication EKU",
+                })
+                self.finding(
+                    title=f"ADCS ESC10 - Weak Certificate Name Mapping in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' uses subject name requirements (Common Name or DNS Name) "
+                        f"with an authentication EKU without requiring strong SID binding. If the domain controller "
+                        f"permits weak name mapping (CertificateMappingMethods < 0x18 or StrongNTLMFallback enabled), "
+                        f"an adversary can achieve account takeover through UPN or SPN collisions."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={"template_name": name, "esc_class": "ESC10", "name_flags": hex(name_flag)},
+                    remediation="Configure Domain Controllers with StrongCertificateBindingEnforcement = 2 and ensure CertificateMappingMethods requires SID extension (0x18).",
+                )
+
+            # ESC13: Universal Group OID Binding via msPKI-Certificate-Policy
+            if linked_groups and not requires_approval:
+                esc_map["ESC13"].append(tmpl)
+                linked_str = ", ".join(linked_groups)
+                all_vulns.append({
+                    "template": name, "esc": "ESC13",
+                    "reason": f"Issuance policy OID linked to group(s) via msDS-OIDToGroupLink: {linked_str}",
+                })
+                self.finding(
+                    title=f"ADCS ESC13 - Universal Group OID Binding in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' defines issuance policy OID(s) linked to Active Directory "
+                        f"group(s) via msDS-OIDToGroupLink ({linked_str}). Enrolling in this template "
+                        f"causes the KDC to inject the linked group SID into the Kerberos PAC during certificate "
+                        f"logon, granting direct group membership without direct LDAP group assignment."
+                    ),
+                    severity=Severity.CRITICAL,
+                    mitre_technique="T1649",
+                    mitre_tactic="Privilege Escalation",
+                    evidence={
+                        "template_name": name,
+                        "esc_class": "ESC13",
+                        "policy_oids": policy_oids,
+                        "linked_groups": linked_groups,
+                    },
+                    remediation="Review msDS-OIDToGroupLink assignments under CN=OID,CN=Public Key Services. Restrict enrollment permissions or remove group links from high-privilege groups.",
+                )
+
+            # ESC14: Weak Explicit Certificate Mapping / Cross-Forest Enrolment
+            if has_auth_eku and not requires_approval and (name_flag & _CT_FLAG_ADD_DIRECTORY_PATH):
+                esc_map["ESC14"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC14",
+                    "reason": "Template enables directory path mapping with client auth without strong binding",
+                })
+                self.finding(
+                    title=f"ADCS ESC14 - Weak Explicit Certificate Mapping in '{name}'",
+                    description=(
+                        f"Certificate template '{name}' enables directory path mapping attributes with "
+                        f"authentication capability. In environments with cross-forest trusts or explicit "
+                        f"altSecurityIdentities mappings lacking SID validation, this enables unauthorized cross-account "
+                        f"impersonation."
+                    ),
+                    severity=Severity.MEDIUM,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={"template_name": name, "esc_class": "ESC14"},
+                    remediation="Disable weak explicit certificate mappings and enforce Strong Certificate Binding across all forest trusts.",
+                )
+
+            # ESC15: Legacy Schema Version 1 Arbitrary Application Policy / EKU
+            if schema_ver <= 1 and has_auth_eku and not requires_approval:
+                esc_map["ESC15"].append(tmpl)
+                all_vulns.append({
+                    "template": name, "esc": "ESC15",
+                    "reason": "Legacy Schema v1 template with authentication EKU allows caller-defined application policies",
+                })
+                self.finding(
+                    title=f"ADCS ESC15 - Arbitrary Application Policy in Legacy Template '{name}'",
+                    description=(
+                        f"Certificate template '{name}' uses legacy schema version 1 with an authentication EKU. "
+                        f"Schema v1 templates may permit clients to specify custom application policies or "
+                        f"override EKU constraints in the certificate request without enrollment agent enforcement."
+                    ),
+                    severity=Severity.MEDIUM,
+                    mitre_technique="T1649",
+                    mitre_tactic="Credential Access",
+                    evidence={"template_name": name, "esc_class": "ESC15", "schema_version": schema_ver},
+                    remediation="Upgrade certificate template to Schema version 2 or higher and restrict issuance requirements.",
+                )
+
+        return all_vulns, esc_map
+
+    def _audit_shadow_credentials_sync(
+        self,
+        dc: str,
+        username: str,
+        password: str,
+        domain: str,
+        target_user: str,
+    ) -> dict[str, Any]:
+        """
+        Audit Active Directory for Shadow Credentials posture (msDS-KeyCredentialLink).
+        Evaluates whether target account has Key Credentials present and whether
+        DACL allows non-admin write permissions on msDS-KeyCredentialLink or GenericWrite/GenericAll.
+        Runs safely in read-only audit mode - NEVER injects raw keys or alters production attributes.
+        """
+        posture: dict[str, Any] = {
+            "target_user": target_user,
+            "account_found": False,
+            "has_existing_credentials": False,
+            "key_credential_count": 0,
+            "writable_trustees": [],
+            "is_vulnerable": False,
+        }
+        if not target_user:
+            return posture
+
+        import ssl
+        try:
+            import ldap3
+            from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+        except ImportError:
+            posture["error"] = "ldap3 module not installed"
+            return posture
+
+        conn = None
+        for port, use_ssl in [(636, True), (389, False)]:
+            try:
+                tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                server = Server(dc, port=port, use_ssl=use_ssl, tls=tls_arg,
+                                get_info=ALL, connect_timeout=10)
+                conn = Connection(server, user=f"{domain.upper()}\\{username}",
+                                  password=password, authentication=NTLM,
+                                  auto_bind=ldap3.AUTO_BIND_NONE, receive_timeout=30)
+                if conn.bind():
+                    break
+            except Exception:
+                conn = None
+
+        if conn is None:
+            posture["error"] = "LDAP bind failed for shadow credentials audit"
+            return posture
+
+        base = ",".join(f"DC={p}" for p in domain.upper().split("."))
+        sd_control = [("1.2.840.113556.1.4.801", True, bytes([0x30, 0x03, 0x02, 0x01, 0x07]))]
+
+        try:
+            conn.search(
+                base,
+                f"(&(objectCategory=person)(objectClass=user)(sAMAccountName={sanitize_ldap(target_user)}))",
+                search_scope=SUBTREE,
+                attributes=[
+                    "sAMAccountName", "distinguishedName",
+                    "msDS-KeyCredentialLink", "nTSecurityDescriptor",
+                ],
+                controls=sd_control,
+            )
+            if not conn.entries:
+                return posture
+
+            entry = conn.entries[0]
+            posture["account_found"] = True
+            posture["distinguished_name"] = str(entry.distinguishedName)
+
+            # Check existing key credentials
+            key_link_attr = getattr(entry, "msDS-KeyCredentialLink", None)
+            if key_link_attr and getattr(key_link_attr, "values", None):
+                posture["has_existing_credentials"] = True
+                posture["key_credential_count"] = len(key_link_attr.values)
+
+            # Analyze DACL for msDS-KeyCredentialLink write rights
+            sd = getattr(entry, "nTSecurityDescriptor", None)
+            if sd and sd.value:
+                try:
+                    from impacket.ldap.ldaptypes import SR_SECURITY_DESCRIPTOR
+                    raw_sd = sd.raw_values[0] if hasattr(sd, "raw_values") else None
+                    if raw_sd:
+                        sd_obj = SR_SECURITY_DESCRIPTOR(data=raw_sd)
+                        if sd_obj.get("Dacl"):
+                            for ace in sd_obj["Dacl"]["Data"]:
+                                if ace["AceType"] not in (0x00, 0x05):
+                                    continue
+                                try:
+                                    mask = ace["Ace"]["Mask"]["MaskFields"]
+                                except (KeyError, AttributeError):
+                                    continue
+
+                                trustee_sid = ""
+                                try:
+                                    from ldap3.protocol.formatters.formatters import format_sid
+                                    trustee_sid = format_sid(ace["Ace"]["Sid"].getData())
+                                except Exception:
+                                    pass
+
+                                # Check standard dangerous rights (GenericAll, GenericWrite, WriteDACL, WriteOwner)
+                                matched_right = None
+                                for right_mask, right_name in _DANGEROUS_RIGHTS.items():
+                                    if mask & right_mask == right_mask:
+                                        matched_right = right_name
+                                        break
+
+                                # Check WriteProperty (0x00000020) for msDS-KeyCredentialLink attribute
+                                if not matched_right and (mask & _RIGHT_WRITE_PROPERTY):
+                                    try:
+                                        obj_type = ace["Ace"].get("ObjectType")
+                                        if obj_type:
+                                            import uuid as _uuid
+                                            guid_str = str(_uuid.UUID(bytes_le=obj_type))
+                                            if guid_str.lower() == _MSDS_KEY_CREDENTIAL_LINK_GUID:
+                                                matched_right = "WriteProperty (msDS-KeyCredentialLink)"
+                                    except Exception:
+                                        pass
+
+                                if matched_right:
+                                    is_audited_trustee = (
+                                        trustee_sid.endswith("-513")  # Domain Users
+                                        or trustee_sid.endswith("-515")  # Domain Computers
+                                        or trustee_sid in ("S-1-5-11", "S-1-1-0", "S-1-5-32-545")
+                                    )
+                                    if is_audited_trustee or not trustee_sid.endswith(("-512", "-519", "-544")):
+                                        posture["writable_trustees"].append({
+                                            "trustee_sid": trustee_sid,
+                                            "right": matched_right,
+                                        })
+                                        posture["is_vulnerable"] = True
+                except Exception as dacl_err:
+                    posture["dacl_error"] = str(dacl_err)[:100]
+
+            if posture["is_vulnerable"]:
+                self.finding(
+                    title=f"AD Shadow Credentials - Writable msDS-KeyCredentialLink on '{target_user}'",
+                    description=(
+                        f"Active Directory object '{target_user}' has write permissions ({', '.join(t['right'] for t in posture['writable_trustees'])}) "
+                        f"granted on the msDS-KeyCredentialLink attribute to audited trustee(s). "
+                        f"An adversary can add an RSA KeyCredential to the target object and authenticate via "
+                        f"PKINIT Kerberos as '{target_user}' to obtain full account control without knowing their password."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1556",
+                    mitre_tactic="Credential Access",
+                    evidence={
+                        "target_user": target_user,
+                        "writable_trustees": posture["writable_trustees"],
+                        "has_existing_credentials": posture["has_existing_credentials"],
+                        "key_count": posture["key_credential_count"],
+                    },
+                    remediation=(
+                        f"Audit permissions on '{target_user}'. Remove WriteProperty for msDS-KeyCredentialLink, "
+                        f"GenericWrite, and GenericAll from non-administrative users and groups."
+                    ),
+                )
+
+        except Exception as exc:
+            posture["error"] = str(exc)[:200]
+        finally:
+            try:
+                conn.unbind()
+            except Exception:
+                pass
+
+        return posture
 
     def _enum_templates_sync(self, dc: str, username: str, password: str,
                              domain: str) -> tuple[list[dict], list[dict]]:
@@ -442,7 +881,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         ca_list:   list[dict] = []
 
         try:
-            # Query certificate templates
+            # Query certificate templates with full attribute set
             tmpl_base = (
                 f"CN=Certificate Templates,CN=Public Key Services,"
                 f"CN=Services,{config_base}"
@@ -451,16 +890,36 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 tmpl_base,
                 "(objectClass=pKICertificateTemplate)",
                 search_scope=SUBTREE,
-                attributes=["cn", "msPKI-Certificate-Name-Flag",
-                            "msPKI-Enrollment-Flag", "pkiExtendedKeyUsage",
-                            "msPKI-RA-Signature", "nTSecurityDescriptor"],
+                attributes=[
+                    "cn", "displayName", "msPKI-Certificate-Name-Flag",
+                    "msPKI-Enrollment-Flag", "msPKI-Private-Key-Flag",
+                    "pkiExtendedKeyUsage", "msPKI-Certificate-Policy",
+                    "msPKI-RA-Signature", "msPKI-Template-Schema-Version",
+                    "nTSecurityDescriptor",
+                ],
             )
             for e in conn.entries:
-                flags = 0
+                name_flags = 0
+                enroll_flags = 0
+                ra_signatures = 0
+                schema_ver = 1
                 try:
-                    flags = int(getattr(e, "msPKI-Certificate-Name-Flag").value or 0)
+                    name_flags = int(getattr(e, "msPKI-Certificate-Name-Flag").value or 0)
                 except Exception:
                     pass
+                try:
+                    enroll_flags = int(getattr(e, "msPKI-Enrollment-Flag").value or 0)
+                except Exception:
+                    pass
+                try:
+                    ra_signatures = int(getattr(e, "msPKI-RA-Signature").value or 0)
+                except Exception:
+                    pass
+                try:
+                    schema_ver = int(getattr(e, "msPKI-Template-Schema-Version").value or 1)
+                except Exception:
+                    pass
+
                 ekus: list[str] = []
                 try:
                     eku_raw = getattr(e, "pkiExtendedKeyUsage", None)
@@ -468,13 +927,53 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                         ekus = [str(v) for v in eku_raw.values]
                 except Exception:
                     pass
+
+                policies: list[str] = []
+                try:
+                    policy_raw = getattr(e, "msPKI-Certificate-Policy", None)
+                    if policy_raw and policy_raw.values:
+                        policies = [str(v) for v in policy_raw.values]
+                except Exception:
+                    pass
+
+                dangerous_acls = []
+                sd = getattr(e, "nTSecurityDescriptor", None)
+                if sd and sd.value:
+                    try:
+                        from impacket.ldap.ldaptypes import SR_SECURITY_DESCRIPTOR
+                        raw_sd = sd.raw_values[0] if hasattr(sd, "raw_values") else None
+                        if raw_sd:
+                            sd_obj = SR_SECURITY_DESCRIPTOR(data=raw_sd)
+                            if sd_obj.get("Dacl"):
+                                for ace in sd_obj["Dacl"]["Data"]:
+                                    if ace["AceType"] in (0x00, 0x05):
+                                        try:
+                                            mask = ace["Ace"]["Mask"]["MaskFields"]
+                                        except (KeyError, AttributeError):
+                                            continue
+                                        for right_mask, right_name in _DANGEROUS_RIGHTS.items():
+                                            if mask & right_mask == right_mask:
+                                                from ldap3.protocol.formatters.formatters import format_sid
+                                                sid = format_sid(ace["Ace"]["Sid"].getData())
+                                                if sid.endswith("-513") or sid.endswith("-515") or sid in ("S-1-5-11", "S-1-1-0", "S-1-5-32-545"):
+                                                    dangerous_acls.append({"trustee_sid": sid, "right": right_name})
+                                                    break
+                    except Exception:
+                        pass
+
                 templates.append({
-                    "name":  str(e.cn),
-                    "msPKI_Certificate_Name_Flag": flags,
-                    "ekus":  ekus,
+                    "name": str(e.cn),
+                    "display_name": str(getattr(e, "displayName", e.cn)),
+                    "msPKI_Certificate_Name_Flag": name_flags,
+                    "msPKI_Enrollment_Flag": enroll_flags,
+                    "msPKI_RA_Signature": ra_signatures,
+                    "schema_version": schema_ver,
+                    "ekus": ekus,
+                    "policy_oids": policies,
+                    "dangerous_acls": dangerous_acls,
                 })
 
-            # Query Enrollment Services (CAs)
+            # Query Enrollment Services (CAs) with flags
             ca_base = (
                 f"CN=Enrollment Services,CN=Public Key Services,"
                 f"CN=Services,{config_base}"
@@ -483,16 +982,49 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 ca_base,
                 "(objectClass=pKIEnrollmentService)",
                 search_scope=SUBTREE,
-                attributes=["cn", "dNSHostName", "certificateTemplates"],
+                attributes=["cn", "dNSHostName", "certificateTemplates", "flags"],
             )
             for e in conn.entries:
+                ca_flags = 0
+                try:
+                    ca_flags = int(getattr(e, "flags").value or 0)
+                except Exception:
+                    pass
                 ca_list.append({
-                    "name":      str(e.cn),
-                    "dns_host":  str(getattr(e, "dNSHostName", "")),
+                    "name": str(e.cn),
+                    "dns_host": str(getattr(e, "dNSHostName", "")),
+                    "flags": ca_flags,
                     "templates": [str(t) for t in
                                   (getattr(e, "certificateTemplates", None) or
                                    type("", (), {"values": []})()).values or []],
                 })
+
+            # Query OID mappings for msDS-OIDToGroupLink (ESC13)
+            oid_to_groups: dict[str, str] = {}
+            try:
+                oid_base = f"CN=OID,CN=Public Key Services,CN=Services,{config_base}"
+                conn.search(
+                    oid_base,
+                    "(msDS-OIDToGroupLink=*)",
+                    search_scope=SUBTREE,
+                    attributes=["cn", "msPKI-Cert-Template-OID", "msDS-OIDToGroupLink"],
+                )
+                for e in conn.entries:
+                    oid_val = str(getattr(e, "msPKI-Cert-Template-OID", getattr(e, "cn", "")))
+                    group_link = str(getattr(e, "msDS-OIDToGroupLink", ""))
+                    if oid_val and group_link:
+                        oid_to_groups[oid_val] = group_link
+            except Exception:
+                pass
+
+            # Link group associations to templates
+            for tmpl in templates:
+                linked = []
+                for p_oid in tmpl.get("policy_oids", []):
+                    if p_oid in oid_to_groups:
+                        linked.append(oid_to_groups[p_oid])
+                tmpl["linked_groups"] = linked
+
         finally:
             try:
                 conn.unbind()
