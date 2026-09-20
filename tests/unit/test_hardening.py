@@ -636,3 +636,49 @@ class TestRegressionGuard:
                         pytest.fail(
                             f"REGRESSION: Circular ref {path}:{node.lineno}"
                         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HARDENING: Marketplace URL Scheme Validation & Cracker Cross-Platform Tmpdir
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMarketplaceAndCrackerHardening:
+    """Validate that marketplace installer rejects non-HTTPS URLs and cracker is cross-platform."""
+
+    def test_marketplace_installer_rejects_insecure_http_url(self):
+        from ares.marketplace.installer import ModuleInstaller
+        installer = ModuleInstaller()
+        with pytest.raises(ValueError, match="Insecure HTTP scheme rejected"):
+            installer.install("http://insecure.example.com/malicious.py")
+
+    def test_marketplace_installer_rejects_file_scheme(self):
+        from ares.marketplace.installer import ModuleInstaller
+        installer = ModuleInstaller()
+        with pytest.raises(ValueError, match="Insecure scheme 'file' rejected"):
+            installer._install_url("file:///etc/passwd", force=False)
+
+    def test_marketplace_installer_rejects_url_without_hostname(self):
+        from ares.marketplace.installer import ModuleInstaller
+        installer = ModuleInstaller()
+        with pytest.raises(ValueError, match="missing hostname"):
+            installer._install_url("https://", force=False)
+
+    def test_cracker_worker_cross_platform_tmpdir(self, tmp_path):
+        import tempfile
+        from unittest.mock import MagicMock
+        from ares.credential.cracker import CrackingWorker
+
+        vault = MagicMock()
+        # Default without tmpdir should use tempfile.gettempdir()
+        worker_default = CrackingWorker(vault=vault)
+        expected_parent = Path(tempfile.gettempdir())
+        assert worker_default.tmpdir.parent == expected_parent
+        assert worker_default.tmpdir.name == "ares-crack"
+        assert worker_default.tmpdir.exists()
+
+        # Custom tmpdir should be honored
+        custom_dir = tmp_path / "custom-crack"
+        worker_custom = CrackingWorker(vault=vault, tmpdir=custom_dir)
+        assert worker_custom.tmpdir == custom_dir
+        assert worker_custom.tmpdir.exists()
+

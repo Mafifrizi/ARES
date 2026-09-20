@@ -37,6 +37,7 @@ import os
 import shutil
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -477,6 +478,14 @@ class ModuleInstaller:
 
     def _install_url(self, url: str, force: bool,
                      verify_signature: bool = True) -> ModuleManifest:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != "https":
+            raise ValueError(
+                f"Insecure scheme {parsed.scheme!r} rejected: marketplace modules must be downloaded via HTTPS."
+            )
+        if not parsed.hostname or not parsed.hostname.strip():
+            raise ValueError("Invalid module URL: missing hostname.")
+
         if not verify_signature:
             logger.warning("marketplace_url_install_unverified",
                            url=url,
@@ -649,8 +658,10 @@ class ModuleInstaller:
     def _detect_source(source: str) -> str:
         if source.startswith(("./", "/", "../")) or Path(source).exists():
             return "local"
-        if source.startswith("https://"):   # http:// rejected - MITM risk
+        if source.startswith("https://"):
             return "url"
+        if source.startswith("http://"):
+            raise ValueError("Insecure HTTP scheme rejected: marketplace modules must be downloaded via HTTPS.")
         if source.startswith("github.com/"):
             return "github"
         return "community"

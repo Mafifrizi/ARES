@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -112,12 +113,15 @@ class CrackingWorker:
     def __init__(
         self,
         vault:        Any,           # CredentialVault
-        tmpdir:       str = "/tmp/ares-crack",
+        tmpdir:       str | Path | None = None,
         timeout_s:    int = 3600,    # 1 hour max per job
         use_gpu:      bool = True,
     ) -> None:
         self.vault     = vault
-        self.tmpdir    = Path(tmpdir)
+        if tmpdir is not None:
+            self.tmpdir = Path(tmpdir)
+        else:
+            self.tmpdir = Path(tempfile.gettempdir()) / "ares-crack"
         self.tmpdir.mkdir(parents=True, exist_ok=True, mode=0o700)  # owner-only: hash files may contain sensitive data
         self.timeout_s = timeout_s
         self.use_gpu   = use_gpu
