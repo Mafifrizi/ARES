@@ -283,7 +283,8 @@ class BaseModule(abc.ABC, Generic[P, R]):
             has_secret = _present(
                 "password", "secret", "nt_hash", "lm_hash",
                 "krbtgt_hash", "key_path", "ssh_key", "ssh_pass",
-            )
+                "ticket", "ccache_path",
+            ) or bool(os.environ.get("KRB5CCNAME"))
             has_domain = bool(ctx.domain) or _present("domain")
             if has_username and has_secret:
                 available.add("credentials")

