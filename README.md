@@ -3,7 +3,7 @@
 <img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="480">
 
 # ARES™
-### Autonomous Red Team Engagement & Continuous Security Validation Platform
+### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
 **The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with zero collateral risk.**
 
@@ -32,7 +32,7 @@
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **autonomous, goal-directed red team engagement platform** that models real-world threat actors. By combining hard kernel-level scope firewalls, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 60+ weaponized techniques mapped to MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 30+ production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
 
 ---
 
@@ -41,10 +41,10 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 ```
                                     THE ARES ADVANTAGE
  ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
- │   STRICT SCOPE ENCLAVE  │   │   AUTONOMOUS DAG ENGINE │   │ ZERO-TRUST ARCHITECTURE │
- │ Hard kernel CIDR egress │   │ Computes shortest paths │   │ Memory-only JWT tokens, │
- │ whitelisting prevents   │───│ to Domain Admins & Crown│───│ AES-256 encrypted vault,│
- │ any collateral impact.  │   │ Jewels deterministically│   │ strict HMAC-CSRF checks.│
+ │   STRICT SCOPE ENCLAVE  │   │  DIRECTED ATTACK ENGINE │   │ ZERO-TRUST ARCHITECTURE │
+ │ Fail-closed ScopeGuard  │   │ Computes shortest paths │   │ Memory-only JWT tokens, │
+ │ CIDR egress validation  │───│ to Domain Admins & Crown│───│ Fernet encrypted vault, │
+ │ prevents out-of-scope.  │   │ Jewels deterministically│   │ strict HMAC-CSRF checks.│
  └─────────────────────────┘   └─────────────────────────┘   └─────────────────────────┘
                                             │
                                             ▼
@@ -58,24 +58,24 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ### Core Value Pillars
 
-1. **Zero-Collateral Scope Governance**: Every campaign runs inside an isolated cryptographic boundary. Hard target IP and CIDR validations at the network socket layer guarantee that no packet ever touches out-of-scope infrastructure.
-2. **Autonomous Goal-Directed Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine autonomously synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama).
+1. **Zero-Collateral Scope Governance**: Every campaign runs inside an isolated boundary. Deterministic ScopeGuard validations on every outbound request guarantee fail-closed enforcement so no action touches unapproved IP addresses or subnets.
+2. **Goal-Directed Attack Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama) under explicit operator authorization.
 3. **Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
-4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM encrypted local vaults protect harvested hashes and sensitive client evidence.
+4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and Fernet-authenticated local vaults (AES-128-CBC + HMAC-SHA256 PBKDF2) protect harvested hashes and sensitive client evidence.
 5. **Automated Deliverables Pipeline**: One-click generation of branded, audit-ready compliance deliverables in PDF, HTML, Markdown, and JSON formats. Features automated headless browser PDF rendering on Windows/Linux without external GTK dependencies.
 
 ---
 
 ## Market Comparison Matrix
 
-| Operational Capability | Traditional Manual Pentest | Legacy Vulnerability Scanners | ARES Autonomous Platform |
+| Operational Capability | Traditional Manual Pentest | Legacy Vulnerability Scanners | ARES Orchestration Platform |
 | :--- | :---: | :---: | :---: |
 | **Testing Frequency** | Annual / Semi-Annual | Scheduled Daily / Weekly | **Continuous / On-Demand** |
 | **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
 | **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
-| **Scope Enclave & Egress Firewall** | Operator Discipline Only | Network Firewalls Only | **Hard Socket-Level CIDR Enforcement** |
+| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed App-Layer ScopeGuard** |
 | **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound & Kerberos Suite** |
-| **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Encrypted Vault** |
+| **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **Fernet Authenticated Vault** |
 | **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |
 | **Delivery Time for Reports** | 1-2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
 | **Deployment Footprint** | External Consultants | Bulky Cloud Agents | **Air-Gapped Local / Self-Hosted** |
@@ -95,7 +95,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ### 1. Operator Enclave & Zero-Trust Gateway
 
-*Autonomous entry barrier designed specifically for authorized offensive operators and security personnel.*
+*Access barrier designed specifically for authorized offensive operators and security personnel.*
 
 <div align="center">
 
@@ -158,12 +158,12 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
   - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
   - **Hard CIDR Whitelists**: Network-level boundary enforcement. The engine intercepts and drops any request targeting unapproved IP addresses or subnets.
   - **Noise Profiles & Jitter**: Configure engagement throttle levels (`Stealth`, `Normal`, `Aggressive`) with randomized delay distributions.
-  - **AES-256 Encrypted Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest with AES-256-GCM.
+  - **Fernet Authenticated Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest using Fernet authenticated cryptography (AES-128-CBC + HMAC-SHA256 with per-record PBKDF2 salt) and masked in all structlog streams.
   - **Clean Teardown Workflows**: Single-click campaign deletion that securely cleans up all associated database rows, graph vertices, and temporary artifacts.
 
 ---
 
-### 4. Modular Adversary Orchestration (60+ Modules)
+### 4. Modular Adversary Orchestration (30+ Execution Modules, 60+ Techniques)
 
 *Extensive catalog of weaponized adversary techniques aligned with the MITRE ATT&CK enterprise matrix.*
 
@@ -177,7 +177,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Replaces unvalidated, unreliable GitHub scripts with typed, reproducible, and auditable adversary modules.
 - **Key Capabilities**:
-  - **Comprehensive Vector Coverage**: 60+ modular techniques covering Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
+  - **Comprehensive Vector Coverage**: 30+ production execution modules covering 60+ mapped adversary techniques across Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`, `windows.lsass_dump`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
   - **Streamlined Execution Panel**: Clean execution view with persistent field labels, demoted low-weight dependency hints, and focused on-submit validation replacing intrusive default warning cards.
   - **Dynamic Typed Schemas**: UI forms are generated dynamically from Python Pydantic models with strict validation.
   - **Dry-Run Safety Engine**: Validate target responsiveness, parameters, and expected outcome before transmitting offensive traffic.
@@ -243,19 +243,19 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 7. Autonomous Strategy & AI Planner
+### 7. Goal-Directed Strategy & Attack Planner
 
-*Goal-directed autonomous engine that plans, prioritizes, and executes complex attack chains while respecting OPSEC limits.*
+*Goal-directed engine that plans, prioritizes, and stages complex attack chains with operator oversight while respecting OPSEC limits.*
 
 <div align="center">
 
-![ARES Autonomous Strategy & AI Planner](docs/assets/screenshots/dashboard-strategy.png)
+![ARES Goal-Directed Strategy & Attack Planner](docs/assets/screenshots/dashboard-strategy.png)
 
-*Autonomous Strategy Console for goal-based campaign planning and adaptive containment governance.*
+*Strategy Console for goal-based campaign planning and adaptive containment governance.*
 
 </div>
 
-- **The Problem Solved**: Coordinates multi-module attack chains autonomously without requiring constant manual operator intervention.
+- **The Problem Solved**: Coordinates multi-module attack chains systematically based on operator goals without requiring repetitive manual command construction.
 - **Key Capabilities**:
   - **Dynamic Engine Verification**: Real-time asynchronous healthchecks against local Ollama daemons (`GET /api/tags`) with sub-second timeouts and TTL caching, paired with dynamic server-side cloud key verification (`Claude`, `OpenAI`).
   - **Clean Operator-Centric Design**: Persistent field labels (`Target Campaign`, `Strategic Objective`, `AI Planning Engine`, `Explicit Authorizations`), human-readable goal descriptions, and complete elimination of server environment variable leakage in UI labels.
@@ -390,11 +390,11 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 | :--- | :--- | :--- | :--- |
 | **Overview** | Executive health, telemetry counters, finding severity metrics. | Single Pane | All Stakeholders |
 | **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
-| **Modules** | 60+ module catalog, parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
+| **Modules** | 30+ module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
 | **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
 | **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
 | **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
-| **Strategy** | Goal-directed autonomous engine, AI planner integration. | `Objective`, `Active`, `Result` | Team Lead, Operator |
+| **Strategy** | Goal-directed attack engine, automated planner integration. | `Objective`, `Active`, `Result` | Team Lead, Operator |
 | **Security** | Operator credentials, API key lifecycle, dependency audit checks. | `Account`, `API Keys`, `Audit` | Team Lead |
 | **EDR/OPSEC** | Defensive telemetry, bypass tracking, detection evasion rules. | `Knowledge Base`, `Report Outcome` | Operator |
 | **Live** | Real-time WebSocket event streams and buffered telemetry logs. | `Stream`, `Buffer` | Operator |
@@ -421,15 +421,15 @@ flowchart TB
     end
 
     subgraph Core["ARES Core Engine & Governance"]
-        ScopeFirewall["Scope Egress Firewall<br>(Strict CIDR & IP Whitelist)"]
+        ScopeFirewall["ScopeGuard Enclave<br>(Fail-Closed CIDR & IP Whitelist)"]
         Governor["OPSEC Noise Governor<br>(Adaptive Jitter & Throttling)"]
         Orchestrator["Module Execution Orchestrator<br>(Worker Thread Pool)"]
-        AutoPlanner["Autonomous Strategy Engine<br>(DAG Heuristics / AI Planner)"]
+        AutoPlanner["Goal-Directed Strategy Engine<br>(DAG Heuristics / Planner)"]
     end
 
     subgraph Storage["Cryptographic Persistence Layer"]
         DB[(SQLite / PostgreSQL<br>Alembic Versioned)]
-        Vault[(AES-256-GCM Vault<br>Encrypted Credentials & Hashes)]
+        Vault[(Fernet Encrypted Vault<br>Encrypted Credentials & Hashes)]
         GraphEngine["Attack Graph DAG Engine<br>(BloodHound Ingest & Shortest Path)"]
     end
 
@@ -454,7 +454,7 @@ flowchart TB
 
 ## Adversary Techniques & MITRE ATT&CK Matrix
 
-ARES implements 60+ modular adversary techniques natively mapped to the MITRE ATT&CK Enterprise Framework:
+ARES implements 30+ production execution modules mapping to 60+ adversary techniques across the MITRE ATT&CK Enterprise Framework:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -627,7 +627,7 @@ For in-depth architecture, the 7 security invariants, CLI scriptability (`--json
 
 ---
 
-## Extensible Developer SDK (Next-Gen Autonomous Architecture)
+## Extensible Developer SDK (Modular Architecture)
 
 ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
 
@@ -752,7 +752,7 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 
 <div align="center">
 
-**ARES - Enterprise-Grade Autonomous Red Team Engagement System.**  
+**ARES - Modern Red Team Engagement & Continuous Security Validation System.**  
 *Continuous Security Validation. Zero Collateral Risk.*
 
 </div>
