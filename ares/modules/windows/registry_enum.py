@@ -140,6 +140,20 @@ _ENUM_TARGETS: list[tuple[str, str, list[str] | None, str, str]] = [
         "UltraVNC stored password",
         "HIGH",
     ),
+    (
+        "HKLM",
+        "SYSTEM\\CurrentControlSet\\Control\\CI\\Config",
+        ["VulnerableDriverBlocklistEnable"],
+        "Microsoft Recommended Driver Blocklist",
+        "HIGH",
+    ),
+    (
+        "HKLM",
+        "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+        ["Enabled"],
+        "Hypervisor-Enforced Code Integrity (HVCI)",
+        "MEDIUM",
+    ),
 ]
 
 # HKCU paths (per-user) - enumerated under current user context
@@ -324,6 +338,8 @@ class RegistryEnumModule(BaseModule):
             "autologon" in str(f).lower() for f in raw.get("cleartext_credentials", [])
         )
         raw["putty_stored_credentials_found"] = bool(raw.get("putty_sessions"))
+        raw["driver_blocklist_enabled"] = raw.get("driver_blocklist_enabled", False)
+        raw["hvci_enabled"] = raw.get("hvci_enabled", False)
         raw["always_install_elevated_risk"] = any(
             "alwaysinstallelevated" in str(f).lower() for f in findings
         )
@@ -576,9 +592,55 @@ class RegistryEnumModule(BaseModule):
                 )
 
         # VNC / SNMP / other credential keys
+        driver_blocklist_enabled = False
+        hvci_enabled = False
+
         for hit in all_findings:
             if "Winlogon" in hit["path"]:
                 continue  # already handled above
+
+            if "CI\\Config" in hit["path"]:
+                val = hit["values"].get("VulnerableDriverBlocklistEnable")
+                is_enabled = False
+                if isinstance(val, int) and val == 1:
+                    is_enabled = True
+                elif isinstance(val, str) and val.strip("\x00") in ("1", "0x1"):
+                    is_enabled = True
+
+                if is_enabled:
+                    driver_blocklist_enabled = True
+                else:
+                    self.finding(
+                        title=f"Microsoft Recommended Driver Blocklist Disabled on {target} (BYOVD Risk)",
+                        description=(
+                            f"The Microsoft Recommended Driver Blocklist is disabled or unconfigured on {target}. "
+                            "Adversaries with local administrator privileges can load signed vulnerable third-party "
+                            "drivers (Bring Your Own Vulnerable Driver - BYOVD) to terminate EDRs, tamper with "
+                            "kernel structures, and bypass RunAsPPL."
+                        ),
+                        severity=Severity.HIGH,
+                        mitre_technique="T1068",
+                        mitre_tactic="Privilege Escalation",
+                        evidence={
+                            "host": target,
+                            "path": hit["path"],
+                            "value": val,
+                            "threat_vector": "BYOVD / Kernel Tampering",
+                        },
+                        remediation=(
+                            "Enable the Microsoft Recommended Driver Blocklist via Windows Security or registry: "
+                            "reg add HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Config /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 1 /f"
+                        ),
+                        host=target, confidence=0.95,
+                    )
+                continue
+
+            if "HypervisorEnforcedCodeIntegrity" in hit["path"]:
+                val = hit["values"].get("Enabled")
+                if (isinstance(val, int) and val == 1) or (isinstance(val, str) and val.strip("\x00") in ("1", "0x1")):
+                    hvci_enabled = True
+                continue
+
             sev = _SEV_MAP.get(hit["severity"], Severity.MEDIUM)
             self.finding(
                 title=f"{hit['description']} Found on {target}",
@@ -606,6 +668,32 @@ class RegistryEnumModule(BaseModule):
                     "storing passwords in the registry."
                 ),
                 host=target, confidence=0.95,
+            )
+
+        # If CI\Config was not found at all, and there were no general connection errors, report unconfigured blocklist
+        ci_checked = any("CI\\Config" in hit["path"] for hit in all_findings)
+        if not ci_checked and not errors and (all_findings or putty_sessions):
+            self.finding(
+                title=f"Microsoft Recommended Driver Blocklist Unconfigured on {target} (BYOVD Risk)",
+                description=(
+                    f"The Microsoft Recommended Driver Blocklist is not configured on {target}. "
+                    "Adversaries with local administrator privileges can load signed vulnerable third-party "
+                    "drivers (Bring Your Own Vulnerable Driver - BYOVD) to bypass EDR, tamper with "
+                    "kernel memory, and disable endpoint protections."
+                ),
+                severity=Severity.HIGH,
+                mitre_technique="T1068",
+                mitre_tactic="Privilege Escalation",
+                evidence={
+                    "host": target,
+                    "path": "SYSTEM\\CurrentControlSet\\Control\\CI\\Config",
+                    "status": "NOT_CONFIGURED",
+                },
+                remediation=(
+                    "Enable the Microsoft Recommended Driver Blocklist via Windows Security or registry: "
+                    "reg add HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Config /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 1 /f"
+                ),
+                host=target, confidence=0.9,
             )
 
         # PuTTY sessions
@@ -640,6 +728,8 @@ class RegistryEnumModule(BaseModule):
             "target":          target,
             "credential_hits": all_findings,
             "putty_sessions":  putty_sessions,
+            "driver_blocklist_enabled": driver_blocklist_enabled,
+            "hvci_enabled":    hvci_enabled,
             "errors":          errors,
         }
         raw["cleartext_credentials"] = self._findings  # OUTPUTS key

