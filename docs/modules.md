@@ -1,6 +1,6 @@
 # ARES Modules Guide
 
-ARES ships with 60+ built-in modules. The modules are not meant to be random
+ARES ships with 64 built-in modules. The modules are not meant to be random
 buttons. They are building blocks for an authorized engagement: create a
 campaign, define scope, run safe validation first, collect findings, then
 generate a report.
@@ -235,6 +235,7 @@ optional dependencies such as AD, cloud, container, Windows, and PDF extras.
 | `ad.sccm` | Review SCCM/MECM abuse paths. |
 | `ad.coerce` | High-noise coercion validation; use only with approval. |
 | `ad.dcsync` | High-noise replication-rights validation; requires explicit authorization. |
+| `ad.ghost_forge` | Forge golden certificates via compromised ADCS CA private keys (ESC1-ESC8). |
 
 ### Credential
 
@@ -294,6 +295,7 @@ optional dependencies such as AD, cloud, container, Windows, and PDF extras.
 | `cloud.azure_ad` | Azure AD service principal, device code, and guest review. |
 | `cloud.gcp` | GCP IAM, GCS, and service account review. |
 | `cloud.identity_federation_abuse` | SAML/OIDC and cross-cloud identity path review. |
+| `cloud.phantom_token` | Abuse Entra ID / Hybrid Azure AD Primary Refresh Tokens (PRT) and session tokens. |
 
 ### Network, Recon, Exfil, Persistence, OPSEC, AI
 

@@ -21,7 +21,7 @@ The documentation is organized into five functional pillars:
 ### Attack Modules and Module SDK
 | Document | Description | Target Audience |
 | --- | --- | --- |
-| [modules.md](modules.md) | Comprehensive catalog of all 28 attack modules and 81 capability definitions. | Operators, Red Team |
+| [modules.md](modules.md) | Comprehensive catalog of all 64 attack modules and capability definitions. | Operators, Red Team |
 | [MODULE_GUIDE.md](MODULE_GUIDE.md) | Operator quickstart for executing and chaining modules across target hosts. | Operators |
 | [module-development.md](module-development.md) | Step-by-step developer guide for writing, testing with `ModuleTestHarness`, and signing attack modules. | Module Developers |
 | [module_sdk.md](module_sdk.md) | Modern v2 SDK specification (`BaseModule[P, R]`, Pydantic v2 params, testing harness, and `AresClient`). | Developers, Integrators |
@@ -75,7 +75,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
         |                                                 |
 +------------------------------+        +---------------------------------+
 |      ATTACK MODULES          |        |        PERSISTENCE LAYER        |
-|  28 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
+|  64 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
 |  81 Capability Bindings      |        |  Fernet Vault Encryption        |
 |  Safe Preview & Execution    |        |  Alembic Migrations (Head 0011) |
 +------------------------------+        +---------------------------------+
