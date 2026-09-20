@@ -2362,7 +2362,14 @@ def update_cmd(
     new_mods = check_res.new_modules
     if module:
         cleaned = module.strip().lower()
-        new_mods = [m for m in new_mods if m.module_id.lower() == cleaned or m.relative_path.lower().endswith(f"{cleaned}.py")]
+        local = mgr.get_local_modules()
+        target_rel_path = local[cleaned].relative_path.lower() if cleaned in local else None
+        new_mods = [
+            m for m in new_mods
+            if m.module_id.lower() == cleaned
+            or m.relative_path.lower().endswith(f"{cleaned}.py")
+            or (target_rel_path and m.relative_path.lower() == target_rel_path)
+        ]
 
     if not new_mods:
         console.print("[green][+] All official modules are already installed. No new modules available.[/green]")

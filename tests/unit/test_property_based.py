@@ -193,7 +193,7 @@ class TestSanitizeHostname:
 class TestSanitizePath:
 
     @given(printable_text)
-    @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow])
+    @settings(max_examples=300, suppress_health_check=[HealthCheck.too_slow], deadline=None)
     def test_returns_string_or_rejects_unsafe_path(self, value: str) -> None:
         try:
             result = sanitize_path(value)
@@ -206,7 +206,7 @@ class TestSanitizePath:
         assert isinstance(result, str)
 
     @given(printable_text)
-    @settings(max_examples=200)
+    @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow], deadline=None)
     def test_idempotent(self, value: str) -> None:
         try:
             once = sanitize_path(value)

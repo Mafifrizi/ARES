@@ -540,10 +540,16 @@ class PlatformUpdateManager:
 
         if module_id:
             cleaned_id = module_id.strip().lower()
-            candidates = [m for m in candidates if m.module_id.lower() == cleaned_id or m.relative_path.lower().endswith(f"{cleaned_id}.py")]
+            local = self.get_local_modules()
+            target_rel_path = local[cleaned_id].relative_path.lower() if cleaned_id in local else None
+            candidates = [
+                m for m in candidates
+                if m.module_id.lower() == cleaned_id
+                or m.relative_path.lower().endswith(f"{cleaned_id}.py")
+                or (target_rel_path and m.relative_path.lower() == target_rel_path)
+            ]
             if not candidates:
                 # Check if it is already installed
-                local = self.get_local_modules()
                 if any(m.lower() == cleaned_id for m in local):
                     return {
                         "status": "already_installed",
@@ -599,7 +605,14 @@ class PlatformUpdateManager:
 
         if module_id:
             cleaned_id = module_id.strip().lower()
-            candidates = [m for m in candidates if m.module_id.lower() == cleaned_id or m.relative_path.lower().endswith(f"{cleaned_id}.py")]
+            local = self.get_local_modules()
+            target_rel_path = local[cleaned_id].relative_path.lower() if cleaned_id in local else None
+            candidates = [
+                m for m in candidates
+                if m.module_id.lower() == cleaned_id
+                or m.relative_path.lower().endswith(f"{cleaned_id}.py")
+                or (target_rel_path and m.relative_path.lower() == target_rel_path)
+            ]
             if not candidates:
                 return {
                     "status": "not_found",
