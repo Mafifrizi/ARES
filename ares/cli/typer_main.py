@@ -2343,11 +2343,8 @@ def update_cmd(
     """
     from ares.core.updater import PlatformUpdateManager
 
-    console.print(Panel.fit(
-        "[bold cyan]ARES Module Update Engine[/bold cyan]\n"
-        f"Target: [green]{repo}@{branch}[/green] | Mode: [yellow]{'Dry-Run' if dry_run else 'Additive Install'}[/yellow]",
-        border_style="cyan",
-    ))
+    mode_tag = "dry-run" if dry_run else "additive-install"
+    console.print(f"[bold cyan][INF][/bold cyan] ARES Module Update Engine [dim]({repo}@{branch} | {mode_tag})[/dim]")
 
     mgr = PlatformUpdateManager(github_repo=repo, branch=branch)
 
@@ -2370,15 +2367,10 @@ def update_cmd(
             console.print("[yellow][*] Note: Existing modules have revisions available. Run 'ares upgrade --modules' to update them.[/yellow]")
         return
 
-    table = Table(title="New Modules Available for Installation", box=box.ROUNDED)
-    table.add_column("Module ID", style="cyan bold")
-    table.add_column("Category", style="green")
-    table.add_column("Relative Path", style="dim")
-    table.add_column("Size", style="yellow")
-
+    console.print(f"[bold cyan][INF][/bold cyan] {len(new_mods)} new module(s) available for installation:")
     for item in new_mods:
-        table.add_row(item.module_id, item.category or "general", item.relative_path, f"{item.size_bytes} B")
-    console.print(table)
+        cat = escape(item.category or "general")
+        console.print(f"  [bold green]+[/bold green] [cyan]{item.module_id}[/cyan] [green]\\[{cat}][/green] [dim]({item.size_bytes} B)[/dim] - [dim]{item.relative_path}[/dim]")
 
     if dry_run:
         console.print(f"\n[yellow][*] Dry-run complete. {len(new_mods)} new module(s) can be installed with 'ares update'.[/yellow]")
@@ -2429,20 +2421,14 @@ def upgrade_cmd(
                 console.print(f"[red][-] Failed checking for updates: {exc}[/red]")
                 raise typer.Exit(1)
 
-        console.print(Panel.fit(
-            f"[bold cyan]ARES Platform System Status[/bold cyan]\n\n"
-            f"  [cyan]Current Version:[/]   {chk.get('version')} (Branch: [green]{chk.get('branch')}[/green])\n"
-            f"  [cyan]Local Commit:[/]      {chk.get('local_commit')}\n"
-            f"  [cyan]Remote Commit:[/]     {chk.get('remote_commit')}\n"
-            f"  [cyan]Remote Date:[/]       {chk.get('commit_date', 'unknown')}\n"
-            f"  [cyan]Latest Change:[/]     {chk.get('commit_message', 'none')}\n\n"
-            f"  [cyan]Core System:[/]       {'[yellow]Update Available[/yellow]' if chk.get('system_update_available') else '[green]Up to date[/green]'}\n"
-            f"  [cyan]Attack Modules:[/]    {chk.get('new_modules_count', 0)} new, {chk.get('upgradable_modules_count', 0)} upgradable\n"
-            f"  [cyan]Web UI Bundle:[/]     {'[green]Available[/green]' if chk.get('ui_available') else '[dim]Not indexed[/dim]'}",
-            title="ares upgrade --check",
-            border_style="cyan",
-            box=box.ROUNDED,
-        ))
+        console.print(f"[bold cyan][INF][/bold cyan] ARES Platform System Status (v{chk.get('version')} on branch: [green]{chk.get('branch')}[/green])")
+        console.print(f"[bold cyan][INF][/bold cyan] Local commit: [white]{chk.get('local_commit')}[/white] | Remote commit: [white]{chk.get('remote_commit')}[/white]")
+        if chk.get("commit_message") and chk.get("commit_message") != "none":
+            console.print(f"[bold cyan][INF][/bold cyan] Latest change: [dim]{chk.get('commit_message')}[/dim]")
+        sys_stat = "[yellow]Update available[/yellow]" if chk.get("system_update_available") else "[green]Up to date[/green]"
+        console.print(f"[bold cyan][INF][/bold cyan] Core system: {sys_stat}")
+        console.print(f"[bold cyan][INF][/bold cyan] Attack modules: [white]{chk.get('new_modules_count', 0)}[/white] new available, [white]{chk.get('upgradable_modules_count', 0)}[/white] upgradable")
+        console.print(f"[bold cyan][INF][/bold cyan] Web UI bundle: {'[green]Available[/green]' if chk.get('ui_available') else '[dim]Not indexed[/dim]'}")
         if chk.get("system_update_available") or chk.get("new_modules_count", 0) > 0:
             console.print("\n[yellow][*] Run [bold]ares upgrade[/bold] to apply the latest system updates.[/yellow]")
         else:
@@ -2455,11 +2441,8 @@ def upgrade_cmd(
 
     action_label = "Full Platform System" if all else ("Core Engine & DB" if system else ("Web UI Dashboard" if ui and not modules else "Attack Modules"))
 
-    console.print(Panel.fit(
-        "[bold cyan]ARES Platform Upgrade Engine[/bold cyan]\n"
-        f"Target: [green]{repo}@{branch}[/green] | Scope: [bold]{action_label}[/bold] | Mode: [yellow]{'Dry-Run' if dry_run else 'In-Place Upgrade'}[/yellow]",
-        border_style="cyan",
-    ))
+    mode_str = "dry-run" if dry_run else "in-place upgrade"
+    console.print(f"[bold cyan][INF][/bold cyan] ARES Platform Upgrade Engine [dim]({repo}@{branch} | scope: {action_label} | {mode_str})[/dim]", soft_wrap=True)
 
     # ── 2. Full Platform System Upgrade ────────────────────────────────────────
     if all:
