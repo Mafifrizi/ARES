@@ -67,6 +67,23 @@ app     = typer.Typer(
 )
 console = Console()
 
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+# Suppress noisy internal library and plugin debug logs in CLI mode unless explicitly requested
+_ares_cli_log_level = os.getenv("ARES_LOG_LEVEL", "WARNING").upper()
+try:
+    from ares.core.logger import setup_logger
+    setup_logger(level=_ares_cli_log_level)
+except Exception:
+    logging.basicConfig(level=getattr(logging, _ares_cli_log_level, logging.WARNING))
+
 PYTHON_MIN_VERSION = (3, 10)
 PYTHON_MAX_VERSION_EXCLUSIVE = (3, 13)
 AD_IMPACKET_TESTED_PYTHON = (3, 12)
@@ -329,13 +346,14 @@ def campaign_create(
         store.save_campaign(c)
 
         console.print(Panel(
-            f"[bold green]✓ Campaign created[/]\n"
+            f"[bold green][+] Campaign created[/]\n"
             f"  ID:       [cyan]{c.id}[/]\n"
             f"  Name:     {c.name}\n"
             f"  Client:   {c.client or ' - '}\n"
             f"  Profile:  [yellow]{profile}[/]\n"
             f"  Scope:    {', '.join(s.cidr for s in c.scope)}",
             title="Campaign Created",
+            box=box.ROUNDED,
         ))
     except Exception as exc:
         console.print(f"[bold red]Error:[/] {exc}")
@@ -355,7 +373,7 @@ def campaign_list(
         console.print("[dim]No campaigns found. Run [cyan]ares campaign create[/] to start.[/]")
         return
 
-    table = Table(title="Campaigns", show_header=True)
+    table = Table(title="Campaigns", show_header=True, box=box.ROUNDED)
     table.add_column("ID",       style="cyan",   width=12)
     table.add_column("Name",     style="bold",   width=24)
     table.add_column("Client",   width=16)
@@ -478,7 +496,7 @@ def target_add(
 
     entry = {"target": target, "tags": tag, "notes": notes}
     store.add_target(cid, entry)
-    console.print(f"[green]✓ Target added:[/] {target} → campaign {cid[:8]}")
+    console.print(f"[green][+] Target added:[/] {target} -> campaign {cid[:8]}")
 
 
 @target_app.command("list")
@@ -495,7 +513,7 @@ def target_list(
         console.print("[dim]No targets. Run [cyan]ares target add <ip>[/][/]")
         return
 
-    table = Table(title=f"Targets (campaign {cid[:8]})")
+    table = Table(title=f"Targets (campaign {cid[:8]})", box=box.ROUNDED)
     table.add_column("Target", style="cyan")
     table.add_column("Tags")
     table.add_column("Notes")
@@ -516,7 +534,7 @@ def target_import(
 
     lines = file.read_text().strip().splitlines()
     targets = [l.strip() for l in lines if l.strip() and not l.startswith("#")]
-    console.print(f"[green]✓ Imported {len(targets)} targets[/]")
+    console.print(f"[green][+] Imported {len(targets)} targets[/]")
 
 
 # ── Module commands ────────────────────────────────────────────────────────────
@@ -533,7 +551,7 @@ def module_list(
     from ares.core.plugin.loader import PluginLoader
     registry = PluginLoader().load_all()
 
-    table = Table(title="Available Modules", show_header=True, show_lines=True)
+    table = Table(title="Available Modules", show_header=True, show_lines=True, box=box.ROUNDED)
     table.add_column("Module ID",    style="cyan",   width=28)
     table.add_column("Name",         width=24)
     table.add_column("OpSec",        style="yellow", width=10)
@@ -654,18 +672,19 @@ def module_install(
             result = installer.install_as_dict(module_spec, verify_signature=verify)
         if result and result.get("success"):
             console.print(Panel(
-                f"[green]✓ Installed {module_spec}[/]\n"
+                f"[green][+] Installed {module_spec}[/]\n"
                 f"  Version:  {result.get('version', ' - ')}\n"
                 f"  Path:     [dim]{result.get('path', ' - ')}[/]\n"
                 f"  Verified: {'[green]yes[/]' if result.get('verified') else '[yellow]no[/]'}",
                 title="Module Installed",
+                box=box.ROUNDED,
             ))
         else:
             error = result.get("error", "unknown error") if result else "install returned no result"
-            console.print(f"[red]✗ Install failed:[/] {error}")
+            console.print(f"[red][-] Install failed:[/] {error}")
             raise typer.Exit(1)
     except (ImportError, AttributeError) as exc:
-        console.print(f"[red]✗ ModuleInstaller error:[/] {exc}")
+        console.print(f"[red][-] ModuleInstaller error:[/] {exc}")
         raise typer.Exit(1)
 
 
@@ -691,9 +710,10 @@ def chain_execute(
         f"[bold]Target:[/]  {target}\n"
         f"[bold]Profile:[/] {profile}\n"
         + (f"[bold]Domain:[/]  {domain}\n" if domain else "")
-        + ("[yellow]● PLAN ONLY[/]" if show_plan else "")
-        + ("[yellow]● DRY RUN[/]" if dry_run else ""),
-        title="[bold red]⛓  Attack Chain[/]",
+        + ("[yellow][*] PLAN ONLY[/]" if show_plan else "")
+        + ("[yellow][*] DRY RUN[/]" if dry_run else ""),
+        title="[bold red]Attack Chain Execution[/]",
+        box=box.ROUNDED,
     ))
 
     if not dry_run and not show_plan:
@@ -720,7 +740,7 @@ def chain_list() -> None:
     """List available attack chain goals and their module sequences."""
     try:
         from ares.goal.engine import GOAL_DEFINITIONS, Goal
-        table = Table(title="Available Goals", show_lines=True)
+        table = Table(title="Available Goals", show_lines=True, box=box.ROUNDED)
         table.add_column("Goal",        style="cyan",  width=20)
         table.add_column("Description", width=38)
         table.add_column("Modules",     style="dim",   width=52)
@@ -735,7 +755,7 @@ def chain_list() -> None:
         console.print(table)
     except (ImportError, AttributeError):
         # Fallback static table
-        table = Table(title="Available Goals")
+        table = Table(title="Available Goals", box=box.ROUNDED)
         table.add_column("Goal",        style="cyan",  width=20)
         table.add_column("Description", width=40)
         table.add_column("Chain",       style="dim",   width=40)
@@ -783,7 +803,7 @@ def chain_suggest(
             console.print("[dim]No suggestions available - check registry modules.[/]")
             return
 
-        table = Table(title=f"Suggestions for [{goal}] → {target}", show_lines=True)
+        table = Table(title=f"Suggestions for [{goal}] → {target}", show_lines=True, box=box.ROUNDED)
         table.add_column("Rank",    width=5,  style="dim")
         table.add_column("Module",  width=24, style="cyan")
         table.add_column("Score",   width=7,  style="yellow", justify="right")
@@ -840,9 +860,10 @@ def report_generate(
 
     if result_paths:
         console.print(Panel(
-            "\n".join(f"  [green]✓[/] [cyan]{fmt.upper()}[/]  {path}"
+            "\n".join(f"  [green][+][/] [cyan]{fmt.upper()}[/]  {path}"
                       for fmt, path in result_paths.items()),
             title=f"Report Generated - {c['name']}",
+            box=box.ROUNDED,
         ))
     else:
         console.print("[red]Report generation failed. Check logs.[/]")
@@ -862,7 +883,7 @@ def report_list(
         console.print("[dim]No reports yet. Run [cyan]ares report generate --campaign <id>[/][/]")
         return
 
-    table = Table(title="Generated Reports")
+    table = Table(title="Generated Reports", box=box.ROUNDED)
     table.add_column("Filename",  style="cyan",  width=44)
     table.add_column("Format",    style="yellow", width=8)
     table.add_column("Size",      justify="right", width=10)
@@ -901,13 +922,14 @@ def signing_gen_key(
     pub_path.write_text(signer.public_key_pem())
 
     console.print(Panel(
-        f"[green]✓ Key pair generated[/]\n\n"
+        f"[green][+] Key pair generated[/]\n\n"
         f"  Key ID:      [cyan]{signer.key_id}[/]\n"
         f"  Private key: [dim]{priv_path}[/]  (keep this SECRET)\n"
         f"  Public key:  [cyan]{pub_path}[/]  (share this)\n\n"
         f"Add your public key to the ARES registry:\n"
         f"  [dim]ares signing add-key {signer.key_id} {pub_path} --author {author}[/]",
         title="Signing Key Generated",
+        box=box.ROUNDED,
     ))
 
 
@@ -933,7 +955,7 @@ def signing_sign(
     sig_path = module_file.with_suffix(module_file.suffix + ".sig")
     sig.save(sig_path)
 
-    console.print(f"[green]✓ Signed:[/] {module_file.name} → {sig_path.name}")
+    console.print(f"[green][+] Signed:[/] {module_file.name} -> {sig_path.name}")
     console.print(f"  Key ID:    [cyan]{sig.key_id}[/]")
     console.print(f"  File hash: [dim]{sig.file_hash[:16]}...[/]")
 
@@ -959,11 +981,11 @@ def signing_verify(
              "unsigned": "dim", "invalid": "red", "revoked": "red"}.get(
         result.trust_level.value, "white"
     )
-    icon  = {"trusted": "✓", "community": "⚠", "unsigned": " - ",
-              "invalid": "✗", "revoked": "✗"}.get(result.trust_level.value, "?")
+    tag   = {"trusted": "[OK]", "community": "[WARN]", "unsigned": "[*]",
+             "invalid": "[FAIL]", "revoked": "[REVOKED]"}.get(result.trust_level.value, "[?]")
 
     console.print(
-        f"[{color}]{icon} {module_file.name}:[/] "
+        f"[{color}]{tag} {module_file.name}:[/] "
         f"[{color}]{result.trust_level.value.upper()}[/]"
         + (f" (author: {result.author})" if result.author else "")
         + (f"\n  [red]Error: {result.error}[/]" if result.error else "")
@@ -983,7 +1005,7 @@ def signing_add_key(
     registry = KeyRegistry()
     pem = pub_key.read_text()
     registry.add_trusted_key(key_id, pem, author, added_by=operator)
-    console.print(f"[green]✓ Trusted key added:[/] {key_id} ({author})")
+    console.print(f"[green][+] Trusted key added:[/] {key_id} ({author})")
 
 
 @signing_app.command("revoke-key")
@@ -999,7 +1021,7 @@ def signing_revoke_key(
     from ares.core.signing import KeyRegistry
     registry = KeyRegistry()
     registry.revoke_key(key_id, reason=reason, operator=operator)
-    console.print(f"[red]✗ Key revoked:[/] {key_id}")
+    console.print(f"[red][-] Key revoked:[/] {key_id}")
 
 
 # ── Async helpers ──────────────────────────────────────────────────────────────
@@ -1067,7 +1089,7 @@ async def _run_chain(
         console.print("[red]c-live-cli:chain-intent-invalid[/]")
         return
 
-    plan_table = RTable(title=f"Attack Plan - [{goal}]", show_lines=True)
+    plan_table = RTable(title=f"Attack Plan - [{goal}]", show_lines=True, box=box.ROUNDED)
     plan_table.add_column("#",       width=4,  style="dim")
     plan_table.add_column("Module",  width=24, style="cyan")
     plan_table.add_column("Reason",  width=46)
@@ -2148,7 +2170,7 @@ def quickstart() -> None:
         console.print(f"[red]Failed to create campaign: {exc}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"\n[green]✅ Campaign created: {cid}[/green]\n")
+    console.print(f"\n[green][+] Campaign created: {cid}[/green]\n")
     console.print("[bold]Next steps:[/bold]")
     console.print(f"  ares module run ad.enum_users --campaign {cid} --dc {target.split('/')[0]} --domain corp.local")
     console.print(f"  ares module run ad.kerberoast  --campaign {cid} --dc {target.split('/')[0]} --domain corp.local")
@@ -2576,7 +2598,7 @@ def goal_run(
         console.print("[red]c-live-cli:goal-intent-invalid[/]")
         raise typer.Exit(1)
 
-    table = Table(title=f"[bold]Goal Preview - {goal}[/bold]", show_lines=True)
+    table = Table(title=f"[bold]Goal Preview - {goal}[/bold]", show_lines=True, box=box.ROUNDED)
     table.add_column("Step", style="cyan", width=5)
     table.add_column("Module", style="green")
     table.add_column("Reason")
@@ -2609,7 +2631,7 @@ def goal_run(
 def goal_list() -> None:
     """List all available goals and their descriptions."""
     from ares.goal.engine import GOAL_DEFINITIONS
-    table = Table(title="Available Goals", show_lines=False)
+    table = Table(title="Available Goals", show_lines=False, box=box.ROUNDED)
     table.add_column("Goal",        style="cyan bold")
     table.add_column("Description")
     table.add_column("Chain Preview", style="dim")
@@ -2640,10 +2662,11 @@ def goal_capabilities(
             f"[bold]REQUIRES:[/bold] {requires or ['(none)']}\n"
             f"[bold]OUTPUTS:[/bold]  {outputs or ['(none)']}",
             title=f"Module: {module_id}",
+            box=box.ROUNDED,
         ))
         return
 
-    table = Table(title=f"Capability Graph ({summary['total_capabilities']} capabilities)", show_lines=False)
+    table = Table(title=f"Capability Graph ({summary['total_capabilities']} capabilities)", show_lines=False, box=box.ROUNDED)
     table.add_column("Capability",  style="cyan")
     table.add_column("Produced by", style="green")
     for cap, mods in sorted(summary["capabilities"].items()):
@@ -2747,10 +2770,11 @@ def graph_path(
 
         report = graph.path_to_report(path)
         console.print(Panel(
-            f"[bold]{report['start']} → {report['end']}[/bold]\n"
+            f"[bold]{report['start']} -> {report['end']}[/bold]\n"
             f"Steps: {report['path_length'] - 1}  Score: {report['total_score']}\n"
             f"Modules: {', '.join(report['attack_modules']) or '(none)'}",
             title="Shortest Attack Path",
+            box=box.ROUNDED,
         ))
         for step in report["steps"]:
             atk = f" [dim]← {step['attack']}[/dim]" if step.get("attack") else ""
@@ -2951,7 +2975,7 @@ async def test_missing_target_raises(module):
     test_file.write_text(test_code)
 
     console.print(Panel(
-        f"[green]✅ Module scaffolded[/green]\n\n"
+        f"[green][+] Module scaffolded[/green]\n\n"
         f"  [bold]Module:[/bold]  {module_file}\n"
         f"  [bold]Tests:[/bold]   {test_file}\n\n"
         f"Next steps:\n"
@@ -2960,6 +2984,7 @@ async def test_missing_target_raises(module):
         f"  3. Run tests:  [cyan]pytest {test_file.name}[/cyan]\n"
         f"  4. Install:    [cyan]ares module install ./{module_file.name}[/cyan]",
         title=f"ares module create - {module_id}",
+        box=box.ROUNDED,
     ))
 
 
