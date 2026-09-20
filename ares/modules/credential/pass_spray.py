@@ -102,11 +102,17 @@ def query_password_policy(
                 except (ValueError, TypeError):
                     return 30  # safe default
 
-            threshold = int(str(entry.lockoutThreshold)) if hasattr(entry, "lockoutThreshold") else 0
-            duration  = _ad_duration_to_minutes(entry.lockoutDuration) if hasattr(entry, "lockoutDuration") else 30
-            window    = _ad_duration_to_minutes(entry.lockOutObservationWindow) if hasattr(entry, "lockOutObservationWindow") else 30
-            min_len   = int(str(entry.minPwdLength)) if hasattr(entry, "minPwdLength") else 7
-            history   = int(str(entry.pwdHistoryLength)) if hasattr(entry, "pwdHistoryLength") else 24
+            def _safe_int(val: Any, default: int = 0) -> int:
+                try:
+                    return int(str(val))
+                except (ValueError, TypeError):
+                    return default
+
+            threshold = _safe_int(getattr(entry, "lockoutThreshold", 0), 0)
+            duration  = _ad_duration_to_minutes(getattr(entry, "lockoutDuration", 30))
+            window    = _ad_duration_to_minutes(getattr(entry, "lockOutObservationWindow", 30))
+            min_len   = _safe_int(getattr(entry, "minPwdLength", 7), 7)
+            history   = _safe_int(getattr(entry, "pwdHistoryLength", 24), 24)
 
             # Calculate safe spray parameters
             if threshold == 0:
@@ -126,6 +132,72 @@ def query_password_policy(
                 "password_history_length": history,
                 "safe_spray_delay_s":     round(safe_delay, 1),
                 "safe_attempts_per_user": safe_attempts,
+            })
+
+            # Check Fine-Grained Password Policies (PSO)
+            pso_policies: list[dict[str, Any]] = []
+            try:
+                pso_dn = f"CN=Password Settings Objects,CN=System,{base_dn}"
+                conn.search(
+                    pso_dn,
+                    "(objectClass=msDS-PasswordSettings)",
+                    search_scope=ldap3.SUBTREE,
+                    attributes=[
+                        "cn",
+                        "msDS-LockoutThreshold",
+                        "msDS-LockoutDuration",
+                        "msDS-LockoutObservationWindow",
+                        "msDS-MinimumPasswordLength",
+                        "msDS-PasswordSettingsPrecedence",
+                    ],
+                )
+                for pso_entry in conn.entries:
+                    p_name = str(getattr(pso_entry, "cn", "PSO"))
+                    p_thresh = _safe_int(getattr(pso_entry, "msDS-LockoutThreshold", 0), 0)
+                    p_dur = _ad_duration_to_minutes(getattr(pso_entry, "msDS-LockoutDuration", 0))
+                    p_win = _ad_duration_to_minutes(getattr(pso_entry, "msDS-LockoutObservationWindow", 0))
+                    p_min_len = _safe_int(getattr(pso_entry, "msDS-MinimumPasswordLength", 7), 7)
+                    pso_policies.append({
+                        "name": p_name,
+                        "lockout_threshold": p_thresh,
+                        "lockout_duration_min": p_dur,
+                        "observation_window_min": p_win,
+                        "min_password_length": p_min_len,
+                    })
+            except Exception:
+                pso_policies = []
+
+            # Check Entra ID / Azure AD Hybrid Identity Synchronization
+            hybrid_sync_detected = False
+            try:
+                conn.search(
+                    base_dn,
+                    "(&(objectClass=user)(msDS-ExternalDirectoryObjectId=*))",
+                    search_scope=ldap3.SUBTREE,
+                    attributes=["sAMAccountName", "msDS-ExternalDirectoryObjectId"],
+                    size_limit=5,
+                )
+                if conn.entries:
+                    hybrid_sync_detected = True
+            except Exception:
+                hybrid_sync_detected = False
+
+            if pso_policies:
+                min_pso_threshold = min(
+                    (p["lockout_threshold"] for p in pso_policies if p["lockout_threshold"] > 0),
+                    default=0,
+                )
+                if min_pso_threshold > 0:
+                    effective_threshold = min(threshold, min_pso_threshold) if threshold > 0 else min_pso_threshold
+                    safe_attempts = max(1, effective_threshold - 2)
+                    safe_delay = (window * 60 * 1.5) / max(safe_attempts, 1)
+                    result["safe_attempts_per_user"] = safe_attempts
+                    result["safe_spray_delay_s"] = round(safe_delay, 1)
+
+            result.update({
+                "pso_policies": pso_policies,
+                "pso_enforced": bool(pso_policies),
+                "hybrid_sync_detected": hybrid_sync_detected,
             })
         conn.unbind()
     except ImportError:
@@ -499,6 +571,60 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         attempts = 0
         lockout_detected = False
 
+        # Pre-flight Fine-Grained Password Policy & Hybrid Sync Posture Check
+        policy_info = kwargs.get("policy_info")
+        if policy_info is None and domain and target and kwargs.get("query_policy", False):
+            try:
+                policy_info = query_password_policy(
+                    target, domain, kwargs.get("policy_user", ""), kwargs.get("policy_password", "")
+                )
+            except Exception:
+                policy_info = None
+
+        if policy_info and policy_info.get("pso_enforced"):
+            pso_list = policy_info.get("pso_policies", [])
+            min_thresh = min(
+                (p["lockout_threshold"] for p in pso_list if p["lockout_threshold"] > 0),
+                default=0,
+            )
+            self.finding(
+                title=f"Fine-Grained Password Policy (PSO) Enforced on Domain {domain}",
+                description=(
+                    f"Active Directory Fine-Grained Password Policy (PSO) detected on {domain} "
+                    f"with lockout threshold of {min_thresh} attempt(s). "
+                    "Spray pacing dynamically throttled to prevent accidental account lockouts."
+                ),
+                severity=Severity.LOW,
+                mitre_technique="T1110.003",
+                mitre_tactic="Credential Access",
+                evidence={"target": target, "domain": domain, "pso_policies": pso_list},
+                remediation=(
+                    "Maintain strict Fine-Grained Password Policies on administrative groups. "
+                    "Ensure service accounts and standard users are segregated with dedicated PSOs."
+                ),
+                host=target,
+                confidence=0.95,
+            )
+
+        if policy_info and policy_info.get("hybrid_sync_detected"):
+            self.finding(
+                title=f"Entra ID Hybrid Sync & Cloud Smart Lockout Active on {domain}",
+                description=(
+                    f"Hybrid identity synchronization detected on domain {domain}. "
+                    "Cloud-synced accounts are protected by Entra ID Smart Lockout and Identity Protection."
+                ),
+                severity=Severity.LOW,
+                mitre_technique="T1110.003",
+                mitre_tactic="Credential Access",
+                evidence={"target": target, "domain": domain, "hybrid_sync": True},
+                remediation=(
+                    "Ensure Entra ID Password Protection is deployed to on-premises Domain Controllers "
+                    "to block known compromised passwords across hybrid infrastructure."
+                ),
+                host=target,
+                confidence=0.9,
+            )
+
         for password in passwords:
             if lockout_detected:
                 break
@@ -658,5 +784,11 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
             ],
             "locked_accounts": locked_accounts,
             "lockout_detected": lockout_detected,
+            "pso_enforced": bool(policy_info and policy_info.get("pso_enforced")),
+            "pso_policies": policy_info.get("pso_policies", []) if policy_info else [],
+            "hybrid_sync_detected": bool(policy_info and policy_info.get("hybrid_sync_detected")),
+            "safe_attempts_per_user": (
+                policy_info.get("safe_attempts_per_user", max_per_user) if policy_info else max_per_user
+            ),
         }
         return self._findings[:], raw

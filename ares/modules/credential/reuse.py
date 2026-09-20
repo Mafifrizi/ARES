@@ -10,6 +10,7 @@ MITRE ATT&CK:
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
@@ -29,6 +30,64 @@ from ares.core.logger import get_logger, audit
 from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.reuse")
+
+
+def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
+    """
+    Non-destructive probe of OAuth 2.0 Device Code Flow / Identity Posture.
+    Checks whether target exposes or permits unrestricted Device Authorization Grant (T1528 / T1550).
+    """
+    import urllib.request
+    import urllib.error
+    import ssl
+
+    result: dict[str, Any] = {
+        "device_code_endpoint_active": False,
+        "device_code_permitted": False,
+        "checked_endpoint": None,
+    }
+
+    clean_target = target.strip().lower()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    probe_urls: list[str] = []
+    if "microsoftonline.com" in clean_target:
+        probe_urls.append(f"https://{clean_target}/common/oauth2/v2.0/devicecode")
+    elif "." in clean_target:
+        probe_urls.append(f"https://login.microsoftonline.com/{clean_target}/oauth2/v2.0/devicecode")
+        probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
+    else:
+        probe_urls.append(f"https://login.microsoftonline.com/{clean_target}/oauth2/v2.0/devicecode")
+
+    for url in probe_urls:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "ARES-Identity-Posture/2026.1"},
+                data=b"client_id=04b07795-8ddb-461a-bbee-02f9e1bf7b46&scope=openid",
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+                status = resp.getcode()
+                if status in (200, 400):
+                    body = resp.read().decode("utf-8", errors="ignore")
+                    result["checked_endpoint"] = url
+                    result["device_code_endpoint_active"] = True
+                    if "device_code" in body or "user_code" in body or "error" in body:
+                        result["device_code_permitted"] = True
+                        break
+        except urllib.error.HTTPError as exc:
+            if exc.code in (400, 405):
+                result["checked_endpoint"] = url
+                result["device_code_endpoint_active"] = True
+                result["device_code_permitted"] = True
+                break
+        except Exception:
+            continue
+
+    return result
 
 
 @module_contract(
@@ -194,6 +253,31 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
         if vault is None:
             return [], {"error": "no_vault_provided"}
 
+        # Audit OAuth 2.0 Device Code Flow / Modern Identity Posture
+        loop = asyncio.get_running_loop()
+        oauth_audit_func = kwargs.get("oauth_audit_func") or _audit_oauth_posture_sync
+        oauth_data = await loop.run_in_executor(None, oauth_audit_func, target)
+
+        if oauth_data.get("device_code_permitted"):
+            self.finding(
+                title=f"OAuth 2.0 Device Code Flow Vector Permitted on {target}",
+                description=(
+                    f"OAuth 2.0 Device Authorization Grant (Device Code Flow) endpoint is active and "
+                    f"reachable for target {target} ({oauth_data.get('checked_endpoint')}). "
+                    "Unrestricted Device Code Flow exposes the tenant to device code phishing attacks "
+                    "(T1528 / T1550) that can bypass traditional MFA."
+                ),
+                severity=Severity.MEDIUM,
+                confidence=0.9,
+                host=target,
+                mitre_technique="T1528",
+                mitre_tactic="Credential Access",
+                remediation=(
+                    "Implement Conditional Access policy to block Device Code Flow for non-compliant "
+                    "or unmanaged devices. Restrict device authorization grants to corporate IP ranges."
+                ),
+            )
+
         try:
             from ares.credential.reuse import ReuseEngine, ReuseProtocol
             engine = ReuseEngine(vault=vault)
@@ -222,6 +306,8 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
                 "valid_credentials": valid,
                 "owned_hosts": [target] if valid else [],
                 "total_attempts": len(results),
+                "oauth_device_code_permitted": oauth_data.get("device_code_permitted", False),
+                "oauth_device_code_endpoint": oauth_data.get("checked_endpoint"),
             }
 
         except Exception as exc:

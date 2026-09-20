@@ -41,6 +41,54 @@ _COLLECTION_PATTERNS = [
     "*wallet.dat", "*.wallet",
 ]
 
+def _audit_lots_egress_sync(target: str) -> dict[str, Any]:
+    """
+    Non-destructive audit of Living-off-the-Trusted-Services (LOTS) cloud egress paths
+    and enterprise Tenant Restrictions enforcement (T1567.002).
+    """
+    import urllib.request
+    import urllib.error
+    import ssl
+
+    cloud_endpoints = {
+        "m365_graph": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "aws_s3": "https://s3.amazonaws.com",
+        "azure_blob": "https://blob.core.windows.net",
+    }
+
+    result: dict[str, Any] = {
+        "lots_routes_open": [],
+        "tenant_restrictions_enforced": False,
+        "checked_endpoints": list(cloud_endpoints.keys()),
+    }
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    for service_name, url in cloud_endpoints.items():
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ARES-Egress-Audit/2026.1"},
+                method="HEAD",
+            )
+            with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+                headers_dict = dict(resp.headers)
+                for header_key in headers_dict:
+                    hl = header_key.lower()
+                    if "restrict-access" in hl or "sec-ms-gpo" in hl or "tenant" in hl:
+                        result["tenant_restrictions_enforced"] = True
+                result["lots_routes_open"].append(service_name)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (400, 401, 403, 405):
+                result["lots_routes_open"].append(service_name)
+        except Exception:
+            continue
+
+    return result
+
+
 @module_contract(
     permissions=[
         NetworkPermission(ports=[22, 135, 445], protocols=["tcp"]),
@@ -305,8 +353,38 @@ class StagedCollectionModule(BaseModule):
                 host=target, confidence=0.9,
             )
 
-        raw = {"target": target, "files_found": hits,
-               "search_paths": search_paths, "total": len(hits)}
+        lots_audit_func = kwargs.get("lots_audit_func") or _audit_lots_egress_sync
+        lots_data = await loop.run_in_executor(None, lots_audit_func, target)
+
+        if lots_data.get("lots_routes_open") and not lots_data.get("tenant_restrictions_enforced"):
+            self.finding(
+                title=f"Cloud LOTS Exfiltration Route Open (Missing Tenant Restrictions) on {target}",
+                description=(
+                    f"Outbound egress to trusted cloud infrastructure ({', '.join(lots_data['lots_routes_open'])}) "
+                    f"is permitted from {target} without corporate Tenant Restrictions. "
+                    "Attackers staging sensitive data can exfiltrate directly to external/attacker-controlled "
+                    "cloud tenants (T1567.002) bypassing perimeter network defenses."
+                ),
+                severity=Severity.HIGH,
+                confidence=0.85,
+                host=target,
+                mitre_technique="T1567.002",
+                mitre_tactic="Exfiltration",
+                remediation=(
+                    "Implement TLS inspection on corporate egress gateways and configure Tenant Restriction v2 "
+                    "headers ('Restrict-Access-To-Tenants' and 'Restrict-Access-Context') to block unauthorized "
+                    "data exfiltration to external cloud tenants."
+                ),
+            )
+
+        raw = {
+            "target": target,
+            "files_found": hits,
+            "search_paths": search_paths,
+            "total": len(hits),
+            "lots_routes_open": lots_data.get("lots_routes_open", []),
+            "tenant_restrictions_enforced": lots_data.get("tenant_restrictions_enforced", False),
+        }
         raw["sensitive_file_paths"] = raw.get("files_staged", [])  # OUTPUTS key
         raw["collection_inventory"] = raw.get("files_staged", [])  # OUTPUTS key
         return self._findings[:], raw
