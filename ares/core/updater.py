@@ -146,6 +146,27 @@ def secure_resolve_path(base_dir: Path, relative_path: str | Path) -> Path:
     return target_path
 
 
+def extract_all_module_ids(code: str) -> list[str]:
+    """
+    Extract all MODULE_ID string constants declared in classes within the code.
+    """
+    try:
+        tree = ast.parse(code)
+    except Exception:
+        return []
+    ids: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, ast.Assign):
+                    for target in item.targets:
+                        if isinstance(target, ast.Name) and target.id == "MODULE_ID":
+                            if isinstance(item.value, ast.Constant) and isinstance(item.value.value, str):
+                                if item.value.value not in ids:
+                                    ids.append(item.value.value)
+    return ids
+
+
 def validate_module_code(code: str, expected_module_id: Optional[str] = None) -> tuple[bool, str, Optional[str]]:
     """
     Pre-flight AST analysis on Python code.
@@ -159,7 +180,7 @@ def validate_module_code(code: str, expected_module_id: Optional[str] = None) ->
         return False, f"AST parsing failed: {str(exc)}", None
 
     found_classes: list[str] = []
-    found_id: Optional[str] = None
+    found_ids: list[str] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
@@ -169,22 +190,23 @@ def validate_module_code(code: str, expected_module_id: Optional[str] = None) ->
                     for target in item.targets:
                         if isinstance(target, ast.Name) and target.id == "MODULE_ID":
                             if isinstance(item.value, ast.Constant) and isinstance(item.value.value, str):
-                                found_id = item.value.value
+                                if item.value.value not in found_ids:
+                                    found_ids.append(item.value.value)
 
     if not found_classes:
         return False, "Validation rejected: No class definition found in module code.", None
 
-    if not found_id:
+    if not found_ids:
         return False, "Validation rejected: Class does not declare a valid MODULE_ID attribute.", None
 
-    if expected_module_id and found_id != expected_module_id:
+    if expected_module_id and expected_module_id not in found_ids:
         return (
             False,
-            f"Validation rejected: MODULE_ID mismatch (expected '{expected_module_id}', got '{found_id}').",
-            found_id,
+            f"Validation rejected: MODULE_ID mismatch (expected '{expected_module_id}', got '{found_ids[-1]}').",
+            found_ids[-1],
         )
 
-    return True, "Valid module syntax and structure.", found_id
+    return True, "Valid module syntax and structure.", found_ids[0]
 
 
 def atomic_write_file(target_path: Path, content: str | bytes, is_binary: bool = False) -> None:
@@ -338,31 +360,37 @@ class PlatformUpdateManager:
             return local_modules
 
         for py_file in sorted(self.builtin_modules_dir.rglob("*.py")):
-            if py_file.stem.startswith("_") or py_file.stem == "base":
+            rel_path = str(py_file.relative_to(self.builtin_modules_dir)).replace("\\", "/")
+            if (
+                py_file.stem.startswith("_")
+                or py_file.stem == "base"
+                or rel_path in MODULE_HELPER_FILES
+                or py_file.name in {"base.py", "descriptors.py", "params.py", "sdk.py"}
+            ):
                 continue
             try:
                 content_bytes = py_file.read_bytes()
                 sha256 = hashlib.sha256(content_bytes).hexdigest()
                 text = content_bytes.decode("utf-8", errors="ignore")
-                valid, msg, module_id = validate_module_code(text)
-                if not valid or not module_id:
+                valid, msg, primary_id = validate_module_code(text)
+                if not valid or not primary_id:
                     continue
 
-                rel_path = str(py_file.relative_to(self.builtin_modules_dir)).replace("\\", "/")
                 category = rel_path.split("/")[0] if "/" in rel_path else ""
-
                 norm_bytes = content_bytes.replace(b"\r\n", b"\n")
                 git_sha = hashlib.sha1(b"blob " + str(len(norm_bytes)).encode() + b"\x00" + norm_bytes).hexdigest()
 
-                local_modules[module_id] = ModuleManifestItem(
-                    module_id=module_id,
-                    relative_path=rel_path,
-                    sha256=sha256,
-                    size_bytes=len(content_bytes),
-                    category=category,
-                    is_installed=True,
-                    git_sha=git_sha,
-                )
+                module_ids = extract_all_module_ids(text) or [primary_id]
+                for mid in module_ids:
+                    local_modules[mid] = ModuleManifestItem(
+                        module_id=mid,
+                        relative_path=rel_path,
+                        sha256=sha256,
+                        size_bytes=len(content_bytes),
+                        category=category,
+                        is_installed=True,
+                        git_sha=git_sha,
+                    )
             except Exception as exc:
                 logger.debug("Failed scanning local module file", file=str(py_file), error=str(exc))
 
@@ -422,7 +450,8 @@ class PlatformUpdateManager:
             ):
                 continue
 
-            remote_module_count += 1
+            matching_local = [m for m in local_modules.values() if m.relative_path == rel_mod_path]
+            remote_module_count += len(matching_local) if matching_local else 1
             category = rel_mod_path.split("/")[0] if "/" in rel_mod_path else ""
             remote_sha = entry.get("sha", "")
             size_bytes = entry.get("size", 0)
@@ -1081,7 +1110,9 @@ class PlatformUpdateManager:
         try:
             local_mods = self.get_local_modules()
             count = len(local_mods)
-            checks.append({"subsystem": "Attack Modules", "status": "PASS" if count > 0 else "WARN", "detail": f"{count} modules discovered and validated"})
+            unique_files = len(set(item.relative_path for item in local_mods.values()))
+            detail_str = f"{count} modules discovered and validated ({unique_files} source files)"
+            checks.append({"subsystem": "Attack Modules", "status": "PASS" if count > 0 else "WARN", "detail": detail_str})
         except Exception as exc:
             checks.append({"subsystem": "Attack Modules", "status": "FAIL", "detail": str(exc)})
 
