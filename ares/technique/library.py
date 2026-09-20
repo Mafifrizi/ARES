@@ -519,6 +519,34 @@ _TECHNIQUES: list[dict[str, Any]] = [
         "severity": "low",
         "url": "https://attack.mitre.org/techniques/T1135/",
     },
+    {
+        "id": "T1528",
+        "name": "Steal Application Access Token",
+        "tactic": "Credential Access",
+        "tactics": ["Credential Access"],
+        "description": "Adversaries acquire application access tokens to authenticate to protected cloud services and APIs.",
+        "platforms": ["Windows", "Linux", "Cloud"],
+        "permissions": ["User"],
+        "data_sources": ["Cloud Service: Cloud Service Authentication"],
+        "detection": "Monitor for unexpected token issuance, anomalous IP usage of session tokens, and PRT extraction.",
+        "mitigations": ["Conditional Access policies", "Continuous access evaluation"],
+        "severity": "high",
+        "url": "https://attack.mitre.org/techniques/T1528/",
+    },
+    {
+        "id": "T1606",
+        "name": "Forge Web Credentials",
+        "tactic": "Credential Access",
+        "tactics": ["Credential Access"],
+        "description": "Adversaries forge web credentials such as SAML tokens, cookies, or OAuth refresh tokens to bypass MFA and hijack sessions.",
+        "platforms": ["Cloud", "SaaS"],
+        "permissions": ["User"],
+        "data_sources": ["Authentication Logs", "Token Issuance Telemetry"],
+        "detection": "Detect signing key abuse, irregular token issuance without matching authentication events.",
+        "mitigations": ["Hardware-backed security keys", "Token lifetime restrictions"],
+        "severity": "high",
+        "url": "https://attack.mitre.org/techniques/T1606/",
+    },
 ]
 
 
@@ -598,6 +626,8 @@ _MODULE_TECHNIQUE_MAP: dict[str, list[str]] = {
     "ad.delegation_abuse":    ["T1558.001", "T1134.001"],
     "ad.coerce":              ["T1187"],
     "ad.laps_enum":           ["T1552.004"],
+    "ad.sccm":                ["T1078.002", "T1021.006"],
+    "ad.ghost_forge":         ["T1649", "T1558"],
     # ── Credential Access ─────────────────────────────────────────────────────
     "credential.pass_the_hash":   ["T1550.002"],
     "credential.pass_spray":      ["T1110.003"],
@@ -612,6 +642,7 @@ _MODULE_TECHNIQUE_MAP: dict[str, list[str]] = {
     "lateral.ssh_pivot":      ["T1021.004", "T1090.001"],
     "lateral.rdp":            ["T1021.001"],
     "lateral.smb_relay":      ["T1557.001"],
+    "lateral.ntlm_relay":     ["T1557.001", "T1134.001"],
     "lateral.mssql":          ["T1505.001"],
     # ── Persistence ───────────────────────────────────────────────────────────
     "persistence.scheduled_task":   ["T1053.005"],
@@ -643,6 +674,7 @@ _MODULE_TECHNIQUE_MAP: dict[str, list[str]] = {
     "cloud.azure":        ["T1526", "T1530", "T1580", "T1078.004"],
     "cloud.gcp":          ["T1526", "T1530", "T1552.005", "T1580"],
     "cloud.azure_ad":     ["T1528", "T1606"],
+    "cloud.phantom_token": ["T1528", "T1606"],
     # ── Network ──────────────────────────────────────────────────────────────
     "network.port_scan":       ["T1046"],
     "network.service_detect":  ["T1046"],

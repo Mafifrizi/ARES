@@ -555,13 +555,7 @@ def module_list(
     from ares.core.plugin.loader import PluginLoader
     registry = PluginLoader().load_all()
 
-    table = Table(title="Available Modules", show_header=True, show_lines=True, box=box.ROUNDED)
-    table.add_column("Module ID",    style="cyan",   width=28)
-    table.add_column("Name",         width=24)
-    table.add_column("OpSec",        style="yellow", width=10)
-    table.add_column("MITRE",        width=16)
-    table.add_column("Description",  width=36)
-
+    rows = []
     for mod_id, mod_cls in sorted(registry._registry.items()):
         meta = mod_cls.metadata()
         if category and meta.get("category") != category:
@@ -577,13 +571,24 @@ def module_list(
             "medium": "yellow", "high_noise": "red",
         }.get(opsec_val, "white")
 
-        table.add_row(
+        rows.append((
             mod_id,
             meta.get("name", ""),
             f"[{opsec_color}]{opsec_val}[/]",
             meta.get("mitre", "")[:16],
             meta.get("description", "")[:36],
-        )
+        ))
+
+    count_label = f" ({len(rows)} loaded)" if not (category or opsec or search) else f" ({len(rows)} matching)"
+    table = Table(title=f"Available Modules{count_label}", show_header=True, show_lines=True, box=box.ROUNDED)
+    table.add_column("Module ID",    style="cyan",   width=28)
+    table.add_column("Name",         width=24)
+    table.add_column("OpSec",        style="yellow", width=10)
+    table.add_column("MITRE",        width=16)
+    table.add_column("Description",  width=36)
+
+    for r in rows:
+        table.add_row(*r)
 
     console.print(table)
 
