@@ -87,7 +87,7 @@ Key security controls in ARES v6:
 
 | Control | Implementation |
 |---------|---------------|
-| Credential encryption | Fernet with per-record PBKDF2-SHA256 salt (100,000 iterations) |
+| Credential encryption | AES-256-GCM (AEAD) with per-record PBKDF2-SHA256 salt (600,000 iterations) |
 | Legacy encryption | Configurable via `ARES_LEGACY_SALT` env var |
 | JWT tokens | HS256 default; RS256 supported via `ARES_JWT_ALGORITHM=RS256` |
 | Token revocation | JTI blacklist - logout immediately invalidates tokens |

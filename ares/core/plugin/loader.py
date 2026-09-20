@@ -130,6 +130,9 @@ class ModuleRegistry:
     def get(self, module_id: str) -> type[BaseModule] | None:
         return self._registry.get(module_id)
 
+    def __setitem__(self, module_id: str, cls: type[BaseModule]) -> None:
+        self._registry[module_id] = cls
+
     def all(self) -> list[type[BaseModule]]:
         return list(self._registry.values())
 

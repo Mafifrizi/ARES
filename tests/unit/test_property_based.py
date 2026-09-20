@@ -314,13 +314,14 @@ class TestValidateIpOrCidr:
 class TestDataEncryptorProperties:
 
     _enc = DataEncryptor("hypothesis-test-encryption-key!!")
+    _enc_a = DataEncryptor("key-a-for-hypothesis-test-32ch!!")
+    _enc_b = DataEncryptor("key-b-for-hypothesis-test-32ch!!")
 
     @given(st.text(min_size=0, max_size=1000))
     @settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_roundtrip_any_text(self, value: str) -> None:
         """encrypt → decrypt must recover original value for any text."""
-        enc = DataEncryptor("hyp-test-key-32chars-minimum-req")
-        result = enc.decrypt(enc.encrypt(value))
+        result = self._enc.decrypt(self._enc.encrypt(value))
         assert result == value, (
             f"Roundtrip failed for {repr(value[:50])!r}: got {repr(result)!r}"
         )
@@ -329,26 +330,19 @@ class TestDataEncryptorProperties:
     @settings(max_examples=200, deadline=None)
     def test_tampered_returns_none(self, noise: bytes) -> None:
         """Appending random bytes to ciphertext must return None, never raise."""
-        enc = DataEncryptor("hyp-test-key-32chars-minimum-req")
-        token = enc.encrypt("secret")
+        token = self._enc.encrypt("secret")
         assert token is not None
-        # Corrupt it
-        import base64
-        salt_hex = token[:32]
-        fernet_part = token[33:]
-        # Append noise to fernet part
-        garbled = f"{salt_hex}:{fernet_part}{noise.hex()}"
-        result = enc.decrypt(garbled)
+        # Corrupt it by appending noise or corrupting payload
+        garbled = f"{token}{noise.hex()}"
+        result = self._enc.decrypt(garbled)
         assert result is None
 
     @given(st.text(min_size=0, max_size=500))
     @settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_different_keys_cant_decrypt(self, value: str) -> None:
         """Ciphertext from key A must not be decryptable by key B."""
-        enc_a = DataEncryptor("key-a-for-hypothesis-test-32ch!!")
-        enc_b = DataEncryptor("key-b-for-hypothesis-test-32ch!!")
-        token = enc_a.encrypt(value)
-        assert enc_b.decrypt(token) is None
+        token = self._enc_a.encrypt(value)
+        assert self._enc_b.decrypt(token) is None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

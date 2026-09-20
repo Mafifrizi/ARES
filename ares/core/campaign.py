@@ -217,57 +217,55 @@ class Campaign(BaseModel):
             return any(addr in IPNetwork(s.cidr) for s in self.scope)
         except (AddrFormatError, ValueError):
             target = ip.strip().lower()
+            if not target:
+                return False
+
             explicit_hosts = {
                 entry.strip().lower()
                 for entry in [*self.targets, self.dc, self.domain]
                 if entry and entry.strip()
             }
-            if target and target in explicit_hosts:
-                return True
 
-            # Not a valid IP literal - attempt DNS resolution
+            # Attempt DNS resolution first to verify resolved IP is in CIDR scope
             import socket as _socket
             import logging as _logging
             _log = _logging.getLogger("ares.campaign")
             try:
-                # Bug 3 fix: use async-safe getaddrinfo when event loop is running
                 import asyncio as _asyncio
                 try:
                     _loop = _asyncio.get_event_loop()
                     if _loop.is_running():
-                        # Running inside async context - use run_in_executor to avoid blocking
                         import concurrent.futures as _cf
                         with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
                             results = _pool.submit(
-                                _socket.getaddrinfo, ip, None,
+                                _socket.getaddrinfo, target, None,
                                 _socket.AF_INET, _socket.SOCK_STREAM
-                            ).result(timeout=5.0)
+                            ).result(timeout=2.0)
                     else:
-                        results = _socket.getaddrinfo(ip, None, _socket.AF_INET, _socket.SOCK_STREAM)
+                        results = _socket.getaddrinfo(target, None, _socket.AF_INET, _socket.SOCK_STREAM)
                 except RuntimeError:
-                    results = _socket.getaddrinfo(ip, None, _socket.AF_INET, _socket.SOCK_STREAM)
-                if not results:
-                    _log.warning("scope_check_dns_no_result: hostname %r resolved to nothing - BLOCKING", ip)
-                    return False  # Fail closed
-                resolved_ip = results[0][4][0]
-                from netaddr import IPAddress as _IPAddr
-                addr = _IPAddr(resolved_ip)
-                in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
-                if not in_scope:
-                    _log.warning(
-                        "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",
-                        ip, resolved_ip, [s.cidr for s in self.scope],
-                    )
-                else:
-                    _log.debug("scope_check_hostname_resolved: %r → %s (in scope)", ip, resolved_ip)
-                return in_scope
-            except (_socket.gaierror, TimeoutError, Exception) as dns_exc:
-                _log.warning(
-                    "scope_check_dns_failed: hostname %r could not be resolved (%s) - BLOCKING "
-                    "(add explicit IP to scope or ensure DNS is available)",
-                    ip, str(dns_exc)[:80],
-                )
-                return False  # Fail closed - unresolvable hostname is not in scope
+                    results = _socket.getaddrinfo(target, None, _socket.AF_INET, _socket.SOCK_STREAM)
+
+                if results:
+                    resolved_ip = results[0][4][0]
+                    from netaddr import IPAddress as _IPAddr
+                    addr = _IPAddr(resolved_ip)
+                    in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
+                    if not in_scope:
+                        _log.warning(
+                            "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",
+                            target, resolved_ip, [s.cidr for s in self.scope],
+                        )
+                        return False
+                    return True
+            except (_socket.gaierror, TimeoutError, Exception):
+                pass
+
+            # If DNS resolution failed (offline test lab / local dev): allow ONLY if explicitly declared in targets/dc/domain
+            if target in explicit_hosts:
+                return True
+
+            return False
 
     def check(self, ip: str) -> bool:
         """Alias for is_in_scope - used by guardrail consumers."""

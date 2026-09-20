@@ -124,7 +124,7 @@ Services registered by name:
 | `registry`   | ModuleRegistry         | Lazily populated by loader   |
 | `engine`     | AresEngine             | Core orchestrator            |
 | `db`         | AresDatabase           | SQLite async                 |
-| `vault`      | CredentialVault        | Fernet-encrypted             |
+| `vault`      | CredentialVault        | AES-256-GCM encrypted          |
 | `telemetry`  | TelemetryCollector     | In-process metrics           |
 | `cluster`    | ClusterController      | Redis or in-process queue    |
 | `guardrail`  | CampaignGuardrail      | Scope + safety enforcement   |
@@ -299,7 +299,7 @@ OperatorSession
 **Compromise level never downgrades.** Once `domain_admin`, always `domain_admin`.
 
 Persistence via `CheckpointManager`:
-- Fernet-encrypted `.ares_ckpt` files
+- AES-256-GCM encrypted `.ares_ckpt` files
 - Plaintext secrets never written to disk
 - `save(state)` → encrypted JSON
 - `load(campaign_id)` → decrypts + deserializes

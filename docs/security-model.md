@@ -33,9 +33,9 @@ ARES is an offensive framework. This document explains how ARES protects the **o
 
 | Data | Algorithm | Key Source |
 |------|-----------|------------|
-| Credential vault | Fernet (AES-128-CBC + HMAC-SHA256) | `ARES_ENCRYPTION_KEY` |
-| Campaign checkpoints | Fernet | Same key |
-| Evidence files | Fernet | Same key |
+| Credential vault | AES-256-GCM (AEAD) | `ARES_ENCRYPTION_KEY` |
+| Campaign checkpoints | AES-256-GCM (AEAD) | Same key |
+| Evidence files | AES-256-GCM (AEAD) | Same key |
 | API tokens | bcrypt (cost=12) | N/A (one-way hash) |
 
 **Key management:** ARES uses two separate deployment secrets. The deployer or
@@ -52,6 +52,11 @@ export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet;
 Never store these values in version control. Keep `ARES_ENCRYPTION_KEY` stable
 and backed up securely; rotating it requires re-encrypting existing vault and
 stored sensitive records.
+
+> **Note:** ARES uses PBKDF2-HMAC-SHA256 with 600,000 iterations (OWASP 2024)
+> for key derivation. Legacy records encrypted with Fernet (AES-128-CBC +
+> HMAC-SHA256, 100k iterations) are transparently decrypted and re-encrypted
+> with AES-256-GCM on the next write.
 
 ### In Transit
 
@@ -306,13 +311,24 @@ Strict-Transport-Security: max-age=31536000
 
 ## Scope Enforcement
 
-### CampaignGuardrail
+### Kernel Scope Wall (Transport-Level Egress Firewall)
 
-Every module execution passes through `CampaignGuardrail.check()`:
+At the transport layer, ARES deploys an automated **Kernel Scope Wall** (`ares.core.scope_firewall.ScopeFirewall`) that intercepts low-level socket and event loop connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`):
+- **Fail-Closed Egress Blocking**: If an attack module attempts to connect directly to an out-of-scope IP/hostname, the connection is instantly aborted with `ScopeFirewallBlockError` (status 403 Forbidden) and audited.
+- **ContextVar Task Isolation**: Active exclusively within the attack module execution coroutine. Database pools, API requests, and telemetry tasks bypass the firewall in `< 0.00001ms`.
+- **DNS Re-entrancy & Rebinding Defense**: Non-blocking hostname resolution checks resolved IPs against scope CIDRs, with an internal lock preventing recursive interception.
+- **Loopback & Proactor IPC Safety**: Exempts internal loopback (`127.0.0.1`, `::1`) and Windows Proactor event loop named pipes.
+- **Cloud Category Allowlist**: Cloud modules (`MODULE_CATEGORY == "cloud"`) are permitted to access official provider endpoints (`*.microsoftonline.com`, `*.amazonaws.com`, etc.) while blocking untrusted egress.
 
-1. **Sensitive range check**: 169.254.0.0/16 (AWS IMDS), 127.0.0.0/8 (loopback) - always blocked
-2. **Scope CIDR check**: target must be in one of the campaign's declared scope CIDRs
-3. **Dangerous module confirmation**: `ad.dcsync`, `lateral.psexec`, `linux.container` require `confirmed=True`
+### CampaignGuardrail & Pre-Flight Scope Enforcement
+
+Every module execution passes through comprehensive pre-flight verification:
+
+1. **Recursive Parameter Target Scanner**: Recursively extracts all target keys (`target`, `targets`, `dc`, `host`, `rhost`, `rhosts`, `ip`, `server`, `destination`, `url`) before module instantiation.
+2. **Recon Module Scope Enforcement**: Reconnaissance modules are strictly bound to campaign scope CIDRs.
+3. **Sensitive Range Check**: `169.254.0.0/16` (AWS IMDS), `127.0.0.0/8` (loopback) - always blocked for offensive targeting.
+4. **Scope CIDR Check**: Target must be within one of the campaign's declared scope CIDRs.
+5. **Dangerous Module Confirmation**: `ad.dcsync`, `lateral.psexec`, `linux.container` require `confirmed=True`.
 
 ```python
 allowed, reason = guardrail.check("ad.dcsync", "10.0.0.1")
@@ -325,7 +341,7 @@ allowed, _ = guardrail.check("ad.dcsync", "10.0.0.1", confirmed=True)
 
 ### ScopeGuard (NoiseController)
 
-At the network level, `ScopeGuard.assert_in_scope(target)` is called in `BaseModule.before_request()` before every network call. Raises `ScopeError` (which is `ABORT` action - never retried).
+At the module level, `ScopeGuard.assert_in_scope(target)` is called in `BaseModule.before_request()` before individual requests, raising `ScopeError` (aborting immediately without retry).
 
 ---
 

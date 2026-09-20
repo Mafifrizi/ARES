@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import urllib.parse
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -19,12 +20,13 @@ from pydantic import BaseModel
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.context import ExecutionContext
-from ares.core.errors import AresError, NetworkError
+from ares.core.errors import AresError, NetworkError, ScopeError, ScopeFirewallBlockError
 from ares.core.logger import audit, setup_logger
 from ares.core.noise import NoiseController
 from ares.core.notifier import build_notifier_from_settings
 from ares.core.plugin.loader import ModuleRegistry, PluginLoader
 from ares.core.runtime_state import CampaignRuntimeState, CampaignRuntimeStateStore
+from ares.core.scope_firewall import scope_firewall_guard
 from ares.core.validator import FindingValidator, ValidationResult, build_default_validator
 
 from ares.core.execution_admission import (
@@ -59,6 +61,7 @@ MODULE_OUTCOMES = (
     "network_error",
     "unsupported",
     "module_error",
+    "scope_firewall_blocked",
 )
 _SUCCESSFUL_MODULE_OUTCOMES = {
     "modulestatus.done",
@@ -72,6 +75,63 @@ _SUCCESSFUL_MODULE_OUTCOMES = {
 _SECRET_ERROR_PATTERN = re.compile(
     r"(?i)\b(password|passwd|secret|token|api[_-]?key|nt_hash|lm_hash|krbtgt_hash)\b\s*([:=])\s*([^\s,;]+)"
 )
+
+_TARGET_KEYS = frozenset(
+    {
+        "target",
+        "targets",
+        "dc",
+        "host",
+        "hosts",
+        "rhost",
+        "rhosts",
+        "ip",
+        "ips",
+        "server",
+        "servers",
+        "destination",
+        "destinations",
+        "url",
+        "urls",
+    }
+)
+
+
+def _extract_all_targets(params: dict[str, Any]) -> list[str]:
+    """Recursively extract all target IPs, hostnames, and URLs from module parameters."""
+    extracted: set[str] = set()
+
+    def _inspect(obj: Any, parent_key: str = "") -> None:
+        if not obj:
+            return
+        if isinstance(obj, str):
+            if parent_key.lower() in _TARGET_KEYS:
+                for part in re.split(r"[,\s]+", obj.strip()):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if "://" in part:
+                        try:
+                            parsed = urllib.parse.urlparse(part)
+                            if parsed.hostname:
+                                extracted.add(parsed.hostname)
+                        except Exception:
+                            pass
+                    elif ":" in part and not part.startswith("[") and part.count(":") == 1:
+                        host = part.split(":", 1)[0].strip()
+                        if host:
+                            extracted.add(host)
+                    else:
+                        extracted.add(part)
+        elif isinstance(obj, (list, tuple, set)):
+            for item in obj:
+                _inspect(item, parent_key)
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                _inspect(v, str(k))
+
+    _inspect(params, "")
+    return sorted(extracted)
 
 
 def module_outcome_value(value: Any) -> str:
@@ -525,27 +585,29 @@ class AresEngine:
             )
 
         # ── Scope pre-check - enforce before any module code runs ────────
-        # Cloud/reporting modules use API credentials, not host IPs - skip scope check
-        _NO_SCOPE_CATEGORIES = {"cloud", "reporting", "recon"}
-        _target = params.get("target", "") or params.get("dc", "") or params.get("host", "")
-        _module_category = (
-            self.registry.get(module_id) or type("", (), {"MODULE_CATEGORY": ""})
-        ).MODULE_CATEGORY
-        if _target and _module_category not in _NO_SCOPE_CATEGORIES:
-            if not campaign.is_in_scope(_target):
-                from ares.core.errors import ScopeError
+        # Cloud/reporting modules use API credentials, not host IPs - skip host pre-check
+        _NO_SCOPE_CATEGORIES = {"cloud", "reporting"}
+        _module_cls = self.registry.get(module_id)
+        _module_category = str(getattr(_module_cls, "MODULE_CATEGORY", "") or "").lower().strip()
+        if _module_category not in _NO_SCOPE_CATEGORIES:
+            candidate_targets = _extract_all_targets(params)
+            fallback_target = params.get("target", "") or params.get("dc", "") or params.get("host", "")
+            if fallback_target and str(fallback_target) not in candidate_targets:
+                candidate_targets.append(str(fallback_target))
 
-                audit(
-                    "module_scope_violation",
-                    actor=campaign.operator,
-                    detail=f"module={module_id} target={_target!r} not in scope",
-                )
-                return EngineModuleResult(
-                    module_id=module_id,
-                    status=ModuleStatus.FAILED,
-                    error=f"Target {_target!r} is not in campaign scope {[s.cidr for s in campaign.scope]}. "
-                    "Add the target CIDR to scope or use a different target.",
-                )
+            for cand in candidate_targets:
+                if not campaign.is_in_scope(cand):
+                    audit(
+                        "module_scope_violation",
+                        actor=campaign.operator,
+                        detail=f"module={module_id} target={cand!r} not in scope",
+                    )
+                    return EngineModuleResult(
+                        module_id=module_id,
+                        status=ModuleStatus.FAILED,
+                        error=f"Target {cand!r} is not in campaign scope {[s.cidr for s in campaign.scope]}. "
+                        "Add the target CIDR to scope or use a different target.",
+                    )
 
         cls = self.registry.get(module_id)
         noise = NoiseController(campaign)
@@ -584,56 +646,63 @@ class AresEngine:
                 telemetry=runtime_state.telemetry,
             )
 
-            # ── validate() before execute() ───────────────────────────
-            # Always call validate() first - lets modules fail fast with
-            # informative errors before any network activity happens.
-            # skip_validation=True is an escape hatch for tests / retries.
-            if not skip_validation:
-                try:
-                    await asyncio.wait_for(
-                        instance.validate(ctx),
-                        timeout=10,
-                    )
-                except asyncio.TimeoutError:
-                    duration_ms = round((time.monotonic() - t0) * 1000, 2)
-                    audit(
-                        "module_validation_failed",
-                        actor=campaign.operator,
-                        detail=f"module={module_id} reason=timeout",
-                    )
-                    return EngineModuleResult(
-                        module_id=module_id,
-                        status=ModuleStatus.FAILED,
-                        error=f"Module '{module_id}' validate() timed out (>10s)",
-                        duration_ms=duration_ms,
-                    )
-                except Exception as val_exc:
-                    duration_ms = round((time.monotonic() - t0) * 1000, 2)
-                    err_msg = str(val_exc)
-                    logger.warning(
-                        "engine_module_validation_failed", module_id=module_id, error=err_msg[:200]
-                    )
-                    audit(
-                        "module_validation_failed",
-                        actor=campaign.operator,
-                        detail=f"module={module_id} error={err_msg[:100]}",
-                    )
-                    return EngineModuleResult(
-                        module_id=module_id,
-                        status=ModuleStatus.FAILED,
-                        error=f"Validation failed: {err_msg[:300]}",
-                        duration_ms=duration_ms,
-                    )
-            # ── end validate ───────────────────────────────────────────
+            async with scope_firewall_guard(
+                campaign=campaign,
+                module_id=module_id,
+                module_category=_module_category,
+            ):
+                # ── validate() before execute() ───────────────────────────
+                # Always call validate() first - lets modules fail fast with
+                # informative errors before any network activity happens.
+                # skip_validation=True is an escape hatch for tests / retries.
+                if not skip_validation:
+                    try:
+                        await asyncio.wait_for(
+                            instance.validate(ctx),
+                            timeout=10,
+                        )
+                    except asyncio.TimeoutError:
+                        duration_ms = round((time.monotonic() - t0) * 1000, 2)
+                        audit(
+                            "module_validation_failed",
+                            actor=campaign.operator,
+                            detail=f"module={module_id} reason=timeout",
+                        )
+                        return EngineModuleResult(
+                            module_id=module_id,
+                            status=ModuleStatus.FAILED,
+                            error=f"Module '{module_id}' validate() timed out (>10s)",
+                            duration_ms=duration_ms,
+                        )
+                    except ScopeFirewallBlockError:
+                        raise
+                    except Exception as val_exc:
+                        duration_ms = round((time.monotonic() - t0) * 1000, 2)
+                        err_msg = str(val_exc)
+                        logger.warning(
+                            "engine_module_validation_failed", module_id=module_id, error=err_msg[:200]
+                        )
+                        audit(
+                            "module_validation_failed",
+                            actor=campaign.operator,
+                            detail=f"module={module_id} error={err_msg[:100]}",
+                        )
+                        return EngineModuleResult(
+                            module_id=module_id,
+                            status=ModuleStatus.FAILED,
+                            error=f"Validation failed: {err_msg[:300]}",
+                            duration_ms=duration_ms,
+                        )
+                # ── end validate ───────────────────────────────────────────
 
-            # Call execute(ctx) - preferred interface.
-            # Falls back to run(**ctx.params) via BaseModule.execute() default
-            # for modules that haven't migrated yet.
-            mark_effect_started(admitted_context)
-            execute_coro = instance.execute(ctx)
-            module_result = await asyncio.wait_for(execute_coro, timeout=effective_timeout)
-            findings = module_result.findings
-            raw = module_result.raw
+                # Call execute(ctx) - preferred interface.
+                # Falls back to run(**ctx.params) via BaseModule.execute() default
+                # for modules that haven't migrated yet.
+                mark_effect_started(admitted_context)
+                execute_coro = instance.execute(ctx)
+                module_result = await asyncio.wait_for(execute_coro, timeout=effective_timeout)
+                findings = module_result.findings
+                raw = module_result.raw
         except asyncio.TimeoutError:
             logger.error(
                 "engine_timed_out_s",
@@ -642,6 +711,21 @@ class AresEngine:
             )
             _last_exc: Exception = asyncio.TimeoutError(f"Timed out after {effective_timeout}s")
             _action = AresError.RETRY
+        except ScopeFirewallBlockError as exc:
+            audit(
+                "scope_firewall_egress_blocked",
+                actor=campaign.operator,
+                detail=f"module={module_id} target={exc.target_host} port={exc.target_port}",
+            )
+            logger.error(
+                "scope_firewall_egress_blocked",
+                module_id=module_id,
+                target=exc.target_host,
+                port=exc.target_port,
+                scope=exc.scope_cidrs,
+            )
+            _last_exc = exc
+            _action = AresError.SKIP
         except AresError as exc:
             logger.warning("engine_areserror", module_id=module_id, action=exc.action, exc=exc)
             _last_exc = exc
@@ -660,7 +744,11 @@ class AresEngine:
 
         if _last_exc is not None:
             status = ModuleStatus.TIMEOUT if _was_timeout else ModuleStatus.FAILED
-            typed_outcome = "network_error" if isinstance(_last_exc, NetworkError) else ""
+            typed_outcome = (
+                "scope_firewall_blocked"
+                if isinstance(_last_exc, ScopeFirewallBlockError)
+                else ("network_error" if isinstance(_last_exc, NetworkError) else "")
+            )
             typed_message = (
                 redact_error_message(str(_last_exc)[:300]) or "" if typed_outcome else ""
             )

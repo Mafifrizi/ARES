@@ -76,7 +76,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
 +------------------------------+        +---------------------------------+
 |      ATTACK MODULES          |        |        PERSISTENCE LAYER        |
 |  64 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
-|  81 Capability Bindings      |        |  Fernet Vault Encryption        |
+|  81 Capability Bindings      |        |  AES-256-GCM Vault Encryption   |
 |  Safe Preview & Execution    |        |  Alembic Migrations (Head 0011) |
 +------------------------------+        +---------------------------------+
 ```

@@ -16,11 +16,12 @@ Checkpoint includes:
     - Attack timeline events
 
 Storage:
-    ~/.ares/checkpoints/<campaign_id>/<timestamp>.ares_ckpt  (JSON+Fernet)
+    ~/.ares/checkpoints/<campaign_id>/<timestamp>.ares_ckpt  (AES-256-GCM)
     ~/.ares/checkpoints/<campaign_id>/latest -> symlink to newest
 
 Security:
-    All checkpoints are Fernet-encrypted with the operator's key.
+    All checkpoints are AES-256-GCM encrypted with the operator's key.
+    Legacy Fernet checkpoints are transparently decrypted on load.
     Plaintext secrets never touch disk.
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ares.core.logger import audit, get_logger
 
@@ -116,7 +118,8 @@ class CheckpointData:
 class CheckpointManager:
     """
     Saves and restores campaign state.
-    Encrypts all data at rest.
+    Encrypts all data at rest using AES-256-GCM.
+    Legacy Fernet checkpoints are transparently decrypted on load.
 
     Usage:
         mgr = CheckpointManager(encryption_key)
@@ -125,8 +128,14 @@ class CheckpointManager:
     """
 
     # Fixed salt for checkpoint key derivation - deterministic so same key always
-    # produces same Fernet key across restarts (no salt storage required).
+    # produces same derived key across restarts (no salt storage required).
     _KDF_SALT = b"ares-checkpoint-manager-v1-salt"
+    _KDF_SALT_V2 = b"ares-checkpoint-manager-v2-gcm"
+
+    # AES-GCM nonce length
+    _GCM_NONCE_LEN = 12
+    # Magic header for v2 checkpoint files (4 bytes)
+    _V2_MAGIC = b"ACV2"
 
     def __init__(self, encryption_key: bytes | str) -> None:
         import base64
@@ -141,16 +150,39 @@ class CheckpointManager:
         else:
             raise TypeError(f"encryption_key must be str or bytes, got {type(encryption_key)}")
 
-        # PBKDF2-HMAC-SHA256 - consistent with security.DataEncryptor (100k iterations)
-        kdf = PBKDF2HMAC(
+        # ── v2 AES-256-GCM key derivation (600k iterations) ──
+        kdf_v2 = PBKDF2HMAC(
+            algorithm=_hashes.SHA256(),
+            length=32,
+            salt=self._KDF_SALT_V2,
+            iterations=600_000,
+        )
+        self._aesgcm = AESGCM(kdf_v2.derive(key_bytes))
+
+        # ── Legacy Fernet key (100k iterations) for backward-compat decrypt ──
+        kdf_legacy = PBKDF2HMAC(
             algorithm=_hashes.SHA256(),
             length=32,
             salt=self._KDF_SALT,
             iterations=100_000,
         )
-        derived = kdf.derive(key_bytes)
-        self._fernet = Fernet(base64.urlsafe_b64encode(derived))
+        derived_legacy = kdf_legacy.derive(key_bytes)
+        self._fernet = Fernet(base64.urlsafe_b64encode(derived_legacy))
         CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _decrypt_checkpoint(self, data: bytes) -> bytes:
+        """
+        Decrypt a checkpoint blob.
+        Tries v2 AES-256-GCM first (magic header 'ACV2'), falls back to Fernet.
+        """
+        if data[:len(self._V2_MAGIC)] == self._V2_MAGIC:
+            nonce_start = len(self._V2_MAGIC)
+            nonce_end   = nonce_start + self._GCM_NONCE_LEN
+            nonce = data[nonce_start:nonce_end]
+            ct    = data[nonce_end:]
+            return self._aesgcm.decrypt(nonce, ct, None)
+        # Legacy Fernet fallback
+        return self._fernet.decrypt(data)
 
     def save(self, data: CheckpointData, notes: str = "") -> Path:
         """
@@ -163,7 +195,9 @@ class CheckpointManager:
         data.manifest.created_at    = time.time()
         data.manifest.notes = notes
         raw      = json.dumps(data.to_dict(), default=str).encode()
-        encrypted = self._fernet.encrypt(raw)
+        nonce    = os.urandom(self._GCM_NONCE_LEN)
+        ct       = self._aesgcm.encrypt(nonce, raw, None)
+        encrypted = self._V2_MAGIC + nonce + ct
 
         campaign_dir = CHECKPOINT_DIR / (data.campaign_id or data.manifest.campaign_id)
         campaign_dir.mkdir(parents=True, exist_ok=True)
@@ -226,7 +260,7 @@ class CheckpointManager:
             path = matches[0]
 
         encrypted = path.read_bytes()
-        raw       = self._fernet.decrypt(encrypted)
+        raw       = self._decrypt_checkpoint(encrypted)
         d         = json.loads(raw)
 
         manifest = CheckpointManifest(**d["manifest"])
@@ -267,7 +301,7 @@ class CheckpointManager:
         for _, f in sorted(files, key=lambda t: -t[0]):
             try:
                 enc = f.read_bytes()
-                raw = self._fernet.decrypt(enc)
+                raw = self._decrypt_checkpoint(enc)
                 d   = json.loads(raw)
                 results.append(d["manifest"])
             except (ValueError, KeyError, OSError):

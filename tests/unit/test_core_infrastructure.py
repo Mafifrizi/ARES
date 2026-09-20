@@ -491,7 +491,7 @@ class TestSecurity:
         enc = DataEncryptor(key="test-key-32-chars-padded-xxxxxxx")
         e1 = enc.encrypt("same data")
         e2 = enc.encrypt("same data")
-        assert e1 != e2  # Fernet uses random IV
+        assert e1 != e2  # AES-256-GCM uses random nonce
 
     def test_hash_and_verify_password(self):
         from ares.core.security import hash_password, verify_password

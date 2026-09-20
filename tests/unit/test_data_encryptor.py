@@ -47,15 +47,16 @@ class TestBasicEncryptDecrypt:
         enc = make_enc()
         assert enc.decrypt(None) is None
 
-    def test_encrypted_value_has_salt_prefix(self):
+    def test_encrypted_value_has_v2_prefix(self):
         enc = make_enc()
         token = enc.encrypt("secret")
         assert token is not None
-        assert len(token) > 33
-        assert token[32] == ":"
+        assert token.startswith("v2:")
+        parts = token[3:].split(":", 2)
+        assert len(parts) == 3
 
     def test_two_encryptions_produce_different_ciphertext(self):
-        """Per-record random salt means identical plaintexts encrypt differently."""
+        """AES-256-GCM uses random nonce, so identical plaintexts encrypt differently."""
         enc = make_enc()
         t1 = enc.encrypt("same")
         t2 = enc.encrypt("same")
@@ -197,12 +198,12 @@ class TestLegacyFormat:
             assert _get_legacy_salt() == custom_salt
 
     def test_new_format_value_decrypts_correctly_after_roundtrip(self):
-        """Values encrypted with v6 (new format) must decrypt correctly."""
+        """Values encrypted with v2 (AES-256-GCM) must decrypt correctly."""
         enc = DataEncryptor("test-key-32chars-minimum-required")
-        secret = "v6-encrypted-secret"
+        secret = "v2-encrypted-secret"
         token = enc.encrypt(secret)
-        # Confirm it's new format (has 33-char salt prefix)
-        assert token is not None and len(token) > 33 and token[32] == ":"
+        # Confirm it's v2 format (starts with 'v2:')
+        assert token is not None and token.startswith("v2:")
         assert enc.decrypt(token) == secret
 
 
@@ -254,13 +255,19 @@ class TestExceptionNarrowing:
     def test_unexpected_exception_bubbles_up(self):
         """Exceptions NOT in the catch list must bubble up (not silently swallowed)."""
         enc = make_enc()
-        fernet_body = self._canonical_fernet_body(enc)
+        # Create a v2 token and corrupt it in a way that triggers MemoryError
+        # through the _derive_aesgcm path
+        token = enc.encrypt("fixture")
+        assert token is not None
 
-        with patch.object(enc, '_derive_fernet') as mock_fernet:
-            mock_fernet.return_value.decrypt.side_effect = MemoryError("OOM")
-            salt_hex = os.urandom(16).hex()
+        with patch.object(enc, '_derive_aesgcm') as mock_gcm:
+            mock_gcm.return_value.decrypt.side_effect = MemoryError("OOM")
+            # Use a different salt to force _derive_aesgcm call
+            parts = token.split(":", 3)
+            parts[1] = os.urandom(16).hex()  # different salt triggers derivation
+            tampered_token = ":".join(parts)
             with pytest.raises(MemoryError):
-                enc.decrypt(f"{salt_hex}:{fernet_body}")
+                enc.decrypt(tampered_token)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -281,3 +288,200 @@ class TestIsolation:
         enc2 = DataEncryptor(key)
         token = enc1.encrypt("cross-instance")
         assert enc2.decrypt(token) == "cross-instance"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AES-256-GCM Upgrade Tests (v2 format)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestAES256GCMUpgrade:
+    """Tests for the Fernet → AES-256-GCM upgrade."""
+
+    def test_new_encrypt_produces_v2_format(self):
+        """New encrypt() output must start with 'v2:' prefix."""
+        enc = make_enc()
+        token = enc.encrypt("hello-gcm")
+        assert token is not None
+        assert token.startswith("v2:")
+        parts = token[3:].split(":", 2)
+        assert len(parts) == 3, "v2 ciphertext must have salt:nonce:ct_b64"
+        salt_hex, nonce_hex, ct_b64 = parts
+        assert len(salt_hex) == 32, "salt must be 32 hex chars (16 bytes)"
+        assert len(nonce_hex) == 24, "nonce must be 24 hex chars (12 bytes)"
+        assert len(ct_b64) > 0, "ciphertext must be non-empty"
+
+    def test_v2_roundtrip(self):
+        enc = make_enc()
+        assert enc.decrypt(enc.encrypt("v2-roundtrip")) == "v2-roundtrip"
+
+    def test_v2_roundtrip_empty_string(self):
+        enc = make_enc()
+        assert enc.decrypt(enc.encrypt("")) == ""
+
+    def test_v2_roundtrip_unicode(self):
+        enc = make_enc()
+        value = "P@ssw0rd! - привет - 中文 - emoji 🔴"
+        assert enc.decrypt(enc.encrypt(value)) == value
+
+    def test_v2_roundtrip_long_string(self):
+        enc = make_enc()
+        value = "x" * 10_000
+        assert enc.decrypt(enc.encrypt(value)) == value
+
+    def test_v2_two_encryptions_differ(self):
+        """Each v2 encryption uses a random nonce, so ciphertexts differ."""
+        enc = make_enc()
+        t1 = enc.encrypt("same")
+        t2 = enc.encrypt("same")
+        assert t1 != t2
+
+    def test_v2_tampered_nonce_returns_none(self):
+        enc = make_enc()
+        token = enc.encrypt("secret")
+        assert token is not None
+        # Corrupt the nonce (chars 36-59 in the v2:salt:nonce:ct format)
+        parts = token.split(":", 3)
+        parts[2] = "0" * 24  # replace nonce with zeros
+        tampered = ":".join(parts)
+        assert enc.decrypt(tampered) is None
+
+    def test_v2_tampered_ciphertext_returns_none(self):
+        enc = make_enc()
+        token = enc.encrypt("secret")
+        assert token is not None
+        # Flip a character in the base64 ciphertext
+        parts = token.split(":", 3)
+        ct = parts[3]
+        flipped = ct[:-5] + ("X" if ct[-5] != "X" else "Y") + ct[-4:]
+        parts[3] = flipped
+        tampered = ":".join(parts)
+        assert enc.decrypt(tampered) is None
+
+    def test_v2_truncated_returns_none(self):
+        enc = make_enc()
+        token = enc.encrypt("secret")
+        assert enc.decrypt(token[:20]) is None
+
+    def test_v2_cross_instance_decryption(self):
+        """Same key, different DataEncryptor instances — v2 cross-decrypt works."""
+        key = "shared-v2-key-32chars-minimum-req!"
+        enc1 = DataEncryptor(key)
+        enc2 = DataEncryptor(key)
+        token = enc1.encrypt("cross-v2")
+        assert enc2.decrypt(token) == "cross-v2"
+
+    def test_v2_aad_binding_roundtrip(self):
+        """AAD-bound ciphertext decrypts with correct AAD."""
+        enc = make_enc()
+        aad = b"cred-id-abc123"
+        token = enc.encrypt("secret-with-aad", aad=aad)
+        assert enc.decrypt(token, aad=aad) == "secret-with-aad"
+
+    def test_v2_aad_mismatch_fails(self):
+        """AAD-bound ciphertext fails with wrong AAD."""
+        enc = make_enc()
+        aad_correct = b"cred-id-abc123"
+        aad_wrong   = b"cred-id-WRONG"
+        token = enc.encrypt("secret-with-aad", aad=aad_correct)
+        assert enc.decrypt(token, aad=aad_wrong) is None
+
+    def test_v2_aad_none_vs_empty_fails(self):
+        """Encrypted with AAD, decrypted without — must fail."""
+        enc = make_enc()
+        token = enc.encrypt("aad-test", aad=b"context")
+        assert enc.decrypt(token, aad=None) is None
+
+    def test_legacy_v6_fernet_still_decrypts(self):
+        """Existing v6 per-salt Fernet ciphertexts must still decrypt."""
+        key = "test-key-32chars-minimum-required"
+        enc = DataEncryptor(key)
+
+        # Manually create a v6-format ciphertext (per-record salt + Fernet)
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.primitives import hashes
+        import base64
+
+        fake_salt = os.urandom(16)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(), length=32,
+            salt=fake_salt, iterations=100_000,
+        )
+        legacy_fernet = Fernet(base64.urlsafe_b64encode(kdf.derive(key.encode())))
+        legacy_token = legacy_fernet.encrypt(b"v6-secret").decode()
+        v6_ciphertext = f"{fake_salt.hex()}:{legacy_token}"
+
+        result = enc.decrypt(v6_ciphertext)
+        assert result == "v6-secret"
+
+    def test_legacy_v5_fernet_still_decrypts(self):
+        """Existing v5 bare Fernet ciphertexts must still decrypt."""
+        key = "test-key-32chars-minimum-required"
+        enc = DataEncryptor(key)
+
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.primitives import hashes
+        import base64
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(), length=32,
+            salt=enc._LEGACY_SALT, iterations=100_000,
+        )
+        legacy_fernet = Fernet(base64.urlsafe_b64encode(kdf.derive(key.encode())))
+        legacy_token = legacy_fernet.encrypt(b"v5-secret").decode()
+
+        # v5 bare token — no salt prefix
+        assert len(legacy_token) <= 32 or legacy_token[32] != ":"
+        result = enc.decrypt(legacy_token)
+        assert result == "v5-secret"
+
+    def test_generate_key_returns_url_safe_string(self):
+        """generate_key() must return a url-safe base64 string."""
+        key = DataEncryptor.generate_key()
+        assert len(key) >= 32
+        # Must not crash as a DataEncryptor passphrase
+        enc = DataEncryptor(key)
+        assert enc.decrypt(enc.encrypt("test-gen-key")) == "test-gen-key"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Vault v2 integration
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestVaultV2:
+    """Verify CredentialVault uses v2 format after upgrade."""
+
+    def test_vault_store_reveal_roundtrip(self):
+        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
+        cred = Credential(username="admin", domain="CORP", cred_type=CredentialType.CLEARTEXT)
+        cid = vault.store(cred, "SuperSecret123!")
+        assert vault.reveal(cid) == "SuperSecret123!"
+
+    def test_vault_stored_secret_is_v2_format(self):
+        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
+        cred = Credential(username="admin", domain="CORP", cred_type=CredentialType.CLEARTEXT)
+        cid = vault.store(cred, "MyPassword!")
+        stored_cred = vault.get(cid)
+        enc_bytes = stored_cred.secret_enc
+        assert enc_bytes.startswith(b"v2:"), "Vault must store in v2 format"
+
+    def test_vault_ephemeral_roundtrip(self):
+        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        vault = CredentialVault(encryption_key=None)
+        cred = Credential(username="guest", cred_type=CredentialType.CLEARTEXT)
+        cid = vault.store(cred, "ephemeral-secret")
+        assert vault.reveal(cid) == "ephemeral-secret"
+
+    def test_vault_mark_cracked_uses_v2(self):
+        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
+        cred = Credential(username="svc", domain="CORP", cred_type=CredentialType.KRB5_TGS)
+        cid = vault.store(cred, "$krb5tgs$hash...")
+        vault.mark_cracked(cid, "CrackedPass1!")
+        assert vault.reveal(cid) == "CrackedPass1!"
+        stored_cred = vault.get(cid)
+        assert stored_cred.secret_enc.startswith(b"v2:")
+

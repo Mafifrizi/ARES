@@ -754,11 +754,12 @@ class TestCredentialVaultPersistence:
             }
         ]
 
-        # Vault B: restore from DB - share salt/fernet for compatibility
+        # Vault B: restore from DB - share salt/ciphers for compatibility
         vault_b = CredentialVault(encryption_key=enc_key)
         vault_b._salt = vault_a._salt
         vault_b._salt_hex = vault_a._salt_hex
         vault_b._fernet = vault_a._fernet
+        vault_b._aesgcm = vault_a._aesgcm
 
         count = vault_b.restore_from_db_records(db_records)
 

@@ -13,6 +13,7 @@ from typing import Any
 
 import bcrypt as _bcrypt
 import jwt
+from cryptography.exceptions import InvalidTag
 from cryptography.fernet import Fernet, InvalidToken
 from jwt.exceptions import InvalidTokenError
 
@@ -165,27 +166,37 @@ def decode_access_token(
 
 # ── Data encryption ───────────────────────────────────────────────────────────
 
+# PBKDF2 iterations: new writes use 600k (OWASP 2024); legacy Fernet records
+# still decode with their original 100k iterations.
+_PBKDF2_ITERATIONS_V2 = 600_000
+_PBKDF2_ITERATIONS_LEGACY = 100_000
+
+# Ciphertext format prefix for AES-256-GCM records (v2 upgrade).
+_V2_PREFIX = "v2:"
+
 
 class DataEncryptor:
     """
-    Fernet symmetric encryption for sensitive campaign data (credentials, loot).
+    AES-256-GCM (AEAD) symmetric encryption for sensitive campaign data.
 
-    Key derivation: PBKDF2-HMAC-SHA256 (100,000 iterations).
+    Upgrade from Fernet (AES-128-CBC + HMAC-SHA256) to AES-256-GCM:
+        - 256-bit key (vs 128-bit)
+        - AEAD mode with optional associated-data binding
+        - PBKDF2-HMAC-SHA256 with 600,000 iterations (OWASP 2024)
 
-    Salt strategy (CRIT-SEC-02 fix):
-        A 16-byte random salt is generated per DataEncryptor instance.
-        Every ciphertext is stored as "<salt_hex_32chars>:<fernet_token>".
-        On decrypt(), the salt is parsed from the prefix so the correct
-        derived key is always used - no need to store salt separately in DB.
+    Ciphertext format (v2):
+        "v2:<salt_hex_32>:<nonce_hex_24>:<ciphertext_b64>"
+        - salt:   16-byte random salt for PBKDF2 derivation (32 hex chars)
+        - nonce:  12-byte random nonce for AES-GCM (24 hex chars)
+        - ciphertext: base64-encoded AESGCM output (includes GCM auth tag)
 
-        This means each encrypted value has its own unique salt, eliminating
-        the fixed-salt offline brute-force risk entirely. Decryption works
-        across restarts as long as ARES_ENCRYPTION_KEY stays the same.
+    Backward compatibility (three-path decrypt):
+        1. "v2:..." → AES-256-GCM (new)
+        2. "<32-hex>:<fernet-token>" → Fernet per-record salt (v6)
+        3. Bare Fernet token → Fernet legacy fixed-salt (v5)
 
-    Legacy compatibility:
-        Values without a 32-char hex prefix are decrypted using the old
-        fixed salt as a fallback, keeping existing DB records readable.
-        They will be re-encrypted with a random salt on the next write.
+    All new writes use v2 format. Legacy records are re-encrypted on next write.
+    Decryption works across restarts as long as ARES_ENCRYPTION_KEY stays the same.
     """
 
     # Legacy fixed salt - ONLY for decrypting old records written before per-record salts.
@@ -196,17 +207,52 @@ class DataEncryptor:
     _LEGACY_SALT: bytes = _get_legacy_salt()
 
     def __init__(self, key: str) -> None:
+        import base64
         import os as _os
+
+        from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         if not key or len(key) < 32:
             raise ValueError("ARES_ENCRYPTION_KEY must be provided and at least 32 characters long")
 
         self._raw_key = key.encode()
+
+        # ── v2 AES-256-GCM key derivation (600k iterations) ──
         self._salt = _os.urandom(16)  # fresh random salt per instance
-        self._salt_hex = self._salt.hex()  # 32 hex chars, used as ciphertext prefix
-        self._fernet = self._derive_fernet(self._salt)
+        self._salt_hex = self._salt.hex()  # 32 hex chars
+        kdf = PBKDF2HMAC(
+            algorithm=_hashes.SHA256(),
+            length=32,
+            salt=self._salt,
+            iterations=_PBKDF2_ITERATIONS_V2,
+        )
+        self._aesgcm = AESGCM(kdf.derive(self._raw_key))
+        self._gcm_cache: dict[bytes, AESGCM] = {self._salt: self._aesgcm}
+        self._fernet_cache: dict[bytes, Fernet] = {}
+
+        # ── Legacy Fernet cached lazily for backward-compat decryption only ──
+        self._cached_fernet: Fernet | None = None
+
+    @property
+    def _fernet(self) -> Fernet:
+        """Derive a legacy Fernet key from instance salt lazily (100k iter)."""
+        if self._cached_fernet is None:
+            self._cached_fernet = self._derive_fernet(self._salt)
+        return self._cached_fernet
+
+    @_fernet.setter
+    def _fernet(self, val: Fernet) -> None:
+        self._cached_fernet = val
 
     def _derive_fernet(self, salt: bytes) -> Fernet:
+        """Derive a legacy Fernet key from salt (100k iterations). Decrypt-only."""
+        if not hasattr(self, "_fernet_cache"):
+            self._fernet_cache = {}
+        if salt in self._fernet_cache:
+            return self._fernet_cache[salt]
+
         import base64
 
         from cryptography.hazmat.primitives import hashes as _hashes
@@ -216,9 +262,34 @@ class DataEncryptor:
             algorithm=_hashes.SHA256(),
             length=32,
             salt=salt,
-            iterations=100_000,
+            iterations=_PBKDF2_ITERATIONS_LEGACY,
         )
-        return Fernet(base64.urlsafe_b64encode(kdf.derive(self._raw_key)))
+        cipher = Fernet(base64.urlsafe_b64encode(kdf.derive(self._raw_key)))
+        if len(self._fernet_cache) < 256:
+            self._fernet_cache[salt] = cipher
+        return cipher
+
+    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":
+        """Derive an AES-256-GCM key from salt (600k iterations)."""
+        if not hasattr(self, "_gcm_cache"):
+            self._gcm_cache = {}
+        if salt in self._gcm_cache:
+            return self._gcm_cache[salt]
+
+        from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+        kdf = PBKDF2HMAC(
+            algorithm=_hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=_PBKDF2_ITERATIONS_V2,
+        )
+        cipher = AESGCM(kdf.derive(self._raw_key))
+        if len(self._gcm_cache) < 256:
+            self._gcm_cache[salt] = cipher
+        return cipher
 
     @staticmethod
     def _is_canonical_fernet_token(token: str) -> bool:
@@ -232,42 +303,75 @@ class DataEncryptor:
             return False
         return base64.urlsafe_b64encode(decoded) == raw
 
-    def encrypt(self, data: str | None) -> str | None:
-        """Encrypt value. Returns '<salt_hex>:<fernet_token>' or None."""
+    def encrypt(self, data: str | None, aad: bytes | None = None) -> str | None:
+        """
+        Encrypt value using AES-256-GCM.
+
+        Returns 'v2:<salt_hex>:<nonce_hex>:<ciphertext_b64>' or None.
+        Optional *aad* binds the ciphertext to a context (e.g. credential ID).
+        """
+        import base64
+        import os as _os
+
         if data is None:
             return None
-        token = self._fernet.encrypt(data.encode()).decode()
-        return f"{self._salt_hex}:{token}"
+        nonce = _os.urandom(12)
+        ct = self._aesgcm.encrypt(nonce, data.encode(), aad)
+        ct_b64 = base64.urlsafe_b64encode(ct).decode()
+        return f"{_V2_PREFIX}{self._salt_hex}:{nonce.hex()}:{ct_b64}"
 
-    def decrypt(self, token: str | None) -> str | None:
+    def decrypt(self, token: str | None, aad: bytes | None = None) -> str | None:
         """
-        Decrypt a value from encrypt().
-        Handles new '<salt_hex>:<token>' format and legacy fixed-salt format.
+        Three-path decrypt dispatcher:
+          1. 'v2:...' → AES-256-GCM (new)
+          2. '<32-hex>:<fernet-token>' → Fernet per-record salt (v6)
+          3. Bare Fernet token → Fernet legacy fixed-salt (v5)
+
+        Optional *aad* must match what was used during encrypt() for v2 records.
         """
+        import base64
+
         if token is None:
             return None
         try:
-            # New format: first 32 chars = salt hex, char 33 = ':', rest = fernet token
+            # ── Path 1: v2 AES-256-GCM ──
+            if token.startswith(_V2_PREFIX):
+                body = token[len(_V2_PREFIX):]
+                parts = body.split(":", 2)
+                if len(parts) != 3:
+                    raise ValueError("Malformed v2 ciphertext")
+                salt_hex, nonce_hex, ct_b64 = parts
+                salt = bytes.fromhex(salt_hex)
+                nonce = bytes.fromhex(nonce_hex)
+                ct = base64.b64decode(ct_b64, altchars=b"-_", validate=True)
+                aesgcm = self._derive_aesgcm(salt)
+                return aesgcm.decrypt(nonce, ct, aad).decode()
+
+            # ── Path 2: Fernet per-record salt (v6) ──
             if len(token) > 33 and token[32] == ":":
                 salt = bytes.fromhex(token[:32])
                 raw_fernet_token = token[33:]
                 if not self._is_canonical_fernet_token(raw_fernet_token):
                     raise ValueError("Invalid Fernet token encoding")
                 fernet_token = raw_fernet_token.encode()
-                return self._derive_fernet(salt).decrypt(fernet_token).decode()
+                result = self._derive_fernet(salt).decrypt(fernet_token).decode()
+                logger.info(
+                    "[security] Decrypted v6 Fernet ciphertext - will re-encrypt as v2 on next write"
+                )
+                return result
 
-            # Legacy fallback: no prefix - use old fixed salt for pre-existing DB records
+            # ── Path 3: Fernet legacy fixed-salt (v5) ──
             if not self._is_canonical_fernet_token(token):
                 raise ValueError("Invalid Fernet token encoding")
             result = (
                 self._derive_fernet(self._LEGACY_SALT).decrypt(token.encode()).decode()
             )
             logger.info(
-                "[security] Decrypted legacy ciphertext - will re-encrypt on next write"
+                "[security] Decrypted legacy v5 ciphertext - will re-encrypt as v2 on next write"
             )
             return result
 
-        except (InvalidToken, ValueError, UnicodeDecodeError) as exc:
+        except (InvalidToken, InvalidTag, ValueError, UnicodeDecodeError) as exc:
             logger.error(
                 "[security] Decryption failed - data may be tampered or key mismatch",
                 error=str(exc)[:80],
@@ -276,8 +380,8 @@ class DataEncryptor:
 
     @staticmethod
     def generate_key() -> str:
-        """Generate a new random Fernet key."""
-        return Fernet.generate_key().decode()
+        """Generate a new random encryption key (32 bytes, url-safe base64)."""
+        return secrets.token_urlsafe(32)
 
 
 # ── Input sanitization ────────────────────────────────────────────────────────

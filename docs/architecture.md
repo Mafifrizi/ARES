@@ -56,7 +56,7 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 │                       STATE & INTELLIGENCE                       │
 │  OperatorSession ──► HostState, CompromiseLevel                  │
 │  ArtifactStore   ──► HostArtifact, CredentialArtifact, etc.     │
-│  CredentialVault ──► Fernet-encrypted, scored, deduped           │
+│  CredentialVault ──► AES-256-GCM encrypted, scored, deduped           │
 │  NetworkModel    ──► Graph, pivot routing                        │
 │  ArtifactCorrelationEngine ──► 7 compound attack rules           │
 │  ArtifactIntelEngine ──► auto-queue next modules from artifacts  │
@@ -85,7 +85,7 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 | `campaign.py` | `Campaign`, `Finding`, `ScopeEntry`, `NoiseProfile` |
 | `config.py` | `AresSettings` (Pydantic), `@lru_cache` singleton |
 | `noise.py` | `NoiseController`, `JitterEngine`, `RateLimiter`, `ScopeGuard` |
-| `security.py` | JWT, `DataEncryptor` (Fernet), bcrypt, sanitize_* helpers |
+| `security.py` | JWT, `DataEncryptor` (AES-256-GCM), bcrypt, sanitize_* helpers |
 | `logger.py` | structlog NDJSON, sensitive data masking |
 | `sandbox.py` | `SandboxRunner` - 4-tier module isolation |
 | `chain/chain.py` | `AttackChain`, Kahn's dependency resolver, `ChainAdvisor` |
@@ -263,8 +263,8 @@ HIGH_NOISE modules (psexec, dcsync) are automatically blocked in `stealth` profi
 See [security-model.md](security-model.md) for full details.
 
 Key properties:
-- All credentials encrypted at rest (Fernet)
-- All checkpoints encrypted at rest (Fernet)
+- All credentials encrypted at rest (AES-256-GCM)
+- All checkpoints encrypted at rest (AES-256-GCM)
 - JWT for API authentication
 - ScopeGuard prevents out-of-scope operations
 - CampaignGuardrail requires operator confirmation for HIGH_RISK modules

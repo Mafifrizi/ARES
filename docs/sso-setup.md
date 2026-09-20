@@ -36,14 +36,14 @@ If you click **"Or continue with SSO"** and an inline warning appears:
 
 ### 1. Prerequisite: `ARES_ENCRYPTION_KEY` Environment Variable
 
-ARES enforces application-level encryption for sensitive secrets at rest using the `DataEncryptor` module (Fernet-based: `PBKDF2-HMAC-SHA256` with 100,000 iterations + `AES-128-CBC` + `HMAC-SHA256` with a per-record cryptographically secure random salt). All SAML certificates and OIDC client secrets are encrypted before database persistence.
+ARES enforces application-level encryption for sensitive secrets at rest using the `DataEncryptor` module (`AES-256-GCM` AEAD: `PBKDF2-HMAC-SHA256` with 600,000 iterations + per-record cryptographically secure random 16-byte salt and 12-byte nonce). All SAML certificates and OIDC client secrets are encrypted before database persistence.
 
 The application strictly requires `ARES_ENCRYPTION_KEY` to be **at least 32 characters long**. If unset or shorter than 32 characters, ARES will fail fast at startup with an explicit error.
 
 #### Generate an Encryption Key:
-Run the official Fernet generation command:
+Run either a standard secrets generator or Fernet generation command:
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 *Example output: `16R2yRp-PWlbNT49xq6sZzp39ArxJJ7Tlap1MqYWp3w=`*
 

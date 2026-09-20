@@ -218,11 +218,16 @@ class CredentialScorer:
 class CredentialVault:
     """
     Encrypted in-memory credential vault.
-    All secret values are Fernet-encrypted at rest.
+    All secret values are AES-256-GCM encrypted at rest (v2 format).
+    Legacy Fernet records are transparently decrypted and re-encrypted on next write.
     Use to_db_records() to persist to SQLite.
 
     Thread-safe for async use (single asyncio event loop).
     """
+
+    # PBKDF2 iteration counts
+    _PBKDF2_ITERATIONS_V2 = 600_000
+    _PBKDF2_ITERATIONS_LEGACY = 100_000
 
     # Legacy salt - only for decrypting old credential entries (backward compat)
     # Legacy fixed salt - ONLY for decrypting vault records written before v6.
@@ -234,15 +239,22 @@ class CredentialVault:
         b"ares-credential-vault-v1-salt",
     )
 
+    # v2 ciphertext prefix
+    _V2_PREFIX = "v2:"
+
     def __init__(self, encryption_key: bytes | str | None) -> None:
         import base64, os as _os
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         if encryption_key is None:
             # Auto-generate ephemeral key (in-memory vault, not persisted)
             self._raw_key = None
-            self._fernet  = Fernet(Fernet.generate_key())
+            self._aesgcm = AESGCM(AESGCM.generate_key(bit_length=256))
+            self._salt = _os.urandom(16)
+            self._salt_hex = self._salt.hex()
+            self._fernet = None  # no legacy Fernet for ephemeral vaults
         else:
             self._raw_key = (
                 encryption_key.encode()
@@ -252,15 +264,43 @@ class CredentialVault:
             # Instance-level random salt - used for encrypt(); embedded as prefix in ciphertext
             self._salt     = _os.urandom(16)
             self._salt_hex = self._salt.hex()
-            self._fernet   = self._derive_fernet(self._salt)
+
+            # ── v2 AES-256-GCM key derivation (600k iterations) ──
+            kdf_v2 = PBKDF2HMAC(
+                algorithm=_hashes.SHA256(),
+                length=32,
+                salt=self._salt,
+                iterations=self._PBKDF2_ITERATIONS_V2,
+            )
+            self._aesgcm = AESGCM(kdf_v2.derive(self._raw_key))
+            self._gcm_cache: dict[bytes, AESGCM] = {self._salt: self._aesgcm}
+            self._fernet_cache: dict[bytes, Fernet] = {}
+
+            # ── Legacy Fernet cached lazily for backward-compat decryption only ──
+            self._cached_fernet: Fernet | None = None
 
         self._scorer  = CredentialScorer()
         self._store:  dict[str, Credential] = {}  # id → Credential
         self._secrets = self._store  # alias used by tests
         self._by_fqdn: dict[str, str] = {}         # fqdn → id (dedup)
 
+    @property
+    def _fernet(self) -> Fernet | None:
+        """Derive a legacy Fernet key from instance salt lazily (100k iter)."""
+        if getattr(self, "_cached_fernet", None) is None and self._raw_key is not None:
+            self._cached_fernet = self._derive_fernet(self._salt)
+        return getattr(self, "_cached_fernet", None)
+
+    @_fernet.setter
+    def _fernet(self, val: Fernet | None) -> None:
+        self._cached_fernet = val
+
     def _derive_fernet(self, salt: bytes) -> Fernet:
-        """Derive a Fernet key from self._raw_key + salt."""
+        """Derive a legacy Fernet key from self._raw_key + salt (100k iter). Decrypt-only."""
+        if not hasattr(self, "_fernet_cache"):
+            self._fernet_cache = {}
+        if salt in self._fernet_cache:
+            return self._fernet_cache[salt]
         import base64
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         from cryptography.hazmat.primitives import hashes as _hashes
@@ -270,9 +310,85 @@ class CredentialVault:
             algorithm  = _hashes.SHA256(),
             length     = 32,
             salt       = salt,
-            iterations = 100_000,
+            iterations = self._PBKDF2_ITERATIONS_LEGACY,
         )
-        return Fernet(base64.urlsafe_b64encode(kdf.derive(self._raw_key)))
+        cipher = Fernet(base64.urlsafe_b64encode(kdf.derive(self._raw_key)))
+        if len(self._fernet_cache) < 256:
+            self._fernet_cache[salt] = cipher
+        return cipher
+
+    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":
+        """Derive an AES-256-GCM key from self._raw_key + salt (600k iter)."""
+        if not hasattr(self, "_gcm_cache"):
+            self._gcm_cache = {}
+        if salt in self._gcm_cache:
+            return self._gcm_cache[salt]
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        if self._raw_key is None:
+            raise ValueError("Cannot derive key: vault uses ephemeral key")
+        kdf = PBKDF2HMAC(
+            algorithm  = _hashes.SHA256(),
+            length     = 32,
+            salt       = salt,
+            iterations = self._PBKDF2_ITERATIONS_V2,
+        )
+        cipher = AESGCM(kdf.derive(self._raw_key))
+        if len(self._gcm_cache) < 256:
+            self._gcm_cache[salt] = cipher
+        return cipher
+
+    def _encrypt_secret(self, plaintext: str) -> bytes:
+        """Encrypt a secret using AES-256-GCM. Returns v2-formatted bytes."""
+        import base64
+        import os as _os
+
+        nonce = _os.urandom(12)
+        ct = self._aesgcm.encrypt(nonce, plaintext.encode(), None)
+        ct_b64 = base64.urlsafe_b64encode(ct).decode()
+        return f"{self._V2_PREFIX}{self._salt_hex}:{nonce.hex()}:{ct_b64}".encode()
+
+    def _decrypt_secret(self, raw: bytes) -> str:
+        """
+        Three-path decrypt dispatcher for vault secrets:
+          1. 'v2:...' → AES-256-GCM (new)
+          2. '<32-hex>:<fernet-token>' → Fernet per-record salt (v6)
+          3. Bare Fernet token → Fernet legacy fixed-salt (v5)
+        """
+        import base64
+
+        token_str = raw.decode() if isinstance(raw, bytes) else raw
+
+        # ── Path 1: v2 AES-256-GCM ──
+        if token_str.startswith(self._V2_PREFIX):
+            body = token_str[len(self._V2_PREFIX):]
+            parts = body.split(":", 2)
+            if len(parts) != 3:
+                raise ValueError("Malformed v2 vault ciphertext")
+            salt_hex, nonce_hex, ct_b64 = parts
+            salt = bytes.fromhex(salt_hex)
+            nonce = bytes.fromhex(nonce_hex)
+            ct = base64.b64decode(ct_b64, altchars=b"-_", validate=True)
+            if self._raw_key is not None:
+                aesgcm = self._derive_aesgcm(salt)
+            else:
+                aesgcm = self._aesgcm
+            return aesgcm.decrypt(nonce, ct, None).decode()
+
+        # ── Path 2: Fernet per-record salt (v6) ──
+        if len(token_str) > 33 and token_str[32] == ":":
+            salt = bytes.fromhex(token_str[:32])
+            fernet_token = token_str[33:].encode()
+            return self._derive_fernet(salt).decrypt(fernet_token).decode()
+
+        # ── Path 3: Fernet legacy fixed-salt (v5) / ephemeral ──
+        if self._raw_key is not None:
+            return self._derive_fernet(self._LEGACY_SALT).decrypt(raw).decode()
+        # Ephemeral vault — raw is old-style Fernet from a previous session (shouldn't happen)
+        if self._fernet is not None:
+            return self._fernet.decrypt(raw).decode()
+        raise ValueError("Cannot decrypt: ephemeral vault has no Fernet key")
 
     def store(self, cred: Credential, secret: str) -> str:
         """
@@ -294,21 +410,13 @@ class CredentialVault:
             new_score = self._scorer.score(cred)
             if new_score > existing.score:
                 cred.id         = existing_id
-                if self._raw_key is not None:
-                    _tok = self._fernet.encrypt(secret.encode()).decode()
-                    cred.secret_enc = f"{self._salt_hex}:{_tok}".encode()
-                else:
-                    cred.secret_enc = self._fernet.encrypt(secret.encode())
+                cred.secret_enc = self._encrypt_secret(secret)
                 cred.score      = new_score
                 self._store[existing_id] = cred
                 logger.debug("credential_updated", fqdn=cred.fqdn, score=cred.score)
             return existing_id
 
-        if self._raw_key is not None:
-            token = self._fernet.encrypt(secret.encode()).decode()
-            cred.secret_enc = f"{self._salt_hex}:{token}".encode()
-        else:
-            cred.secret_enc = self._fernet.encrypt(secret.encode())
+        cred.secret_enc = self._encrypt_secret(secret)
         cred.score      = self._scorer.score(cred)
         self._store[cred.id]     = cred
         self._by_fqdn[dedup_key] = cred.id
@@ -384,16 +492,9 @@ class CredentialVault:
         fqdn = cred.fqdn if hasattr(cred, "fqdn") else ""
         audit("credential_revealed", actor="engine", cred_id=cred_id[:8], fqdn=fqdn)
         raw = cred.secret_enc
-        if self._raw_key is not None and raw:
-            token_str = raw.decode() if isinstance(raw, bytes) else raw
-            # New format: <32-char salt hex>:<fernet token>
-            if len(token_str) > 33 and token_str[32] == ":":
-                salt         = bytes.fromhex(token_str[:32])
-                fernet_token = token_str[33:].encode()
-                return self._derive_fernet(salt).decrypt(fernet_token).decode()
-            # Legacy fallback - fixed salt
-            return self._derive_fernet(self._LEGACY_SALT).decrypt(raw).decode()
-        return self._fernet.decrypt(raw).decode()
+        if not raw:
+            raise ValueError(f"Credential {cred_id!r} has no encrypted secret")
+        return self._decrypt_secret(raw)
 
     def mark_validated(self, cred_id: str, target_host: str) -> None:
         """Mark a credential as successfully used on a host."""
@@ -417,11 +518,7 @@ class CredentialVault:
         if not cred:
             return
         cred.cracked    = True
-        if self._raw_key is not None:
-            _tok = self._fernet.encrypt(plaintext.encode()).decode()
-            cred.secret_enc = f"{self._salt_hex}:{_tok}".encode()
-        else:
-            cred.secret_enc = self._fernet.encrypt(plaintext.encode())
+        cred.secret_enc = self._encrypt_secret(plaintext)
         cred.cred_type  = CredentialType.CLEARTEXT
         cred.score      = self._scorer.score(cred)
         logger.info("credential_cracked", fqdn=cred.fqdn, new_score=cred.score)

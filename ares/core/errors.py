@@ -347,10 +347,56 @@ class ScopeError(AresError):
         message: str,
         target: str = "",
         scope_cidrs: list[str] | None = None,
+        module_id: str = "",
+        context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(message, target=target, **kwargs)
+        ctx = dict(context or {})
+        ctx["scope_cidrs"] = scope_cidrs or []
+        super().__init__(message, module_id=module_id, target=target, context=ctx)
         self.scope_cidrs = scope_cidrs or []
+
+
+class ScopeFirewallBlockError(ScopeError):
+    """
+    Direct network socket or transport connection attempt to an out-of-scope host
+    was intercepted and dropped by the ScopeFirewall.
+    Engine ABORTS immediately with an audit event.
+    """
+
+    default_action = AresError.ABORT
+
+    def __init__(
+        self,
+        message: str,
+        target_host: str = "",
+        target_port: int | None = None,
+        module_id: str = "",
+        violation_type: str = "socket_out_of_scope",
+        scope_cidrs: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        ctx = dict(context or {})
+        ctx.update(
+            {
+                "target_host": target_host,
+                "target_port": target_port,
+                "violation_type": violation_type,
+                "scope_cidrs": scope_cidrs or [],
+            }
+        )
+        super().__init__(
+            message,
+            target=target_host,
+            scope_cidrs=scope_cidrs,
+            module_id=module_id,
+            context=ctx,
+        )
+        self.target_host = target_host
+        self.target_port = target_port
+        self.module_id = module_id
+        self.violation_type = violation_type
 
 
 # ── OpSec Errors ───────────────────────────────────────────────────────────────
@@ -465,6 +511,7 @@ HTTP_STATUS_MAP: dict[type, int] = {
     AuthenticationFailed: 401,
     AccountLocked: 423,  # Locked
     ScopeError: 403,
+    ScopeFirewallBlockError: 403,
     HoneypotDetected: 403,
     ModuleTimeoutError: 408,
     ConnectionTimeout: 408,

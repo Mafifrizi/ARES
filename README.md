@@ -43,7 +43,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
  ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
  │   STRICT SCOPE ENCLAVE  │   │  DIRECTED ATTACK ENGINE │   │ ZERO-TRUST ARCHITECTURE │
  │ Fail-closed ScopeGuard  │   │ Computes shortest paths │   │ Memory-only JWT tokens, │
- │ CIDR egress validation  │───│ to Domain Admins & Crown│───│ Fernet encrypted vault, │
+ │ & Kernel Egress Wall    │───│ to Domain Admins & Crown│───│ AES-256-GCM AEAD vault, │
  │ prevents out-of-scope.  │   │ Jewels deterministically│   │ strict HMAC-CSRF checks.│
  └─────────────────────────┘   └─────────────────────────┘   └─────────────────────────┘
                                             │
@@ -58,10 +58,10 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ### Core Value Pillars
 
-1. **Zero-Collateral Scope Governance**: Every campaign runs inside an isolated boundary. Deterministic ScopeGuard validations on every outbound request guarantee fail-closed enforcement so no action touches unapproved IP addresses or subnets.
+1. **Zero-Collateral Scope Governance (Kernel Scope Wall)**: Every campaign executes inside a hardened, isolated boundary. ARES pairs deterministic application-layer ScopeGuard pre-checks with a low-level **Kernel Scope Wall & Egress Network Firewall** that intercepts raw socket connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) at the transport layer. Guarantees fail-closed enforcement so zero offensive packets reach unapproved IP addresses or subnets.
 2. **Goal-Directed Attack Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama) under explicit operator authorization.
 3. **Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
-4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and Fernet-authenticated local vaults (AES-128-CBC + HMAC-SHA256 PBKDF2) protect harvested hashes and sensitive client evidence.
+4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM AEAD encrypted local vaults (PBKDF2-HMAC-SHA256 600k iterations) protect harvested hashes and sensitive client evidence.
 5. **Automated Deliverables Pipeline**: One-click generation of branded, audit-ready compliance deliverables in PDF, HTML, Markdown, and JSON formats. Features automated headless browser PDF rendering on Windows/Linux without external GTK dependencies.
 
 ---
@@ -73,9 +73,9 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 | **Testing Frequency** | Annual / Semi-Annual | Scheduled Daily / Weekly | **Continuous / On-Demand** |
 | **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
 | **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
-| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed App-Layer ScopeGuard** |
+| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed App-Layer ScopeGuard & Kernel Socket Firewall** |
 | **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound & Kerberos Suite** |
-| **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **Fernet Authenticated Vault** |
+| **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Authenticated Vault** |
 | **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |
 | **Delivery Time for Reports** | 1-2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
 | **Deployment Footprint** | External Consultants | Bulky Cloud Agents | **Air-Gapped Local / Self-Hosted** |
@@ -111,7 +111,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
   - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
-  - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level Fernet credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
+  - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level AES-256-GCM credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
   - **HMAC Double-Submit CSRF Protection**: Constant-time verification on all state-mutating requests (`X-ARES-CSRF`).
   - **Cryptographic Brute-Force Shield**: Enforces exponential backoff and IP-based rate limiting on authentication attempts.
 
@@ -143,7 +143,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ### 3. Scoped Campaign & Target Boundary Management
 
-*Zero-collateral target governance enforcing hard CIDR whitelist boundaries and encrypted evidence isolation.*
+*Zero-collateral target governance enforcing hard CIDR whitelist boundaries, transport-level Kernel Scope Wall egress interception, and encrypted evidence isolation.*
 
 <div align="center">
 
@@ -153,12 +153,14 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 </div>
 
-- **The Problem Solved**: Prevents catastrophic out-of-scope scanning and eliminates unencrypted credential files on operator laptops.
+- **The Problem Solved**: Prevents catastrophic out-of-scope scanning, raw socket leakage from attack modules, and unencrypted credential exposure on operator laptops.
 - **Key Capabilities**:
-  - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
+  - **Kernel Scope Wall & Egress Network Firewall**: Transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) enforcing strict fail-closed CIDR boundaries. Features async `ContextVar` task isolation (zero bleed to database pools or web dashboard handlers), anti-re-entrancy DNS protection, loopback/Windows Proactor pipe safeguards, cloud provider allowlists, and recursive parameter scanning.
   - **Hard CIDR Whitelists**: Network-level boundary enforcement. The engine intercepts and drops any request targeting unapproved IP addresses or subnets.
+  - **Recon & Port Scan Scope Enforcement**: Reconnaissance and discovery modules are strictly bound to authorized campaign scope, closing out-of-scope port scanning loopholes.
+  - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
   - **Noise Profiles & Jitter**: Configure engagement throttle levels (`Stealth`, `Normal`, `Aggressive`) with randomized delay distributions.
-  - **Fernet Authenticated Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest using Fernet authenticated cryptography (AES-128-CBC + HMAC-SHA256 with per-record PBKDF2 salt) and masked in all structlog streams.
+  - **AES-256-GCM Authenticated Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest using AES-256-GCM authenticated encryption (AEAD with PBKDF2-HMAC-SHA256 600k iterations and per-record random salt/nonce) and masked in all structlog streams.
   - **Clean Teardown Workflows**: Single-click campaign deletion that securely cleans up all associated database rows, graph vertices, and temporary artifacts.
 
 ---
@@ -421,7 +423,7 @@ flowchart TB
     end
 
     subgraph Core["ARES Core Engine & Governance"]
-        ScopeFirewall["ScopeGuard Enclave<br>(Fail-Closed CIDR & IP Whitelist)"]
+        ScopeFirewall["Kernel Scope Wall & Egress Firewall<br>(Transport Socket Interception & CIDR)"]
         Governor["OPSEC Noise Governor<br>(Adaptive Jitter & Throttling)"]
         Orchestrator["Module Execution Orchestrator<br>(Worker Thread Pool)"]
         AutoPlanner["Goal-Directed Strategy Engine<br>(DAG Heuristics / Planner)"]
@@ -429,7 +431,7 @@ flowchart TB
 
     subgraph Storage["Cryptographic Persistence Layer"]
         DB[(SQLite / PostgreSQL<br>Alembic Versioned)]
-        Vault[(Fernet Encrypted Vault<br>Encrypted Credentials & Hashes)]
+        Vault[(AES-256-GCM Encrypted Vault<br>Encrypted Credentials & Hashes)]
         GraphEngine["Attack Graph DAG Engine<br>(BloodHound Ingest & Shortest Path)"]
     end
 
