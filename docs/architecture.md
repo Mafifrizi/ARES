@@ -85,6 +85,7 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 | `campaign.py` | `Campaign`, `Finding`, `ScopeEntry`, `NoiseProfile` |
 | `config.py` | `AresSettings` (Pydantic), `@lru_cache` singleton |
 | `noise.py` | `NoiseController`, `JitterEngine`, `RateLimiter`, `ScopeGuard` |
+| `scope_firewall.py` | `ScopeFirewall` - transport-level socket & event loop egress firewall |
 | `security.py` | JWT, `DataEncryptor` (AES-256-GCM), bcrypt, sanitize_* helpers |
 | `logger.py` | structlog NDJSON, sensitive data masking |
 | `sandbox.py` | `SandboxRunner` - 4-tier module isolation |
@@ -160,6 +161,7 @@ AresError
 │   ├── SandboxError (skip)
 │   └── WorkerCrashed (requeue)
 ├── ScopeError (ABORT - never retry)
+│   └── ScopeFirewallBlockError (ABORT - intercepted socket egress)
 ├── OpsecError (pause/adjust profile)
 │   ├── DetectionSignal (escalate profile)
 │   └── HoneypotDetected (ABORT campaign)

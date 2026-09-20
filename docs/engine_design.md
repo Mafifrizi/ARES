@@ -26,7 +26,8 @@ AresEngine
  ├─ OperatorSession      (attack state: hosts, creds, history)
  ├─ CredentialVault      (encrypted credential store)
  ├─ TelemetryCollector   (metrics, alerting)
- └─ CampaignGuardrail    (scope enforcement, safety gate)
+ ├─ CampaignGuardrail    (scope enforcement, safety gate)
+ └─ ScopeFirewall        (transport socket egress firewall)
 ```
 
 ---
@@ -53,6 +54,9 @@ BaseModule.validate(ctx)         ← parameter + context check
     ▼
 CampaignGuardrail.check()        ← second check (context has real target)
     │
+    ▼
+ScopeFirewall.guard()            ← transport-level socket egress firewall
+    │  fail-closed interception of out-of-scope traffic
     ▼
 SandboxRunner.run_module(ctx)    ← capability-enforced execution
     │  subprocess isolation + resource limits
@@ -128,6 +132,7 @@ Services registered by name:
 | `telemetry`  | TelemetryCollector     | In-process metrics           |
 | `cluster`    | ClusterController      | Redis or in-process queue    |
 | `guardrail`  | CampaignGuardrail      | Scope + safety enforcement   |
+| `scope_firewall` | ScopeFirewall      | Transport socket firewall    |
 | `sandbox`    | SandboxRunner          | Subprocess/seccomp/Docker    |
 | `kb`         | AttackKnowledgeBase    | Technique library            |
 

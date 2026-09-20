@@ -70,7 +70,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
 +-------------------------------------------------------------------------+
 |                           ARES CORE ENGINE                              |
 |   AresEngine (orchestration)        ExecutionPolicyKernel (gatekeeping) |
-|   OutcomeKnowledgeBase (learning)   ScopeGuard (CIDR enforcement)       |
+|   OutcomeKnowledgeBase (learning)   ScopeFirewall (Kernel Egress Wall)  |
 +-------------------------------------------------------------------------+
         |                                                 |
 +------------------------------+        +---------------------------------+
@@ -114,6 +114,7 @@ ARES enforces security controls at the kernel level:
   - Live campaign streams authenticate using time-limited (30s) single-use tickets verified through atomic Compare-And-Swap (CAS) database transactions.
   - Tokens and API keys are never transmitted over WebSocket URLs or stored in browser storage.
 - **Scope and Opsec Boundaries**:
+  - **Kernel Scope Wall & Egress Network Firewall**: Low-level transport socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) drops out-of-scope connections fail-closed before packets reach the wire, with async ContextVar task isolation.
   - Every network action is strictly validated against user-defined CIDR scope boundaries. Out-of-scope executions are blocked immediately with hard exceptions.
   - Execution preview mode (`dry_run=True`) validates inputs and schema without dispatching any packets across the network.
 
