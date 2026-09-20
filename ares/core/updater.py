@@ -247,6 +247,7 @@ class ModuleManifestItem:
     category: str = ""
     is_installed: bool = False
     is_upgradable: bool = False
+    git_sha: str = ""
 
 
 @dataclass
@@ -350,6 +351,9 @@ class PlatformUpdateManager:
                 rel_path = str(py_file.relative_to(self.builtin_modules_dir)).replace("\\", "/")
                 category = rel_path.split("/")[0] if "/" in rel_path else ""
 
+                norm_bytes = content_bytes.replace(b"\r\n", b"\n")
+                git_sha = hashlib.sha1(b"blob " + str(len(norm_bytes)).encode() + b"\x00" + norm_bytes).hexdigest()
+
                 local_modules[module_id] = ModuleManifestItem(
                     module_id=module_id,
                     relative_path=rel_path,
@@ -357,6 +361,7 @@ class PlatformUpdateManager:
                     size_bytes=len(content_bytes),
                     category=category,
                     is_installed=True,
+                    git_sha=git_sha,
                 )
             except Exception as exc:
                 logger.debug("Failed scanning local module file", file=str(py_file), error=str(exc))
@@ -443,10 +448,12 @@ class PlatformUpdateManager:
                 new_modules.append(item)
             else:
                 item.is_installed = True
-                # Git blob SHA differs from pure content SHA256; if size or hash indicates diff
-                # For exact content matching, we will fetch and verify during download
-                item.is_upgradable = True
-                upgradable_modules.append(item)
+                if existing.git_sha and remote_sha and existing.git_sha == remote_sha:
+                    item.is_upgradable = False
+                    up_to_date_modules.append(item)
+                else:
+                    item.is_upgradable = True
+                    upgradable_modules.append(item)
 
         ui_local_present = (self.frontend_dist_dir / "index.html").exists()
 
