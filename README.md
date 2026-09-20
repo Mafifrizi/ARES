@@ -522,9 +522,11 @@ ARES includes a built-in Nuclei-style update engine. Operators do not need to `g
   ares update --module <id>    # Install a specific new module
   ares update --dry-run        # Preview new modules without modifying disk
   ```
-- **In-Place Upgrades (Existing Modules, Web UI, Full Platform)**:
+- **In-Place Upgrades (System Core, Database Schema, Modules, Web UI)**:
   ```powershell
-  ares upgrade --all           # Upgrade full platform (modules + Web UI + engine)
+  ares upgrade                 # Full-system upgrade (Core platform + DB migrations + Modules + UI)
+  ares upgrade --system        # Upgrade core framework engine and apply database schema migrations
+  ares upgrade --check         # Check commit delta and available updates without modifying disk
   ares upgrade --ui            # Upgrade Frontend Web UI dashboard bundle
   ares upgrade --modules       # Upgrade installed modules to latest revisions
   ares upgrade --dry-run       # Preview upgrades without modifying disk

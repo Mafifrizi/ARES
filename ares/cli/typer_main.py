@@ -2379,26 +2379,59 @@ def update_cmd(
 
 @app.command("upgrade")
 def upgrade_cmd(
-    all: bool = typer.Option(False, "--all", "-a", help="Upgrade full platform (modules + Web UI + engine)"),
+    all: bool = typer.Option(False, "--all", "-a", help="Upgrade full platform (core engine + DB migrations + modules + Web UI)"),
+    system: bool = typer.Option(False, "--system", "--core", help="Upgrade core framework engine and apply database schema migrations"),
     ui: bool = typer.Option(False, "--ui", help="Upgrade Frontend Web UI Dashboard bundle"),
     modules: bool = typer.Option(False, "--modules", help="Upgrade existing attack modules to latest versions"),
     module: Optional[str] = typer.Option(None, "--module", "-m", help="Specific installed module ID to upgrade"),
+    check: bool = typer.Option(False, "--check", "-c", help="Check for available system and module updates without modifying disk"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview upgrades without modifying disk"),
     repo: str = typer.Option("Mafifrizi/ARES", "--repo", help="Official GitHub repository (owner/repo)"),
     branch: str = typer.Option("main", "--branch", help="Git branch to synchronize against"),
 ) -> None:
     """
-    Upgrade existing ARES modules, Web UI dashboard, or the entire platform.
+    Upgrade ARES core platform system, database schemas, attack modules, or Web UI dashboard.
 
-    Ensures zero data loss: Databases, credentials, and custom configurations are preserved.
+    Ensures zero data loss: Databases, credentials, and custom configurations are strictly preserved.
     """
     from ares.core.updater import PlatformUpdateManager
 
+    mgr = PlatformUpdateManager(github_repo=repo, branch=branch)
+
+    # ── 1. Check mode ──────────────────────────────────────────────────────────
+    if check:
+        with console.status("[cyan]Checking remote repository for system updates...[/cyan]"):
+            try:
+                chk = mgr.check_system_update()
+            except Exception as exc:
+                console.print(f"[red][-] Failed checking for updates: {exc}[/red]")
+                raise typer.Exit(1)
+
+        console.print(Panel.fit(
+            f"[bold cyan]ARES Platform System Status[/bold cyan]\n\n"
+            f"  [cyan]Current Version:[/]   {chk.get('version')} (Branch: [green]{chk.get('branch')}[/green])\n"
+            f"  [cyan]Local Commit:[/]      {chk.get('local_commit')}\n"
+            f"  [cyan]Remote Commit:[/]     {chk.get('remote_commit')}\n"
+            f"  [cyan]Remote Date:[/]       {chk.get('commit_date', 'unknown')}\n"
+            f"  [cyan]Latest Change:[/]     {chk.get('commit_message', 'none')}\n\n"
+            f"  [cyan]Core System:[/]       {'[yellow]Update Available[/yellow]' if chk.get('system_update_available') else '[green]Up to date[/green]'}\n"
+            f"  [cyan]Attack Modules:[/]    {chk.get('new_modules_count', 0)} new, {chk.get('upgradable_modules_count', 0)} upgradable\n"
+            f"  [cyan]Web UI Bundle:[/]     {'[green]Available[/green]' if chk.get('ui_available') else '[dim]Not indexed[/dim]'}",
+            title="ares upgrade --check",
+            border_style="cyan",
+            box=box.ROUNDED,
+        ))
+        if chk.get("system_update_available") or chk.get("new_modules_count", 0) > 0:
+            console.print("\n[yellow][*] Run [bold]ares upgrade[/bold] to apply the latest system updates.[/yellow]")
+        else:
+            console.print("\n[green][+] System is fully up to date with official release.[/green]")
+        return
+
     # Default to --all if no specific scope is selected
-    if not all and not ui and not modules and not module:
+    if not all and not system and not ui and not modules and not module:
         all = True
 
-    action_label = "Full Platform" if all else ("Web UI Dashboard" if ui and not modules else "Attack Modules")
+    action_label = "Full Platform System" if all else ("Core Engine & DB" if system else ("Web UI Dashboard" if ui and not modules else "Attack Modules"))
 
     console.print(Panel.fit(
         "[bold cyan]ARES Platform Upgrade Engine[/bold cyan]\n"
@@ -2406,25 +2439,73 @@ def upgrade_cmd(
         border_style="cyan",
     ))
 
-    mgr = PlatformUpdateManager(github_repo=repo, branch=branch)
-
+    # ── 2. Full Platform System Upgrade ────────────────────────────────────────
     if all:
-        with console.status("[cyan]Upgrading complete platform (modules, Web UI, hot-reload)...[/cyan]"):
+        with console.status("[cyan]Executing full-system platform upgrade (Core, DB, Modules, UI)...[/cyan]"):
             res = mgr.upgrade_all(dry_run=dry_run)
+
         if dry_run:
             console.print("[yellow][*] Dry-run simulation completed. No files modified.[/yellow]")
             return
-        console.print("[green][+] Full platform upgrade completed successfully.[/green]")
-        console.print(f"  - Modules updated: [cyan]{res.get('modules_upgraded', 0)}[/cyan]")
-        console.print(f"  - New modules added: [cyan]{res.get('modules_added', 0)}[/cyan]")
-        console.print(f"  - Web UI status: [cyan]{res.get('ui_status', 'ok')}[/cyan]")
+
+        sys_res = res.get("system", {})
+        console.print("\n[bold green][+] Platform System Upgrade Completed[/bold green]\n")
+        
+        # System Core
+        sys_status = sys_res.get("status", "ok")
+        if sys_status == "ok":
+            console.print(f"  [green]*[/green] Core Framework: [bold green]Updated[/bold green] ({sys_res.get('system', {}).get('message', 'Synchronized')})")
+        elif sys_status == "up_to_date":
+            console.print("  [green]*[/green] Core Framework: [dim]Already up to date[/dim]")
+        elif sys_status == "dirty_tree":
+            console.print(f"  [yellow]![/yellow] Core Framework: [yellow]Skipped (working tree has modified files)[/yellow]")
+        else:
+            console.print(f"  [yellow]![/yellow] Core Framework: {sys_res.get('system', {}).get('message', 'Checked')}")
+
+        # Database Schema
+        db_res = sys_res.get("database", {})
+        if db_res.get("applied"):
+            console.print("  [green]*[/green] Database Schema: [bold green]Migrated (head)[/bold green]")
+        else:
+            console.print(f"  [green]*[/green] Database Schema: [dim]{db_res.get('message', 'Verified')}[/dim]")
+
+        # Attack Modules & UI
+        console.print(f"  [green]*[/green] Attack Modules: [cyan]{res.get('modules_upgraded', 0)} updated[/cyan], [cyan]{res.get('modules_added', 0)} new added[/cyan]")
+        console.print(f"  [green]*[/green] Web UI Dashboard: [cyan]{res.get('ui_status', 'ok')}[/cyan]")
+
+        # Server reload
         srv = res.get("server_reload", {})
         if srv.get("connected"):
-            console.print(f"  - Live Server Hot-Reload: [green]Connected ({srv.get('module_count')} modules active)[/green]")
+            console.print(f"  [green]*[/green] Live Server Hot-Reload: [green]Connected ({srv.get('module_count')} modules active)[/green]")
         else:
-            console.print("  - Live Server: [dim]Offline (changes will apply on next start)[/dim]")
+            console.print("  [green]*[/green] Live Server: [dim]Offline (changes will apply on next start)[/dim]")
+
+        # Post-upgrade diagnostics
+        diag = res.get("diagnostics", {})
+        if diag.get("healthy"):
+            console.print("\n[bold green][+] Post-Upgrade System Diagnostics: HEALTHY (All checks passed)[/bold green]")
+            for c in diag.get("checks", []):
+                console.print(f"    [green]OK[/green] {c.get('subsystem')}: [dim]{c.get('detail')}[/dim]")
         return
 
+    # ── 3. System Core Only Upgrade ────────────────────────────────────────────
+    if system:
+        with console.status("[cyan]Upgrading core framework engine and applying database migrations...[/cyan]"):
+            res = mgr.upgrade_system(dry_run=dry_run)
+            diag = mgr.run_post_upgrade_diagnostics() if not dry_run else {"healthy": True}
+
+        if dry_run:
+            console.print("[yellow][*] Dry-run simulation completed. No files modified.[/yellow]")
+            return
+
+        console.print(f"[green][+] Core engine upgrade: {res.get('status')}[/green]")
+        console.print(f"  - Details: {res.get('system', {}).get('message', 'Complete')}")
+        console.print(f"  - Database: {res.get('database', {}).get('message', 'Complete')}")
+        if diag.get("healthy"):
+            console.print("[green][+] Post-upgrade health: PASS[/green]")
+        return
+
+    # ── 4. Web UI Dashboard Only Upgrade ───────────────────────────────────────
     if ui:
         with console.status("[cyan]Upgrading Frontend Web UI Dashboard bundle...[/cyan]"):
             try:
@@ -2440,6 +2521,7 @@ def upgrade_cmd(
         if not modules and not module:
             return
 
+    # ── 5. Attack Modules Only Upgrade ─────────────────────────────────────────
     if modules or module:
         with console.status("[cyan]Checking and upgrading attack modules...[/cyan]"):
             try:
