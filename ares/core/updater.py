@@ -51,6 +51,17 @@ ALLOWED_DOMAINS = frozenset({
     "codeload.github.com",
 })
 
+# Internal module helper files that are not standalone attack modules
+MODULE_HELPER_FILES: frozenset[str] = frozenset({
+    "base.py",
+    "descriptors.py",
+    "params.py",
+    "sdk.py",
+    "ad/dependencies.py",
+    "ai/plan_validator.py",
+    "reporting/report_gen.py",
+})
+
 # Resource quotas and safety limits
 MAX_MODULE_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 MAX_UI_BUNDLE_SIZE = 150 * 1024 * 1024  # 150 MB
@@ -398,7 +409,12 @@ class PlatformUpdateManager:
 
             rel_mod_path = path_str[len("ares/modules/"):]
             filename = Path(rel_mod_path).name
-            if filename.startswith("_") or filename == "base.py" or not filename.endswith(".py"):
+            if (
+                filename.startswith("_")
+                or not filename.endswith(".py")
+                or rel_mod_path in MODULE_HELPER_FILES
+                or filename in {"base.py", "descriptors.py", "params.py", "sdk.py"}
+            ):
                 continue
 
             remote_module_count += 1
@@ -957,10 +973,12 @@ class PlatformUpdateManager:
         )
 
         try:
+            import logging
             from types import SimpleNamespace
             from alembic import command as alembic_cmd
             from alembic.config import Config as AlembicConfig
 
+            logging.getLogger("alembic").setLevel(logging.ERROR)
             alembic_cfg = AlembicConfig(str(alembic_ini))
             if custom_db:
                 alembic_cfg.cmd_opts = SimpleNamespace(x=[f"db_url={custom_db}"])

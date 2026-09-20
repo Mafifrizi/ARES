@@ -37,10 +37,14 @@ import uuid
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
+import warnings
 from typing import Any, Optional
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*authlib.*")
 
 import typer
 from rich import box
