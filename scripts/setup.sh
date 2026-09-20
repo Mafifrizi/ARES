@@ -55,6 +55,8 @@ updates = {
 env_path = Path(".env")
 lines = env_path.read_text(encoding="utf-8").splitlines()
 for index, line in enumerate(lines):
+    if line.strip().startswith("ARES_BROWSER_ORIGIN=") and "example.invalid" in line:
+        lines[index] = "ARES_BROWSER_ORIGIN="
     for prefix, value in updates.items():
         if line.strip().startswith(prefix) and ("CHANGE_ME" in line or line.strip() == prefix):
             lines[index] = value

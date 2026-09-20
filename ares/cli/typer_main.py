@@ -1645,6 +1645,20 @@ def doctor(
     except Exception as exc:
         check("Settings loadable", "warn", str(exc)[:60])
 
+    # Browser session policy
+    try:
+        from ares.core.browser_sessions import build_browser_session_policy
+        from ares.core.config import get_settings
+        _s = get_settings()
+        _policy = build_browser_session_policy(_s)
+        check("Browser session policy", "ok", f"{_policy.origin} (debug={_policy.debug})")
+    except Exception as exc:
+        check(
+            "Browser session policy",
+            "warn",
+            f"{exc} - fix: set ARES_DEBUG=true for local dev or set valid HTTPS ARES_BROWSER_ORIGIN matching ARES_TRUSTED_HOSTS",
+        )
+
     # Summary
     console.print()
     total = ok + warn + fail
@@ -1855,8 +1869,12 @@ def _start_dashboard_process(
     *,
     popen_factory: Callable[..., subprocess.Popen] = subprocess.Popen,
     os_name: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.Popen:
     console.print(f"[cyan]{label}[/cyan] {' '.join(command)}")
+    kwargs: dict[str, object] = dict(_popen_kwargs(os_name))
+    if env is not None:
+        kwargs["env"] = env
     return popen_factory(
         command,
         cwd=str(cwd),
@@ -1865,7 +1883,7 @@ def _start_dashboard_process(
         stdin=subprocess.DEVNULL,
         text=True,
         bufsize=1,
-        **_popen_kwargs(os_name),
+        **kwargs,
     )
 
 
@@ -2054,12 +2072,18 @@ def _run_dashboard_dev(
     previous_signal_handlers = _install_dashboard_signal_handlers()
 
     try:
+        backend_env = dict(os.environ)
+        backend_env["ARES_DEBUG"] = "true"
+        backend_env["ARES_BROWSER_ORIGIN"] = f"http://{ui_host}:{ui_port}"
+        backend_env["ARES_TRUSTED_HOSTS"] = "localhost,127.0.0.1"
+
         backend_process = _start_dashboard_process(
             "backend",
             backend_command,
             root_path,
             popen_factory=popen_factory,
             os_name=os_name,
+            env=backend_env,
         )
         if cleanup_job is not None:
             cleanup_job.assign(backend_process)
@@ -2288,9 +2312,13 @@ def _run_python_setup(
             enc_val = _extract_env_value(existing, "ARES_ENCRYPTION_KEY")
             admin_val = _extract_env_value(existing, "ARES_DEFAULT_ADMIN_PASSWORD")
 
+            origin_val = _extract_env_value(existing, "ARES_BROWSER_ORIGIN")
+            debug_val = _extract_env_value(existing, "ARES_DEBUG")
+
             has_placeholders = (
                 "CHANGE_ME" in existing
                 or (admin_val is not None and "YOUR_STRONG_ADMIN_PASSWORD_HERE" in admin_val)
+                or (origin_val is not None and "example.invalid" in origin_val)
             )
             missing_critical = (
                 secret_val is None or secret_val == "" or "CHANGE_ME" in secret_val
@@ -2315,6 +2343,14 @@ def _run_python_setup(
                     admin_password = _setup_admin_password()
                     updated = _upsert_env_value(updated, "ARES_DEFAULT_ADMIN_PASSWORD", admin_password)
 
+                # Clean placeholder browser origin if pointing to example.invalid
+                if origin_val is not None and "example.invalid" in origin_val:
+                    updated = _upsert_env_value(updated, "ARES_BROWSER_ORIGIN", "")
+
+                # Default ARES_DEBUG to true for local installation if unset or invalid
+                if debug_val is None or debug_val == "" or (debug_val.lower() == "false" and (origin_val is None or "example.invalid" in origin_val or origin_val == "")):
+                    updated = _upsert_env_value(updated, "ARES_DEBUG", "true")
+
                 env_path.write_text(updated, encoding="utf-8")
 
                 if force:
@@ -2338,6 +2374,10 @@ def _run_python_setup(
             template = _upsert_env_value(template, "ARES_SECRET_KEY", secrets.token_hex(32))
             template = _upsert_env_value(template, "ARES_ENCRYPTION_KEY", _setup_fernet_key())
             template = _upsert_env_value(template, "ARES_DEFAULT_ADMIN_PASSWORD", admin_password)
+            template = _upsert_env_value(template, "ARES_DEBUG", "true")
+            origin_in_template = _extract_env_value(template, "ARES_BROWSER_ORIGIN")
+            if origin_in_template and "example.invalid" in origin_in_template:
+                template = _upsert_env_value(template, "ARES_BROWSER_ORIGIN", "")
             env_path.write_text(template, encoding="utf-8")
             console.print(f"[green]OK[/green] .env created at {env_path}")
             console.print(f"Admin password: {admin_password}")

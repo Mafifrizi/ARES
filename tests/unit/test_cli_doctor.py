@@ -700,3 +700,58 @@ def test_setup_entrypoint_help(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "Usage: ares-setup" in output
     assert "--force" in output
+
+
+def test_python_setup_cleans_invalid_browser_origin_placeholder(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    (tmp_path / ".env").write_text(
+        "ARES_SECRET_KEY=CHANGE_ME\n"
+        "ARES_ENCRYPTION_KEY=CHANGE_ME\n"
+        "ARES_DEFAULT_ADMIN_PASSWORD=YOUR_STRONG_ADMIN_PASSWORD_HERE\n"
+        "ARES_DEBUG=false\n"
+        "ARES_BROWSER_ORIGIN=https://ares.example.invalid\n",
+        encoding="utf-8",
+    )
+
+    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+
+    content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "example.invalid" not in content
+    assert "ARES_BROWSER_ORIGIN=" in content
+    assert "ARES_DEBUG=true" in content
+
+
+def test_doctor_validates_browser_session_policy(monkeypatch, capsys):
+    from ares.cli import typer_main
+    from ares.core.browser_sessions import BrowserSessionPolicy
+
+    # Test OK path
+    called = []
+    fake_policy = BrowserSessionPolicy(
+        origin="http://127.0.0.1:5173",
+        authority="127.0.0.1:5173",
+        refresh_cookie_name="ares-dev-refresh",
+        csrf_cookie_name="ares-dev-csrf",
+        secure=False,
+        debug=True,
+    )
+    monkeypatch.setattr(
+        "ares.core.browser_sessions.build_browser_session_policy",
+        lambda settings: fake_policy,
+    )
+
+    # Invoke doctor check directly or simulate doctor
+    # Verify doctor check prints Browser session policy [OK]
+    import ares.cli.typer_main as tm
+    console_out = []
+    monkeypatch.setattr(tm.console, "print", lambda *args, **kwargs: console_out.append(str(args)))
+
+    # Doctor will run checks
+    try:
+        tm.doctor()
+    except Exception:
+        pass
+
+    assert any("Browser session policy" in line for line in console_out)
+

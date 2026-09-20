@@ -502,6 +502,9 @@ def test_dashboard_dev_launches_both_processes_and_cleans_up(monkeypatch, tmp_pa
     ]
     assert launched[0].kwargs["cwd"] == str(tmp_path)
     assert launched[1].kwargs["cwd"] == str(tmp_path / "frontend")
+    assert launched[0].kwargs["env"]["ARES_DEBUG"] == "true"
+    assert launched[0].kwargs["env"]["ARES_BROWSER_ORIGIN"] == "http://127.0.0.1:5173"
+    assert launched[0].kwargs["env"]["ARES_TRUSTED_HOSTS"] == "localhost,127.0.0.1"
     assert opened == []
     assert all(process.stopped for process in launched)
     assert [call[0][:2] for call in taskkill_calls] == [
