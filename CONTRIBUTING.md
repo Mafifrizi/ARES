@@ -10,10 +10,11 @@ to get started - from dev environment setup to submitting a pull request.
 1. [Development Environment](#development-environment)
 2. [Branching Strategy](#branching-strategy)
 3. [Commit Conventions](#commit-conventions)
-4. [Writing a New Module](#writing-a-new-module)
-5. [Testing Requirements](#testing-requirements)
-6. [Pull Request Process](#pull-request-process)
-7. [Code Guidelines & Conventions](#code-guidelines--conventions)
+4. [Priority Research Track: Linux Active Directory](#priority-research-track-linux-active-directory)
+5. [Writing a New Module](#writing-a-new-module)
+6. [Testing Requirements](#testing-requirements)
+7. [Pull Request Process](#pull-request-process)
+8. [Code Guidelines & Conventions](#code-guidelines--conventions)
 
 ---
 
@@ -98,6 +99,22 @@ git commit -m "feat: add ad.delegation_abuse with RBCD support"
 git commit -m "fix: laps_enum vault.store() not called after LDAP query"
 git commit -m "security: narrow DataEncryptor exception catch-all"
 ```
+
+---
+
+## Priority Research Track: Linux Active Directory
+
+We are actively calling for offensive security researchers and contributors to build cross-platform Active Directory post-exploitation modules targeting Linux domain members (SSSD, Winbind, Kerberos keyrings, and ccache ticket extraction).
+
+See the full technical specification and module contracts:
+👉 **[RFC 001: Linux Active Directory Tradecraft](docs/research/linux-active-directory-tradecraft.md)**
+
+Prioritized modules open for PRs:
+- `linux.sssd_harvest`: SSSD LDB database extraction (`/var/lib/sss/db/`)
+- `linux.ccache_hunt`: Kerberos ticket cache hunter (`/tmp/krb5cc_*`, Kernel Keyring)
+- `linux.keytab_abuse`: Computer account keytab harvesting & Silver Ticket generation
+- `linux.samba_secrets`: Samba/Winbind machine password extraction (`secrets.tdb`)
+- `credential.ticket_converter`: In-memory ccache $\leftrightarrow$ kirbi bidirectional converter
 
 ---
 

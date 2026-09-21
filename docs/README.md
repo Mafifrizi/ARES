@@ -6,7 +6,7 @@ Welcome to the technical documentation repository for **ARES (Automated Red team
 
 ## 1. Documentation Index
 
-The documentation is organized into five functional pillars:
+The documentation is organized into six functional pillars:
 
 ### Architecture and Core Engine
 | Document | Description | Target Audience |
@@ -46,6 +46,11 @@ The documentation is organized into five functional pillars:
 | Document | Description | Target Audience |
 | --- | --- | --- |
 | [github-publish-guide.md](github-publish-guide.md) | Checklist for version tagging, repository sanitization, and release publication. | Maintainers |
+
+### Research Tracks and Architecture RFCs
+| Document | Description | Target Audience |
+| --- | --- | --- |
+| [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001: Cross-platform Active Directory post-exploitation, SSSD cache harvesting, Kerberos ccache extraction, and module specifications. | Offensive Researchers, Red Team |
 
 ---
 

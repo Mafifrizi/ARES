@@ -73,7 +73,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 | **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
 | **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
 | **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed Dual-Layer ScopeGuard & OS/Transport Firewall** |
-| **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound & Kerberos Suite** |
+| **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound, Kerberos Suite & Linux AD RFC Track** |
 | **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Authenticated Vault** |
 | **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |
 | **Delivery Time for Reports** | 1-2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
@@ -703,6 +703,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
+- [**RFC 001: Linux Active Directory & Cross-Platform Tradecraft**](docs/research/linux-active-directory-tradecraft.md)
 - [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
 - [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md)
 - [**Step-by-Step Module Development Guide**](docs/module-development.md)
