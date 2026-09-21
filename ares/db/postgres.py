@@ -2302,6 +2302,7 @@ class PostgresDatabase:
         self._pool_max = pool_max
         self._pool: Any = None  # asyncpg.Pool
         self._startup_trace: list[str] = []
+        self._sso_schema_ensured: bool = False
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -3775,7 +3776,6 @@ class PostgresDatabase:
                         await self._validate_managed_schema(conn)
                         await self._validate_websocket_ticket_schema(conn)
                         await validate_postgresql_admission_authority_catalog(conn)
-                        await self._ensure_sso_schema(conn)
                     except _PostgresMigrationRequiredError:
                         raise
                     except _PostgresStartupDiagnosticError as exc:
@@ -5771,7 +5771,21 @@ class PostgresDatabase:
             """
         )
 
+    async def _ensure_sso_ready(self) -> None:
+        """Lazily ensure enterprise SSO schema exists on first SSO operation."""
+        if getattr(self, "_sso_schema_ensured", False):
+            return
+        if self._pool is None:
+            return
+        try:
+            async with self._pool.acquire() as conn:
+                await self._ensure_sso_schema(conn)
+            self._sso_schema_ensured = True
+        except Exception as exc:
+            logger.warning("pg_sso_schema_init_failed", error=str(exc))
+
     async def get_organization(self, slug_or_id: str) -> dict[str, Any] | None:
+        await self._ensure_sso_ready()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM organizations WHERE slug=$1 OR id=$1",
@@ -5796,6 +5810,7 @@ class PostgresDatabase:
     async def get_sso_config(
         self, org_id: str, protocol: str | None = None
     ) -> dict[str, Any] | None:
+        await self._ensure_sso_ready()
         async with self._pool.acquire() as conn:
             if protocol:
                 row = await conn.fetchrow(
@@ -5827,6 +5842,7 @@ class PostgresDatabase:
         role_mapping_json: str = "{}",
         is_enabled: bool = True,
     ) -> str:
+        await self._ensure_sso_ready()
         sso_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -5874,6 +5890,7 @@ class PostgresDatabase:
         nonce: str | None = None,
         ttl_minutes: int = 10,
     ) -> str:
+        await self._ensure_sso_ready()
         state_id = str(uuid.uuid4())
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -5894,6 +5911,7 @@ class PostgresDatabase:
         flow_id: str,
         flow_type: str,
     ) -> dict[str, Any] | None:
+        await self._ensure_sso_ready()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
@@ -5921,6 +5939,7 @@ class PostgresDatabase:
         auth_provider: str = "sso",
     ) -> dict[str, Any]:
         """JIT provision or look up an SSO user adhering to the canonical schema."""
+        await self._ensure_sso_ready()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
