@@ -1,6 +1,6 @@
 """
 ARES Database - async SQLite via aiosqlite.
-All credential/token content encrypted at rest via Fernet.
+All credential/token content encrypted at rest via AES-256-GCM (v2 format, Fernet backward-compatible).
 """
 
 from __future__ import annotations
@@ -2036,7 +2036,7 @@ class AresDatabase:
 
     async def save_credential_preencrypted(self, c: DBCredential) -> None:
         """
-        Persist a credential whose secret is ALREADY Fernet-encrypted by
+        Persist a credential whose secret is ALREADY encrypted (AES-256-GCM v2) by
         CredentialVault. Skips _enc_val() to prevent double-encryption.
         Uses INSERT OR IGNORE so re-running after a crash doesn't overwrite
         existing secrets with the same ID.
@@ -2068,7 +2068,7 @@ class AresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign from DB as raw dicts.
-        Secrets are returned as-is (Fernet-encrypted by CredentialVault)  - 
+        Secrets are returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) - 
         use CredentialVault.restore_from_db_records() to re-hydrate.
         """
         async with self._conn.execute(

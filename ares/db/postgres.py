@@ -10,12 +10,12 @@ Install:
 
 Configuration (.env):
     ARES_DATABASE_URL=postgresql+asyncpg://ares_user:strong_password@db:5432/ares_db
-    ARES_ENCRYPTION_KEY=<fernet-key>
+    ARES_ENCRYPTION_KEY=<256-bit-encryption-key>
 
 Design:
   - Same public API as AresDatabase (SQLite) - zero changes to server.py or engine.py
   - asyncpg connection pool (min=2, max=10)
-  - All credential/token content encrypted at rest via Fernet (same as SQLite backend)
+  - All credential/token content encrypted at rest via AES-256-GCM (same as SQLite backend)
   - Alembic-managed migrations: `alembic -x db_url=<url> upgrade head`
   - Parameterized queries throughout - no string interpolation
 
@@ -5429,7 +5429,7 @@ class PostgresDatabase:
 
     async def save_credential_preencrypted(self, cred: Any) -> None:
         """
-        Persist a credential whose secret is ALREADY Fernet-encrypted by
+        Persist a credential whose secret is ALREADY encrypted (AES-256-GCM v2) by
         CredentialVault. Skips _enc_val() to prevent double-encryption.
         Mirrors database.py implementation - required by engine._persist_vault_credentials().
         """
@@ -5458,7 +5458,7 @@ class PostgresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign as raw dicts.
-        Secrets returned as-is (Fernet-encrypted by CredentialVault)  - 
+        Secrets returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) - 
         use CredentialVault.restore_from_db_records() to re-hydrate.
         Required by server.py POST /campaigns/{id}/restore-vault endpoint.
         """

@@ -2223,11 +2223,14 @@ def _setup_platform_label(platform_name: str, os_name: str) -> str:
     return platform_name or os_name
 
 
-def _setup_fernet_key() -> str:
-    import base64
+def _setup_encryption_key() -> str:
+    """Generate a 256-bit (32-byte) URL-safe encryption key for AES-256-GCM."""
     import secrets
 
-    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+    return secrets.token_urlsafe(32)
+
+
+_setup_fernet_key = _setup_encryption_key  # backward-compatibility alias
 
 
 def _setup_admin_password(length: int = 20) -> str:
@@ -2335,7 +2338,7 @@ def _run_python_setup(
 
                 # Check ARES_ENCRYPTION_KEY
                 if force or enc_val is None or enc_val == "" or "CHANGE_ME" in enc_val:
-                    new_enc = _setup_fernet_key()
+                    new_enc = _setup_encryption_key()
                     updated = _upsert_env_value(updated, "ARES_ENCRYPTION_KEY", new_enc)
 
                 # Check ARES_DEFAULT_ADMIN_PASSWORD
@@ -2372,7 +2375,7 @@ def _run_python_setup(
 
             admin_password = _setup_admin_password()
             template = _upsert_env_value(template, "ARES_SECRET_KEY", secrets.token_hex(32))
-            template = _upsert_env_value(template, "ARES_ENCRYPTION_KEY", _setup_fernet_key())
+            template = _upsert_env_value(template, "ARES_ENCRYPTION_KEY", _setup_encryption_key())
             template = _upsert_env_value(template, "ARES_DEFAULT_ADMIN_PASSWORD", admin_password)
             template = _upsert_env_value(template, "ARES_DEBUG", "true")
             origin_in_template = _extract_env_value(template, "ARES_BROWSER_ORIGIN")

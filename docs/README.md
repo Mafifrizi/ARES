@@ -70,7 +70,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
 +-------------------------------------------------------------------------+
 |                           ARES CORE ENGINE                              |
 |   AresEngine (orchestration)        ExecutionPolicyKernel (gatekeeping) |
-|   OutcomeKnowledgeBase (learning)   ScopeFirewall (Kernel Egress Wall)  |
+|   OutcomeKnowledgeBase (learning)   ScopeFirewall (Egress Scope Wall)   |
 +-------------------------------------------------------------------------+
         |                                                 |
 +------------------------------+        +---------------------------------+
@@ -105,7 +105,7 @@ The ARES user interface adheres to strict enterprise product design principles, 
 
 ## 4. Security and Execution Guarantees
 
-ARES enforces security controls at the kernel level:
+ARES enforces comprehensive multi-layer security controls:
 
 - **Strict Origin and CSRF Isolation**:
   - Browser requests are bound to same-origin with strict CSRF cookie verification.
@@ -114,7 +114,7 @@ ARES enforces security controls at the kernel level:
   - Live campaign streams authenticate using time-limited (30s) single-use tickets verified through atomic Compare-And-Swap (CAS) database transactions.
   - Tokens and API keys are never transmitted over WebSocket URLs or stored in browser storage.
 - **Scope and Opsec Boundaries**:
-  - **Kernel Scope Wall & Egress Network Firewall**: Low-level transport socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) drops out-of-scope connections fail-closed before packets reach the wire, with async ContextVar task isolation.
+  - **Dual-Layer Scope Firewall & Egress Filter**: Combines native OS-level packet filtering (`OSFirewallController` via Windows Defender Firewall / Linux Netfilter when elevated) with process-isolated transport socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`), dropping out-of-scope connections fail-closed before packets reach the wire, with async ContextVar task isolation.
   - Every network action is strictly validated against user-defined CIDR scope boundaries. Out-of-scope executions are blocked immediately with hard exceptions.
   - Execution preview mode (`dry_run=True`) validates inputs and schema without dispatching any packets across the network.
 

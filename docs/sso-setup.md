@@ -41,7 +41,7 @@ ARES enforces application-level encryption for sensitive secrets at rest using t
 The application strictly requires `ARES_ENCRYPTION_KEY` to be **at least 32 characters long**. If unset or shorter than 32 characters, ARES will fail fast at startup with an explicit error.
 
 #### Generate an Encryption Key:
-Run either a standard secrets generator or Fernet generation command:
+Run the 256-bit AES key generator:
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```

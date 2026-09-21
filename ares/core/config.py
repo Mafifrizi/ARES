@@ -87,7 +87,7 @@ class AresSettings(BaseSettings):
     ares_database_url: str = "sqlite+aiosqlite:///./ares.db"
 
     # Encryption
-    ares_encryption_key: SecretStr = Field(..., min_length=32, description="Generate: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'")
+    ares_encryption_key: SecretStr = Field(..., min_length=32, description="Generate: python -c 'import secrets; print(secrets.token_urlsafe(32))'")
 
     # Logging
     ares_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -222,8 +222,7 @@ def get_settings() -> AresSettings:
                 "\n"
                 "   Required environment variables are missing:\n"
                 "     ARES_SECRET_KEY              - generate: openssl rand -hex 32\n"
-                "     ARES_ENCRYPTION_KEY          - generate: python -c "
-                "'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'\n"
+                "     ARES_ENCRYPTION_KEY          - generate: python -c 'import secrets; print(secrets.token_urlsafe(32))'\n"
                 "     ARES_DEFAULT_ADMIN_PASSWORD  - min 12 chars, rotate after first login\n"
                 "\n"
                 "   \033[1mQuickest fix:\033[0m\n"

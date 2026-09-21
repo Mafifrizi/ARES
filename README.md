@@ -43,7 +43,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
  ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
  │   STRICT SCOPE ENCLAVE  │   │  DIRECTED ATTACK ENGINE │   │ ZERO-TRUST ARCHITECTURE │
  │ Fail-closed ScopeGuard  │   │ Computes shortest paths │   │ Memory-only JWT tokens, │
- │ & Kernel Egress Wall    │───│ to Domain Admins & Crown│───│ AES-256-GCM AEAD vault, │
+ │ & Egress Scope Wall     │───│ to Domain Admins & Crown│───│ AES-256-GCM AEAD vault, │
  │ prevents out-of-scope.  │   │ Jewels deterministically│   │ strict HMAC-CSRF checks.│
  └─────────────────────────┘   └─────────────────────────┘   └─────────────────────────┘
                                             │
@@ -58,7 +58,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 
 ### Core Value Pillars
 
-1. **Zero-Collateral Scope Governance (Kernel Scope Wall)**: Every campaign executes inside a hardened, isolated boundary. ARES pairs deterministic application-layer ScopeGuard pre-checks with a low-level **Kernel Scope Wall & Egress Network Firewall** that intercepts raw socket connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) at the transport layer. Guarantees fail-closed enforcement so zero offensive packets reach unapproved IP addresses or subnets.
+1. **Zero-Collateral Scope Governance (Dual-Layer Scope Firewall)**: Every campaign executes inside a hardened, isolated boundary. ARES pairs deterministic application-layer ScopeGuard pre-checks with a dual-layer **Scope Firewall & Egress Filter** that integrates OS-level packet filtering (Windows Defender Firewall / Linux Netfilter when elevated) with transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) in Python user space. Guarantees fail-closed enforcement so zero offensive packets reach unapproved IP addresses or subnets.
 2. **Goal-Directed Attack Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama) under explicit operator authorization.
 3. **Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
 4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM AEAD encrypted local vaults (PBKDF2-HMAC-SHA256 600k iterations) protect harvested hashes and sensitive client evidence.
@@ -143,7 +143,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ### 3. Scoped Campaign & Target Boundary Management
 
-*Zero-collateral target governance enforcing hard CIDR whitelist boundaries, transport-level Kernel Scope Wall egress interception, and encrypted evidence isolation.*
+*Zero-collateral target governance enforcing hard CIDR whitelist boundaries, dual-layer Scope Firewall egress interception, and encrypted evidence isolation.*
 
 <div align="center">
 
@@ -155,7 +155,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Prevents catastrophic out-of-scope scanning, raw socket leakage from attack modules, and unencrypted credential exposure on operator laptops.
 - **Key Capabilities**:
-  - **Kernel Scope Wall & Egress Network Firewall**: Transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) enforcing strict fail-closed CIDR boundaries. Features async `ContextVar` task isolation (zero bleed to database pools or web dashboard handlers), anti-re-entrancy DNS protection, loopback/Windows Proactor pipe safeguards, cloud provider allowlists, and recursive parameter scanning.
+  - **Dual-Layer Scope Firewall & Egress Filter**: Combines native OS-level packet filtering (`OSFirewallController` via Windows Defender Firewall / Linux Netfilter when elevated) with transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) enforcing strict fail-closed CIDR boundaries. Features async `ContextVar` task isolation (zero bleed to database pools or web dashboard handlers), anti-re-entrancy DNS protection, loopback/Windows Proactor pipe safeguards, cloud provider allowlists, and recursive parameter scanning.
   - **Hard CIDR Whitelists**: Network-level boundary enforcement. The engine intercepts and drops any request targeting unapproved IP addresses or subnets.
   - **Recon & Port Scan Scope Enforcement**: Reconnaissance and discovery modules are strictly bound to authorized campaign scope, closing out-of-scope port scanning loopholes.
   - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
@@ -423,7 +423,7 @@ flowchart TB
     end
 
     subgraph Core["ARES Core Engine & Governance"]
-        ScopeFirewall["Kernel Scope Wall & Egress Firewall<br>(Transport Socket Interception & CIDR)"]
+        ScopeFirewall["Scope Firewall & Egress Filter<br>(OS Kernel Filtering & Transport Sockets)"]
         Governor["OPSEC Noise Governor<br>(Adaptive Jitter & Throttling)"]
         Orchestrator["Module Execution Orchestrator<br>(Worker Thread Pool)"]
         AutoPlanner["Goal-Directed Strategy Engine<br>(DAG Heuristics / Planner)"]

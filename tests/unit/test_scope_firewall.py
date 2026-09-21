@@ -1,7 +1,7 @@
 """
-Tests for ARES Kernel Scope Wall & Egress Network Firewall.
-Verifies socket-level interception, ContextVar task isolation, DNS resolution safety,
-cloud allowlists, and engine integration.
+Tests for ARES Dual-Layer Scope Firewall & Egress Network Filter.
+Verifies OS-level packet filtering controller, socket-level interception, ContextVar
+task isolation, DNS resolution safety, cloud allowlists, and engine integration.
 """
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from ares.core.campaign import Campaign, ScopeEntry
 from ares.core.errors import ScopeFirewallBlockError
 from ares.core.scope_firewall import (
     ScopeFirewall,
+    OSFirewallController,
+    get_os_firewall_status,
     scope_firewall_guard,
     scope_firewall_sync_guard,
     install_hooks,
@@ -244,3 +246,75 @@ class TestEngineIntegration:
         assert result.status == ModuleStatus.FAILED
         assert result.outcome == "scope_firewall_blocked"
         assert "[ScopeFirewall]" in (result.error or "")
+
+
+class TestOSFirewallController:
+    """Tests for native OS / Kernel packet filtering controller."""
+
+    def test_status_reporting(self):
+        status = get_os_firewall_status()
+        assert "platform" in status
+        assert "engine" in status
+        assert "elevated" in status
+        assert "fallback_mode" in status
+        assert status["fallback_mode"] == "In-Process Transport Socket Interception"
+
+    def test_unprivileged_fallback_produces_no_errors(self, sample_campaign: Campaign):
+        with patch.object(OSFirewallController, "is_elevated", return_value=False):
+            rules = OSFirewallController.apply_rules(sample_campaign, ["10.0.0.0/24"])
+            assert rules == []
+            status = OSFirewallController.get_status()
+            assert status["elevated"] is False
+            assert status["active_rules_count"] == 0
+
+    def test_windows_elevated_rule_application_and_cleanup(self, sample_campaign: Campaign):
+        with (
+            patch.object(OSFirewallController, "is_elevated", return_value=True),
+            patch("sys.platform", "win32"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="Ok.", stderr="")
+            rules = OSFirewallController.apply_rules(sample_campaign, ["10.0.0.0/24", "192.168.1.0/24"])
+            assert len(rules) == 1
+            assert rules[0].startswith("ARES_SCOPE_WALL_")
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == "netsh"
+            assert "advfirewall" in cmd
+            assert "remoteip=10.0.0.0/24,192.168.1.0/24" in cmd
+
+            # Verify cleanup
+            removed = OSFirewallController.remove_rules(rules)
+            assert removed == 1
+            del_cmd = mock_run.call_args[0][0]
+            assert del_cmd[0] == "netsh"
+            assert f"name={rules[0]}" in del_cmd
+
+    def test_linux_elevated_rule_application_and_cleanup(self, sample_campaign: Campaign):
+        with (
+            patch.object(OSFirewallController, "is_elevated", return_value=True),
+            patch("sys.platform", "linux"),
+            patch("os.getpid", return_value=12345),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            rules = OSFirewallController.apply_rules(sample_campaign, ["172.16.0.0/16"])
+            assert len(rules) == 1
+            assert rules[0].startswith("ARES_SCOPE_WALL_")
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == "iptables"
+            assert "-d" in cmd
+            assert "172.16.0.0/16" in cmd
+
+            removed = OSFirewallController.remove_rules(rules)
+            assert removed == 1
+
+    def test_scope_firewall_guard_wires_os_firewall(self, sample_campaign: Campaign):
+        with (
+            patch.object(OSFirewallController, "apply_rules", return_value=["ARES_SCOPE_WALL_test"]) as mock_apply,
+            patch.object(OSFirewallController, "remove_rules") as mock_remove,
+        ):
+            with scope_firewall_sync_guard(sample_campaign, enable_os_firewall=True) as fw:
+                assert fw is not None
+                mock_apply.assert_called_once()
+            mock_remove.assert_called_once_with(["ARES_SCOPE_WALL_test"])

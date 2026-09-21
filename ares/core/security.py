@@ -1,6 +1,6 @@
 """
 ARES Security
-JWT authentication, Fernet encryption for stored data, input sanitization.
+JWT authentication, AES-256-GCM encryption for stored data (with legacy Fernet fallback), input sanitization.
 """
 
 from __future__ import annotations

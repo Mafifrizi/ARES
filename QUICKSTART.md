@@ -131,7 +131,7 @@ Windows PowerShell:
 
 ```powershell
 $env:ARES_SECRET_KEY = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
-$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:ARES_ENCRYPTION_KEY = .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
 $env:ARES_DEFAULT_ADMIN_PASSWORD = "replace-with-your-own-strong-admin-password"
 ```
 
@@ -139,7 +139,7 @@ Linux/macOS:
 
 ```bash
 export ARES_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export ARES_ENCRYPTION_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export ARES_DEFAULT_ADMIN_PASSWORD="replace-with-your-own-strong-admin-password"
 ```
 

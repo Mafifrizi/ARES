@@ -1477,7 +1477,7 @@ class AresEngine:
         """
         Sync in-memory CredentialVault to the DB after each module run.
         Uses save_credential_preencrypted() to avoid double-encrypting secrets
-        that are already Fernet-encrypted by the vault.
+        that are already vault-encrypted (AES-256-GCM v2).
 
         Returns: number of credentials saved/updated.
         """

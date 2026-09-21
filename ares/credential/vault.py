@@ -78,7 +78,7 @@ class PrivilegeLevel(str, Enum):
 class Credential:
     """
     A single credential entry in the vault.
-    Secret value is NEVER stored in plaintext - always Fernet-encrypted.
+    Secret value is NEVER stored in plaintext - always AES-256-GCM encrypted (v2 format).
     """
     id:             str = field(default_factory=lambda: str(uuid.uuid4()))
     campaign_id:    str = ""

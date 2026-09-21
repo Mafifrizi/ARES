@@ -43,7 +43,7 @@ fi
 if grep -q "CHANGE_ME" .env 2>/dev/null; then
     echo "[*] Replacing CHANGE_ME placeholders in .env with secure keys..."
     SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-    ENC=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+    ENC=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
     ARES_GENERATED_SECRET="$SECRET" ARES_GENERATED_ENC="$ENC" python3 - <<'PY'
 import os
 from pathlib import Path

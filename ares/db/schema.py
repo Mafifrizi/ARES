@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS credentials (
     source_module   TEXT,
     notes           TEXT DEFAULT '',
     cracked         INTEGER NOT NULL DEFAULT 0,
-    cracked_value_enc TEXT,              -- Fernet-encrypted cracked plaintext. MUST be encrypted before writing; never store plaintext here.
+    cracked_value_enc TEXT,              -- Vault-encrypted cracked plaintext (AES-256-GCM v2). MUST be encrypted before writing; never store plaintext here.
     captured_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

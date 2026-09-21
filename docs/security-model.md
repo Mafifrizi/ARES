@@ -45,8 +45,8 @@ client generates both; ARES does not ship a shared production key.
 # Token/session signing key
 export ARES_SECRET_KEY="$(openssl rand -hex 32)"
 
-# Encryption key for vault, checkpoint, and stored sensitive material
-export ARES_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+# Encryption key for vault, checkpoint, and stored sensitive material (AES-256-GCM)
+export ARES_ENCRYPTION_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 ```
 
 Never store these values in version control. Keep `ARES_ENCRYPTION_KEY` stable
@@ -311,14 +311,19 @@ Strict-Transport-Security: max-age=31536000
 
 ## Scope Enforcement
 
-### Kernel Scope Wall (Transport-Level Egress Firewall)
+### Scope Firewall (Dual-Layer OS & Transport Egress Firewall)
 
-At the transport layer, ARES deploys an automated **Kernel Scope Wall** (`ares.core.scope_firewall.ScopeFirewall`) that intercepts low-level socket and event loop connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`):
-- **Fail-Closed Egress Blocking**: If an attack module attempts to connect directly to an out-of-scope IP/hostname, the connection is instantly aborted with `ScopeFirewallBlockError` (status 403 Forbidden) and audited.
-- **ContextVar Task Isolation**: Active exclusively within the attack module execution coroutine. Database pools, API requests, and telemetry tasks bypass the firewall in `< 0.00001ms`.
-- **DNS Re-entrancy & Rebinding Defense**: Non-blocking hostname resolution checks resolved IPs against scope CIDRs, with an internal lock preventing recursive interception.
-- **Loopback & Proactor IPC Safety**: Exempts internal loopback (`127.0.0.1`, `::1`) and Windows Proactor event loop named pipes.
-- **Cloud Category Allowlist**: Cloud modules (`MODULE_CATEGORY == "cloud"`) are permitted to access official provider endpoints (`*.microsoftonline.com`, `*.amazonaws.com`, etc.) while blocking untrusted egress.
+ARES deploys a strict dual-layer **Scope Firewall** (`ares.core.scope_firewall.ScopeFirewall` and `OSFirewallController`) to enforce fail-closed scope boundaries:
+1. **OS / Kernel-Level Packet Filtering (Elevated Mode)**:
+   - When running with administrative privileges (Windows Administrator / Linux root), `OSFirewallController` interacts directly with OS network packet filtering (`netsh advfirewall` on Windows, `iptables` on Linux), establishing outbound firewall rules that physically block network egress outside campaign scope CIDRs.
+   - Includes automatic fail-safe rule teardown on context completion and process shutdown (`atexit`).
+2. **In-Process Transport Socket Interceptor (Process Mode)**:
+   - Hooks low-level socket and event loop connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) in Python user space, ensuring fail-closed scope enforcement even when running unprivileged without OS admin rights.
+   - **Fail-Closed Egress Blocking**: Any out-of-scope connection attempt is instantly aborted with `ScopeFirewallBlockError` (status 403 Forbidden) and recorded in security audit logs.
+   - **ContextVar Task Isolation**: Active exclusively within the attack module execution coroutine. Database pools, API requests, and telemetry tasks bypass the firewall in `< 0.00001ms`.
+   - **DNS Re-entrancy & Rebinding Defense**: Non-blocking hostname resolution checks resolved IPs against scope CIDRs, with an internal lock preventing recursive interception.
+   - **Loopback & Proactor IPC Safety**: Exempts internal loopback (`127.0.0.1`, `::1`) and Windows Proactor event loop named pipes.
+   - **Cloud Category Allowlist**: Cloud modules (`MODULE_CATEGORY == "cloud"`) are permitted to access official provider endpoints (`*.microsoftonline.com`, `*.amazonaws.com`, etc.) while blocking untrusted egress.
 
 ### CampaignGuardrail & Pre-Flight Scope Enforcement
 

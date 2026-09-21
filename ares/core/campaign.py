@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from netaddr import IPNetwork, AddrFormatError
 
 
@@ -170,6 +170,7 @@ class Campaign(BaseModel):
     # ── AD campaign context ───────────────────────────────────────────────────
     domain:  str = Field(default="", description="Active Directory domain (e.g. corp.local)")
     dc:      str = Field(default="", description="Domain controller IP or hostname")
+    _scope_cache: dict[str, bool] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
         """Warn if operator is still the default 'unknown'."""
@@ -205,67 +206,72 @@ class Campaign(BaseModel):
         For hostnames: attempts DNS resolution to obtain the IP, then checks
         the resolved IP against scope CIDRs. If DNS fails, the check FAILS
         CLOSED (returns False) to prevent accidental out-of-scope execution.
-
-        NOTE: When called from async context, DNS resolution uses
-        loop.getaddrinfo() (non-blocking). Falls back to sync only in CLI context.
+        Falls back to explicitly declared targets/dc/domain for offline labs.
         """
         if not self.scope:
             return False  # No scope = nothing is in scope (safe default)
+
+        normalized = ip.strip().lower()
+        if not normalized:
+            return False
+
+        if normalized in self._scope_cache:
+            return self._scope_cache[normalized]
+
+        res = self._check_scope_uncached(normalized)
+        if len(self._scope_cache) < 1024:
+            self._scope_cache[normalized] = res
+        return res
+
+    def _check_scope_uncached(self, target: str) -> bool:
         try:
             from netaddr import IPAddress
-            addr = IPAddress(ip)
+            addr = IPAddress(target)
             return any(addr in IPNetwork(s.cidr) for s in self.scope)
         except (AddrFormatError, ValueError):
-            target = ip.strip().lower()
-            if not target:
-                return False
+            pass
 
-            explicit_hosts = {
-                entry.strip().lower()
-                for entry in [*self.targets, self.dc, self.domain]
-                if entry and entry.strip()
-            }
+        explicit_hosts = {
+            entry.strip().lower()
+            for entry in [*self.targets, self.dc, self.domain]
+            if entry and entry.strip()
+        }
 
-            # Attempt DNS resolution first to verify resolved IP is in CIDR scope
-            import socket as _socket
-            import logging as _logging
-            _log = _logging.getLogger("ares.campaign")
+        # Attempt DNS resolution first to verify resolved IP is in CIDR scope
+        import socket as _socket
+        import logging as _logging
+        _log = _logging.getLogger("ares.campaign")
+        try:
+            import concurrent.futures as _cf
+            _pool = _cf.ThreadPoolExecutor(max_workers=1)
             try:
-                import asyncio as _asyncio
-                try:
-                    _loop = _asyncio.get_event_loop()
-                    if _loop.is_running():
-                        import concurrent.futures as _cf
-                        with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
-                            results = _pool.submit(
-                                _socket.getaddrinfo, target, None,
-                                _socket.AF_INET, _socket.SOCK_STREAM
-                            ).result(timeout=2.0)
-                    else:
-                        results = _socket.getaddrinfo(target, None, _socket.AF_INET, _socket.SOCK_STREAM)
-                except RuntimeError:
-                    results = _socket.getaddrinfo(target, None, _socket.AF_INET, _socket.SOCK_STREAM)
+                results = _pool.submit(
+                    _socket.getaddrinfo, target, None,
+                    _socket.AF_INET, _socket.SOCK_STREAM
+                ).result(timeout=0.4)
+            finally:
+                _pool.shutdown(wait=False, cancel_futures=True)
 
-                if results:
-                    resolved_ip = results[0][4][0]
-                    from netaddr import IPAddress as _IPAddr
-                    addr = _IPAddr(resolved_ip)
-                    in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
-                    if not in_scope:
-                        _log.warning(
-                            "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",
-                            target, resolved_ip, [s.cidr for s in self.scope],
-                        )
-                        return False
-                    return True
-            except (_socket.gaierror, TimeoutError, Exception):
-                pass
-
-            # If DNS resolution failed (offline test lab / local dev): allow ONLY if explicitly declared in targets/dc/domain
-            if target in explicit_hosts:
+            if results:
+                resolved_ip = results[0][4][0]
+                from netaddr import IPAddress as _IPAddr
+                addr = _IPAddr(resolved_ip)
+                in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
+                if not in_scope:
+                    _log.warning(
+                        "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",
+                        target, resolved_ip, [s.cidr for s in self.scope],
+                    )
+                    return False
                 return True
+        except (_socket.gaierror, TimeoutError, Exception):
+            pass
 
-            return False
+        # If DNS resolution failed (offline test lab / local dev): allow ONLY if explicitly declared in targets/dc/domain
+        if target in explicit_hosts:
+            return True
+
+        return False
 
     def check(self, ip: str) -> bool:
         """Alias for is_in_scope - used by guardrail consumers."""

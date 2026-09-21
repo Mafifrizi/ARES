@@ -637,6 +637,29 @@ def test_python_setup_replaces_change_me_placeholders_in_existing_env(tmp_path, 
     assert "ARES_API_PORT=8080" in env_content
 
 
+def test_python_setup_replaces_new_256bit_placeholder_in_existing_env(tmp_path, capsys):
+    from ares.cli.typer_main import _run_python_setup
+
+    (tmp_path / ".env").write_text(
+        "ARES_SECRET_KEY=CHANGE_ME_USE_openssl_rand_-hex_32\n"
+        "ARES_ENCRYPTION_KEY=CHANGE_ME_USE_secrets_token_urlsafe_32\n"
+        "ARES_DEFAULT_ADMIN_PASSWORD=YOUR_STRONG_ADMIN_PASSWORD_HERE\n"
+        "ARES_API_PORT=8080\n",
+        encoding="utf-8",
+    )
+
+    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+
+    output = capsys.readouterr().out
+    assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
+    assert "Admin password:" in output
+
+    env_content = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "CHANGE_ME" not in env_content
+    assert "YOUR_STRONG_ADMIN_PASSWORD_HERE" not in env_content
+    assert "ARES_API_PORT=8080" in env_content
+
+
 def test_python_setup_leaves_configured_env_unchanged(tmp_path, capsys):
     from ares.cli.typer_main import _run_python_setup
 
