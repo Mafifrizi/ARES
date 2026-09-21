@@ -66,7 +66,7 @@ To ensure safety, stability, and detection-minimization:
 
 ---
 
-### Acknowledgments
+### Prior Art & References
 
-This research track draws inspiration from foundational cross-platform tradecraft, notably the pioneering work of **Tim Brown (`@timb-machine`)** on `linikatz`, **Benjamin Delpy (`@gentilkiwi`)** on `mimikatz`, **Alberto Solino (`@asolino`)** on `Impacket`, and the broader open-source offensive security research community.
+This research track draws inspiration from foundational cross-platform tradecraft, notably the pioneering work of **Linikatz (Tim Brown, Cisco CX Security)**, **Mimikatz (Benjamin Delpy)**, **Impacket (Alberto Solino, SecureAuth)**, and the broader open-source offensive security research community.
 ```

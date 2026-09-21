@@ -635,10 +635,10 @@ We invite adversarial engineers, penetration testers, and offensive developers t
 
 ---
 
-## 7. Scholarly & Industry Acknowledgments
+## 7. Prior Art & Technical References
 
-ARES acknowledges and thanks the pioneers whose foundational research made cross-platform Active Directory security analysis possible:
-- **Tim Brown (`@timb-machine`) & Cisco CX Security**: Creator of `linikatz`, demonstrating UNIX/Linux Active Directory credential extraction mechanics.
-- **Benjamin Delpy (`@gentilkiwi`)**: Author of `mimikatz`, establishing the foundations of Kerberos ticket abuse and Windows credential architecture.
-- **Alberto Solino (`@asolino`) & SecureAuth Corp**: Authors of `Impacket`, providing the definitive Python implementations of MSRPC, SMB, and Kerberos protocols.
-- **Dirk-jan Mollema**: Research on PKINIT, unPAC, and cross-platform Active Directory delegation abuse.
+ARES builds upon foundational offensive security research and acknowledges the open-source projects that established cross-platform Active Directory security analysis:
+- **Linikatz (Tim Brown, Cisco CX Security)**: Pioneered UNIX/Linux Active Directory credential harvesting, SSSD cache extraction, and Kerberos ccache tradecraft.
+- **Mimikatz (Benjamin Delpy)**: Established foundational Kerberos ticket manipulation and Windows memory architecture research.
+- **Impacket (Alberto Solino, SecureAuth)**: The definitive open-source Python implementation of MSRPC, SMB, and Kerberos protocols.
+- **PKINITtools (Dirk-jan Mollema)**: Groundbreaking research on Kerberos PKINIT, unPAC integrity, and cross-platform Active Directory delegation abuse.
