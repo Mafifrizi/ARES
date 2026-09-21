@@ -2,7 +2,6 @@
 
 <img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="480">
 
-# ARES™
 ### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
 **The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with zero collateral risk.**
