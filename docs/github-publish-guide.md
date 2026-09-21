@@ -43,7 +43,6 @@ Keep these files visible:
 - `docs/api-reference.md` - API docs.
 - `docs/security-model.md` - security model.
 - `docs/validation-lab.md` - local validation lab.
-- `docs/community-posts.md` - launch copy for Facebook and Discord.
 
 ## Initialize Git
 

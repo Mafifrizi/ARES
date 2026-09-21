@@ -46,7 +46,6 @@ The documentation is organized into five functional pillars:
 | Document | Description | Target Audience |
 | --- | --- | --- |
 | [github-publish-guide.md](github-publish-guide.md) | Checklist for version tagging, repository sanitization, and release publication. | Maintainers |
-| [community-posts.md](community-posts.md) | Announcement templates and release communications for community platforms. | Maintainers |
 
 ---
 
