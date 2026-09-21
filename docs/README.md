@@ -32,6 +32,7 @@ The documentation is organized into five functional pillars:
 | --- | --- | --- |
 | [api-reference.md](api-reference.md) | Full FastAPI endpoint specification, query parameters, and JSON payloads. | API Consumers, Integrators |
 | [security-model.md](security-model.md) | Formal threat model, credential encryption, memory protection, and CSRF isolation. | Security Architects, Auditors |
+| [sso-setup.md](sso-setup.md) | Enterprise Multi-Tenant Single Sign-On (SAML 2.0 / OIDC), IdP federation, and setup. | IAM Engineers, Admins |
 | [database-migrations.md](database-migrations.md) | Alembic revision chain (0001 to 0011), SQLite/PostgreSQL schema parity, and adoption. | DBAs, DevOps |
 | [validation-lab.md](validation-lab.md) | Local hermetic validation lab specification and automated safety test harness. | QA, Core Engineers |
 

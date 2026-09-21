@@ -73,7 +73,7 @@ Traditional penetration testing is fundamentally flawed: it is expensive, episod
 | **Testing Frequency** | Annual / Semi-Annual | Scheduled Daily / Weekly | **Continuous / On-Demand** |
 | **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
 | **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
-| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed App-Layer ScopeGuard & Kernel Socket Firewall** |
+| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed Dual-Layer ScopeGuard & OS/Transport Firewall** |
 | **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound & Kerberos Suite** |
 | **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Authenticated Vault** |
 | **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |

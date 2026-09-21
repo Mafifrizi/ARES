@@ -156,6 +156,93 @@ created.
 
 ---
 
+### `GET /auth/sso/init`
+
+Initiate an SP-initiated Single Sign-On (SAML 2.0 or OIDC) flow for a specific organization. Returns the authorization redirect URL and registers an ephemeral single-use state token in the database for CSRF and replay protection.
+
+**Query Parameters:**
+- `org`: Organization slug (defaults to `"default"`).
+
+**Response:** `200 OK`
+```json
+{
+  "configured": true,
+  "protocol": "saml",
+  "redirect_url": "https://idp.example.com/sso/endpoint?...",
+  "flow_id": "c1f7b8c2-..."
+}
+```
+
+---
+
+### `POST /auth/sso/saml/acs`
+
+SAML 2.0 Assertion Consumer Service (ACS) endpoint (HTTP-POST binding). Receives signed base64-encoded XML assertions from Identity Providers (Okta, Microsoft Entra ID, Ping), verifies digital signatures with the stored IdP x.509 certificate, validates the `InResponseTo` correlation identifier against active state tokens, JIT-provisions the user, and sets secure browser session cookies (`ares-dev-refresh` and `ares-dev-csrf`).
+
+**Request:** `application/x-www-form-urlencoded`
+```
+SAMLResponse=PHNhbWxwOlJlc3BvbnNlLi4u&RelayState=%2Fdashboard%2F
+```
+
+**Response:** HTTP `303 See Other` redirecting to the target dashboard route with active session cookies.
+
+---
+
+### `GET /auth/sso/oidc/callback`
+
+OpenID Connect (OIDC) Authorization Code callback endpoint. Exchanges the one-time authorization code with the provider token endpoint, cryptographically verifies ID Token claims (`iss`, `aud`, `nonce`), maps user claims and roles, JIT-provisions the user account, and issues browser session cookies.
+
+**Query Parameters:**
+- `code`: Authorization code issued by the IdP.
+- `state`: Single-use state parameter generated during initiation.
+
+**Response:** HTTP `303 See Other` redirecting to `/dashboard/` with active session cookies.
+
+---
+
+### `GET /auth/sso/config/{org_slug}`
+
+Retrieve SSO status and metadata for an organization. Requires the `team_lead` administrative role.
+
+**Response:** `200 OK`
+```json
+{
+  "configured": true,
+  "organization": { "id": "org-1", "slug": "default", "name": "Default Organization" },
+  "protocol": "saml",
+  "is_enabled": true,
+  "issuer_or_entity_id": "https://idp.example.com/entityid",
+  "sso_url": "https://idp.example.com/sso",
+  "default_role": "reporter",
+  "has_certificate": true,
+  "has_client_secret": false
+}
+```
+
+---
+
+### `POST /auth/sso/config/{org_slug}`
+
+Register or update SSO federation settings for an organization. Requires the `team_lead` administrative role. All certificates and client secrets are encrypted before persistence via `AES-256-GCM` AEAD.
+
+**Request:** `application/json`
+```json
+{
+  "protocol": "saml",
+  "issuer_or_entity_id": "https://idp.example.com/entityid",
+  "sso_url": "https://idp.example.com/sso",
+  "idp_certificate": "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----",
+  "default_role": "reporter",
+  "role_mapping": {
+    "SecAdmins": "team_lead",
+    "RedTeam": "operator"
+  },
+  "is_enabled": true
+}
+```
+
+---
+
 ### `POST /auth/change-password`
 
 Change password for the authenticated user.
@@ -327,6 +414,17 @@ durably terminal:
 
 ---
 
+### `POST /campaigns/{id}/restore-vault`
+
+Re-hydrate the campaign's `CredentialVault` from persisted database records. Loads encrypted credentials at rest (`AES-256-GCM` v2 / transparent legacy Fernet fallback) into the active campaign memory session.
+
+**Response:** `200 OK`
+```json
+{ "status": "restored", "credentials_loaded": 5 }
+```
+
+---
+
 ## Modules
 
 ### `GET /modules`
@@ -387,6 +485,67 @@ returns a local preview without module execution.
     "dc":     "dc01.corp.local"
   },
   "dry_run": false
+}
+```
+
+---
+
+### `POST /modules/{module_id}/feasibility`
+
+Pre-flight defense feasibility assessment before module execution. Evaluates target defense posture (EDR, Credential Guard, PPL, MDI, Sysmon), calculates risk score, and recommends stealthy alternatives.
+
+**Request:** `application/json`
+```json
+{
+  "campaign_id": "abc12345",
+  "target": "10.0.0.5",
+  "params": { "share": "C$" }
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "module_id": "lateral.smb_exec",
+  "campaign_id": "abc12345",
+  "report": {
+    "feasible": true,
+    "risk_score": 45,
+    "target": "10.0.0.5",
+    "stealth_recommendations": []
+  }
+}
+```
+
+---
+
+### `GET /modules/execution-chains`
+
+Return read-only attack execution-chain guidance, capability paths, and multi-stage execution chain templates for the Modules catalog.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": "ad-kerberoast-to-privesc",
+    "name": "Active Directory Kerberoast to Local Privilege Escalation",
+    "steps": ["ad.spn_scan", "ad.kerberoast", "windows.privesc"]
+  }
+]
+```
+
+---
+
+### `POST /modules/reload`
+
+Hot-reload attack modules in-memory from builtin and external module sources. Strictly permitted for loopback origins (`127.0.0.1`, `::1`, `localhost`) or authenticated operators with administrative privileges.
+
+**Response:** `200 OK`
+```json
+{
+  "status": "ok",
+  "reloaded": true,
+  "module_count": 64
 }
 ```
 

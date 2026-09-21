@@ -39,6 +39,12 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - Browser authentication is same-origin only. Login first obtains a pre-login
   CSRF cookie from `GET /auth/csrf`, then calls `POST /auth/token` with the
   existing form body and `X-ARES-CSRF`.
+- Enterprise Single Sign-On (SAML 2.0 / OIDC): The login surface supports SP-initiated
+  SSO via **"Or continue with SSO"**. Clicking initiates `GET /auth/sso/init?org=default`,
+  redirecting to the configured IdP. Upon assertion verification at `/auth/sso/saml/acs`
+  or `/auth/sso/oidc/callback`, the backend issues secure session cookies and redirects
+  back to `/dashboard/`, where `AuthProvider` performs a locked startup refresh and loads
+  the operator profile.
 - Access tokens are held in module memory only. Refresh tokens exist only in a
   host-only HttpOnly cookie and never enter JSON, browser-readable storage,
   React state, messages, logs, or request bodies/headers/queries.
