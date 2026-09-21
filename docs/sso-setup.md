@@ -99,28 +99,58 @@ Request payload for `POST /auth/sso/config/{org_slug}`:
 *Note: The backend automatically encrypts `idp_certificate` and `client_secret` via `DataEncryptor` before persisting to `sso_configurations`.*
 
 #### Option B: Direct SQL Database Insertion
-If provisioning directly via SQLite (`ares.db`):
+ARES automatically manages and provisions the required multi-tenant SSO tables (`organizations`, `sso_configurations`, `sso_flow_states`, and JIT federated user attributes) across both supported storage backends:
+- **SQLite** (`ares.db` for local development and single-operator red team deployments)
+- **Enterprise PostgreSQL** (`postgresql+asyncpg://` or `postgresql://` for high-concurrency multi-tenant team server deployments)
+
+If provisioning directly via SQL:
 1. Ensure the organization exists in the `organizations` table:
    ```sql
    INSERT INTO organizations (id, slug, name, is_active)
-   VALUES ('org-corp-01', 'corp', 'ACME Corp', 1);
+   VALUES ('org-corp-01', 'corp', 'ACME Corp', 1)
+   ON CONFLICT (slug) DO NOTHING;
    ```
 2. Encrypt certificates or client secrets using the ARES CLI helper:
    ```bash
    python -c "from ares.core.config import get_settings; from ares.core.sso import encrypt_sso_secret; print(encrypt_sso_secret('YOUR_SECRET_HERE', get_settings()))"
    ```
 3. Insert into `sso_configurations`:
-   ```sql
-   INSERT INTO sso_configurations (
-       id, org_id, protocol, is_enabled,
-       issuer_or_entity_id, sso_url, idp_certificate_enc,
-       default_role, role_mapping_json
-   ) VALUES (
-       'sso-cfg-01', 'org-corp-01', 'saml', 1,
-       'https://idp.example.com/entityid', 'https://idp.example.com/sso', '<ENCRYPTED_VALUE>',
-       'reporter', '{"SecAdmins": "team_lead"}'
-   );
-   ```
+   - **For SQLite**:
+     ```sql
+     INSERT INTO sso_configurations (
+         id, org_id, protocol, is_enabled,
+         issuer_or_entity_id, sso_url, idp_certificate_enc,
+         default_role, role_mapping_json
+     ) VALUES (
+         'sso-cfg-01', 'org-corp-01', 'saml', 1,
+         'https://idp.example.com/entityid', 'https://idp.example.com/sso', '<ENCRYPTED_VALUE>',
+         'reporter', '{"SecAdmins": "team_lead"}'
+     )
+     ON CONFLICT(org_id, protocol) DO UPDATE SET
+         is_enabled=excluded.is_enabled,
+         issuer_or_entity_id=excluded.issuer_or_entity_id,
+         sso_url=excluded.sso_url,
+         idp_certificate_enc=excluded.idp_certificate_enc,
+         updated_at=datetime('now');
+     ```
+   - **For PostgreSQL**:
+     ```sql
+     INSERT INTO sso_configurations (
+         id, org_id, protocol, is_enabled,
+         issuer_or_entity_id, sso_url, idp_certificate_enc,
+         default_role, role_mapping_json
+     ) VALUES (
+         'sso-cfg-01', 'org-corp-01', 'saml', 1,
+         'https://idp.example.com/entityid', 'https://idp.example.com/sso', '<ENCRYPTED_VALUE>',
+         'reporter', '{"SecAdmins": "team_lead"}'
+     )
+     ON CONFLICT (org_id, protocol) DO UPDATE SET
+         is_enabled=EXCLUDED.is_enabled,
+         issuer_or_entity_id=EXCLUDED.issuer_or_entity_id,
+         sso_url=EXCLUDED.sso_url,
+         idp_certificate_enc=EXCLUDED.idp_certificate_enc,
+         updated_at=now();
+     ```
 
 ---
 

@@ -334,7 +334,7 @@ def _setup_otel(app: FastAPI, settings: Any) -> None:
 
 # ── App-level singletons ──────────────────────────────────────────────────────
 _engine: AresEngine | None = None
-_db: AresDatabase | None = None
+_db: Any | None = None
 
 # WebSocket registry: campaign_id → opaque authenticated connection contexts.
 @dataclass(eq=False)
@@ -459,10 +459,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     app.state.browser_policy = build_browser_session_policy(settings)
     canonical_noncredentialed_origins(settings.cors_origins_list)
-    _db = await AresDatabase.create(
-        db_path=settings.db_path,
-        encryption_key=settings.encryption_key_value,
-    )
+    db_url = settings.ares_database_url
+    if db_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        from ares.db.postgres import PostgresDatabase
+
+        _db = await PostgresDatabase.create(
+            dsn=db_url,
+            encryption_key=settings.encryption_key_value,
+        )
+        logger.info("ares_database_backend_initialized", backend="postgresql")
+    else:
+        _db = await AresDatabase.create(
+            db_path=settings.db_path,
+            encryption_key=settings.encryption_key_value,
+        )
+        logger.info("ares_database_backend_initialized", backend="sqlite")
     app.state.db = _db
     await _db.ensure_default_admin(settings.ares_default_admin_password)
 
@@ -769,7 +780,7 @@ async def _require_campaign_access(
         raise HTTPException(404, "Campaign not found")
 
 
-def get_db(request: Request) -> AresDatabase:
+def get_db(request: Request) -> Any:
     return request.app.state.db
 
 

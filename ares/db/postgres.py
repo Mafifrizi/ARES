@@ -3775,6 +3775,7 @@ class PostgresDatabase:
                         await self._validate_managed_schema(conn)
                         await self._validate_websocket_ticket_schema(conn)
                         await validate_postgresql_admission_authority_catalog(conn)
+                        await self._ensure_sso_schema(conn)
                     except _PostgresMigrationRequiredError:
                         raise
                     except _PostgresStartupDiagnosticError as exc:
@@ -5706,6 +5707,337 @@ class PostgresDatabase:
             )
             return True
         return False
+
+    # ── Multi-Tenant & Enterprise SSO ─────────────────────────────────────────
+
+    @staticmethod
+    async def _ensure_sso_schema(connection: Any) -> None:
+        """Ensure enterprise SSO and multi-tenant schema exists in PostgreSQL."""
+        await connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS organizations (
+                id          TEXT PRIMARY KEY,
+                slug        TEXT NOT NULL UNIQUE,
+                name        TEXT NOT NULL,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations (slug);
+
+            CREATE TABLE IF NOT EXISTS sso_configurations (
+                id                  TEXT PRIMARY KEY,
+                org_id              TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                protocol            TEXT NOT NULL,
+                is_enabled          INTEGER NOT NULL DEFAULT 1,
+                issuer_or_entity_id TEXT NOT NULL DEFAULT '',
+                sso_url             TEXT NOT NULL DEFAULT '',
+                idp_certificate_enc TEXT DEFAULT '',
+                sp_entity_id        TEXT DEFAULT '',
+                acs_url             TEXT DEFAULT '',
+                client_id           TEXT DEFAULT '',
+                client_secret_enc   TEXT DEFAULT '',
+                jwks_uri            TEXT DEFAULT '',
+                default_role        TEXT NOT NULL DEFAULT 'reporter',
+                role_mapping_json   TEXT NOT NULL DEFAULT '{}',
+                created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT ck_sso_protocol CHECK (protocol IN ('saml', 'oidc')),
+                CONSTRAINT uq_sso_org_protocol UNIQUE (org_id, protocol)
+            );
+            CREATE INDEX IF NOT EXISTS idx_sso_org ON sso_configurations (org_id);
+
+            CREATE TABLE IF NOT EXISTS sso_flow_states (
+                id          TEXT PRIMARY KEY,
+                org_id      TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                flow_type   TEXT NOT NULL,
+                flow_id     TEXT NOT NULL UNIQUE,
+                nonce       TEXT,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at  TIMESTAMPTZ NOT NULL,
+                is_consumed INTEGER NOT NULL DEFAULT 0,
+                consumed_at TIMESTAMPTZ,
+                CONSTRAINT ck_flow_type CHECK (flow_type IN ('saml', 'oidc'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_sso_flow_lookup
+                ON sso_flow_states (flow_id, is_consumed, expires_at);
+
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id TEXT;
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT NOT NULL DEFAULT 'local';
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS external_subject_id TEXT DEFAULT NULL;
+
+            INSERT INTO organizations (id, slug, name, is_active)
+            VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'Default Organization', 1)
+            ON CONFLICT (slug) DO NOTHING;
+            """
+        )
+
+    async def get_organization(self, slug_or_id: str) -> dict[str, Any] | None:
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM organizations WHERE slug=$1 OR id=$1",
+                slug_or_id,
+            )
+            if row:
+                return self._row_to_dict(row)
+            if slug_or_id == "default":
+                default_id = "00000000-0000-0000-0000-000000000001"
+                await conn.execute(
+                    """INSERT INTO organizations(id, slug, name, is_active)
+                       VALUES($1, $2, $3, 1)
+                       ON CONFLICT (slug) DO NOTHING""",
+                    default_id,
+                    "default",
+                    "Default Organization",
+                )
+                row = await conn.fetchrow("SELECT * FROM organizations WHERE slug='default'")
+                return self._row_to_dict(row) if row else None
+        return None
+
+    async def get_sso_config(
+        self, org_id: str, protocol: str | None = None
+    ) -> dict[str, Any] | None:
+        async with self._pool.acquire() as conn:
+            if protocol:
+                row = await conn.fetchrow(
+                    "SELECT * FROM sso_configurations "
+                    "WHERE org_id=$1 AND protocol=$2 AND is_enabled=1",
+                    org_id,
+                    protocol,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT * FROM sso_configurations WHERE org_id=$1 AND is_enabled=1 LIMIT 1",
+                    org_id,
+                )
+        return self._row_to_dict(row) if row else None
+
+    async def save_sso_config(
+        self,
+        org_id: str,
+        protocol: str,
+        issuer_or_entity_id: str = "",
+        sso_url: str = "",
+        idp_certificate_enc: str = "",
+        sp_entity_id: str = "",
+        acs_url: str = "",
+        client_id: str = "",
+        client_secret_enc: str = "",
+        jwks_uri: str = "",
+        default_role: str = "reporter",
+        role_mapping_json: str = "{}",
+        is_enabled: bool = True,
+    ) -> str:
+        sso_id = str(uuid.uuid4())
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO sso_configurations(
+                    id, org_id, protocol, is_enabled,
+                    issuer_or_entity_id, sso_url, idp_certificate_enc,
+                    sp_entity_id, acs_url, client_id, client_secret_enc,
+                    jwks_uri, default_role, role_mapping_json, updated_at
+                ) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+                ON CONFLICT (org_id, protocol) DO UPDATE SET
+                    is_enabled=EXCLUDED.is_enabled,
+                    issuer_or_entity_id=EXCLUDED.issuer_or_entity_id,
+                    sso_url=EXCLUDED.sso_url,
+                    idp_certificate_enc=EXCLUDED.idp_certificate_enc,
+                    sp_entity_id=EXCLUDED.sp_entity_id,
+                    acs_url=EXCLUDED.acs_url,
+                    client_id=EXCLUDED.client_id,
+                    client_secret_enc=EXCLUDED.client_secret_enc,
+                    jwks_uri=EXCLUDED.jwks_uri,
+                    default_role=EXCLUDED.default_role,
+                    role_mapping_json=EXCLUDED.role_mapping_json,
+                    updated_at=now()""",
+                sso_id,
+                org_id,
+                protocol,
+                1 if is_enabled else 0,
+                issuer_or_entity_id,
+                sso_url,
+                idp_certificate_enc,
+                sp_entity_id,
+                acs_url,
+                client_id,
+                client_secret_enc,
+                jwks_uri,
+                default_role,
+                role_mapping_json,
+            )
+        return sso_id
+
+    async def create_sso_flow_state(
+        self,
+        org_id: str,
+        flow_type: str,
+        flow_id: str,
+        nonce: str | None = None,
+        ttl_minutes: int = 10,
+    ) -> str:
+        state_id = str(uuid.uuid4())
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO sso_flow_states(
+                    id, org_id, flow_type, flow_id, nonce, created_at, expires_at
+                ) VALUES($1, $2, $3, $4, $5, now(), now() + ($6 || ' minutes')::interval)""",
+                state_id,
+                org_id,
+                flow_type,
+                flow_id,
+                nonce,
+                str(int(ttl_minutes)),
+            )
+        return state_id
+
+    async def consume_sso_flow_state(
+        self,
+        flow_id: str,
+        flow_type: str,
+    ) -> dict[str, Any] | None:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """SELECT * FROM sso_flow_states
+                       WHERE flow_id=$1 AND flow_type=$2 AND is_consumed=0 AND expires_at > now()
+                       FOR UPDATE""",
+                    flow_id,
+                    flow_type,
+                )
+                if not row:
+                    return None
+                record = self._row_to_dict(row)
+                await conn.execute(
+                    "UPDATE sso_flow_states SET is_consumed=1, consumed_at=now() WHERE id=$1",
+                    record["id"],
+                )
+                return record
+
+    async def provision_or_get_sso_user(
+        self,
+        org_id: str,
+        username: str,
+        role: str = "reporter",
+        external_id: str = "",
+        auth_provider: str = "sso",
+    ) -> dict[str, Any]:
+        """JIT provision or look up an SSO user adhering to the canonical schema."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """SELECT * FROM users
+                       WHERE (
+                           external_subject_id=$1
+                           AND external_subject_id IS NOT NULL
+                           AND external_subject_id != ''
+                       ) OR username=$2
+                       FOR UPDATE""",
+                    external_id,
+                    username,
+                )
+                if row:
+                    user = self._row_to_dict(row)
+                    updates = []
+                    params: list[Any] = []
+                    idx = 1
+                    if external_id and not user.get("external_subject_id"):
+                        updates.append(f"external_subject_id=${idx}")
+                        params.append(external_id)
+                        idx += 1
+                    if role and role != user.get("role"):
+                        updates.append(f"role=${idx}")
+                        params.append(role)
+                        idx += 1
+                    if updates:
+                        params.append(user["id"])
+                        await conn.execute(
+                            f"UPDATE users SET {', '.join(updates)} WHERE id=${idx}",  # noqa: S608
+                            *params,
+                        )
+                        updated_row = await conn.fetchrow(
+                            "SELECT * FROM users WHERE id=$1", user["id"]
+                        )
+                        user = self._row_to_dict(updated_row) if updated_row else user
+                    return user
+
+                user_id = str(uuid.uuid4())
+                dummy_hash = hash_password(secrets.token_urlsafe(32))
+                await conn.execute(
+                    """INSERT INTO users(
+                        id, username, hashed_password, role, is_active,
+                        created_by, org_id, auth_provider, external_subject_id
+                    ) VALUES($1, $2, $3, $4, 1, $5, $6, $7, $8)""",
+                    user_id,
+                    username,
+                    dummy_hash,
+                    role,
+                    f"sso:{auth_provider}",
+                    org_id,
+                    auth_provider,
+                    external_id,
+                )
+                logger.info(
+                    "sso_user_provisioned",
+                    username=username,
+                    role=role,
+                    org_id=org_id,
+                    provider=auth_provider,
+                )
+                new_row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", user_id)
+                return self._row_to_dict(new_row)
+
+    async def create_sso_session(
+        self,
+        user_id: str,
+        token_factory: AccessTokenFactory,
+    ) -> SessionIssueResult:
+        """Create authenticated session for an SSO-authenticated user."""
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT id,username,role,is_active,auth_epoch "
+                    "FROM users WHERE id=$1 FOR UPDATE",
+                    user_id,
+                )
+                if row is None or not bool(row["is_active"]):
+                    return SessionIssueResult(SessionIssueStatus.INVALID)
+                (
+                    family_id,
+                    raw_token,
+                    absolute_expiry,
+                ) = await self._insert_initial_family_token_with_expiry(
+                    conn,
+                    user_id=row["id"],
+                    auth_epoch=int(row["auth_epoch"]),
+                )
+                access_token = token_factory(
+                    {
+                        "sub": row["username"],
+                        "sid": family_id,
+                        "ver": int(row["auth_epoch"]),
+                    }
+                )
+                await conn.execute(
+                    "UPDATE users SET last_login=now() WHERE id=$1",
+                    row["id"],
+                )
+                await conn.execute(
+                    "INSERT INTO audit_log(actor,action,detail) VALUES("
+                    "'auth-system','sso_login_family_created','')"
+                )
+        return SessionIssueResult(
+            SessionIssueStatus.ISSUED,
+            IssuedTokenSession(
+                access_token=access_token,
+                refresh_token=raw_token,
+                user_id=row["id"],
+                subject=row["username"],
+                family_id=family_id,
+                auth_epoch=int(row["auth_epoch"]),
+                absolute_expires_at=absolute_expiry,
+                refresh_generation=0,
+                role=row["role"],
+            ),
+        )
 
     # ── API Keys ───────────────────────────────────────────────────────────────
 
