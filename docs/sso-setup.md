@@ -99,7 +99,7 @@ Request payload for `POST /auth/sso/config/{org_slug}`:
 *Note: The backend automatically encrypts `idp_certificate` and `client_secret` via `DataEncryptor` before persisting to `sso_configurations`.*
 
 #### Option B: Direct SQL Database Insertion
-If provisioning directly via SQLite (`ares.db`) or PostgreSQL:
+If provisioning directly via SQLite (`ares.db`):
 1. Ensure the organization exists in the `organizations` table:
    ```sql
    INSERT INTO organizations (id, slug, name, is_active)
