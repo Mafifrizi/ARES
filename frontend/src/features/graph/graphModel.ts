@@ -264,7 +264,25 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
   let os: "windows" | "windows-server" | "linux" | "firewall" = "windows";
   const osInfoLower = String(meta.os || meta.os_info || "").toLowerCase();
 
-  if (meta.os === "firewall" || meta.os === "windows-server" || meta.os === "windows" || meta.os === "linux") {
+  // Extract open ports and telemetry
+  const rawPorts: number[] = Array.isArray(meta.open_ports)
+    ? (meta.open_ports as (number | string)[]).map((p) => Number(p)).filter((n) => !isNaN(n))
+    : [];
+  const hasPort22 = rawPorts.includes(22);
+  const hasWinPorts = rawPorts.some((p) => [135, 139, 445, 3389, 5985, 5986].includes(p));
+  const hasDcPorts = rawPorts.some((p) => [88, 389, 636].includes(p)) || Boolean(meta.is_dc);
+
+  const telemetryText = `${osInfoLower} ${labelLower} ${JSON.stringify(meta.service_versions ?? {})} ${JSON.stringify(meta.findings ?? {})}`.toLowerCase();
+  const isLinuxTelemetry = [
+    "linux", "debian", "ubuntu", "kali", "centos", "rhel", "red hat", "redhat",
+    "fedora", "arch", "alpine", "openssh", "ssh pivot", "sudo", "suid", "cron"
+  ].some((k) => telemetryText.includes(k));
+  const isWindowsTelemetry = [
+    "windows", "microsoft", "iis", "active directory", "kerberos", "domain controller",
+    "msrpc", "samr", "lsass", "smb"
+  ].some((k) => telemetryText.includes(k));
+
+  if (meta.os === "firewall" || meta.os === "windows-server" || meta.os === "linux") {
     os = meta.os;
   } else if (
     typeLower.includes("firewall") ||
@@ -272,30 +290,36 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     labelLower.includes("ingress") ||
     labelLower.includes("gateway") ||
     labelLower.includes("k8s-ingress") ||
-    osInfoLower.includes("firewall")
+    osInfoLower.includes("firewall") ||
+    telemetryText.includes("pfsense") ||
+    telemetryText.includes("cisco") ||
+    telemetryText.includes("fortigate")
   ) {
     os = "firewall";
   } else if (
     typeLower.includes("dc") ||
-    Boolean(meta.is_dc) ||
+    hasDcPorts ||
     labelLower.includes("dc01") ||
     labelLower.includes("domain controller") ||
+    osInfoLower.includes("windows-server")
+  ) {
+    os = "windows-server";
+  } else if (
+    isLinuxTelemetry ||
+    (hasPort22 && !hasWinPorts)
+  ) {
+    os = "linux";
+  } else if (
+    isWindowsTelemetry ||
+    hasWinPorts ||
     labelLower.includes("server") ||
     labelLower.includes("sql") ||
     labelLower.includes("fs01") ||
     osInfoLower.includes("server")
   ) {
-    os = "windows-server";
-  } else if (
-    labelLower.includes("linux") ||
-    labelLower.includes("ubuntu") ||
-    labelLower.includes("kali") ||
-    labelLower.includes("aws") ||
-    labelLower.includes("imds") ||
-    osInfoLower.includes("linux") ||
-    osInfoLower.includes("ubuntu")
-  ) {
-    os = "linux";
+    os = (hasDcPorts || labelLower.includes("server")) ? "windows-server" : "windows";
+  } else {
+    os = hasPort22 ? "linux" : "windows";
   }
 
   // 2. Detect Accurate Privilege Tier (SYSTEM * vs ADMIN vs USER / BEACON vs TARGET)
@@ -379,46 +403,123 @@ export function adaptApiGraphToCobalt(
   apiGraph: SafeGraph,
   campaign?: { name?: string; targets?: string[]; scope_cidrs?: string[] } | null
 ): SafeGraph {
-  if (apiGraph.nodes.length > 0) {
-    // 1. Identify which nodes participate in edges
-    const connectedNodeIds = new Set<string>();
-    apiGraph.edges.forEach((e) => {
-      connectedNodeIds.add(e.source);
-      connectedNodeIds.add(e.target);
-    });
-
-    // In Cobalt Strike Pivot Topology, the canvas strictly models network infrastructure
-    // (hosts, servers, domain controllers, firewalls, gateways, and active pivot channels).
-    // Findings (vulnerabilities like Kerberoastable SPN, Open Ports, PRT compromise) and
-    // user/group AD objects are attributes of hosts, NOT separate physical computer workstations!
-    // This prevents fake computer monitors from crowding the canvas and colliding with real hosts.
-    const candidateNodes = apiGraph.nodes.filter((n) => {
-      const typeLower = (n.type || "").toLowerCase();
-      if (
-        typeLower === "finding" ||
-        typeLower === "credential" ||
-        typeLower === "user" ||
-        typeLower === "group" ||
-        typeLower === "domain"
-      ) {
-        return false;
+  // Map findings by host key
+  const findingsByHost = new Map<string, SafeGraphNode[]>();
+  apiGraph.nodes
+    .filter((n) => (n.type || "").toLowerCase() === "finding")
+    .forEach((f) => {
+      const incomingEdge = apiGraph.edges.find((e) => e.target === f.id);
+      let hostKey = incomingEdge ? incomingEdge.source : String(f.metadata?.host || "");
+      if (!hostKey) {
+        const ipMatch = f.label.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+        if (ipMatch) hostKey = ipMatch[0];
       }
-      return true;
+      if (hostKey) {
+        const clean = hostKey.toLowerCase().replace("host:", "");
+        if (!findingsByHost.has(clean)) findingsByHost.set(clean, []);
+        findingsByHost.get(clean)!.push(f);
+      }
     });
 
+  let candidateNodes = apiGraph.nodes.filter((n) => {
+    const typeLower = (n.type || "").toLowerCase();
+    return !(
+      typeLower === "finding" ||
+      typeLower === "credential" ||
+      typeLower === "user" ||
+      typeLower === "group" ||
+      typeLower === "domain"
+    );
+  });
+
+  // If candidate infrastructure nodes are empty, synthesize host nodes from findings or campaign targets
+  if (candidateNodes.length === 0) {
+    const inferredTargets: string[] = [];
+    findingsByHost.forEach((_, hostKey) => {
+      if (hostKey && !inferredTargets.includes(hostKey)) {
+        inferredTargets.push(hostKey);
+      }
+    });
+    if (campaign && Array.isArray(campaign.targets)) {
+      campaign.targets.forEach((tgt) => {
+        if (tgt && !inferredTargets.includes(tgt)) {
+          inferredTargets.push(tgt);
+        }
+      });
+    }
+
+    if (inferredTargets.length > 0) {
+      candidateNodes = inferredTargets.map((tgt, idx) => {
+        const tgtLower = tgt.toLowerCase();
+        const isDc = tgtLower.includes("dc") || tgtLower.includes("server") || idx === inferredTargets.length - 1;
+        const isLinux = tgtLower.includes("linux") || tgtLower.includes("ubuntu") || tgtLower.includes("kali") || tgtLower.includes("deb");
+        const hostFindings = findingsByHost.get(tgtLower) || [];
+        const hasCrit = hostFindings.some((f) => f.severity === "critical");
+        const hasHigh = hostFindings.some((f) => f.severity === "high");
+        const privilege = hasCrit ? "system" : hasHigh ? "admin" : hostFindings.length > 0 ? "user" : "uncompromised";
+
+        return {
+          id: `host:${tgt}`,
+          type: isDc ? "dc" : "host",
+          label: tgt,
+          color: isDc ? "#e11d48" : hasCrit ? "#e11d48" : hasHigh ? "#f59e0b" : "#06b6d4",
+          severity: hasCrit ? "critical" : hasHigh ? "high" : "low",
+          metadata: {
+            os: isDc ? "windows-server" : (isLinux ? "linux" : "windows"),
+            privilege,
+            status: "active",
+            ip: tgt,
+            subLabel: isDc ? "DOMAIN CONTROLLER" : "TARGET HOST",
+          }
+        };
+      });
+    }
+  }
+
+  // Ensure Ingress Firewall is included if perimeter scope CIDRs exist
+  if (candidateNodes.length > 0 && Array.isArray(campaign?.scope_cidrs) && campaign.scope_cidrs.length > 0) {
+    const hasFw = candidateNodes.some((n) => (n.type || "").toLowerCase() === "firewall" || n.id.includes("firewall") || n.id.includes("ingress"));
+    if (!hasFw) {
+      const scopeLabel = campaign.scope_cidrs[0] || campaign?.name || "Target Scope";
+      const fwNode: SafeGraphNode = {
+        id: "node:ingress-fw",
+        type: "firewall",
+        label: "INGRESS / SCOPE",
+        color: "#06b6d4",
+        metadata: {
+          os: "firewall",
+          privilege: "user",
+          ip: campaign?.scope_cidrs?.[0] || "0.0.0.0/0",
+          subLabel: String(scopeLabel),
+        },
+      };
+      candidateNodes = [fwNode, ...candidateNodes];
+    }
+  }
+
+  if (candidateNodes.length > 0) {
     const nodes: SafeGraphNode[] = candidateNodes.map((n) => {
       const inference = inferCobaltNodeData(n);
+      const hostKey = (inference.ip || n.label || n.id || "").toLowerCase().replace("host:", "");
+      const hostFindings = findingsByHost.get(hostKey) || [];
+      const hasCrit = hostFindings.some((f) => f.severity === "critical");
+      const hasHigh = hostFindings.some((f) => f.severity === "high");
+      const derivedPriv = hasCrit ? "system" : hasHigh ? "admin" : inference.privilege;
+
       return {
         ...n,
+        severity: hasCrit ? "critical" : hasHigh ? "high" : n.severity,
         metadata: {
           ...n.metadata,
           os: inference.os,
-          privilege: inference.privilege,
+          privilege: derivedPriv,
           status: inference.status,
           ip: inference.ip || (n.label.includes(".") ? n.label : null),
           process: inference.process || null,
           pid: inference.pid !== undefined ? inference.pid : null,
-          subLabel: inference.subLabel || null
+          subLabel: inference.subLabel || null,
+          findingCount: hostFindings.length,
+          maxSeverity: hasCrit ? "critical" : hasHigh ? "high" : hostFindings.length > 0 ? "medium" : null,
         }
       };
     });
@@ -437,68 +538,37 @@ export function adaptApiGraphToCobalt(
           } else if (typeLower.includes("session") || typeLower.includes("ssh")) {
             label = "SSH 22";
           } else if (typeLower.includes("discovery")) {
-            label = "discovered";
+            label = "in-scope";
           } else {
             label = "link";
           }
         }
-        return {
-          ...e,
-          label
-        };
+        return { ...e, label };
       });
 
-    return { nodes, edges };
-  }
-
-  // Fallback: If campaign has targets but no modules have run yet, display the target hosts
-  if (campaign && Array.isArray(campaign.targets) && campaign.targets.length > 0) {
-    const firewallNode: SafeGraphNode = {
-      id: "node:ingress-fw",
-      type: "firewall",
-      label: "INGRESS / SCOPE",
-      color: "#06b6d4",
-      metadata: {
-        os: "firewall",
-        privilege: "user",
-        ip: campaign.scope_cidrs?.[0] || "10.0.0.0/24",
-        subLabel: `${campaign.name || "Target Scope"}`
-      }
-    };
-
-    const targetNodes: SafeGraphNode[] = campaign.targets.slice(0, 12).map((tgt, idx) => {
-      const tgtLower = tgt.toLowerCase();
-      const isDc = tgtLower.includes("dc") || tgtLower.includes("server") || idx === campaign.targets!.length - 1;
-      const isLinux = tgtLower.includes("linux") || tgtLower.includes("ubuntu") || tgtLower.includes("deb");
-      return {
-        id: `node:target-${idx}`,
-        type: isDc ? "dc" : "host",
-        label: tgt,
-        color: isDc ? "#e11d48" : "#f59e0b",
-        severity: isDc ? "high" : "low",
-        metadata: {
-          os: isDc ? "windows-server" : (isLinux ? "linux" : "windows"),
-          privilege: "uncompromised",
-          status: "mapped",
-          ip: tgt,
-          subLabel: isDc ? "TARGET DC (UNPWNED)" : "TARGET HOST"
+    // If there are hosts but no edges from firewall to hosts, add discovery edges
+    const fwNode = nodes.find((n) => (n.type || "").toLowerCase() === "firewall" || n.id.includes("firewall") || n.id.includes("ingress"));
+    const hostNodes = nodes.filter((n) => n !== fwNode);
+    if (fwNode && hostNodes.length > 0) {
+      const existingConnected = new Set(edges.map((e) => e.target));
+      hostNodes.forEach((hn, idx) => {
+        if (!existingConnected.has(hn.id) && idx < 4) {
+          edges.push({
+            id: `edge:fw-host-${idx}`,
+            source: fwNode.id,
+            target: hn.id,
+            type: "discovery",
+            label: "in-scope",
+            weight: 1,
+            color: "#06b6d4",
+            dashed: true,
+            metadata: { protocol: "TCP/SCAN" },
+          });
         }
-      };
-    });
+      });
+    }
 
-    const edges: SafeGraphEdge[] = targetNodes.map((tgtNode, idx) => ({
-      id: `edge:fw-tgt-${idx}`,
-      source: firewallNode.id,
-      target: tgtNode.id,
-      type: "discovery",
-      label: "in-scope",
-      weight: 1,
-      color: "#f59e0b",
-      dashed: true,
-      metadata: { protocol: "TCP/SCAN" }
-    }));
-
-    return { nodes: [firewallNode, ...targetNodes], edges };
+    return { nodes, edges };
   }
 
   return { nodes: [], edges: [] };

@@ -2553,6 +2553,97 @@ async def run_module(
                         await db.save_loot(loot_obj)
                 except Exception as exc:
                     logger.warning("save_loot_failed", error=str(exc))
+
+        # Auto-upsert target host to ensure campaign hosts table stays synchronized with live reconnaissance
+        try:
+            target_ip = str(raw_params.get("target") or raw.get("target") or "").strip()
+            if not target_ip and getattr(module_result, "findings", []):
+                target_ip = str(getattr(module_result.findings[0], "host", "") or "").strip()
+            if target_ip and target_ip.lower() not in ("localhost", "127.0.0.1", ""):
+                from ares.db.database import Host as DBHost
+                raw_ports = raw.get("open_ports") or []
+                clean_ports: list[int] = []
+                if isinstance(raw_ports, list):
+                    for p in raw_ports:
+                        try:
+                            clean_ports.append(int(p))
+                        except (ValueError, TypeError):
+                            pass
+                existing_hosts = await db.get_hosts(body.campaign_id)
+                match_host = next((h for h in existing_hosts if h.get("ip_address") == target_ip), None)
+                old_ports = []
+                if match_host:
+                    raw_old = match_host.get("open_ports_json") or []
+                    if isinstance(raw_old, str):
+                        import json as _json
+                        try:
+                            old_ports = _json.loads(raw_old)
+                        except Exception:
+                            old_ports = []
+                    elif isinstance(raw_old, list):
+                        old_ports = raw_old
+                merged_ports = sorted(list(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()])))
+                hostname = match_host.get("hostname") if match_host else (raw.get("hostname") or target_ip)
+
+                # Robust OS classification
+                existing_os = str(match_host.get("os") or "").strip().lower() if match_host else ""
+                detected_os = str(raw.get("detected_os") or raw.get("os") or (raw.get("os_fingerprint") or {}).get("os") or "").strip().lower()
+
+                sv = raw.get("service_versions") or {}
+                banners: list[str] = []
+                if isinstance(sv, dict):
+                    for v in sv.values():
+                        if isinstance(v, dict) and v.get("banner"):
+                            banners.append(str(v["banner"]))
+                        elif isinstance(v, str):
+                            banners.append(v)
+
+                banners_text = " ".join(banners).lower()
+                findings_text = " ".join([
+                    f"{getattr(f, 'title', '')} {getattr(f, 'description', '')}"
+                    for f in getattr(module_result, "findings", []) or []
+                ]).lower()
+                combined_telemetry = f"{banners_text} {findings_text}".lower()
+
+                is_linux_indicator = any(
+                    k in combined_telemetry
+                    for k in ["linux", "debian", "ubuntu", "kali", "centos", "rhel", "red hat", "redhat", "fedora", "arch", "alpine", "openssh", "ssh pivot", "sudo", "suid"]
+                ) or ("linux" in module_id or "ssh" in module_id or module_id == "lateral.ssh_pivot")
+                
+                is_win_indicator = any(
+                    k in combined_telemetry
+                    for k in ["microsoft", "windows", "iis", "active directory", "kerberos", "domain controller", "msrpc"]
+                ) or ("ad." in module_id or "win" in module_id or "kerberoast" in module_id)
+
+                has_port_22 = 22 in merged_ports
+                has_win_ports = any(p in (135, 139, 445, 3389, 5985, 5986) for p in merged_ports)
+                has_dc_ports = any(p in (88, 389, 636) for p in merged_ports)
+
+                if has_dc_ports or "windows-server" in detected_os:
+                    os_name = "windows-server"
+                elif detected_os in ("linux", "windows", "windows-server", "firewall"):
+                    os_name = detected_os
+                elif is_linux_indicator or (has_port_22 and not has_win_ports):
+                    os_name = "linux"
+                elif is_win_indicator or has_win_ports:
+                    os_name = "windows"
+                elif existing_os and existing_os not in ("target", "unknown", "none"):
+                    os_name = existing_os
+                else:
+                    os_name = "linux" if has_port_22 else "target"
+
+                host_record = DBHost(
+                    id=str(match_host.get("id") if match_host else f"host_{target_ip.replace('.', '_').replace(':', '_')}"),
+                    campaign_id=body.campaign_id,
+                    ip_address=target_ip,
+                    hostname=str(hostname or target_ip),
+                    os=str(os_name or "target"),
+                    open_ports=merged_ports,
+                    is_dc=bool(match_host.get("is_dc")) if match_host else has_dc_ports,
+                )
+                await db.upsert_host(host_record)
+        except Exception as exc:
+            logger.warning("auto_upsert_host_failed", error=str(exc))
         await _record_module_run(
             db,
             body.campaign_id,
@@ -3634,7 +3725,9 @@ async def campaign_graph(
     snapshot = await db.get_campaign_graph(campaign_id)
     if snapshot is None and getattr(runtime_state, "attack_graph", None) is not None:
         snapshot = runtime_state.attack_graph.to_d3_json()
-    return merge_durable_attack_graph(build_campaign_graph(c_obj), snapshot)
+    return merge_durable_attack_graph(
+        build_campaign_graph(c_obj, hosts=_hosts, credentials=_credentials), snapshot
+    )
 
 
 @app.get("/graph/{campaign_id}/attack-paths", tags=["visualization"])

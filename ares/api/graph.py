@@ -133,12 +133,18 @@ def _safe_graph_data(value: Any) -> Any:
 
 # ── Graph builder ──────────────────────────────────────────────────────────────
 
-def build_campaign_graph(campaign: Any) -> dict[str, Any]:
+def build_campaign_graph(
+    campaign: Any,
+    hosts: list[dict[str, Any]] | None = None,
+    credentials: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """
-    Build the complete campaign graph from Campaign state.
+    Build the complete campaign graph from Campaign state, durable DB hosts, and credentials.
 
     Args:
-        campaign: Campaign object (with findings, session state)
+        campaign: Campaign object (with findings, session state, targets)
+        hosts: Optional list of durable host dictionaries from database
+        credentials: Optional list of durable credential dictionaries from database
 
     Returns:
         dict with nodes, edges, stats, layout_hint
@@ -155,6 +161,7 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
     # ── Hosts from session ──────────────────────────────────────────────────
     session = getattr(campaign, "session", None) or getattr(campaign, "_session", None)
     host_lookup: dict[str, str] = {}
+    host_items: list[tuple[str, Any]] = []
 
     if session:
         session_hosts = getattr(session, "hosts", None)
@@ -165,16 +172,131 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                 (str(getattr(host, "ip_address", "") or getattr(host, "hostname", "")), host)
                 for host in session.all_hosts()
             ]
+
+    for ip, host in host_items:
+        if not ip:
+            continue
+        c_level = getattr(getattr(host, "compromise_level", None), "value", "none")
+        is_dc = getattr(host, "is_dc", False)
+        hostname = getattr(host, "hostname", "") or ip
+        is_owned = bool(getattr(host, "owned", getattr(host, "is_owned", False)))
+        host_node_id = f"host:{ip}"
+
+        h_ports = getattr(host, "open_ports", []) or []
+        clean_ports = [int(p) for p in h_ports if str(p).isdigit()]
+        has_ssh = 22 in clean_ports
+        has_win = any(p in (135, 139, 445, 3389, 5985, 5986) for p in clean_ports)
+        raw_os = str(getattr(host, "os", "") or getattr(host, "os_info", "") or "").strip().lower()
+        if is_dc or any(p in (88, 389, 636) for p in clean_ports):
+            session_os = "windows-server"
+        elif has_ssh and not has_win:
+            session_os = "linux"
+        elif has_win:
+            session_os = "windows"
+        elif raw_os in ("linux", "windows", "windows-server", "firewall"):
+            session_os = raw_os
         else:
-            host_items = []
-        for ip, host in host_items:
+            session_os = "linux" if has_ssh else (raw_os or "target")
+
+        add_node(APIGraphNode(
+            id    = host_node_id,
+            type  = "dc" if is_dc else "host",
+            label = f"{hostname}\n{ip}" if hostname != ip else ip,
+            data  = {
+                "ip":               ip,
+                "hostname":         hostname,
+                "compromise_level": c_level,
+                "is_dc":            is_dc,
+                "open_ports":       getattr(host, "open_ports", []),
+                "os":               session_os,
+                "os_info":          session_os,
+                "owned":            is_owned,
+            },
+            color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
+            shape = "diamond" if is_dc else "circle",
+            size  = 35 if is_dc else (28 if is_owned else 20),
+        ))
+
+        host_lookup[ip.lower()] = host_node_id
+        if hostname:
+            host_lookup[hostname.lower()] = host_node_id
+            if "." in hostname:
+                host_lookup[hostname.split(".")[0].lower()] = host_node_id
+        fqdn = getattr(host, "fqdn", "")
+        if fqdn:
+            host_lookup[fqdn.lower()] = host_node_id
+            if "." in fqdn:
+                host_lookup[fqdn.split(".")[0].lower()] = host_node_id
+
+        via_host = getattr(host, "discovered_from", None)
+        if via_host and f"host:{via_host}" in node_ids:
+            edges.append(APIGraphEdge(
+                source = f"host:{via_host}",
+                target = f"host:{ip}",
+                type   = "discovery",
+                label  = "discovered",
+                color  = "#ffffff",
+                dashed = True,
+            ))
+
+    # ── Hosts from database persistence ─────────────────────────────────────
+    if hosts:
+        for h in hosts:
+            ip = str(h.get("ip_address") or "").strip()
             if not ip:
                 continue
-            c_level = getattr(getattr(host, "compromise_level", None), "value", "none")
-            is_dc   = getattr(host, "is_dc", False)
-            hostname = getattr(host, "hostname", "") or ip
-            is_owned = bool(getattr(host, "owned", getattr(host, "is_owned", False)))
             host_node_id = f"host:{ip}"
+            if host_node_id in node_ids:
+                continue
+            hostname = str(h.get("hostname") or ip).strip()
+            is_dc = bool(h.get("is_dc"))
+            c_level = "recon"
+            # Infer elevated compromise level from campaign findings
+            for f in getattr(campaign, "findings", []) or []:
+                f_host = str(getattr(f, "host", "") or "").strip().lower()
+                if f_host in (ip.lower(), hostname.lower()):
+                    sev = getattr(getattr(f, "severity", None), "value", "info").lower()
+                    if sev == "critical":
+                        c_level = "domain_admin" if is_dc else "system"
+                    elif sev == "high" and c_level not in ("system", "domain_admin"):
+                        c_level = "local_admin"
+                    elif sev in ("medium", "low") and c_level == "recon":
+                        c_level = "user"
+
+            raw_ports = h.get("open_ports_json") or h.get("open_ports") or []
+            if isinstance(raw_ports, str):
+                import json as _json
+                try:
+                    raw_ports = _json.loads(raw_ports)
+                except Exception:
+                    raw_ports = []
+
+            clean_ports = [int(p) for p in raw_ports if str(p).isdigit()] if isinstance(raw_ports, list) else []
+            has_ssh = 22 in clean_ports
+            has_win = any(p in (135, 139, 445, 3389, 5985, 5986) for p in clean_ports)
+            has_dc = is_dc or any(p in (88, 389, 636) for p in clean_ports)
+
+            # Check campaign findings for Linux or Windows signatures
+            finding_text = " ".join([
+                f"{getattr(f, 'title', '')} {getattr(f, 'description', '')}"
+                for f in getattr(campaign, "findings", []) or []
+                if str(getattr(f, "host", "")).lower() in (ip.lower(), hostname.lower())
+            ]).lower()
+
+            is_linux_f = any(k in finding_text for k in ["linux", "openssh", "ssh", "debian", "ubuntu", "kali", "sudo", "suid"])
+            is_win_f = any(k in finding_text for k in ["windows", "active directory", "kerberos", "domain controller", "msrpc"])
+
+            h_os = str(h.get("os") or "").strip().lower()
+            if has_dc:
+                os_resolved = "windows-server"
+            elif is_linux_f or (has_ssh and not has_win):
+                os_resolved = "linux"
+            elif is_win_f or has_win:
+                os_resolved = "windows"
+            elif h_os in ("linux", "windows", "windows-server", "firewall"):
+                os_resolved = h_os
+            else:
+                os_resolved = "linux" if has_ssh else (h_os or "target")
 
             add_node(APIGraphNode(
                 id    = host_node_id,
@@ -185,40 +307,114 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                     "hostname":         hostname,
                     "compromise_level": c_level,
                     "is_dc":            is_dc,
-                    "open_ports":       getattr(host, "open_ports", []),
-                    "os_info":          getattr(host, "os_info", ""),
-                    "owned":            is_owned,
+                    "open_ports":       raw_ports if isinstance(raw_ports, list) else [],
+                    "os":               os_resolved,
+                    "os_info":          os_resolved,
+                    "owned":            c_level in ("system", "domain_admin", "local_admin"),
                 },
                 color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
                 shape = "diamond" if is_dc else "circle",
-                size  = 35 if is_dc else (28 if is_owned else 20),
+                size  = 35 if is_dc else (28 if c_level in ("system", "domain_admin") else 22),
             ))
 
-            # Store aliases for robust cross-referencing
             host_lookup[ip.lower()] = host_node_id
             if hostname:
                 host_lookup[hostname.lower()] = host_node_id
                 if "." in hostname:
                     host_lookup[hostname.split(".")[0].lower()] = host_node_id
-            fqdn = getattr(host, "fqdn", "")
-            if fqdn:
-                host_lookup[fqdn.lower()] = host_node_id
-                if "." in fqdn:
-                    host_lookup[fqdn.split(".")[0].lower()] = host_node_id
 
-            # Edges: discovery chain
-            via_host = getattr(host, "discovered_from", None)
-            if via_host and f"host:{via_host}" in node_ids:
-                edges.append(APIGraphEdge(
-                    source = f"host:{via_host}",
-                    target = f"host:{ip}",
-                    type   = "discovery",
-                    label  = "discovered",
-                    color  = "#ffffff",
-                    dashed = True,
-                ))
+    # ── Hosts synthesized from campaign targets & findings ───────────────────
+    candidate_targets: set[str] = set()
+    for tgt in getattr(campaign, "targets", []) or []:
+        if isinstance(tgt, str) and tgt.strip():
+            candidate_targets.add(tgt.strip())
+    for f in getattr(campaign, "findings", []) or []:
+        f_host = str(getattr(f, "host", "") or "").strip()
+        if f_host and f_host.lower() not in ("localhost", "127.0.0.1"):
+            candidate_targets.add(f_host)
 
-            # Edges: lateral movement
+    for tgt in candidate_targets:
+        tgt_clean = tgt.lower()
+        if tgt_clean in host_lookup or f"host:{tgt}" in node_ids:
+            continue
+        host_node_id = f"host:{tgt}"
+        target_findings = [
+            f for f in (getattr(campaign, "findings", []) or [])
+            if str(getattr(f, "host", "") or "").strip().lower() == tgt_clean
+        ]
+        is_dc = any("dc" in tgt_clean or "domain controller" in str(getattr(f, "title", "")).lower() for f in target_findings)
+        c_level = "recon"
+        open_ports: list[int] = []
+        for f in target_findings:
+            sev = getattr(getattr(f, "severity", None), "value", "info").lower()
+            if sev == "critical":
+                c_level = "domain_admin" if is_dc else "system"
+            elif sev == "high" and c_level not in ("system", "domain_admin"):
+                c_level = "local_admin"
+            elif sev in ("medium", "low") and c_level == "recon":
+                c_level = "user"
+            ev = getattr(f, "evidence", {}) or {}
+            if isinstance(ev, dict) and "port" in ev and ev["port"]:
+                try:
+                    open_ports.append(int(ev["port"]))
+                except (ValueError, TypeError):
+                    pass
+
+        os_detected = "linux" if any("linux" in str(getattr(f, "module_id", "")).lower() or "ssh" in str(getattr(f, "title", "")).lower() for f in target_findings) else ("windows" if is_dc else "target")
+
+        add_node(APIGraphNode(
+            id    = host_node_id,
+            type  = "dc" if is_dc else "host",
+            label = tgt,
+            data  = {
+                "ip":               tgt,
+                "hostname":         tgt,
+                "compromise_level": c_level,
+                "is_dc":            is_dc,
+                "open_ports":       sorted(list(set(open_ports))),
+                "os_info":          os_detected,
+                "owned":            c_level in ("system", "domain_admin", "local_admin"),
+            },
+            color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
+            shape = "diamond" if is_dc else "circle",
+            size  = 35 if is_dc else 24,
+        ))
+        host_lookup[tgt_clean] = host_node_id
+
+    # ── Perimeter Ingress Gateway ───────────────────────────────────────────
+    all_host_nodes = [nid for nid in node_ids if nid.startswith("host:")]
+    if all_host_nodes and "node:ingress-fw" not in node_ids:
+        fw_id = "node:ingress-fw"
+        scope_str = "IN-SCOPE"
+        raw_scope = getattr(campaign, "scope", [])
+        if raw_scope and isinstance(raw_scope, list) and isinstance(raw_scope[0], dict):
+            scope_str = str(raw_scope[0].get("cidr", "IN-SCOPE"))
+        add_node(APIGraphNode(
+            id    = fw_id,
+            type  = "firewall",
+            label = "PERIMETER\nINGRESS",
+            data  = {
+                "os":               "firewall",
+                "ip":               scope_str,
+                "hostname":         "Perimeter Gateway",
+                "compromise_level": "none",
+            },
+            color = "#06b6d4",
+            shape = "square",
+            size  = 30,
+        ))
+        for h_id in all_host_nodes[:4]:
+            edges.append(APIGraphEdge(
+                source = fw_id,
+                target = h_id,
+                type   = "discovery",
+                label  = "in-scope",
+                color  = "#06b6d4",
+                dashed = True,
+            ))
+
+        # Edges: lateral movement from session host attack history
+        for ip, host in host_items:
             attack_history = getattr(host, "attack_history", [])
             for attack in attack_history:
                 src_ip  = getattr(attack, "from_host", None)
@@ -282,7 +478,7 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                         type="pivot", label="cloud pivot", color="#ffffff", weight=2.0
                     ))
 
-    # ── Credentials ────────────────────────────────────────────────────────
+    # ── Credentials from vault or database ──────────────────────────────────
     vault = getattr(campaign, "vault", None) or getattr(campaign, "_vault", None)
     if vault:
         creds = getattr(vault, "_store", None) or getattr(vault, "_credentials", {})
@@ -309,7 +505,6 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                 size  = 18 if privilege != "domain_admin" else 26,
             ))
 
-            # Edge: cred → host where it was found
             source_host = getattr(cred, "source_host", None)
             target_source_id = None
             if source_host:
@@ -324,8 +519,33 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                     color  = "#ffffff",
                 ))
 
+    if credentials:
+        for c in credentials:
+            c_id = str(c.get("id") or "")
+            username = str(c.get("username") or "user")
+            domain = str(c.get("domain") or "")
+            priv = str(c.get("privilege") or "user")
+            label = f"{domain}\\{username}" if domain else username
+            cred_node_id = f"cred:{c_id[:8] if c_id else username}"
+            if cred_node_id not in node_ids:
+                add_node(APIGraphNode(
+                    id    = cred_node_id,
+                    type  = "credential",
+                    label = label,
+                    data  = {
+                        "username":  username,
+                        "domain":    domain,
+                        "privilege": priv,
+                        "cred_type": str(c.get("cred_type") or ""),
+                        "cracked":   bool(c.get("cracked")),
+                    },
+                    color = _PRIVILEGE_COLORS.get(priv, "#6c757d"),
+                    shape = "square",
+                    size  = 18 if priv != "domain_admin" else 26,
+                ))
+
     # ── Findings from campaign ──────────────────────────────────────────────
-    findings = getattr(campaign, "findings", [])
+    findings = getattr(campaign, "findings", []) or []
     for finding in findings:
         sev      = getattr(getattr(finding, "severity", None), "value", "info")
         title    = getattr(finding, "title", "")
@@ -369,6 +589,9 @@ def build_campaign_graph(campaign: Any) -> dict[str, Any]:
                         break
             if not target_host_id and f"host:{host}" in node_ids:
                 target_host_id = f"host:{host}"
+
+        if not target_host_id and len(all_host_nodes) == 1:
+            target_host_id = all_host_nodes[0]
 
         if target_host_id and target_host_id in node_ids:
             edges.append(APIGraphEdge(

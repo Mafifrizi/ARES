@@ -39,6 +39,11 @@ class UntrustedTargetData(Generic[T]):
     def is_tainted(self) -> bool:
         return self._tainted
 
+    @property
+    def value(self) -> T:
+        """Returns the underlying value."""
+        return self._value
+
     def raw_dangerous(self) -> T:
         """Returns the raw un-sanitized data. Use with caution."""
         return self._value

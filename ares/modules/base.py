@@ -25,6 +25,7 @@ Optional class attributes (defaults shown):
 from __future__ import annotations
 
 import abc
+import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -680,6 +681,11 @@ class ModuleResult:
     # Enables accurate learning in OutcomeKnowledgeBase (not just status string)
     outcome_quality:  float = -1.0   # -1.0 = not set by module (auto-computed)
     outcome_evidence: str   = ""     # e.g. "3 TGS tickets from corp.local"
+
+    @property
+    def data(self) -> dict:
+        """Alias for raw dictionary for developer ergonomics and backward compatibility."""
+        return self.raw
 
     @property
     def effective_quality(self) -> float:

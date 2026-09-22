@@ -34,7 +34,7 @@ import {
   useRef,
   useState
 } from "react";
-import { NavLink, Navigate, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -53,6 +53,7 @@ import {
   useDashboardUi,
   useSessionState
 } from "./dashboardUiState";
+import { StructuredJsonViewer } from "../../components/common/StructuredJsonViewer";
 
 interface ModuleRunRecord {
   campaignId: string;
@@ -1802,6 +1803,8 @@ function ExecutionChainsPanel({
 
 export function ModulesPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
   const executionChains = useQuery({ queryKey: ["executionChains"], queryFn: api.executionChains });
@@ -1815,6 +1818,20 @@ export function ModulesPage() {
   const [lastRunRecord, setLastRunRecord] = useSessionState<ModuleRunRecord | null>("ares.dashboard.modules.lastRun", null);
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.modules.tab", "Catalog");
   const previousSelectedId = useRef(selectedId);
+
+  useEffect(() => {
+    const queryModule = searchParams.get("module") || (location.state as { moduleId?: string } | null)?.moduleId;
+    const queryTab = searchParams.get("tab") || (location.state as { tab?: string } | null)?.tab;
+
+    if (queryModule) {
+      setSelectedId(queryModule);
+      if (queryTab) {
+        setActiveTab(queryTab);
+      } else {
+        setActiveTab("Run Panel");
+      }
+    }
+  }, [searchParams, location.state, setSelectedId, setActiveTab]);
   const campaignDetail = useQuery({
     queryKey: ["campaign", campaignId],
     queryFn: () => api.campaign(campaignId),
@@ -1882,14 +1899,96 @@ export function ModulesPage() {
   const runError = run.error ?? (persistedRun?.isError ? persistedRun.payload : undefined);
 
   useEffect(() => {
-    if (previousSelectedId.current === selectedId) {
+    let incomingParams: Record<string, unknown> | null = null;
+    try {
+      const stored = sessionStorage.getItem("ares.dashboard.modules.params");
+      if (stored) {
+        incomingParams = JSON.parse(stored);
+        sessionStorage.removeItem("ares.dashboard.modules.params");
+      }
+    } catch {
+      incomingParams = null;
+    }
+
+    const queryTarget = searchParams.get("target") || (location.state as { target?: string } | null)?.target;
+    const stateParams = (location.state as { params?: Record<string, unknown> } | null)?.params;
+    if (queryTarget || stateParams) {
+      incomingParams = {
+        ...(incomingParams ?? {}),
+        ...(queryTarget ? { target: queryTarget, host: queryTarget, dc: queryTarget, targets: [queryTarget] } : {}),
+        ...(stateParams ?? {})
+      };
+    }
+
+    if (previousSelectedId.current === selectedId && !incomingParams) {
       return;
     }
     previousSelectedId.current = selectedId;
-    setParams({});
+
+    const currentTarget = String(
+      incomingParams?.target ||
+      incomingParams?.host ||
+      incomingParams?.dc ||
+      params.target ||
+      params.host ||
+      params.dc ||
+      params.target_host ||
+      params.rhost ||
+      selectedCampaign?.targets?.[0] ||
+      ""
+    ).trim();
+
+    const targetModule = list.find((item) => item.id === selectedId);
+    const schema = targetModule?.param_schema ?? {};
+    const schemaKeys = Object.keys(schema);
+
+    const nextParams: Record<string, unknown> = {};
+
+    // 1. Populate primary target/host/dc fields if supported by module schema
+    if (schemaKeys.includes("target") && currentTarget) {
+      nextParams.target = currentTarget;
+    }
+    if (schemaKeys.includes("host") && currentTarget) {
+      nextParams.host = currentTarget;
+    }
+    if (schemaKeys.includes("dc") && currentTarget) {
+      nextParams.dc = currentTarget;
+    }
+    if (schemaKeys.includes("targets") && currentTarget) {
+      nextParams.targets = [currentTarget];
+    }
+    if (schemaKeys.includes("target_host") && currentTarget) {
+      nextParams.target_host = currentTarget;
+    }
+    if (schemaKeys.includes("rhost") && currentTarget) {
+      nextParams.rhost = currentTarget;
+    }
+
+    // 2. Transfer standard parameters across chains and pivots if valid in schema
+    const contextualKeys = ["port", "ports", "service", "domain", "username", "target_user", "use_ldaps"];
+    for (const key of contextualKeys) {
+      if (schemaKeys.includes(key)) {
+        if (incomingParams && incomingParams[key] !== undefined) {
+          nextParams[key] = incomingParams[key];
+        } else if (params[key] !== undefined) {
+          nextParams[key] = params[key];
+        }
+      }
+    }
+
+    // 3. Merge any specific incoming params passed explicitly
+    if (incomingParams) {
+      for (const [k, v] of Object.entries(incomingParams)) {
+        if (v !== undefined) {
+          nextParams[k] = v;
+        }
+      }
+    }
+
+    setParams(nextParams);
     setConfirmed(false);
     setDryRun(true);
-  }, [selectedId, setConfirmed, setDryRun, setParams]);
+  }, [selectedId, list, selectedCampaign, setConfirmed, setDryRun, setParams, searchParams, location.state]);
 
   return (
     <Page
@@ -2044,6 +2143,48 @@ export function ModulesPage() {
                 <span>Module Parameters</span>
                 <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
               </div>
+
+              {/* Quick Target Selector for In-Scope Campaign Hosts */}
+              {((selectedCampaign?.targets && selectedCampaign.targets.length > 0) || (selectedCampaign?.scope_cidrs && selectedCampaign.scope_cidrs.length > 0)) && (
+                <div className="p-2.5 rounded-sm bg-zinc-900/60 border border-zinc-800 space-y-1.5 text-xs font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5 font-semibold">
+                      <Target size={12} className="text-cyan-400 shrink-0" />
+                      QUICK ENGAGEMENT TARGETS:
+                    </span>
+                    <span className="text-[10px] text-zinc-500 font-sans">1-click populate</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {selectedCampaign?.targets?.map((tgt) => (
+                      <button
+                        key={tgt}
+                        type="button"
+                        onClick={() => setParams((prev) => ({ ...prev, target: tgt, host: tgt, dc: tgt, targets: [tgt] }))}
+                        className={`px-2 py-0.5 rounded-sm border text-[11px] transition-colors ${
+                          params.target === tgt || params.host === tgt || params.dc === tgt
+                            ? "bg-cyan-950 border-cyan-700 text-cyan-200 font-bold"
+                            : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+                        }`}
+                        title={`Set target to ${tgt}`}
+                      >
+                        {tgt}
+                      </button>
+                    ))}
+                    {selectedCampaign?.scope_cidrs?.map((cidr) => (
+                      <button
+                        key={cidr}
+                        type="button"
+                        onClick={() => setParams((prev) => ({ ...prev, target: cidr, cidr }))}
+                        className="px-2 py-0.5 rounded-sm border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-[10px] transition-colors"
+                        title={`Set scope to ${cidr}`}
+                      >
+                        {cidr}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <ParamForm
                 schema={selected.param_schema}
                 values={params}
@@ -3603,8 +3744,8 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
       </div>
 
       <details className="advanced-details">
-        <summary>Details</summary>
-        <pre className="json-box">{JSON.stringify(snapshot ?? {}, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Telemetry Engine Payload</summary>
+        <StructuredJsonViewer data={snapshot ?? {}} title="Telemetry Engine Snapshot" maxHeightClass="max-h-64" />
       </details>
     </section>
   );
@@ -3656,8 +3797,8 @@ function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
         </div>
       </div>
       <details className="advanced-details">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw CVSS Payload</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Inspect Raw CVSS Payload</summary>
+        <StructuredJsonViewer data={data} title="CVSS Risk Metrics" maxHeightClass="max-h-64" />
       </details>
     </section>
   );
@@ -3676,7 +3817,7 @@ function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
       </div>
       <details className="advanced-details" open>
         <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Detailed Delta Metrics</summary>
-        <pre className="json-box text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+        <StructuredJsonViewer data={data} title="Campaign Delta Metrics" maxHeightClass="max-h-72" />
       </details>
     </section>
   );
@@ -3736,34 +3877,19 @@ function DataPanel({
     <section className="panel detail-panel mb-3">
       <div className="flex items-center justify-between mb-2">
         <strong className="text-xs font-semibold text-zinc-200">{title}</strong>
-        <div className="flex items-center gap-2">
-          {onClear && (
-            <button
-              className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50"
-              onClick={onClear}
-              type="button"
-              title="Clear payload preview"
-            >
-              <X size={12} />
-              <span>Clear</span>
-            </button>
-          )}
+        {onClear && (
           <button
-            className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1.5"
-            onClick={handleCopy}
+            className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50"
+            onClick={onClear}
             type="button"
-            title="Copy payload to clipboard"
+            title="Clear payload preview"
           >
-            {copied ? <CheckCircle2 size={12} className="text-emerald-400" /> : <Copy size={12} />}
-            <span>{copied ? "Copied" : "Copy Payload"}</span>
+            <X size={12} />
+            <span>Clear</span>
           </button>
-          <span className="badge text-[10px] uppercase font-mono">Payload</span>
-        </div>
+        )}
       </div>
-      <details className="advanced-details">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Payload Details</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{jsonText}</pre>
-      </details>
+      <StructuredJsonViewer data={data} title={`${title} Telemetry`} maxHeightClass="max-h-96" defaultExpandedDepth={1} />
     </section>
   );
 }
@@ -3872,6 +3998,219 @@ function getTailoredFindingDetails(finding: Finding) {
   };
 }
 
+function DiscoveredPerimeterCard({
+  rawOutput,
+  onSelectModule
+}: {
+  rawOutput?: Record<string, unknown>;
+  onSelectModule?: (moduleId: string, params?: Record<string, unknown>) => void;
+}) {
+  const [copiedLootIdx, setCopiedLootIdx] = useState<number | null>(null);
+  if (!rawOutput) return null;
+
+  const target = String(rawOutput.target ?? rawOutput.host ?? "");
+  const openPorts = Array.isArray(rawOutput.open_ports) ? (rawOutput.open_ports as (number | string)[]) : [];
+  const serviceMap = (rawOutput.service_map ?? {}) as Record<string, string>;
+  const serviceVersions = (rawOutput.service_versions ?? {}) as Record<string, Record<string, unknown> | string>;
+  const loot = Array.isArray(rawOutput.loot) ? (rawOutput.loot as Record<string, unknown>[]) : [];
+  const scanMs = typeof rawOutput.scan_ms === "number" ? rawOutput.scan_ms : null;
+  const totalScanned = typeof rawOutput.total_scanned === "number" ? rawOutput.total_scanned : null;
+
+  const hasPerimeter = openPorts.length > 0 || Object.keys(serviceVersions).length > 0;
+  if (!hasPerimeter && loot.length === 0) return null;
+
+  return (
+    <div className="space-y-3 mt-3">
+      {hasPerimeter && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3.5 space-y-3 font-mono text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
+            <div className="flex items-center gap-2">
+              <Radio size={14} className="text-emerald-400 animate-pulse shrink-0" />
+              <span className="font-semibold text-zinc-200 uppercase tracking-wider text-[11px]">
+                DISCOVERED TARGET PERIMETER & SERVICES
+              </span>
+              {target && (
+                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm text-[11px]">
+                  HOST: <strong className="text-zinc-100">{target}</strong>
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+              {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
+              {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+              <span className="text-emerald-400 font-semibold">[SURFACE ACTIVE]</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {openPorts.map((port) => {
+              const portStr = String(port);
+              const service = serviceMap[portStr] ?? "unknown";
+              const versionInfo = serviceVersions[portStr];
+              const banner = typeof versionInfo === "object" && versionInfo !== null
+                ? String(versionInfo.banner ?? versionInfo.version ?? "")
+                : typeof versionInfo === "string" ? versionInfo : "";
+
+              return (
+                <div
+                  key={portStr}
+                  className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-1.5 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-zinc-100 bg-zinc-950 px-2 py-0.5 border border-zinc-800 rounded-sm">
+                      PORT {portStr}/TCP
+                    </span>
+                    <span className="text-[10px] text-emerald-400 uppercase font-semibold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                      OPEN ({service})
+                    </span>
+                  </div>
+
+                  {banner && (
+                    <div className="text-[10px] text-zinc-400 truncate bg-zinc-950/70 p-1 rounded-sm border border-zinc-800/40">
+                      <span className="text-zinc-500 font-semibold">BANNER: </span>
+                      <span className="text-zinc-300 font-mono">{banner}</span>
+                    </div>
+                  )}
+
+                  {onSelectModule && (
+                    <div className="pt-1 flex items-center gap-1 flex-wrap">
+                      {portStr === "22" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                            title="Fingerprint OpenSSH version"
+                          >
+                            Fingerprint SSH
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                            title="Arm SSH Pivot"
+                          >
+                            SSH Pivot
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("linux.privesc", { target })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                            title="Arm Linux Privesc"
+                          >
+                            Privesc Audit
+                          </button>
+                        </>
+                      )}
+                      {(portStr === "80" || portStr === "443" || portStr === "8080" || portStr === "8443") && (
+                        <button
+                          type="button"
+                          onClick={() => onSelectModule("network.http_fingerprint", { target, ports: [Number(portStr)] })}
+                          className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                        >
+                          HTTP Fingerprint
+                        </button>
+                      )}
+                      {(portStr === "88" || portStr === "389" || portStr === "636") && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("ad.enum_users", { target, domain: "" })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                          >
+                            Enum Users
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("ad.kerberoast", { target, domain: "" })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                          >
+                            Kerberoast
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Closed-Loop Defensive Telemetry & Purple Team Loot */}
+      {loot.length > 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3.5 space-y-2.5 font-mono text-xs">
+          <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+              <span className="font-semibold text-zinc-200 uppercase tracking-wider text-[11px]">
+                CLOSED-LOOP DEFENSIVE TELEMETRY & PURPLE LOOT ({loot.length})
+              </span>
+            </div>
+            <span className="text-[10px] text-zinc-400 uppercase font-semibold">SYNTHESIZED DETECTION RULES</span>
+          </div>
+
+          <div className="space-y-2">
+            {loot.map((item, idx) => {
+              const name = String(item.name ?? `Artifact #${idx + 1}`);
+              const lootType = String(item.loot_type ?? "rule");
+              const content = item.content as Record<string, unknown> | undefined;
+              const ruleText = typeof content?.kql === "string"
+                ? content.kql
+                : typeof content?.sigma === "string"
+                ? content.sigma
+                : typeof item.content === "string"
+                ? item.content
+                : JSON.stringify(item.content ?? item, null, 2);
+
+              const handleCopyRule = () => {
+                void navigator.clipboard.writeText(ruleText);
+                setCopiedLootIdx(idx);
+                setTimeout(() => setCopiedLootIdx(null), 1500);
+              };
+
+              return (
+                <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/50 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 truncate">
+                      <Terminal size={12} className="text-zinc-400 shrink-0" />
+                      <strong className="text-zinc-200 text-xs truncate">{name}</strong>
+                      <span className="badge text-[10px] py-0 px-1.5 uppercase font-mono">{lootType}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyRule}
+                      className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
+                      title="Copy detection rule query"
+                    >
+                      {copiedLootIdx === idx ? (
+                        <>
+                          <CheckCircle2 size={11} className="text-emerald-400" />
+                          <span className="text-emerald-400">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={11} />
+                          <span>Copy Rule</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
+                    {ruleText}
+                  </pre>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModuleRunSummary({
   result,
   error,
@@ -3915,15 +4254,19 @@ function ModuleRunSummary({
   const warnings = Array.isArray(result?.warnings) ? result.warnings.map(String) : [];
   const nextSteps = Array.isArray(result?.operator_next_steps) ? result.operator_next_steps.map(String) : [];
   const hasOutcomeError = ["operator_error", "dependency_error", "network_error", "unsupported", "module_error", "failed", "timeout"].includes(displayOutcome);
+  const openPorts = Array.isArray(rawOutput?.open_ports) ? (rawOutput.open_ports as (number | string)[]) : [];
+  const hasPerimeter = openPorts.length > 0 || Object.keys((rawOutput?.service_versions ?? {}) as object).length > 0;
   const emptyText = dryRun
     ? "No live execution was performed."
     : rawError
       ? `Module halted with status '${rawError}'. See execution notice above.`
-      : outcome === "completed_no_findings"
-        ? "No confirmed findings. The module completed without observing an exploitable condition."
-        : runError
-          ? "No findings recorded because execution failed."
-          : "No findings returned.";
+      : hasPerimeter
+        ? `Target perimeter active: ${openPorts.length} port(s) identified. Review reconnaissance telemetry below.`
+        : outcome === "completed_no_findings"
+          ? "No confirmed findings. The module completed without observing an exploitable condition."
+          : runError
+            ? "No findings recorded because execution failed."
+            : "No findings returned.";
 
   return (
     <section className="mt-4 space-y-3 font-sans">
@@ -4000,6 +4343,9 @@ function ModuleRunSummary({
           </ul>
         </div>
       )}
+
+      {/* Discovered Target Perimeter Matrix & Purple Team Loot */}
+      <DiscoveredPerimeterCard rawOutput={rawOutput} onSelectModule={onSelectModule} />
 
       {/* Findings Telemetry Stream (High-Density Tactical Matrix) */}
       {findings.length > 0 ? (
@@ -4199,8 +4545,8 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
         <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
       <details className="advanced-details mt-3">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw Scope Parameters</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(campaign, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Inspect Raw Scope Parameters</summary>
+        <StructuredJsonViewer data={campaign} title="Campaign Scope & Target Configuration" maxHeightClass="max-h-72" />
       </details>
     </div>
   );
@@ -4399,9 +4745,17 @@ function LiveEventCard({
         </div>
         <p>{message}</p>
         {created ? <small>{created}</small> : null}
-        <details className="advanced-details compact">
-          <summary>Details</summary>
-          <pre className="json-box">{JSON.stringify(serializeError(event), null, 2)}</pre>
+        <details className="advanced-details compact mt-2">
+          <summary className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 cursor-pointer">Telemetry Details</summary>
+          <div className="mt-1.5">
+            <StructuredJsonViewer
+              data={serializeError(event)}
+              title="Event Telemetry"
+              defaultExpandedDepth={1}
+              maxHeightClass="max-h-56"
+              showSummaryStrip={false}
+            />
+          </div>
         </details>
       </div>
     </article>

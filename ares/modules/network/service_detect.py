@@ -47,7 +47,7 @@ _PROBES: dict[str, bytes] = {
 
 # Version patterns - (service, pattern, severity, cve_hint)
 _VULN_PATTERNS: list[tuple[str, str, str, str]] = [
-    ("openssh",   r"OpenSSH[_\s]([0-9]\.[0-9])",   "INFO",     ""),
+    ("openssh",   r"OpenSSH[_\s]([0-9]+\.[0-9]+)",   "INFO",     "Enforce key-based authentication, disable root login, and audit SSH configurations"),
     ("vsftpd",    r"vsftpd\s([0-9]\.[0-9]\.[0-9])", "MEDIUM",   "CVE-2011-2523 if 2.3.4"),
     ("proftpd",   r"ProFTPD\s([0-9]\.[0-9])",       "INFO",     ""),
     ("apache",    r"Apache[/\s]([0-9]+\.[0-9]+)",   "INFO",     ""),
@@ -57,6 +57,39 @@ _VULN_PATTERNS: list[tuple[str, str, str, str]] = [
     ("mongodb",   r"\"version\"",                   "MEDIUM",   "Check for no-auth"),
     ("elasticsearch", r"\"number\":\"([0-9]+\.[0-9]+)", "MEDIUM", "Check for no-auth"),
 ]
+
+# Operating system fingerprint patterns from banner data - (pattern, os_family, distro_name, confidence)
+_OS_PATTERNS: list[tuple[str, str, str, float]] = [
+    (r"kali", "linux", "Kali Linux", 0.98),
+    (r"debian", "linux", "Debian Linux", 0.95),
+    (r"ubuntu", "linux", "Ubuntu Linux", 0.95),
+    (r"centos", "linux", "CentOS Linux", 0.95),
+    (r"red\s*hat|rhel", "linux", "Red Hat Enterprise Linux", 0.95),
+    (r"fedora", "linux", "Fedora Linux", 0.95),
+    (r"arch\s*linux|archlinux", "linux", "Arch Linux", 0.95),
+    (r"alpine", "linux", "Alpine Linux", 0.95),
+    (r"suse|opensuse", "linux", "openSUSE Linux", 0.95),
+    (r"rocky", "linux", "Rocky Linux", 0.95),
+    (r"alma", "linux", "AlmaLinux", 0.95),
+    (r"gentoo", "linux", "Gentoo Linux", 0.95),
+    (r"openssh", "linux", "Linux (OpenSSH)", 0.85),
+    (r"linux", "linux", "Linux Generic", 0.85),
+    (r"microsoft-iis/[0-9.]+|microsoft\s+windows", "windows", "Windows", 0.95),
+    (r"windows\s+server", "windows-server", "Windows Server", 0.95),
+    (r"pfsense|fortios|cisco|routeros", "firewall", "Network Appliance / Firewall", 0.95),
+]
+
+
+def _fingerprint_os_from_banners(banners: list[str]) -> dict[str, Any] | None:
+    combined = " ".join(banners).lower()
+    for pattern, family, distro, conf in _OS_PATTERNS:
+        if re.search(pattern, combined, re.IGNORECASE):
+            return {
+                "os": family,
+                "distro": distro,
+                "confidence": conf,
+            }
+    return None
 
 
 async def _grab_banner(host: str, port: int, timeout: float = 4.0,
@@ -332,9 +365,34 @@ class ServiceDetectModule(BaseModule):
                 confidence=0.9,
             )
 
+        # Fingerprint host OS from service banners
+        banners_list = [entry.get("banner", "") for entry in service_versions.values() if entry.get("banner")]
+        detected_os_info = _fingerprint_os_from_banners(banners_list)
+        if not detected_os_info and any(int(p) == 22 for p in service_versions.keys()):
+            detected_os_info = {"os": "linux", "distro": "Linux (OpenSSH / SSH Service)", "confidence": 0.85}
+
+        if detected_os_info:
+            self.finding(
+                title=f"Host Operating System Identified: {detected_os_info['distro']}",
+                description=(
+                    f"Target host {target} was identified via service banner analysis as "
+                    f"{detected_os_info['distro']} (OS family: {detected_os_info['os']}, confidence: {int(detected_os_info['confidence'] * 100)}%)."
+                ),
+                severity=Severity.INFO,
+                mitre_technique="T1046",
+                mitre_tactic="Discovery",
+                evidence=detected_os_info,
+                remediation="Restrict public banner information where possible to reduce reconnaissance precision.",
+                host=target,
+                confidence=detected_os_info["confidence"],
+            )
+
         raw = {
             "target":           target,
             "service_versions": {str(k): v for k, v in service_versions.items()},
             "vulnerable_services": vuln_services,
+            "os_fingerprint":   detected_os_info,
+            "os":               detected_os_info["os"] if detected_os_info else "target",
+            "detected_os":      detected_os_info["os"] if detected_os_info else "target",
         }
         return self._findings[:], raw

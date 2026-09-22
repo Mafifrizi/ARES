@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 # ── Type aliases ──────────────────────────────────────────────────────────────
 
@@ -970,6 +970,32 @@ class DNSEnumParams(ModuleParams):
     brute: bool = param("Brute-force subdomains", required=False, default=True)
 
 
+def _coerce_ports_list(v: Any) -> list[int]:
+    """Accept integer, comma-separated string, or list/tuple of ports and normalize to list[int]."""
+    if v is None or v == "":
+        return []
+    if isinstance(v, int):
+        return [v]
+    if isinstance(v, str):
+        if not v.strip():
+            return []
+        result = []
+        for p in v.split(","):
+            p_clean = p.strip()
+            if p_clean.isdigit():
+                result.append(int(p_clean))
+        return result
+    if isinstance(v, (list, tuple, set)):
+        result = []
+        for item in v:
+            if isinstance(item, int):
+                result.append(item)
+            elif isinstance(item, str) and item.strip().isdigit():
+                result.append(int(item.strip()))
+        return result
+    return v
+
+
 class HTTPFingerprintParams(ModuleParams):
     """network.http_fingerprint - HTTP service and tech fingerprinting."""
 
@@ -982,6 +1008,11 @@ class HTTPFingerprintParams(ModuleParams):
     timeout: float = param(
         "HTTP timeout (seconds)", required=False, default=5.0, ge=0.5, le=30.0
     )
+
+    @field_validator("ports", mode="before")
+    @classmethod
+    def coerce_ports(cls, v: Any) -> list[int]:
+        return _coerce_ports_list(v)
 
 
 class SNMPEnumParams(ModuleParams):
@@ -1004,6 +1035,11 @@ class ServiceDetectParams(ModuleParams):
     timeout: float = param(
         "Per-port timeout (seconds)", required=False, default=3.0, ge=0.5, le=30.0
     )
+
+    @field_validator("ports", mode="before")
+    @classmethod
+    def coerce_ports(cls, v: Any) -> list[int]:
+        return _coerce_ports_list(v)
 
 
 class PivotParams(ModuleParams):

@@ -23,8 +23,10 @@ import re
 from typing import Any
 
 try:
+    import defusedxml.ElementTree as ET
     from defusedxml.ElementTree import fromstring as _xml_fromstring
 except ImportError:
+    import xml.etree.ElementTree as ET  # nosec B405
     from xml.etree.ElementTree import fromstring as _xml_fromstring  # nosec B405, B314
 
 from ares.core.logger import get_logger, audit

@@ -269,6 +269,20 @@ class AttackGraph:
             target_host_node = host_ids.get(host)
             if not target_host_node and "." in host:
                 target_host_node = host_ids.get(host.split(".")[0])
+            if not target_host_node and host and host not in ("localhost", "127.0.0.1"):
+                target_host_node = f"host:{host}"
+                host_ids[host] = target_host_node
+                self._add_node(GraphNode(
+                    node_id=target_host_node,
+                    label=host,
+                    node_type="host",
+                    properties={"ip": host, "hostname": host},
+                    risk_score=2.0,
+                    is_target=False,
+                ))
+            if not target_host_node and len(host_ids) == 1:
+                target_host_node = list(host_ids.values())[0]
+
             if target_host_node and target_host_node in self._g:
                 self._add_edge(GraphEdge(
                     source=target_host_node, target=node_id,

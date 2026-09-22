@@ -49,6 +49,7 @@ import {
 } from "./graphModel";
 import { PivotComputerNode, PivotFirewallNode, type PivotNodeData } from "./CobaltStrikeNodes";
 import { CobaltSessionDock } from "./CobaltSessionDock";
+import { TacticalInspectorDrawer } from "./TacticalInspectorDrawer";
 
 type CanvasNode = Node<PivotNodeData, string>;
 type CanvasEdge = Edge;
@@ -533,7 +534,7 @@ function CobaltGraphInner({
       bindControls({
         zoomIn: () => zoomIn({ duration: 250 }),
         zoomOut: () => zoomOut({ duration: 250 }),
-        fitView: () => fitView({ padding: 0.14, duration: 300 })
+        fitView: () => fitView({ padding: 0.45, maxZoom: 0.85, duration: 300 })
       });
     }
   }, [bindControls, zoomIn, zoomOut, fitView]);
@@ -620,9 +621,9 @@ function CobaltGraphInner({
         edges={canvas.edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.14 }}
+        fitViewOptions={{ padding: 0.45, maxZoom: 0.85, minZoom: 0.4 }}
         minZoom={0.25}
-        maxZoom={2.0}
+        maxZoom={1.5}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={true}
@@ -647,6 +648,14 @@ function CobaltGraphInner({
         }}
         proOptions={{ hideAttribution: true }}
       />
+
+      {/* Slide-Over Tactical Node & Link Inspector */}
+      {selection && (
+        <TacticalInspectorDrawer
+          selection={selection}
+          onClose={() => onSelect(null)}
+        />
+      )}
     </div>
   );
 }
@@ -763,6 +772,10 @@ export default function GraphPage({
     zoomOut: () => void;
     fitView: () => void;
   } | null>(null);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   const safeApiGraph = useMemo(() => toSafeGraph(graphQuery.data), [graphQuery.data]);
   const paths = useMemo(() => (Array.isArray(pathsQuery.data?.paths) ? pathsQuery.data.paths : []), [pathsQuery.data]);
@@ -1313,7 +1326,7 @@ export default function GraphPage({
                     type="button"
                     onClick={() => {
                       setShowReportingDialog(false);
-                      navigate("/dashboard/reports");
+                      navigate("/reports");
                     }}
                   >
                     Open Reports ↗
