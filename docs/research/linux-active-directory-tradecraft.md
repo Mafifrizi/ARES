@@ -3,9 +3,9 @@
 
 - **RFC Identifier**: RFC-ARES-2026-001
 - **Domain**: Offensive Security Research / Active Directory / Linux Post-Exploitation
-- **Status**: Implemented & Production Ready (ARES v6.0+)
-- **Classification**: Operator-Directed Red Team Capability Specification
-- **Engine Compatibility**: ARES Engine v6.0+ (`BaseModule[P, R]`, Pydantic v2, Python 3.10+)
+- **Status**: Implemented & Production Ready (ARES v6.0.0)
+- **Author**: ARES Architecture & Red Team Engineering Group
+- **Engine Compatibility**: ARES Engine v6.0 (`BaseModule[P, R]`, Pydantic v2, Python 3.10+)
 - **Implementation Status**: Fully implemented across 5 production modules with pure-Python parsers and 18 unit tests.
 
 ---
@@ -614,7 +614,7 @@ class CcacheHuntModule(BaseModule):
 
 ## 6. Implementation Status & Production Verification
 
-RFC-ARES-2026-001 has been fully realized in the ARES v6.0+ production core. The complete capability matrix is available out-of-the-box without external C-extensions:
+RFC-ARES-2026-001 has been fully realized in the ARES v6.0 production core. The complete capability matrix is available out-of-the-box without external C-extensions:
 
 | Module ID | Module Class | Source Path | Contract & Permissions | OPSEC | MITRE |
 | :--- | :--- | :--- | :--- | :--- | :--- |
