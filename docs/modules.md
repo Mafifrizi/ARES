@@ -1,6 +1,6 @@
 # ARES Modules Guide
 
-ARES ships with 64 built-in modules. The modules are not meant to be random
+ARES ships with 69 built-in modules. The modules are not meant to be random
 buttons. They are building blocks for an authorized engagement: create a
 campaign, define scope, run safe validation first, collect findings, then
 generate a report.
@@ -246,6 +246,7 @@ optional dependencies such as AD, cloud, container, Windows, and PDF extras.
 | `credential.golden_ticket` | Golden ticket validation in approved lab/engagement contexts. |
 | `credential.pass_the_hash` | Authorized NTLM hash reuse validation. |
 | `credential.reuse` | Credential reuse checks across discovered services. |
+| `credential.ticket_converter` | In-memory bidirectional transcoding between Linux Kerberos `ccache` and Windows `.kirbi` (KRB-CRED). |
 
 ### Lateral Movement
 
@@ -278,6 +279,10 @@ optional dependencies such as AD, cloud, container, Windows, and PDF extras.
 
 | Module | Use |
 | --- | --- |
+| `linux.sssd_harvest` | SSSD cache parser; extracts offline SHA-512 crypt hashes and identifies Domain Admin escalation paths. |
+| `linux.ccache_hunt` | Pure-Python Kerberos credential cache hunter (`/tmp`, `/run/user`, KCM Unix socket IPC); extracts unexpired TGTs. |
+| `linux.keytab_abuse` | Parses binary keytabs (`/etc/krb5.keytab`, RFC 0x0502); extracts machine AES-256 keys and generates Silver Ticket configs. |
+| `linux.samba_secrets` | Extracts machine account cleartext passwords and computes NTLM hashes from Samba/Winbind `secrets.tdb`. |
 | `linux.kernel_suggester` | Kernel version and known local privilege path review. |
 | `linux.container` | Docker/Kubernetes/container escape posture checks. |
 | `linux.privesc` | Linux privilege escalation posture review. |
@@ -394,3 +399,86 @@ temporary campaign when done.
 2. Use `edr.bypass_adaptive` to understand defensive product assumptions.
 3. Use `opsec.coverage_predictor` before noisy chains.
 4. Prefer low-noise enumeration when uncertainty is high.
+
+---
+
+## Linux Active Directory Post-Exploitation Suite (RFC-ARES-2026-001)
+
+The Linux Active Directory suite addresses the modern hybrid enterprise attack surface: critical Linux systems (Kubernetes worker nodes, CI/CD runners, database servers) joined to Active Directory via SSSD, Winbind, or Kerberos PAM.
+
+### 1. Engineering Principles & Technical Honesty (Anti-Hype Policy)
+
+In strict accordance with the ARES Engineering Standards:
+- **Pure User-Space Execution**: All parsers (`TDBParser`, `CcacheParser`, `KeytabParser`, `KirbiASN1Codec`, `KCMClient`, and `pure_md4`) execute entirely within Python user space using standard-library primitives (`struct`, `hashlib`, `socket`, `io`).
+- **Zero Kernel Overclaims**: These modules do not claim or utilize kernel-mode hooks. They read existing disk databases and IPC sockets accessible under standard POSIX file permissions.
+- **Subprocess Evasion (`execve` Bypass)**: Standard offensive scripts invoke external binaries (`strings`, `tdbdump`, `klist`, `kinit`, `secretsdump.py`), producing `auditd` SYSCALL 59 (`execve`) telemetry alerts. ARES executes zero subprocesses, parsing raw binary structures directly in-memory.
+- **Graceful Unprivileged Fallback**: When run without elevated permissions (`root`), modules verify read access, cleanly classify missing access as `dry_run_blocked` or `permission_denied`, and never raise unhandled exceptions or disrupt target system operations.
+- **Automated AEAD Vault Integration**: Recovered credentials, machine account NTLM hashes, and Kerberos TGTs are encrypted at rest using AES-256-GCM authenticated encryption in `AresVault`, preventing cleartext exposure in engagement logs.
+
+### 2. Module Specifications
+
+#### `linux.sssd_harvest`
+- **Module ID**: `linux.sssd_harvest`
+- **MITRE ATT&CK**: T1003.008 (OS Credential Dumping: /etc/passwd and /etc/shadow), T1558 (Steal or Forge Kerberos Tickets)
+- **OPSEC Rating**: `SILENT` (Reads local files; 0 network packets transmitted).
+- **Parameters**:
+  - `target` (str, required): Target IP address or hostname.
+  - `db_path` (str, optional, default `/var/lib/sss/db/cache_default.ldb`): Path to SSSD LDB cache database.
+  - `extract_offline_hashes` (bool, default `True`): Extracts salted SHA-512 crypt hashes for offline cracking.
+  - `check_domain_admins` (bool, default `True`): Parses LDAP `memberOf` attributes to highlight Domain Admin accounts.
+- **Permissions**: `FilesystemPermission(read_only=True)`, `ProcessPermission(allow_subprocesses=False)`, `VaultPermission(read_types=[], write_types=["password", "hash"])`.
+- **Closed-Loop Telemetry**:
+  - *Sigma Rule*: `detection.selection: name|contains: 'cache_'`, `filter: exe|startswith: '/usr/sbin/sssd'`
+  - *Microsoft Sentinel (KQL)*:
+    ```kql
+    DeviceFileEvents
+    | where ActionType in ('FileRead', 'FileModified')
+    | where FolderPath has_any ('/var/lib/sss/db', '/var/lib/sss/secrets')
+    | where InitiatingProcessFileName !in ('sssd', 'sssd_be', 'sssd_nss', 'sssd_pam')
+    | project Timestamp, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, FolderPath
+    ```
+
+#### `linux.ccache_hunt`
+- **Module ID**: `linux.ccache_hunt`
+- **MITRE ATT&CK**: T1558 (Steal or Forge Kerberos Tickets), T1550.003 (Pass the Ticket)
+- **OPSEC Rating**: `SILENT` (Scans user-space ticket caches; 0 network packets transmitted).
+- **Parameters**:
+  - `target` (str, required): Target IP address or hostname.
+  - `search_paths` (list[str], default `["/tmp", "/run/user"]`): Directories to hunt for Kerberos ccache files (`krb5cc_*`).
+  - `include_expired` (bool, default `False`): Filter out expired credentials by inspecting ticket lifetime timestamps.
+  - `query_kcm` (bool, default `True`): Query the local SSSD KCM Unix domain socket (`/var/run/sss/pipes/kcm`).
+- **Permissions**: `FilesystemPermission(read_only=True)`, `ProcessPermission(allow_subprocesses=False)`, `VaultPermission(read_types=[], write_types=["ticket", "kerberos"])`.
+- **Harvested Artefacts**: Extracted TGTs are tagged with `is_tgt=True`, granting immediate lateral movement or Pass-the-Ticket capabilities.
+
+#### `linux.keytab_abuse`
+- **Module ID**: `linux.keytab_abuse`
+- **MITRE ATT&CK**: T1558.003 (Kerberoasting), T1078.002 (Domain Accounts)
+- **OPSEC Rating**: `LOW` (Local keytab read; optional Silver Ticket configuration derivation).
+- **Parameters**:
+  - `target` (str, required): Target IP address or hostname.
+  - `keytab_path` (str, default `/etc/krb5.keytab`): Path to Kerberos keytab binary file.
+  - `generate_silver_ticket_config` (bool, default `True`): Derives service ticket forging parameters (SPN, encryption type, symmetric key).
+  - `target_service` (str, default `cifs`): Target service name for Silver Ticket configuration template.
+- **Supported Enctypes**: Enctype 18 (`AES256-CTS-HMAC-SHA1-96`), Enctype 17 (`AES128-CTS-HMAC-SHA1-96`), Enctype 23 (`RC4-HMAC`).
+- **Permissions**: `FilesystemPermission(read_only=True)`, `ProcessPermission(allow_subprocesses=False)`, `VaultPermission(read_types=[], write_types=["key", "password"])`.
+
+#### `linux.samba_secrets`
+- **Module ID**: `linux.samba_secrets`
+- **MITRE ATT&CK**: T1003 (OS Credential Dumping), T1550.002 (Pass the Hash)
+- **OPSEC Rating**: `SILENT` (Parses Samba database; 0 network packets transmitted).
+- **Parameters**:
+  - `target` (str, required): Target IP address or hostname.
+  - `secrets_tdb_path` (str, default `/var/lib/samba/private/secrets.tdb`): Path to Samba secrets database.
+- **Capabilities**: Parses TDB records to extract `SECRETS/MACHINE_PASSWORD/<DOMAIN>`. Automatically derives the machine account NTLM hash via cross-platform RFC 1320 MD4, enabling instant Pass-the-Hash lateral movement as the computer account (`DOMAIN$`).
+- **Permissions**: `FilesystemPermission(read_only=True)`, `ProcessPermission(allow_subprocesses=False)`, `VaultPermission(read_types=[], write_types=["password", "hash"])`.
+
+#### `credential.ticket_converter`
+- **Module ID**: `credential.ticket_converter`
+- **MITRE ATT&CK**: T1558 (Steal or Forge Kerberos Tickets)
+- **OPSEC Rating**: `SILENT` (100% in-memory data transformation; zero file writes or network transmission).
+- **Parameters**:
+  - `ticket_b64` (str, required): Base64-encoded Kerberos ticket.
+  - `source_format` (str, `ccache` | `kirbi`): Input format.
+  - `target_format` (str, `kirbi` | `ccache`): Desired output format.
+  - `target` (str, default `127.0.0.1`): Host identifier for provenance tracking.
+- **Capabilities**: Transcodes Linux Kerberos ccache v4 binary structures to Windows `.kirbi` (KRB-CRED ASN.1 Application 22 DER) and vice versa, allowing tickets captured on Linux domain members to be deployed directly against Windows targets without external dependencies.

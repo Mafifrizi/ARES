@@ -50,7 +50,7 @@ The documentation is organized into six functional pillars:
 ### Research Tracks and Architecture RFCs
 | Document | Description | Target Audience |
 | --- | --- | --- |
-| [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001: Cross-platform Active Directory post-exploitation, SSSD cache harvesting, Kerberos ccache extraction, and module specifications. | Offensive Researchers, Red Team |
+| [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001 (Implemented): Cross-platform Linux Active Directory post-exploitation suite (SSSD cache harvesting, Kerberos ccache extraction, keytab abuse, Samba secrets, ticket converter). | Offensive Researchers, Red Team |
 
 ---
 
@@ -80,7 +80,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
         |                                                 |
 +------------------------------+        +---------------------------------+
 |      ATTACK MODULES          |        |        PERSISTENCE LAYER        |
-|  64 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
+|  69 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
 |  81 Capability Bindings      |        |  AES-256-GCM Vault Encryption   |
 |  Safe Preview & Execution    |        |  Alembic Migrations (Head 0011) |
 +------------------------------+        +---------------------------------+

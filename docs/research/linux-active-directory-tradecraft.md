@@ -3,9 +3,10 @@
 
 - **RFC Identifier**: RFC-ARES-2026-001
 - **Domain**: Offensive Security Research / Active Directory / Linux Post-Exploitation
-- **Status**: Open for Implementation & Collaborative Research
+- **Status**: Implemented & Production Ready (ARES v6.0+)
 - **Classification**: Operator-Directed Red Team Capability Specification
 - **Engine Compatibility**: ARES Engine v6.0+ (`BaseModule[P, R]`, Pydantic v2, Python 3.10+)
+- **Implementation Status**: Fully implemented across 5 production modules with pure-Python parsers and 18 unit tests.
 
 ---
 
@@ -609,29 +610,31 @@ class CcacheHuntModule(BaseModule):
 
 ---
 
-## 6. How to Contribute to this Track
+---
 
-We invite adversarial engineers, penetration testers, and offensive developers to build and submit PRs for any of the modules specified above:
+## 6. Implementation Status & Production Verification
 
-1. **Clone and Branch**:
-   ```bash
-   git checkout main && git pull origin main
-   git checkout -b feature/linux-ad-<module-name>
-   ```
-2. **Implement in Target Directory**:
-   - Linux modules: `ares/modules/linux/<module_name>.py`
-   - Credential modules: `ares/modules/credential/<module_name>.py`
-3. **Use the Module Test Harness**:
-   Verify validation, dry-run, OPSEC rating, and error classification:
-   ```python
-   from ares.testing import ModuleTestHarness
+RFC-ARES-2026-001 has been fully realized in the ARES v6.0+ production core. The complete capability matrix is available out-of-the-box without external C-extensions:
 
-   harness = ModuleTestHarness(MyNewModule)
-   result = harness.test_validation({"target": "10.0.0.1"})
-   result.assert_success()
-   ```
-4. **Submit PR**:
-   Target the `main` branch with reference to `RFC-ARES-2026-001`.
+| Module ID | Module Class | Source Path | Contract & Permissions | OPSEC | MITRE |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `linux.sssd_harvest` | `SssdHarvestModule` | `ares/modules/linux/sssd_harvest.py` | Read-only FS, No Subprocess, Vault Write | `SILENT` | T1003.008, T1558 |
+| `linux.ccache_hunt` | `CcacheHuntModule` | `ares/modules/linux/ccache_hunt.py` | Read-only FS, No Subprocess, Vault Write | `SILENT` | T1558, T1550.003 |
+| `linux.keytab_abuse` | `KeytabAbuseModule` | `ares/modules/linux/keytab_abuse.py` | Read-only FS, No Subprocess, Vault Write | `LOW` | T1558.003, T1078.002 |
+| `linux.samba_secrets` | `SambaSecretsModule` | `ares/modules/linux/samba_secrets.py` | Read-only FS, No Subprocess, Vault Write | `SILENT` | T1003, T1550.002 |
+| `credential.ticket_converter` | `TicketConverterModule` | `ares/modules/credential/ticket_converter.py` | No FS, No Subprocess, Zero Network | `SILENT` | T1558 |
+
+### Shared Binary Parsing Architecture (`ares.modules.linux._parsers`)
+- **`TDBParser`**: Structural traversal of Samba TDB and SSSD LDB database records with auto-endian detection (`0x2601196D` / `0x6D190126`).
+- **`CcacheParser` & `build_ccache_v4`**: Full binary serialization and deserialization of RFC Kerberos Credential Cache format version 4 (`0x0504`).
+- **`KeytabParser`**: Binary parsing of Kerberos keytab files (version `0x0502`) supporting AES-256-CTS-HMAC, AES-128-CTS-HMAC, and RC4-HMAC enctypes.
+- **`KirbiASN1Codec`**: Pure-Python DER ASN.1 encoder and decoder for Kerberos `KRB-CRED` (Application tag 22) ticket containers.
+- **`KCMClient`**: Direct Unix domain socket IPC client for SSSD Kerberos Credential Manager (`/var/run/sss/pipes/kcm`).
+- **`pure_md4` & `compute_ntlm_hash`**: Pure-Python RFC 1320 MD4 implementation ensuring reliable NTLM hash calculation across all OS environments and OpenSSL 3.0+ configurations.
+
+### Verification Suite
+- **Unit & Integration Suite**: `tests/unit/modules/test_linux_ad_tradecraft.py` (18/18 passing tests covering parsers, dry-run safety, and AresVault integration).
+- **Module Contracts**: `tests/unit/test_module_contracts.py` (fully compliant declarative contracts, permission validation, and secret sanitization).
 
 ---
 

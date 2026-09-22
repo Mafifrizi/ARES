@@ -13,6 +13,7 @@ try:
     from ares.modules.credential.pass_spray import PassSprayModule  # noqa: F401
     from ares.modules.credential.pass_the_hash import PassTheHashModule  # noqa: F401
     from ares.modules.credential.reuse import CredentialReuseModule  # noqa: F401
+    from ares.modules.credential.ticket_converter import TicketConverterModule  # noqa: F401
 except ImportError:
     pass  # optional deps (impacket, ldap3, etc.) not installed
 
@@ -22,4 +23,5 @@ __all__ = [
     "PassSprayModule",
     "PassTheHashModule",
     "CredentialReuseModule",
+    "TicketConverterModule",
 ]

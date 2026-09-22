@@ -311,6 +311,104 @@ class LinuxPrivescParams(ModuleParams):
     ssh_port: int = param("SSH port", required=False, default=22, ge=1, le=65535)
 
 
+class SssdHarvestParams(ModuleParams):
+    """Parameters for linux.sssd_harvest - SSSD cache and offline hash extractor."""
+
+    db_path: str = param(
+        "Directory containing SSSD LDB databases.",
+        required=False,
+        default="/var/lib/sss/db",
+        min_length=1,
+    )
+    extract_offline_hashes: bool = param(
+        "Extract salted offline password hashes for password cracking.",
+        required=False,
+        default=True,
+    )
+    target_domain: str | None = param(
+        "Specific AD domain name to target. If None, targets all domains.",
+        required=False,
+        default=None,
+    )
+
+
+class CcacheHuntParams(ModuleParams):
+    """Parameters for linux.ccache_hunt - Kerberos ticket cache hunter."""
+
+    search_dirs: list[str] = param(
+        "Filesystem locations to scan for Kerberos ccache files.",
+        required=False,
+        default=["/tmp", "/run/user"],
+    )
+    scan_kernel_keyring: bool = param(
+        "Attempt retrieval of tickets stored in Linux Kernel Keyring.",
+        required=False,
+        default=True,
+    )
+    scan_kcm_socket: bool = param(
+        "Attempt retrieval from Kerberos Credential Manager (KCM) IPC socket.",
+        required=False,
+        default=True,
+    )
+    include_expired: bool = param(
+        "Whether to return expired Kerberos tickets.",
+        required=False,
+        default=False,
+    )
+
+
+class KeytabAbuseParams(ModuleParams):
+    """Parameters for linux.keytab_abuse - Host keytab harvester and Silver Ticket generator."""
+
+    keytab_path: str = param(
+        "Path to the Kerberos keytab file.",
+        required=False,
+        default="/etc/krb5.keytab",
+        min_length=1,
+    )
+    forge_silver_ticket: bool = param(
+        "Attempt offline generation of local service Silver Ticket.",
+        required=False,
+        default=False,
+    )
+    service_name: str = param(
+        "Target service principal for Silver Ticket (e.g. host, cifs, http).",
+        required=False,
+        default="host",
+    )
+
+
+class SambaSecretsParams(ModuleParams):
+    """Parameters for linux.samba_secrets - Samba/Winbind machine password and NTLM extractor."""
+
+    secrets_tdb_path: str = param(
+        "Path to Samba secrets.tdb database.",
+        required=False,
+        default="/var/lib/samba/private/secrets.tdb",
+        min_length=1,
+    )
+
+
+class TicketConverterParams(ModuleParams):
+    """Parameters for credential.ticket_converter - Bi-directional ccache <-> kirbi converter."""
+
+    source_format: str = param(
+        "Format of input ticket: 'ccache' or 'kirbi'.",
+        required=False,
+        default="ccache",
+    )
+    ticket_b64: str = param(
+        "Base64-encoded source ticket bytes.",
+        required=True,
+        min_length=4,
+    )
+    target_format: str = param(
+        "Desired target format: 'ccache' or 'kirbi'.",
+        required=False,
+        default="kirbi",
+    )
+
+
 # ── AD modules ────────────────────────────────────────────────────────────────
 
 
@@ -1328,6 +1426,11 @@ MODULE_PARAMS: dict[str, type[ModuleParams]] = {
     "linux.ld_preload": LDPreloadParams,
     "linux.nfs_escape": NFSEscapeParams,
     "linux.service_hijack": ServiceHijackParams,
+    "linux.sssd_harvest": SssdHarvestParams,
+    "linux.ccache_hunt": CcacheHuntParams,
+    "linux.keytab_abuse": KeytabAbuseParams,
+    "linux.samba_secrets": SambaSecretsParams,
+    "credential.ticket_converter": TicketConverterParams,
     # ── Network ───────────────────────────────────────────────────────────────
     "network.port_scan": PortScanParams,
     "network.dns_enum": DNSEnumParams,

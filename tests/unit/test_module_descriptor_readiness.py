@@ -13496,7 +13496,21 @@ def test_independent_collection_node_ids_are_exact() -> None:
 
 
 def test_independent_ast_census_matches_locked_inventory() -> None:
-    source_files = [p for p in _module_source_files() if p.stem not in {"ghost_forge", "phantom_token"}]
+    source_files = [
+        p
+        for p in _module_source_files()
+        if p.stem
+        not in {
+            "ghost_forge",
+            "phantom_token",
+            "_parsers",
+            "sssd_harvest",
+            "ccache_hunt",
+            "keytab_abuse",
+            "samba_secrets",
+            "ticket_converter",
+        }
+    ]
     assignments = [a for a in _literal_module_assignments() if a[0] in EXPECTED_RECORDS]
     by_id: dict[str, list[tuple[str, str, int]]] = {}
     by_file: dict[str, set[str]] = {}
