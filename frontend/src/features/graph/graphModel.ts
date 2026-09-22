@@ -423,6 +423,17 @@ export function adaptApiGraphToCobalt(
 
   let candidateNodes = apiGraph.nodes.filter((n) => {
     const typeLower = (n.type || "").toLowerCase();
+    const idLower = (n.id || "").toLowerCase();
+    const ipLower = String(n.metadata?.ip || "").toLowerCase();
+    const labelLower = (n.label || "").toLowerCase();
+    if (
+      idLower === "host:in-scope" ||
+      ipLower === "in-scope" ||
+      ipLower === "scope" ||
+      labelLower === "in-scope"
+    ) {
+      return false;
+    }
     return !(
       typeLower === "finding" ||
       typeLower === "credential" ||
@@ -436,14 +447,16 @@ export function adaptApiGraphToCobalt(
   if (candidateNodes.length === 0) {
     const inferredTargets: string[] = [];
     findingsByHost.forEach((_, hostKey) => {
-      if (hostKey && !inferredTargets.includes(hostKey)) {
+      const cleanKey = hostKey.toLowerCase();
+      if (cleanKey && cleanKey !== "in-scope" && cleanKey !== "scope" && !inferredTargets.includes(hostKey)) {
         inferredTargets.push(hostKey);
       }
     });
     if (campaign && Array.isArray(campaign.targets)) {
       campaign.targets.forEach((tgt) => {
-        if (tgt && !inferredTargets.includes(tgt)) {
-          inferredTargets.push(tgt);
+        const cleanTgt = String(tgt).trim();
+        if (cleanTgt && cleanTgt.toLowerCase() !== "in-scope" && !inferredTargets.includes(cleanTgt)) {
+          inferredTargets.push(cleanTgt);
         }
       });
     }
@@ -504,11 +517,22 @@ export function adaptApiGraphToCobalt(
       const hostFindings = findingsByHost.get(hostKey) || [];
       const hasCrit = hostFindings.some((f) => f.severity === "critical");
       const hasHigh = hostFindings.some((f) => f.severity === "high");
-      const derivedPriv = hasCrit ? "system" : hasHigh ? "admin" : inference.privilege;
+      const hasPrivesc = hostFindings.some((f) => {
+        const title = (f.label || "").toLowerCase();
+        const tech = String(f.metadata?.mitre_technique || f.metadata?.mitre || "");
+        return tech === "T1548.001" || tech === "T1548.003" || title.includes("suid") || title.includes("sudo") || title.includes("capabilities") || title.includes("path dirs") || title.includes("privilege");
+      });
+      const metaTags = Array.isArray(n.metadata?.tags) ? (n.metadata.tags as string[]) : [];
+      const isTaggedRoot = metaTags.some((t) => ["root", "system", "elevated", "domain_admin"].includes(String(t).toLowerCase()));
+      const derivedPriv = (hasCrit || hasPrivesc || isTaggedRoot || inference.privilege === "system")
+        ? "system"
+        : hasHigh
+        ? "admin"
+        : inference.privilege;
 
       return {
         ...n,
-        severity: hasCrit ? "critical" : hasHigh ? "high" : n.severity,
+        severity: (hasCrit || hasPrivesc) ? "critical" : hasHigh ? "high" : n.severity,
         metadata: {
           ...n.metadata,
           os: inference.os,
@@ -519,7 +543,13 @@ export function adaptApiGraphToCobalt(
           pid: inference.pid !== undefined ? inference.pid : null,
           subLabel: inference.subLabel || null,
           findingCount: hostFindings.length,
-          maxSeverity: hasCrit ? "critical" : hasHigh ? "high" : hostFindings.length > 0 ? "medium" : null,
+          findings: hostFindings.map((f) => ({
+            title: f.label,
+            severity: f.severity || "info",
+            mitre_technique: f.metadata?.mitre_technique || f.metadata?.mitre || null,
+            description: f.metadata?.description || null
+          })),
+          maxSeverity: (hasCrit || hasPrivesc) ? "critical" : hasHigh ? "high" : hostFindings.length > 0 ? "medium" : null,
         }
       };
     });

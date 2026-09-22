@@ -719,6 +719,34 @@ class PassSprayParams(ModuleParams):
     )
 
 
+class SSHSprayParams(ModuleParams):
+    """credential.ssh_spray - SSH authentication audit and credential spray."""
+
+    target: str = param("Target IP or hostname", min_length=3, max_length=253)
+    port: int = param("SSH port", required=False, default=22, ge=1, le=65535)
+    users: list[str] = param(
+        "List of usernames to spray",
+        required=False,
+        default=["root", "admin", "kali", "ubuntu", "user", "kraii"],
+    )
+    passwords: list[str] = param(
+        "List of passwords to test",
+        required=False,
+        default=["Password123!", "admin", "root", "toor", "ubuntu", "kali", "password", "123456"],
+    )
+    username: str | None = param("Single username to test", required=False, default=None)
+    password: SecretParam | None = param("Single password to test", required=False, default=None, secret=True)
+    delay_s: float = param(
+        "Delay between attempts (seconds)", required=False, default=0.5, ge=0.0, le=60.0
+    )
+    timeout_s: float = param(
+        "Connection timeout (seconds)", required=False, default=5.0, ge=0.5, le=30.0
+    )
+    max_attempts: int = param(
+        "Max total attempts (lockout protection)", required=False, default=20, ge=1, le=200
+    )
+
+
 class PassTheHashParams(ModuleParams):
     """credential.pass_the_hash - SMB pass-the-hash authentication."""
 
@@ -1439,6 +1467,7 @@ MODULE_PARAMS: dict[str, type[ModuleParams]] = {
     "credential.crack": CredentialCrackParams,
     "credential.golden_ticket": GoldenTicketParams,
     "credential.pass_spray": PassSprayParams,
+    "credential.ssh_spray": SSHSprayParams,
     "credential.pass_the_hash": PassTheHashParams,
     "credential.reuse": CredentialReuseParams,
     # ── Exfil ─────────────────────────────────────────────────────────────────

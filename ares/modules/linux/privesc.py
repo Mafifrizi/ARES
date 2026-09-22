@@ -230,6 +230,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         ssh_port: int = 22,
         **kwargs: Any,
     ) -> tuple[list[Finding], dict[str, Any]]:
+        self._target_host = host
         is_remote = ssh_user is not None and host != "localhost"
         if is_remote:
             host = sanitize_hostname(host)
@@ -360,6 +361,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 writable.append(path)
 
         if writable:
+            target_host = getattr(self, "_target_host", None) or "localhost"
             self.finding(
                 title=f"World-writable sensitive files: {', '.join(writable[:3])}",
                 description=f"Found {len(writable)} sensitive path(s) writable: {writable}",
@@ -368,6 +370,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 mitre_tactic="Privilege Escalation",
                 evidence={"writable_paths": writable},
                 remediation="Remove world-write permissions from sensitive system files.",
+                host=target_host,
             )
         return writable
 
@@ -375,6 +378,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         return await self._check_world_writable_sensitive(run=run)
 
     def _analyze(self, raw: dict[str, Any]) -> None:
+        target_host = raw.get("host") or getattr(self, "_target_host", None) or "localhost"
         suid_bins = raw.get("suid", [])
         exploitable = [
             {
@@ -394,6 +398,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 mitre_tactic="Privilege Escalation",
                 evidence={"binaries": exploitable[:10]},
                 remediation="Remove SUID bit: chmod u-s /path/to/binary.",
+                host=target_host,
             )
 
         sudo_rules = raw.get("sudo", [])
@@ -406,6 +411,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 mitre_tactic="Privilege Escalation",
                 evidence={"rules": [line for line in sudo_rules if "NOPASSWD" in line][:5]},
                 remediation="Remove NOPASSWD from sudoers. Restrict sudo to specific commands.",
+                host=target_host,
             )
 
         caps = raw.get("capabilities", [])
@@ -425,6 +431,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 mitre_tactic="Privilege Escalation",
                 evidence={"capabilities": found_caps},
                 remediation="setcap -r /path/to/binary",
+                host=target_host,
             )
 
         writable = raw.get("writable_path", [])
@@ -437,4 +444,13 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 mitre_tactic="Privilege Escalation",
                 evidence={"directories": writable},
                 remediation="Remove write permissions from PATH directories.",
+                host=target_host,
             )
+
+        has_root_vector = bool(exploitable) or any("NOPASSWD" in line for line in sudo_rules) or bool(found_caps)
+        if has_root_vector:
+            raw["privilege"] = "root"
+            raw["compromise_level"] = "system"
+            raw["escalated"] = True
+            raw["root_access"] = True
+            raw["target"] = target_host

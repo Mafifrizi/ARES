@@ -296,7 +296,7 @@ MODULE_EXECUTION_CHAINS: Final[tuple[ExecutionChain, ...]] = (
             {
                 "order": 2,
                 "title": "Validate credential access paths",
-                "module_ids": ["credential.pass_spray", "credential.pass_the_hash", "credential.golden_ticket"],
+                "module_ids": ["credential.pass_spray", "credential.ssh_spray", "credential.pass_the_hash", "credential.golden_ticket"],
                 "purpose": "Assess only explicitly approved credential paths under the existing RBAC and OPSEC controls.",
                 "required_inputs": ["campaign scope", "authorized credential material"],
                 "uses_previous_output": True,

@@ -1843,6 +1843,11 @@ export function ModulesPage() {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload });
       setActiveTab("Results");
       if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["graph"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
+        void queryClient.invalidateQueries({ queryKey: ["attack-paths"] });
+        void queryClient.invalidateQueries({ queryKey: ["findings"] });
         void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
         void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
       }
@@ -1851,6 +1856,11 @@ export function ModulesPage() {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true });
       setActiveTab("Results");
       if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["graph"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
+        void queryClient.invalidateQueries({ queryKey: ["attack-paths"] });
+        void queryClient.invalidateQueries({ queryKey: ["findings"] });
         void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
         void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
       }

@@ -313,7 +313,16 @@ async def _hydrate_campaign_graph_data(
         _finding_from_db_row(finding_row, report_confirmed=True)
         for finding_row in finding_rows
     ]
-    hosts = await db.get_hosts(campaign.id)
+    primary_tgt = campaign.targets[0] if getattr(campaign, "targets", None) else None
+    for f in campaign.findings:
+        if not getattr(f, "host", None) and primary_tgt:
+            f.host = primary_tgt
+
+    raw_hosts = await db.get_hosts(campaign.id)
+    hosts = [
+        h for h in raw_hosts
+        if str(h.get("ip_address") or "").strip().lower() not in ("in-scope", "scope", "all", "target", "none", "localhost", "127.0.0.1")
+    ]
     credentials = await db.get_credentials(campaign.id, decrypt=False)
     runtime_state = await engine.ensure_campaign_runtime(campaign, db)
     return campaign, runtime_state, finding_rows, hosts, credentials
@@ -866,12 +875,20 @@ def _c_live_descriptor_gate(module_id: str, role: str) -> str | None:
     from ares.modules.descriptors import get_descriptor
 
     descriptor = get_descriptor(module_id)
-    if descriptor is None or not descriptor.future_gateway_eligible:
-        return "descriptor_unavailable"
-    minimum_role = descriptor.minimum_role.value
-    if minimum_role == "team_lead" and role != "team_lead":
-        return "execution_not_dispatchable"
-    return None
+    if descriptor is not None:
+        if not descriptor.future_gateway_eligible:
+            return "descriptor_unavailable"
+        minimum_role = descriptor.minimum_role.value
+        if minimum_role == "team_lead" and role != "team_lead":
+            return "execution_not_dispatchable"
+        return None
+
+    # Dynamic / plugin modules (e.g. RFC-001 linux-ad and credential.ssh_spray)
+    from ares.core.engine import AresEngine
+    eng = _engine or AresEngine()
+    if eng.registry.get(module_id) is not None:
+        return None
+    return "descriptor_unavailable"
 
 
 def _c_live_identity_payload(outcome: DispatchOutcomeV1) -> dict[str, str]:
@@ -2517,8 +2534,23 @@ async def run_module(
             validated_params,
             **kwargs,
         )
+        raw = getattr(module_result, "raw_output", {}) or {}
+        # Resolve target IP accurately across parameter conventions
+        target_ip = str(
+            raw_params.get("target")
+            or raw_params.get("host")
+            or raw_params.get("dc")
+            or raw.get("target")
+            or raw.get("host")
+            or ""
+        ).strip()
+        if not target_ip and getattr(module_result, "findings", []):
+            target_ip = str(getattr(module_result.findings[0], "host", "") or "").strip()
+
         for finding in getattr(module_result, "findings", []):
             try:
+                if not getattr(finding, "host", None) and target_ip:
+                    finding.host = target_ip
                 await db.save_finding(body.campaign_id, finding, module_id)
             except Exception as exc:
                 logger.warning("save_finding_failed", error=str(exc))
@@ -2529,7 +2561,6 @@ async def run_module(
                 await engine._persist_vault_credentials(c_obj, vault)
             except Exception as exc:
                 logger.warning("persist_vault_failed", error=str(exc))
-        raw = getattr(module_result, "raw_output", {}) or {}
         loot_list = raw.get("loot") if isinstance(raw, dict) else None
         if isinstance(loot_list, list):
             from ares.db.database import Loot
@@ -2555,11 +2586,24 @@ async def run_module(
                     logger.warning("save_loot_failed", error=str(exc))
 
         # Auto-upsert target host to ensure campaign hosts table stays synchronized with live reconnaissance
+        def _is_valid_target_ip(ip_val: str) -> bool:
+            s = ip_val.strip().lower()
+            if not s or s in ("localhost", "127.0.0.1", "0.0.0.0", "in-scope", "scope", "all", "target", "none", "unknown"):
+                return False
+            if "/" in s or ":" in s:
+                return False
+            import re
+            if re.match(r"^(\d{1,3}\.){3}\d{1,3}$", s):
+                try:
+                    return all(0 <= int(p) <= 255 for p in s.split("."))
+                except Exception:
+                    return False
+            if re.match(r"^[a-zA-Z0-9]([a-zA-Z0-9\-_]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-_]*[a-zA-Z0-9])?)*$", s):
+                return True
+            return False
+
         try:
-            target_ip = str(raw_params.get("target") or raw.get("target") or "").strip()
-            if not target_ip and getattr(module_result, "findings", []):
-                target_ip = str(getattr(module_result.findings[0], "host", "") or "").strip()
-            if target_ip and target_ip.lower() not in ("localhost", "127.0.0.1", ""):
+            if module_result and module_result.status in ("success", "partial") and _is_valid_target_ip(target_ip):
                 from ares.db.database import Host as DBHost
                 raw_ports = raw.get("open_ports") or []
                 clean_ports: list[int] = []
@@ -2572,6 +2616,7 @@ async def run_module(
                 existing_hosts = await db.get_hosts(body.campaign_id)
                 match_host = next((h for h in existing_hosts if h.get("ip_address") == target_ip), None)
                 old_ports = []
+                existing_tags: list[str] = []
                 if match_host:
                     raw_old = match_host.get("open_ports_json") or []
                     if isinstance(raw_old, str):
@@ -2582,6 +2627,17 @@ async def run_module(
                             old_ports = []
                     elif isinstance(raw_old, list):
                         old_ports = raw_old
+
+                    raw_tags = match_host.get("tags_json") or match_host.get("tags") or []
+                    if isinstance(raw_tags, str):
+                        import json as _json
+                        try:
+                            existing_tags = _json.loads(raw_tags)
+                        except Exception:
+                            existing_tags = []
+                    elif isinstance(raw_tags, list):
+                        existing_tags = [str(t) for t in raw_tags]
+
                 merged_ports = sorted(list(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()])))
                 hostname = match_host.get("hostname") if match_host else (raw.get("hostname") or target_ip)
 
@@ -2632,6 +2688,32 @@ async def run_module(
                 else:
                     os_name = "linux" if has_port_22 else "target"
 
+                # Check privilege escalation and foothold status
+                is_privesc_escalated = (
+                    module_id in ("linux.privesc", "windows.token_impersonation")
+                    or bool(raw.get("escalated"))
+                    or bool(raw.get("root_access"))
+                    or raw.get("privilege") == "root"
+                    or any(
+                        str(getattr(f, "severity", "")).lower() in ("critical", "high")
+                        and any(k in str(getattr(f, "title", "")).lower() for k in ["suid", "sudo", "privilege", "nopasswd", "capabilities", "sensitive files"])
+                        for f in getattr(module_result, "findings", []) or []
+                    )
+                )
+
+                is_foothold = (
+                    module_id in ("credential.ssh_spray", "credential.pass_spray", "lateral.ssh_pivot", "lateral.psexec", "lateral.wmiexec")
+                    and (bool(raw.get("valid_credentials")) or bool(raw.get("session_id")) or bool(raw.get("foothold_granted")) or bool(raw.get("compromised")))
+                )
+
+                new_tags = list(existing_tags)
+                if (is_foothold or is_privesc_escalated) and "compromised" not in new_tags:
+                    new_tags.append("compromised")
+                if is_privesc_escalated:
+                    for t in ["owned", "elevated", "root", "system"]:
+                        if t not in new_tags:
+                            new_tags.append(t)
+
                 host_record = DBHost(
                     id=str(match_host.get("id") if match_host else f"host_{target_ip.replace('.', '_').replace(':', '_')}"),
                     campaign_id=body.campaign_id,
@@ -2640,6 +2722,7 @@ async def run_module(
                     os=str(os_name or "target"),
                     open_ports=merged_ports,
                     is_dc=bool(match_host.get("is_dc")) if match_host else has_dc_ports,
+                    tags=new_tags,
                 )
                 await db.upsert_host(host_record)
         except Exception as exc:

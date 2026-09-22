@@ -182,6 +182,33 @@ def build_campaign_graph(
         is_owned = bool(getattr(host, "owned", getattr(host, "is_owned", False)))
         host_node_id = f"host:{ip}"
 
+        # Check findings for session host to elevate compromise level
+        for f in getattr(campaign, "findings", []) or []:
+            f_host = str(getattr(f, "host", "") or "").strip().lower()
+            f_title = str(getattr(f, "title", "") or "").lower()
+            f_mod = str(getattr(f, "module_id", "") or "").lower()
+            is_privesc = "privesc" in f_mod or any(k in f_title for k in ("capabilities", "path dirs", "suid", "sudo", "privilege escalation"))
+            host_matches = (f_host and f_host in (ip.lower(), hostname.lower())) or ip.lower() in f_title
+            if not host_matches and not f_host:
+                c_tgts = [str(t).lower() for t in (getattr(campaign, "targets", []) or [])]
+                if ip.lower() in c_tgts:
+                    host_matches = True
+            if host_matches:
+                sev = getattr(getattr(f, "severity", None), "value", "info").lower()
+                if is_privesc or sev == "critical":
+                    c_level = "domain_admin" if is_dc else "system"
+                elif sev == "high" and c_level not in ("system", "domain_admin"):
+                    c_level = "local_admin"
+                elif sev in ("medium", "low") and c_level in ("none", "recon"):
+                    c_level = "user"
+
+        priv_derived = (
+            "system" if c_level in ("system", "domain_admin")
+            else "admin" if c_level == "local_admin"
+            else "user" if c_level == "user"
+            else "uncompromised"
+        )
+
         h_ports = getattr(host, "open_ports", []) or []
         clean_ports = [int(p) for p in h_ports if str(p).isdigit()]
         has_ssh = 22 in clean_ports
@@ -206,15 +233,16 @@ def build_campaign_graph(
                 "ip":               ip,
                 "hostname":         hostname,
                 "compromise_level": c_level,
+                "privilege":        priv_derived,
                 "is_dc":            is_dc,
                 "open_ports":       getattr(host, "open_ports", []),
                 "os":               session_os,
                 "os_info":          session_os,
-                "owned":            is_owned,
+                "owned":            is_owned or c_level in ("system", "domain_admin", "local_admin"),
             },
             color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
             shape = "diamond" if is_dc else "circle",
-            size  = 35 if is_dc else (28 if is_owned else 20),
+            size  = 35 if is_dc else (28 if c_level in ("system", "domain_admin") else (22 if is_owned else 20)),
         ))
 
         host_lookup[ip.lower()] = host_node_id
@@ -243,20 +271,44 @@ def build_campaign_graph(
     if hosts:
         for h in hosts:
             ip = str(h.get("ip_address") or "").strip()
-            if not ip:
+            if not ip or ip.lower() in ("in-scope", "scope", "all", "target", "none", "localhost", "127.0.0.1", "0.0.0.0"):
                 continue
             host_node_id = f"host:{ip}"
-            if host_node_id in node_ids:
-                continue
             hostname = str(h.get("hostname") or ip).strip()
             is_dc = bool(h.get("is_dc"))
             c_level = "recon"
+            # Read tags from host
+            raw_tags = h.get("tags_json") or h.get("tags") or []
+            tags_list: list[str] = []
+            if isinstance(raw_tags, str):
+                import json as _json
+                try:
+                    tags_list = _json.loads(raw_tags)
+                except Exception:
+                    tags_list = []
+            elif isinstance(raw_tags, list):
+                tags_list = [str(t) for t in raw_tags]
+
+            if any(t in tags_list for t in ["root", "system", "elevated", "domain_admin"]):
+                c_level = "domain_admin" if is_dc else "system"
+            elif any(t in tags_list for t in ["compromised", "owned", "foothold", "user"]):
+                c_level = "user"
+
             # Infer elevated compromise level from campaign findings
             for f in getattr(campaign, "findings", []) or []:
                 f_host = str(getattr(f, "host", "") or "").strip().lower()
-                if f_host in (ip.lower(), hostname.lower()):
+                f_title = str(getattr(f, "title", "") or "").lower()
+                f_mod = str(getattr(f, "module_id", "") or "").lower()
+                is_privesc = "privesc" in f_mod or any(k in f_title for k in ("capabilities", "path dirs", "suid", "sudo", "privilege escalation"))
+                host_matches = (f_host and f_host in (ip.lower(), hostname.lower())) or ip.lower() in f_title
+                if not host_matches and not f_host:
+                    c_tgts = [str(t).lower() for t in (getattr(campaign, "targets", []) or [])]
+                    if ip.lower() in c_tgts:
+                        host_matches = True
+
+                if host_matches:
                     sev = getattr(getattr(f, "severity", None), "value", "info").lower()
-                    if sev == "critical":
+                    if is_privesc or sev == "critical":
                         c_level = "domain_admin" if is_dc else "system"
                     elif sev == "high" and c_level not in ("system", "domain_admin"):
                         c_level = "local_admin"
@@ -280,7 +332,7 @@ def build_campaign_graph(
             finding_text = " ".join([
                 f"{getattr(f, 'title', '')} {getattr(f, 'description', '')}"
                 for f in getattr(campaign, "findings", []) or []
-                if str(getattr(f, "host", "")).lower() in (ip.lower(), hostname.lower())
+                if str(getattr(f, "host", "")).lower() in (ip.lower(), hostname.lower()) or ip.lower() in str(getattr(f, "title", "")).lower()
             ]).lower()
 
             is_linux_f = any(k in finding_text for k in ["linux", "openssh", "ssh", "debian", "ubuntu", "kali", "sudo", "suid"])
@@ -298,6 +350,28 @@ def build_campaign_graph(
             else:
                 os_resolved = "linux" if has_ssh else (h_os or "target")
 
+            priv_derived = (
+                "system" if c_level in ("system", "domain_admin")
+                else "admin" if c_level == "local_admin"
+                else "user" if c_level == "user"
+                else "uncompromised"
+            )
+
+            if host_node_id in node_ids:
+                existing_node = next((n for n in nodes if n.id == host_node_id), None)
+                if existing_node:
+                    existing_node.data["compromise_level"] = c_level
+                    existing_node.data["privilege"] = priv_derived
+                    existing_node.data["owned"] = c_level in ("system", "domain_admin", "local_admin")
+                    if tags_list:
+                        existing_node.data["tags"] = tags_list
+                    if os_resolved and os_resolved != "target":
+                        existing_node.data["os"] = os_resolved
+                        existing_node.data["os_info"] = os_resolved
+                    existing_node.color = _COMPROMISE_COLORS.get(c_level, "#6c757d")
+                    existing_node.size = 35 if is_dc else (28 if c_level in ("system", "domain_admin") else 22)
+                continue
+
             add_node(APIGraphNode(
                 id    = host_node_id,
                 type  = "dc" if is_dc else "host",
@@ -306,11 +380,13 @@ def build_campaign_graph(
                     "ip":               ip,
                     "hostname":         hostname,
                     "compromise_level": c_level,
+                    "privilege":        priv_derived,
                     "is_dc":            is_dc,
                     "open_ports":       raw_ports if isinstance(raw_ports, list) else [],
                     "os":               os_resolved,
                     "os_info":          os_resolved,
                     "owned":            c_level in ("system", "domain_admin", "local_admin"),
+                    "tags":             tags_list,
                 },
                 color = _COMPROMISE_COLORS.get(c_level, "#6c757d"),
                 shape = "diamond" if is_dc else "circle",
@@ -327,10 +403,12 @@ def build_campaign_graph(
     candidate_targets: set[str] = set()
     for tgt in getattr(campaign, "targets", []) or []:
         if isinstance(tgt, str) and tgt.strip():
-            candidate_targets.add(tgt.strip())
+            clean_tgt = tgt.strip()
+            if clean_tgt.lower() not in ("localhost", "127.0.0.1", "0.0.0.0", "in-scope", "scope", "all", "target", "none"):
+                candidate_targets.add(clean_tgt)
     for f in getattr(campaign, "findings", []) or []:
         f_host = str(getattr(f, "host", "") or "").strip()
-        if f_host and f_host.lower() not in ("localhost", "127.0.0.1"):
+        if f_host and f_host.lower() not in ("localhost", "127.0.0.1", "0.0.0.0", "in-scope", "scope", "all", "target", "none"):
             candidate_targets.add(f_host)
 
     for tgt in candidate_targets:
@@ -382,20 +460,25 @@ def build_campaign_graph(
         host_lookup[tgt_clean] = host_node_id
 
     # ── Perimeter Ingress Gateway ───────────────────────────────────────────
-    all_host_nodes = [nid for nid in node_ids if nid.startswith("host:")]
+    all_host_nodes = [
+        nid for nid in node_ids
+        if nid.startswith("host:") and not any(k in nid.lower() for k in ("in-scope", "scope", "none", "target", "firewall"))
+    ]
     if all_host_nodes and "node:ingress-fw" not in node_ids:
         fw_id = "node:ingress-fw"
-        scope_str = "IN-SCOPE"
         raw_scope = getattr(campaign, "scope", [])
+        cidr_str = "0.0.0.0/0"
         if raw_scope and isinstance(raw_scope, list) and isinstance(raw_scope[0], dict):
-            scope_str = str(raw_scope[0].get("cidr", "IN-SCOPE"))
+            raw_cidr = str(raw_scope[0].get("cidr", "")).strip()
+            if raw_cidr and raw_cidr.lower() != "in-scope":
+                cidr_str = raw_cidr
         add_node(APIGraphNode(
             id    = fw_id,
             type  = "firewall",
             label = "PERIMETER\nINGRESS",
             data  = {
                 "os":               "firewall",
-                "ip":               scope_str,
+                "ip":               cidr_str,
                 "hostname":         "Perimeter Gateway",
                 "compromise_level": "none",
             },
@@ -590,8 +673,18 @@ def build_campaign_graph(
             if not target_host_id and f"host:{host}" in node_ids:
                 target_host_id = f"host:{host}"
 
-        if not target_host_id and len(all_host_nodes) == 1:
-            target_host_id = all_host_nodes[0]
+        if not target_host_id:
+            real_host_nodes = [
+                h for h in all_host_nodes
+                if not any(x in h.lower() for x in ("ingress", "scope", "firewall", "none"))
+            ]
+            if len(real_host_nodes) == 1:
+                target_host_id = real_host_nodes[0]
+            elif getattr(campaign, "targets", None):
+                for candidate_t in campaign.targets:
+                    if f"host:{candidate_t}" in node_ids:
+                        target_host_id = f"host:{candidate_t}"
+                        break
 
         if target_host_id and target_host_id in node_ids:
             edges.append(APIGraphEdge(
