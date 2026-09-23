@@ -794,8 +794,10 @@ class TestGoalEngine:
         engine = self._make_engine(["ad.enum_users", "ad.kerberoast", "ad.dcsync"])
         plan = engine.plan(Goal.DOMAIN_ADMIN, context={"dc": "10.0.0.1", "domain": "CORP"})
         assert plan.goal == Goal.DOMAIN_ADMIN
-        assert len(plan.steps) >= 0
+        assert len(plan.steps) == 3
+        assert [s.module_id for s in plan.steps] == ["ad.enum_users", "ad.kerberoast", "ad.dcsync"]
         assert isinstance(plan.estimated_duration_min, int)
+
 
     def test_plan_returns_goal_attack_plan(self):
         from ares.goal.engine import Goal, GoalAttackPlan

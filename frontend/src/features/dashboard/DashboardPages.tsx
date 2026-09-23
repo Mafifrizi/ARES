@@ -3,12 +3,17 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  Check,
   CheckCircle2,
   ChevronDown,
   Copy,
   Cpu,
   Crosshair,
+  Eye,
+  EyeOff,
+  FileText,
   Info,
+  Key,
   Layers,
   Loader2,
   Lock,
@@ -4261,6 +4266,470 @@ function DiscoveredPerimeterCard({
   );
 }
 
+export function maskSecret(val: string): string {
+  if (!val) return "••••";
+  if (val.length <= 4) return "••••";
+  if (val.length <= 8) return val.slice(0, 2) + "••••" + val.slice(-1);
+  return val.slice(0, 3) + "••••••••" + val.slice(-3);
+}
+
+export function getPatternBadgeClass(pattern: string): string {
+  const p = pattern.toLowerCase();
+  if (p.includes("aws") || p.includes("cloud")) {
+    return "bg-amber-950/40 text-amber-300 border-amber-800/60";
+  }
+  if (p.includes("conn") || p.includes("sql") || p.includes("db")) {
+    return "bg-cyan-950/40 text-cyan-300 border-cyan-800/60";
+  }
+  if (p.includes("cert") || p.includes("private") || p.includes("rsa")) {
+    return "bg-emerald-950/40 text-emerald-300 border-emerald-800/60";
+  }
+  if (p.includes("pass") || p.includes("pwd") || p.includes("shadow")) {
+    return "bg-rose-950/40 text-rose-300 border-rose-800/60";
+  }
+  if (p.includes("key") || p.includes("token") || p.includes("api")) {
+    return "bg-purple-950/40 text-purple-300 border-purple-800/60";
+  }
+  return "bg-zinc-900 text-zinc-300 border-zinc-700/80";
+}
+
+export interface DiscoveredSecretHit {
+  file?: string;
+  line?: number;
+  pattern?: string;
+  snippet?: string;
+  extracted_secret?: string;
+  secret_value?: string;
+  entropy?: number;
+  confidence?: number;
+  is_placeholder?: boolean;
+  [key: string]: unknown;
+}
+
+export function DiscoveredSecretsEvidenceViewer({
+  hits,
+  title = "Discovered Secrets & Hardcoded Credentials"
+}: {
+  hits: DiscoveredSecretHit[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(hits.length <= 6);
+  const [revealedIdxs, setRevealedIdxs] = useState<Record<number, boolean>>({});
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null);
+  const [revealAll, setRevealAll] = useState(false);
+
+  if (!hits || hits.length === 0) return null;
+
+  const toggleReveal = (idx: number) => {
+    setRevealedIdxs((prev) => ({
+      ...prev,
+      [idx]: !prev[idx]
+    }));
+  };
+
+  const handleToggleRevealAll = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = !revealAll;
+    setRevealAll(next);
+    const updated: Record<number, boolean> = {};
+    hits.forEach((_, i) => {
+      updated[i] = next;
+    });
+    setRevealedIdxs(updated);
+  };
+
+  const copySecret = (text: string, idx: number) => {
+    void navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
+
+  const copyFile = (path: string, idx: number) => {
+    void navigator.clipboard.writeText(path);
+    setCopiedFileIdx(idx);
+    setTimeout(() => setCopiedFileIdx(null), 1500);
+  };
+
+  return (
+    <div className="mt-2.5 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      {/* Header */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsExpanded((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setIsExpanded((prev) => !prev);
+          }
+        }}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left cursor-pointer select-none"
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <Key size={13} className="text-amber-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({hits.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 font-semibold">
+            LOOT EXTRACTED
+          </span>
+          {hits.some((h) => h.is_placeholder) && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+              SAMPLE / TEST IDENTIFIED
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={handleToggleRevealAll}
+            className="text-[11px] font-mono px-2 py-0.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
+            title={revealAll ? "Mask all discovered secret values" : "Reveal all discovered secret values"}
+          >
+            {revealAll ? <EyeOff size={11} className="text-zinc-400" /> : <Eye size={11} className="text-zinc-400" />}
+            <span>{revealAll ? "Mask All" : "Reveal All"}</span>
+          </button>
+          <div className="flex items-center gap-1 text-zinc-400 text-xs">
+            <span className="text-[11px] font-sans">{isExpanded ? "Hide Details" : "Show Details"}</span>
+            <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Table */}
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3 font-medium">Source File & Line</th>
+                <th className="py-2 px-3 font-medium">Pattern</th>
+                <th className="py-2 px-3 font-medium">Discovered Credential / Value</th>
+                <th className="py-2 px-3 font-medium">Shannon Entropy</th>
+                <th className="py-2 px-3 font-medium">Confidence</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {hits.map((hit, idx) => {
+                const isRevealed = Boolean(revealedIdxs[idx]);
+                const secretVal = String(hit.secret_value || hit.extracted_secret || hit.snippet || "");
+                const displayVal = isRevealed ? secretVal : maskSecret(secretVal);
+                const entropyVal = typeof hit.entropy === "number" ? hit.entropy : null;
+                const confVal = typeof hit.confidence === "number" ? hit.confidence : null;
+                const patternName = String(hit.pattern ?? "credential");
+                const filePath = String(hit.file ?? "");
+                const lineNo = hit.line;
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40 transition-colors">
+                    {/* File Path & Line */}
+                    <td className="py-2.5 px-3 max-w-[240px]">
+                      <div className="flex items-center gap-1.5 truncate" title={filePath}>
+                        <FileText size={12} className="text-zinc-500 shrink-0" />
+                        <span className="text-zinc-200 truncate text-[11px] font-mono">
+                          {filePath.split(/\\|\//).slice(-2).join("/") || filePath}
+                        </span>
+                        {lineNo !== undefined && (
+                          <span className="text-[10px] text-amber-400 bg-zinc-900 px-1 py-0.2 border border-zinc-800 rounded shrink-0">
+                            :{lineNo}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => copyFile(filePath, idx)}
+                          className="text-zinc-500 hover:text-zinc-300 p-0.5 rounded transition-colors shrink-0"
+                          title="Copy file path"
+                        >
+                          {copiedFileIdx === idx ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Pattern Badge */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <span className={`text-[10px] px-2 py-0.5 rounded border uppercase font-medium ${getPatternBadgeClass(patternName)}`}>
+                        {patternName.replace(/_/g, " ")}
+                      </span>
+                    </td>
+
+                    {/* Secret Value & Show/Hide + Copy */}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-1.5 max-w-sm">
+                        <div
+                          className="bg-zinc-900/90 border border-zinc-800/80 rounded px-2 py-1 font-mono text-[11px] text-zinc-100 truncate select-all flex-1 tracking-wider"
+                          title={isRevealed ? secretVal : "Value masked. Click Eye icon to reveal."}
+                        >
+                          {displayVal}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleReveal(idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+                          title={isRevealed ? "Mask secret" : "Reveal full secret value"}
+                        >
+                          {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copySecret(secretVal, idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+                          title="Copy secret value"
+                        >
+                          {copiedIdx === idx ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        </button>
+                      </div>
+                      {hit.snippet && hit.snippet !== hit.extracted_secret && isRevealed && (
+                        <div className="mt-1 text-[10px] font-mono text-zinc-500 bg-zinc-950/70 p-1 rounded border border-zinc-900 truncate" title={hit.snippet}>
+                          Context: <code className="text-zinc-400">{hit.snippet}</code>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Shannon Entropy */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      {entropyVal !== null ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-semibold ${
+                              entropyVal >= 3.5
+                                ? "text-emerald-400"
+                                : entropyVal >= 2.5
+                                ? "text-amber-400"
+                                : "text-zinc-500"
+                            }`}
+                          >
+                            {entropyVal.toFixed(2)}
+                          </span>
+                          <span className="text-[10px] text-zinc-500">bits</span>
+                          <span
+                            className="text-[9px] px-1 py-0.2 rounded uppercase border text-zinc-400 border-zinc-800"
+                            title={
+                              entropyVal >= 3.5
+                                ? "High entropy (Likely true random credential/key)"
+                                : entropyVal >= 2.5
+                                ? "Moderate entropy (Standard passphrase)"
+                                : "Low entropy (Dictionary word or placeholder)"
+                            }
+                          >
+                            {entropyVal >= 3.5 ? "HIGH" : entropyVal >= 2.5 ? "MED" : "LOW"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">n/a</span>
+                      )}
+                    </td>
+
+                    {/* Confidence & Placeholder Pill */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        {confVal !== null ? (
+                          <span
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-medium font-mono ${
+                              confVal >= 0.85
+                                ? "text-emerald-300 bg-emerald-950/50 border-emerald-800/60"
+                                : confVal >= 0.60
+                                ? "text-amber-300 bg-amber-950/50 border-amber-800/60"
+                                : "text-rose-300 bg-rose-950/50 border-rose-800/60"
+                            }`}
+                          >
+                            {confVal >= 0.95 ? "100% Confirmed" : `${Math.round(confVal * 100)}%`}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-500 text-[10px]">Standard</span>
+                        )}
+
+                        {hit.is_placeholder && (
+                          <span
+                            className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 uppercase tracking-tight"
+                            title="Identified as test sample or mock placeholder"
+                          >
+                            Placeholder
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveredHashesEvidenceViewer({
+  hashes,
+  title = "Discovered Hashes & Account Secrets"
+}: {
+  hashes: Record<string, unknown>[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(hashes.length <= 6);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+
+  if (!hashes || hashes.length === 0) return null;
+
+  const copyHash = (hash: string, idx: number) => {
+    void navigator.clipboard.writeText(hash);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
+
+  return (
+    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((p) => !p)}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Key size={13} className="text-purple-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({hashes.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-950/50 border border-purple-800/60 text-purple-300 font-semibold">
+            HASH REPOSITORY
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-zinc-400 text-xs">
+          <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
+          <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3">Principal / Account</th>
+                <th className="py-2 px-3">Type</th>
+                <th className="py-2 px-3">Extracted Hash</th>
+                <th className="py-2 px-3">Privilege</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {hashes.map((item, idx) => {
+                const user = String(item.username || item.account || item.user || "unknown");
+                const hash = String(item.hash || item.ntlm_hash || item.value || "");
+                const type = String(item.hash_type || item.type || "crypt");
+                const isAdmin = Boolean(item.is_admin || item.is_domain_admin || item.privilege === "Domain Admin");
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40">
+                    <td className="py-2 px-3 font-semibold text-zinc-200">{user}</td>
+                    <td className="py-2 px-3">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 uppercase">
+                        {type}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3">
+                      <div className="flex items-center gap-1.5 max-w-md">
+                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1">
+                          {hash}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => copyHash(hash, idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200"
+                          title="Copy hash"
+                        >
+                          {copiedIdx === idx ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {isAdmin ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 font-semibold">
+                          Domain Admin
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500 text-[10px]">Standard User</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveredTicketsEvidenceViewer({
+  tickets,
+  title = "Discovered Kerberos Tickets & TGTs"
+}: {
+  tickets: Record<string, unknown>[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(tickets.length <= 6);
+
+  if (!tickets || tickets.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((p) => !p)}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Key size={13} className="text-cyan-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({tickets.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/60 text-cyan-300 font-semibold">
+            KERBEROS CREDENTIAL CACHE
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-zinc-400 text-xs">
+          <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
+          <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3">Client Principal</th>
+                <th className="py-2 px-3">Service Principal</th>
+                <th className="py-2 px-3">Expiry</th>
+                <th className="py-2 px-3">Cache Path / Origin</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {tickets.map((t, idx) => {
+                const client = String(t.client || t.client_principal || "n/a");
+                const server = String(t.server || t.service_principal || "krbtgt");
+                const expiry = String(t.endtime || t.expiry || t.expires || "valid");
+                const path = String(t.path || t.ccache_path || t.source || "/tmp/krb5cc_*");
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40">
+                    <td className="py-2 px-3 font-semibold text-zinc-200">{client}</td>
+                    <td className="py-2 px-3 text-zinc-300">{server}</td>
+                    <td className="py-2 px-3 text-zinc-400 text-[11px]">{expiry}</td>
+                    <td className="py-2 px-3 text-zinc-500 font-mono text-[11px]">{path}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModuleRunSummary({
   result,
   error,
@@ -4410,6 +4879,22 @@ function ModuleRunSummary({
                 ? "border-l-amber-500"
                 : "border-l-zinc-700";
 
+            const evidence = (finding.evidence ?? {}) as Record<string, unknown>;
+            const rawSecretHits = (
+              Array.isArray(evidence.hits)
+                ? evidence.hits
+                : Array.isArray(evidence.discovered_secrets)
+                ? evidence.discovered_secrets
+                : Array.isArray(rawOutput?.discovered_secrets) &&
+                  (finding.module_id === "exfil.secrets_scan" ||
+                    String(finding.title ?? "").toLowerCase().includes("secrets"))
+                ? rawOutput.discovered_secrets
+                : []
+            ) as DiscoveredSecretHit[];
+
+            const hashes = Array.isArray(evidence.hashes) ? (evidence.hashes as Record<string, unknown>[]) : [];
+            const tickets = Array.isArray(evidence.tickets) ? (evidence.tickets as Record<string, unknown>[]) : [];
+
             return (
               <div
                 className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-3.5 space-y-2.5 rounded-sm`}
@@ -4460,10 +4945,25 @@ function ModuleRunSummary({
                   <h3 className="font-sans font-semibold text-sm text-zinc-100 tracking-tight">
                     {finding.title ?? `Observation #${index + 1}`}
                   </h3>
-                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans">
+                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
                     {String(finding.description ?? "")}
                   </p>
                 </div>
+
+                {/* Discovered Secrets Evidence (Hardcoded Credentials, Keys & Tokens) */}
+                {rawSecretHits.length > 0 && (
+                  <DiscoveredSecretsEvidenceViewer hits={rawSecretHits} />
+                )}
+
+                {/* Discovered Hashes Evidence Repository */}
+                {hashes.length > 0 && (
+                  <DiscoveredHashesEvidenceViewer hashes={hashes} />
+                )}
+
+                {/* Discovered Kerberos Tickets Evidence Repository */}
+                {tickets.length > 0 && (
+                  <DiscoveredTicketsEvidenceViewer tickets={tickets} />
+                )}
 
                 {/* Technical Remediation */}
                 {details.tailoredRemediation && (

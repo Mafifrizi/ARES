@@ -145,6 +145,7 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
 
         valid_credentials: list[dict[str, str]] = []
         tested_pairs: list[dict[str, Any]] = []
+        loot: list[dict[str, Any]] = []
         attempts = 0
 
         # Try asyncssh or fallback to paramiko
@@ -194,8 +195,12 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
                             timeout=timeout_s,
                         )
                         success = True
-                        conn.close()
-                    except (asyncssh.PermissionDenied, asyncssh.KeyExchangeError):
+                        close_fn = getattr(conn, "close", None)
+                        if callable(close_fn):
+                            res = close_fn()
+                            if asyncio.iscoroutine(res):
+                                await res
+                    except (asyncssh.PermissionDenied, asyncssh.KeyExchangeFailed, asyncssh.Error):
                         success = False
                     except (asyncio.TimeoutError, OSError) as exc:
                         logger.debug("ssh_spray_connection_error", target=target, user=username, error=str(exc))

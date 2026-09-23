@@ -269,8 +269,8 @@ class McpToolRegistry:
                 camp = await self.db.get_campaign(campaign_id)
                 if camp and "scope" in camp:
                     return camp["scope"]
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("mcp_fetch_campaign_scope_failed", campaign_id=campaign_id, error=str(exc))
         # Default safety fallback: internal lab subnets only
         return ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "*.corp.local", "*.lab.local", "localhost", "127.0.0.1"]
 
@@ -500,8 +500,8 @@ class McpToolRegistry:
                 "status": "STAGED",
                 "style": "blue",
             })
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("mcp_event_bus_staged_emit_failed", error=str(exc))
 
         simulation_result = {
             "status": "SIMULATION_SUCCESS",

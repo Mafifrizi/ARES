@@ -129,8 +129,8 @@ class AresMcpServer:
                         "status": status_label,
                         "style": status_style,
                     })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("mcp_event_bus_call_emit_failed", error=str(exc))
 
                 return JSONRPCResponse(id=req.id, result=res.model_dump()).model_dump(exclude_none=True)
 

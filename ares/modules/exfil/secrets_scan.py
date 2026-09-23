@@ -80,6 +80,42 @@ _PLACEHOLDER_WORDS = frozenset({
     "example", "sample", "replace_me", "none", "null",
 })
 
+_PLACEHOLDER_SUBSTRINGS = (
+    "placeholder", "dummy", "example", "sample", "replace_me", "changeme", "change_me", "your_"
+)
+
+
+def _is_placeholder_token(token: str, file_path: str = "") -> bool:
+    """Robust heuristic check whether an extracted token is a dummy, fixture, or placeholder."""
+    t = token.lower().strip()
+    f = file_path.lower()
+    if any(kw in f for kw in ("test", "fixture", "mock", "example", "sample", "spec")):
+        return True
+    if t in _PLACEHOLDER_WORDS:
+        return True
+    if any(sub in t for sub in _PLACEHOLDER_SUBSTRINGS):
+        return True
+    if len(t) >= 6 and len(set(t)) <= 3:
+        return True
+    return False
+
+
+def _compute_dynamic_confidence(base_conf: float, token: str, entropy: float, is_placeholder: bool) -> float:
+    """Compute statistically calibrated confidence score from pattern base and entropy characteristics."""
+    conf = base_conf
+    if is_placeholder:
+        conf -= 0.45
+    else:
+        if entropy >= 3.5:
+            conf += 0.05
+        elif entropy < 2.5:
+            conf -= 0.20
+
+    if len(token) < 6:
+        conf -= 0.15
+
+    return round(max(0.15, min(0.98, conf)), 2)
+
 
 def _classify(line: str) -> str:
     for name, pat in _SECRET_PATTERNS.items():
@@ -91,21 +127,22 @@ def _classify(line: str) -> str:
 def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]:
     """Parse line snippet, isolate secret value, compute entropy and dynamic confidence."""
     raw_snippet = snippet.strip()
-    file_lower = file_path.lower()
 
     # 1. AWS Access Key (AKIA... 20 chars)
     m_aws = re.search(r"\b(AKIA[0-9A-Z]{16})\b", raw_snippet)
     if m_aws:
         token = m_aws.group(1)
         entropy = calculate_shannon_entropy(token)
+        is_placeholder = _is_placeholder_token(token, file_path)
+        conf = _compute_dynamic_confidence(0.95, token, entropy, is_placeholder)
         return {
             "pattern": "aws_access_key",
             "snippet": raw_snippet[:150],
             "extracted_secret": token,
             "secret_value": token,
             "entropy": entropy,
-            "confidence": 0.96,
-            "is_placeholder": False,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
         }
 
     # 2. Private Key Header
@@ -113,14 +150,16 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
     if m_key:
         token = m_key.group(1)
         entropy = calculate_shannon_entropy(token)
+        is_placeholder = _is_placeholder_token(token, file_path)
+        conf = _compute_dynamic_confidence(0.98, token, entropy, is_placeholder)
         return {
             "pattern": "private_key_pem",
             "snippet": raw_snippet[:150],
             "extracted_secret": token,
             "secret_value": token,
             "entropy": entropy,
-            "confidence": 0.98,
-            "is_placeholder": False,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
         }
 
     # 3. JWT Token
@@ -128,14 +167,16 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
     if m_jwt:
         token = m_jwt.group(1)
         entropy = calculate_shannon_entropy(token)
+        is_placeholder = _is_placeholder_token(token, file_path)
+        conf = _compute_dynamic_confidence(0.94, token, entropy, is_placeholder)
         return {
             "pattern": "jwt_token",
             "snippet": raw_snippet[:150],
             "extracted_secret": token,
             "secret_value": token,
             "entropy": entropy,
-            "confidence": 0.94,
-            "is_placeholder": False,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
         }
 
     # 4. Connection String
@@ -144,9 +185,9 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
     if m_conn or ("server=" in raw_snippet.lower() and "password=" in raw_snippet.lower()):
         conn_str = m_conn.group(1) if m_conn else raw_snippet
         pwd_val = m_pwd_in_conn.group(1) if m_pwd_in_conn else ""
-        is_placeholder = bool(pwd_val and pwd_val.lower() in _PLACEHOLDER_WORDS)
-        conf = 0.45 if is_placeholder else 0.92
         entropy = calculate_shannon_entropy(pwd_val or conn_str)
+        is_placeholder = _is_placeholder_token(pwd_val or conn_str, file_path)
+        conf = _compute_dynamic_confidence(0.90, pwd_val or conn_str, entropy, is_placeholder)
         return {
             "pattern": "connection_string",
             "snippet": raw_snippet[:150],
@@ -162,8 +203,8 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
     if m_api:
         token = m_api.group(1)
         entropy = calculate_shannon_entropy(token)
-        is_placeholder = bool(token.lower() in _PLACEHOLDER_WORDS or entropy < 2.5)
-        conf = 0.40 if is_placeholder else (0.88 if entropy >= 3.2 else 0.70)
+        is_placeholder = _is_placeholder_token(token, file_path) or entropy < 2.5
+        conf = _compute_dynamic_confidence(0.85, token, entropy, is_placeholder)
         return {
             "pattern": "generic_api_key",
             "snippet": raw_snippet[:150],
@@ -179,16 +220,8 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
     if m_pass:
         token = m_pass.group(1)
         entropy = calculate_shannon_entropy(token)
-        is_placeholder = bool(token.lower() in _PLACEHOLDER_WORDS)
-        if is_placeholder:
-            conf = 0.35
-        elif len(token) >= 8 and entropy >= 3.0:
-            conf = 0.86
-        else:
-            conf = 0.68
-        if any(f in file_lower for f in ("test", "fixture", "mock", "example", "sample")):
-            conf = max(0.20, conf - 0.30)
-            is_placeholder = True
+        is_placeholder = _is_placeholder_token(token, file_path)
+        conf = _compute_dynamic_confidence(0.80, token, entropy, is_placeholder)
         return {
             "pattern": "password_field",
             "snippet": raw_snippet[:150],
@@ -201,14 +234,16 @@ def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]
 
     # Fallback
     entropy = calculate_shannon_entropy(raw_snippet)
+    is_placeholder = _is_placeholder_token(raw_snippet, file_path)
+    conf = _compute_dynamic_confidence(0.50, raw_snippet, entropy, is_placeholder)
     return {
         "pattern": _classify(raw_snippet),
         "snippet": raw_snippet[:150],
         "extracted_secret": raw_snippet,
         "secret_value": raw_snippet,
         "entropy": entropy,
-        "confidence": 0.50,
-        "is_placeholder": True,
+        "confidence": conf,
+        "is_placeholder": is_placeholder,
     }
 
 
@@ -407,6 +442,7 @@ class SecretsScan(BaseModule):
 
         if not kwargs.get("target") and getattr(ctx, "target", ""):
             kwargs["target"] = ctx.target
+        kwargs["dry_run"] = getattr(ctx, "dry_run", False)
 
         findings, raw = await self.run(**kwargs)
 
@@ -506,9 +542,10 @@ class SecretsScan(BaseModule):
 
     @trace_module("exfil.secrets_scan")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        self._findings = []
         ctx      = kwargs.get("ctx") or kwargs
         target   = ctx.get("target", "")
-        dry_run  = ctx.get("dry_run", True)
+        dry_run  = ctx.get("dry_run", False)
         username = ctx.get("username", "")
         password = ctx.get("password", "")
         domain   = ctx.get("domain", "")

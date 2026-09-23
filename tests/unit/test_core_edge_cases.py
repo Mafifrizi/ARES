@@ -439,26 +439,18 @@ class TestVaultEdgeCases:
 class TestSecurityEdgeCases:
 
     def test_sanitize_path_null_byte_injection(self):
-        """Null byte in path should be handled."""
+        """Null byte in path must be rejected with ValueError."""
         from ares.core.security import sanitize_path
-        # Null byte injection - common attack vector
-        try:
-            result = sanitize_path("/home/user/data\x00/etc/shadow")
-            # Should either strip null or raise
-            assert "\x00" not in result
-        except (ValueError, TypeError):
-            pass  # raising is also acceptable
+        with pytest.raises(ValueError, match="Path contains a null byte"):
+            sanitize_path("/home/user/data\x00/etc/shadow")
 
     def test_sanitize_path_double_encoding(self):
-        """Double-encoded traversal should be caught."""
+        """Double-encoded traversal must not escape allowed directory."""
         from ares.core.security import sanitize_path
-        # %2e%2e%2f = ../
-        try:
-            result = sanitize_path("/tmp/%2e%2e%2f%2e%2e%2fetc/passwd")
-            # The URL encoding won't be decoded by sanitize_path, so this should pass
-            # as long as the resolved path stays in allowed dirs
-        except ValueError:
-            pass  # blocking is fine too
+        result = sanitize_path("/tmp/%2e%2e%2f%2e%2e%2fetc/passwd")
+        assert result.startswith("/tmp/") or result.startswith("\\tmp\\")
+        assert "etc/passwd" in result
+
 
     def test_sanitize_path_tmp_allowed(self):
         """Paths under /tmp should be allowed."""

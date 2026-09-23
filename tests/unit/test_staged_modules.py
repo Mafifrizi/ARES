@@ -40,6 +40,18 @@ class TestPhantomTokenModule:
         assert res.findings[0].mitre_technique == "T1528"
         assert res.raw.get("prt_valid") is True
 
+    def test_direct_run_method(self):
+        mod, _ = _make_module(PhantomTokenModule)
+        findings, raw = _run(mod.run(
+            tenant_id="corp.onmicrosoft.com",
+            evaluate_cap_bypass=True,
+            dry_run=False,
+        ))
+        assert len(findings) == 1
+        assert findings[0].mitre_technique == "T1528"
+        assert raw.get("prt_valid") is True
+        assert raw.get("tenant_id") == "corp.onmicrosoft.com"
+
 
 class TestGhostForgeModule:
     def test_module_attributes(self):
@@ -81,6 +93,25 @@ class TestGhostForgeModule:
         assert len(res.findings) >= 1
         assert res.findings[0].mitre_technique == "T1649"
         assert res.raw.get("pkinit_success") is True
+
+    def test_direct_run_method(self):
+        mod, _ = _make_module(GhostForgeModule)
+        findings, raw = _run(mod.run(
+            dc="10.10.10.1",
+            domain="CORP.LOCAL",
+            ca_server="ca.corp.local",
+            ca_name="CORP-CA",
+            impersonate_user="Administrator",
+            username="audit_operator",
+            password="SecretPassword123!",
+            perform_pkinit=True,
+            dry_run=False,
+        ))
+        assert len(findings) == 1
+        assert findings[0].mitre_technique == "T1649"
+        assert raw.get("pkinit_success") is True
+        assert raw.get("dc") == "10.10.10.1"
+
 
     @pytest.mark.asyncio
     async def test_engine_persists_loot_from_module_output(self, tmp_path):

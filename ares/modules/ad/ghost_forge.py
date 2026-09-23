@@ -22,6 +22,7 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.modules.params import ModuleParams, param, SecretParam, GhostForgeParams
 from ares.sdk import (
@@ -126,45 +127,116 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
             p = GhostForgeParams.model_validate(ctx.params)
         else:
             p = GhostForgeParams()
-        dc_host = sanitize_hostname(p.dc)
-        ca_host = sanitize_hostname(p.ca_server)
-        target_account = sanitize_ldap(p.impersonate_user)
 
-        # Resolve vector technique
-        technique = getattr(p, "target_technique", "auto") or "auto"
-        if technique == "auto":
-            technique = "esc13" if getattr(p, "policy_oid", None) else "esc1_strong_map"
+        kwargs = p.model_dump()
+        kwargs["dry_run"] = getattr(ctx, "dry_run", False)
+        if getattr(ctx, "target", None) and not kwargs.get("dc"):
+            kwargs["dc"] = ctx.target
 
-        if ctx.dry_run:
-            ctx.emit_finding(
-                title=f"[DRY-RUN] ADCS PKINIT Chain Simulation: {target_account}@{p.domain}",
-                severity=Severity.INFO,
-                description=(
-                    f"Dry run simulation targeting CA {p.ca_name} ({ca_host}) and template '{p.template}'. "
-                    f"Planned impersonation of '{target_account}' via Kerberos PKINIT against DC {dc_host} "
-                    f"[Technique: {technique}, StrongMappingCheck: {getattr(p, 'enforcement_mode_check', True)}]."
-                ),
-                mitre_technique="T1649",
-            )
+        findings, raw = await self.run(**kwargs)
+
+        if getattr(ctx, "dry_run", False):
+            if findings and hasattr(ctx, "emit_finding"):
+                f = findings[0]
+                ctx.emit_finding(
+                    title=f.title,
+                    severity=f.severity,
+                    description=f.description,
+                    mitre_technique=f.mitre_technique,
+                )
             return ModuleResult(
                 status="dry_run",
                 module_id=self.MODULE_ID,
-                raw={
-                    "dc": dc_host,
-                    "ca": ca_host,
-                    "template": p.template,
-                    "target_user": target_account,
-                    "target_technique": technique,
-                    "dry_run": True,
-                },
+                raw=raw,
             )
 
+        if findings and hasattr(ctx, "emit_finding"):
+            f = findings[0]
+            ctx.emit_finding(
+                title=f.title,
+                severity=f.severity,
+                description=f.description,
+                mitre_technique=f.mitre_technique,
+                mitre_tactic=f.mitre_tactic,
+                evidence=f.evidence,
+                remediation=f.remediation,
+            )
+
+        target_account = raw.get("impersonated_user", "Administrator")
+        cert_thumbprint = raw.get("certificate_thumbprint", "")
+        if hasattr(ctx, "record_credential"):
+            ctx.record_credential(
+                username=target_account,
+                secret=f"TGT_PKINIT_{cert_thumbprint[:16]}",
+                domain=p.domain,
+                cred_type="ticket",
+            )
+
+        return ModuleResult(
+            status="success",
+            findings=findings,
+            raw=raw,
+            module_id=self.MODULE_ID,
+            execution_id=getattr(ctx, "execution_id", ""),
+        )
+
+    @trace_module("ad.ghost_forge")
+    async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        self._findings = []
+        ctx = kwargs.get("ctx") or kwargs
+        dc = str(ctx.get("dc") or ctx.get("target") or "")
+        ca_server = str(ctx.get("ca_server") or "")
+        ca_name = str(ctx.get("ca_name") or "CORP-CA")
+        template = str(ctx.get("template") or "User")
+        username = str(ctx.get("username") or "")
+        domain = str(ctx.get("domain") or "CORP.LOCAL")
+        impersonate_user = str(ctx.get("impersonate_user") or "Administrator")
+        perform_pkinit = bool(ctx.get("perform_pkinit", True))
+        policy_oid = ctx.get("policy_oid")
+        enforcement_mode_check = bool(ctx.get("enforcement_mode_check", True))
+        generate_detection_rules = bool(ctx.get("generate_detection_rules", True))
+        target_technique = ctx.get("target_technique") or "auto"
+        dry_run = bool(ctx.get("dry_run", False))
+
+        dc_host = sanitize_hostname(dc)
+        ca_host = sanitize_hostname(ca_server)
+        target_account = sanitize_ldap(impersonate_user)
+
+        # Resolve vector technique
+        technique = target_technique
+        if technique == "auto":
+            technique = "esc13" if policy_oid else "esc1_strong_map"
+
+        if dry_run:
+            f = Finding(
+                title=f"[DRY-RUN] ADCS PKINIT Chain Simulation: {target_account}@{domain}",
+                severity=Severity.INFO,
+                description=(
+                    f"Dry run simulation targeting CA {ca_name} ({ca_host}) and template '{template}'. "
+                    f"Planned impersonation of '{target_account}' via Kerberos PKINIT against DC {dc_host} "
+                    f"[Technique: {technique}, StrongMappingCheck: {enforcement_mode_check}]."
+                ),
+                mitre_technique="T1649",
+                module_id=self.MODULE_ID,
+                host=dc_host,
+            )
+            return [f], {
+                "dc": dc_host,
+                "ca": ca_host,
+                "ca_server": ca_host,
+                "ca_name": ca_name,
+                "template": template,
+                "target_user": target_account,
+                "target_technique": technique,
+                "dry_run": True,
+            }
+
         logger.info("ghost_forge_execution_start", dc=dc_host, ca=ca_host, impersonate=target_account, technique=technique)
-        audit("adcs_ghost_forge", actor=p.username, technique="T1649", source="ares", target=dc_host)
+        audit("adcs_ghost_forge", actor=username or "operator", technique="T1649", source="ares", target=dc_host)
 
         # 1. Cryptographic Evidence Record & Strong Certificate Mapping Check
-        cert_thumbprint = hashlib.sha256(f"{target_account}-{p.template}-{p.domain}".encode()).hexdigest().upper()
-        strong_map_status = "FullEnforcement_Compliant" if getattr(p, "enforcement_mode_check", True) else "CompatibilityMode"
+        cert_thumbprint = hashlib.sha256(f"{target_account}-{template}-{domain}".encode()).hexdigest().upper()
+        strong_map_status = "FullEnforcement_Compliant" if enforcement_mode_check else "CompatibilityMode"
         security_ext_oid = "1.3.6.1.4.1.311.25.2"  # szOID_NTDS_CA_SECURITY_EXT (ObjectSID)
 
         evidence = EvidenceRecord(
@@ -174,30 +246,30 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
             data={
                 "dc": dc_host,
                 "ca_server": ca_host,
-                "ca_name": p.ca_name,
-                "template": p.template,
+                "ca_name": ca_name,
+                "template": template,
                 "impersonated_user": target_account,
                 "cert_thumbprint": cert_thumbprint,
-                "pkinit_executed": p.perform_pkinit,
+                "pkinit_executed": perform_pkinit,
                 "ticket_encryption": "AES256-CTS-HMAC-SHA1-96",
                 "technique": technique,
                 "strong_mapping_status": strong_map_status,
                 "security_extension_oid": security_ext_oid,
-                "kb5014754_enforced": getattr(p, "enforcement_mode_check", True),
+                "kb5014754_enforced": enforcement_mode_check,
             },
             tags=["ad", "adcs", "pkinit", "unpac_the_hash", "privesc", technique],
         )
 
         # 2. Technique-Specific Finding Synthesis
         if technique == "esc13":
-            policy_oid_val = getattr(p, "policy_oid", None) or "1.3.6.1.4.1.311.99.1.13"
-            finding = ctx.emit_finding(
-                title=f"ADCS ESC13 Policy OID Abuse - PAC Group Elevation via Template Policy: {p.template}",
+            policy_oid_val = policy_oid or "1.3.6.1.4.1.311.99.1.13"
+            finding = Finding(
+                title=f"ADCS ESC13 Policy OID Abuse - PAC Group Elevation via Template Policy: {template}",
                 severity=Severity.CRITICAL,
                 description=(
-                    f"Demonstrated architectural elevation via ESC13: Certificate template '{p.template}' enforces "
+                    f"Demonstrated architectural elevation via ESC13: Certificate template '{template}' enforces "
                     f"issuance policy OID '{policy_oid_val}' mapped to a privileged Active Directory group. "
-                    f"Enrolling standard user '{p.username}' automatically injects privileged group membership into "
+                    f"Enrolling standard user '{username}' automatically injects privileged group membership into "
                     f"the Kerberos PAC during PKINIT authentication without requiring SAN spoofing."
                 ),
                 mitre_technique="T1649",
@@ -205,11 +277,11 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
                 evidence={
                     "dc": dc_host,
                     "ca": ca_host,
-                    "template": p.template,
+                    "template": template,
                     "policy_oid": policy_oid_val,
                     "thumbprint": cert_thumbprint,
                     "evidence_hash": evidence.record_hash,
-                    "pkinit_unpac": p.perform_pkinit,
+                    "pkinit_unpac": perform_pkinit,
                     "kb5014754_bypass_vector": "PAC_Extension_Elevation",
                 },
                 remediation=(
@@ -217,14 +289,16 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
                     "2. Remove high-privilege group mappings (e.g. Enterprise Admins / Domain Admins) from non-restricted enrollment policies. "
                     "3. Audit CA Event ID 4886 for enrollment requests referencing policy OIDs."
                 ),
+                host=dc_host,
+                module_id=self.MODULE_ID,
             )
         else:
-            finding = ctx.emit_finding(
+            finding = Finding(
                 title=f"ADCS Full-Chain Compromise - Persistent Domain Escalation as {target_account}",
                 severity=Severity.CRITICAL,
                 description=(
                     f"Successfully demonstrated end-to-end cryptographic identity takeover: "
-                    f"enrolled an authentication certificate via vulnerable template '{p.template}' "
+                    f"enrolled an authentication certificate via vulnerable template '{template}' "
                     f"impersonating '{target_account}', and negotiated Kerberos PKINIT AS-REQ ticket granting "
                     f"ticket (TGT). Verified compatibility with KB5014754 Strong Certificate Mapping ({strong_map_status})."
                 ),
@@ -233,10 +307,10 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
                 evidence={
                     "dc": dc_host,
                     "ca": ca_host,
-                    "template": p.template,
+                    "template": template,
                     "thumbprint": cert_thumbprint,
                     "evidence_hash": evidence.record_hash,
-                    "pkinit_unpac": p.perform_pkinit,
+                    "pkinit_unpac": perform_pkinit,
                     "strong_mapping_enforcement": strong_map_status,
                     "security_extension_oid": security_ext_oid,
                 },
@@ -247,34 +321,29 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
                     "4. Monitor Windows Event ID 4886 (Certificate Request) and Event ID 4887 (Certificate Issued) for anomalous SAN values. "
                     "5. Restrict PKINIT pre-authentication mapping to hardened smart card templates only."
                 ),
+                host=dc_host,
+                module_id=self.MODULE_ID,
             )
-
-        ctx.record_credential(
-            username=target_account,
-            secret=f"TGT_PKINIT_{cert_thumbprint[:16]}",
-            domain=p.domain,
-            cred_type="ticket",
-        )
 
         # 3. Closed-Loop Purple Telemetry & Loot Construction
         loot_items: list[dict[str, Any]] = [
             {
-                "name": f"ADCS Forged TGT: {target_account}@{p.domain}",
+                "name": f"ADCS Forged TGT: {target_account}@{domain}",
                 "loot_type": "kerberos_ticket",
-                "description": f"Forged Kerberos TGT certificate via PKINIT template {p.template} for {target_account}",
+                "description": f"Forged Kerberos TGT certificate via PKINIT template {template} for {target_account}",
                 "content": {
                     "user": target_account,
-                    "domain": p.domain,
+                    "domain": domain,
                     "thumbprint": cert_thumbprint,
                     "etype": "AES256",
-                    "ca_name": p.ca_name,
+                    "ca_name": ca_name,
                     "technique": technique,
                 },
                 "tags": ["ad", "adcs", "pkinit", "tgt", "ticket", technique],
             }
         ]
 
-        if getattr(p, "generate_detection_rules", True):
+        if generate_detection_rules:
             kql_query = (
                 f"// ARES Closed-Loop Telemetry: Detect ADCS PKINIT & KB5014754 Anomalies\n"
                 f"SecurityEvent\n"
@@ -323,11 +392,11 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
         raw_result = {
             "dc": dc_host,
             "ca_server": ca_host,
-            "template": p.template,
+            "template": template,
             "impersonated_user": target_account,
             "certificate_thumbprint": cert_thumbprint,
-            "pkinit_success": p.perform_pkinit,
-            "unpac_hash_extracted": p.perform_pkinit,
+            "pkinit_success": perform_pkinit,
+            "unpac_hash_extracted": perform_pkinit,
             "evidence_integrity": evidence.record_hash,
             "technique_applied": technique,
             "strong_mapping_status": strong_map_status,
@@ -335,8 +404,8 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
             "event_ids_audited": [4886, 4887, 4768, 4769, 39, 40, 41],
             "tickets": [
                 {
-                    "client": f"{target_account}@{p.domain}",
-                    "service": f"krbtgt/{p.domain}",
+                    "client": f"{target_account}@{domain}",
+                    "service": f"krbtgt/{domain}",
                     "etype": "AES256",
                     "status": "valid",
                 }
@@ -347,10 +416,5 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
         if hasattr(self, "noise") and getattr(self.noise, "jitter", None):
             await self.noise.jitter.sleep()
 
-        return ModuleResult(
-            status="success",
-            findings=[finding],
-            raw=raw_result,
-            module_id=self.MODULE_ID,
-            execution_id=getattr(ctx, "execution_id", ""),
-        )
+        return [finding], raw_result
+
