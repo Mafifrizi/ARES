@@ -200,9 +200,9 @@ class TestSecretsScanModuleExecution:
                 "file": "/etc/vault/config.hcl",
                 "line": 14,
                 "pattern": "generic_api_key",
-                "snippet": "token = 's.94aZbXq39L1849v9NmqP1928'",
-                "extracted_secret": "s.94aZbXq39L1849v9NmqP1928",
-                "secret_value": "s.94aZbXq39L1849v9NmqP1928",
+                "snippet": "token = 'ares_mock_token_94aZbXq39L1849v9NmqP1928'",
+                "extracted_secret": "ares_mock_token_94aZbXq39L1849v9NmqP1928",
+                "secret_value": "ares_mock_token_94aZbXq39L1849v9NmqP1928",
                 "entropy": 4.12,
                 "confidence": 0.95,
                 "is_placeholder": False,
@@ -217,7 +217,7 @@ class TestSecretsScanModuleExecution:
         assert len(res.findings) == 1
         finding = res.findings[0]
         assert finding.confidence == 0.95
-        assert finding.evidence["hits"][0]["secret_value"] == "s.94aZbXq39L1849v9NmqP1928"
+        assert finding.evidence["hits"][0]["secret_value"] == "ares_mock_token_94aZbXq39L1849v9NmqP1928"
 
         # Verify cryptographic evidence records generated
         assert "evidence_chain" in res.raw
