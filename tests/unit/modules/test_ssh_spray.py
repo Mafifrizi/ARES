@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
@@ -87,17 +87,22 @@ class TestSSHSprayModule:
     async def test_spray_finds_valid_credential_via_mock(self):
         mod, _ = _make_module()
 
-        # Mock asyncssh.connect to succeed on 'kali'/'kali' and fail on others
         mock_conn = AsyncMock()
         mock_conn.close = AsyncMock()
+
+        fake_asyncssh = MagicMock()
+        fake_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+        fake_asyncssh.KeyExchangeFailed = type("KeyExchangeFailed", (Exception,), {})
+        fake_asyncssh.Error = type("Error", (Exception,), {})
 
         async def mock_connect(host, port, username, password, **kwargs):
             if username == "kali" and password == "kali":
                 return mock_conn
-            import asyncssh
-            raise asyncssh.PermissionDenied("Auth failed")
+            raise fake_asyncssh.PermissionDenied("Auth failed")
 
-        with patch("asyncssh.connect", side_effect=mock_connect):
+        fake_asyncssh.connect = AsyncMock(side_effect=mock_connect)
+
+        with patch.dict("sys.modules", {"asyncssh": fake_asyncssh}):
             findings, raw = await mod.run(
                 target="192.168.56.105",
                 port=22,
@@ -121,11 +126,17 @@ class TestSSHSprayModule:
     async def test_spray_exhausts_without_match(self):
         mod, _ = _make_module()
 
-        async def mock_connect_fail(host, port, username, password, **kwargs):
-            import asyncssh
-            raise asyncssh.PermissionDenied("Auth failed")
+        fake_asyncssh = MagicMock()
+        fake_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+        fake_asyncssh.KeyExchangeFailed = type("KeyExchangeFailed", (Exception,), {})
+        fake_asyncssh.Error = type("Error", (Exception,), {})
 
-        with patch("asyncssh.connect", side_effect=mock_connect_fail):
+        async def mock_connect_fail(host, port, username, password, **kwargs):
+            raise fake_asyncssh.PermissionDenied("Auth failed")
+
+        fake_asyncssh.connect = AsyncMock(side_effect=mock_connect_fail)
+
+        with patch.dict("sys.modules", {"asyncssh": fake_asyncssh}):
             findings, raw = await mod.run(
                 target="192.168.56.105",
                 port=22,
@@ -139,3 +150,32 @@ class TestSSHSprayModule:
             assert len(raw["valid_credentials"]) == 0
             assert len(findings) == 0
             assert raw["attempts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_spray_falls_back_to_paramiko(self):
+        mod, _ = _make_module()
+
+        fake_paramiko = MagicMock()
+        fake_client = MagicMock()
+        fake_client.connect.return_value = None
+        fake_client.close.return_value = None
+        fake_paramiko.SSHClient.return_value = fake_client
+        fake_paramiko.AutoAddPolicy = MagicMock()
+        fake_paramiko.AuthenticationException = type("AuthenticationException", (Exception,), {})
+
+        with patch.dict("sys.modules", {"asyncssh": None, "paramiko": fake_paramiko}):
+            findings, raw = await mod.run(
+                target="192.168.56.105",
+                port=22,
+                users=["admin"],
+                passwords=["admin123"],
+                delay_s=0.0,
+                timeout_s=1.0,
+                max_attempts=1,
+            )
+
+            assert len(raw["valid_credentials"]) == 1
+            assert raw["valid_credentials"][0]["username"] == "admin"
+            assert raw["valid_credentials"][0]["password"] == "admin123"
+            assert len(findings) == 1
+            assert findings[0].host == "192.168.56.105"
