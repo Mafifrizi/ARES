@@ -13509,6 +13509,7 @@ def test_independent_ast_census_matches_locked_inventory() -> None:
             "keytab_abuse",
             "samba_secrets",
             "ticket_converter",
+            "ssh_spray",
         }
     ]
     assignments = [a for a in _literal_module_assignments() if a[0] in EXPECTED_RECORDS]
