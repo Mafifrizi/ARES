@@ -3,14 +3,20 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  Check,
   CheckCircle2,
   ChevronDown,
   Copy,
   Cpu,
   Crosshair,
+  Eye,
+  EyeOff,
+  FileText,
   Info,
+  Key,
   Layers,
   Loader2,
+  Lock,
   Menu,
   Plus,
   Radio,
@@ -34,7 +40,7 @@ import {
   useRef,
   useState
 } from "react";
-import { NavLink, Navigate, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ApiError,
@@ -53,6 +59,7 @@ import {
   useDashboardUi,
   useSessionState
 } from "./dashboardUiState";
+import { StructuredJsonViewer } from "../../components/common/StructuredJsonViewer";
 
 interface ModuleRunRecord {
   campaignId: string;
@@ -1802,6 +1809,8 @@ function ExecutionChainsPanel({
 
 export function ModulesPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const modules = useQuery({ queryKey: ["modules"], queryFn: api.modules });
   const executionChains = useQuery({ queryKey: ["executionChains"], queryFn: api.executionChains });
@@ -1815,6 +1824,20 @@ export function ModulesPage() {
   const [lastRunRecord, setLastRunRecord] = useSessionState<ModuleRunRecord | null>("ares.dashboard.modules.lastRun", null);
   const [activeTab, setActiveTab] = useSessionState("ares.dashboard.modules.tab", "Catalog");
   const previousSelectedId = useRef(selectedId);
+
+  useEffect(() => {
+    const queryModule = searchParams.get("module") || (location.state as { moduleId?: string } | null)?.moduleId;
+    const queryTab = searchParams.get("tab") || (location.state as { tab?: string } | null)?.tab;
+
+    if (queryModule) {
+      setSelectedId(queryModule);
+      if (queryTab) {
+        setActiveTab(queryTab);
+      } else {
+        setActiveTab("Run Panel");
+      }
+    }
+  }, [searchParams, location.state, setSelectedId, setActiveTab]);
   const campaignDetail = useQuery({
     queryKey: ["campaign", campaignId],
     queryFn: () => api.campaign(campaignId),
@@ -1826,6 +1849,11 @@ export function ModulesPage() {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload });
       setActiveTab("Results");
       if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["graph"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
+        void queryClient.invalidateQueries({ queryKey: ["attack-paths"] });
+        void queryClient.invalidateQueries({ queryKey: ["findings"] });
         void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
         void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
       }
@@ -1834,6 +1862,11 @@ export function ModulesPage() {
       setLastRunRecord({ campaignId, moduleId: selectedId, payload: serializeError(error), isError: true });
       setActiveTab("Results");
       if (!dryRun) {
+        void queryClient.invalidateQueries({ queryKey: ["graph"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+        void queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
+        void queryClient.invalidateQueries({ queryKey: ["attack-paths"] });
+        void queryClient.invalidateQueries({ queryKey: ["findings"] });
         void queryClient.invalidateQueries({ queryKey: ["telemetry"] });
         void queryClient.invalidateQueries({ queryKey: ["monthlyStats"] });
       }
@@ -1877,19 +1910,102 @@ export function ModulesPage() {
   const canRun = Boolean(campaignId && selectedId) && executionConditionBlocked;
   const runBlocked = !canRun;
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
-  const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
-  const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
-  const runError = run.error ?? (persistedRun?.isError ? persistedRun.payload : undefined);
+  const activeRun = (run.data ? { campaignId, moduleId: selectedId, payload: run.data, isError: false } : null) ??
+    (lastRunRecord?.campaignId === campaignId ? lastRunRecord : null);
+  const runResult = (!activeRun?.isError ? activeRun?.payload : undefined) as Record<string, unknown> | undefined;
+  const runError = run.error ?? (activeRun?.isError ? activeRun.payload : undefined);
 
   useEffect(() => {
-    if (previousSelectedId.current === selectedId) {
+    let incomingParams: Record<string, unknown> | null = null;
+    try {
+      const stored = sessionStorage.getItem("ares.dashboard.modules.params");
+      if (stored) {
+        incomingParams = JSON.parse(stored);
+        sessionStorage.removeItem("ares.dashboard.modules.params");
+      }
+    } catch {
+      incomingParams = null;
+    }
+
+    const queryTarget = searchParams.get("target") || (location.state as { target?: string } | null)?.target;
+    const stateParams = (location.state as { params?: Record<string, unknown> } | null)?.params;
+    if (queryTarget || stateParams) {
+      incomingParams = {
+        ...(incomingParams ?? {}),
+        ...(queryTarget ? { target: queryTarget, host: queryTarget, dc: queryTarget, targets: [queryTarget] } : {}),
+        ...(stateParams ?? {})
+      };
+    }
+
+    if (previousSelectedId.current === selectedId && !incomingParams) {
       return;
     }
     previousSelectedId.current = selectedId;
-    setParams({});
+
+    const currentTarget = String(
+      incomingParams?.target ||
+      incomingParams?.host ||
+      incomingParams?.dc ||
+      params.target ||
+      params.host ||
+      params.dc ||
+      params.target_host ||
+      params.rhost ||
+      selectedCampaign?.targets?.[0] ||
+      ""
+    ).trim();
+
+    const targetModule = list.find((item) => item.id === selectedId);
+    const schema = targetModule?.param_schema ?? {};
+    const schemaKeys = Object.keys(schema);
+
+    const nextParams: Record<string, unknown> = {};
+
+    // 1. Populate primary target/host/dc fields if supported by module schema
+    if (schemaKeys.includes("target") && currentTarget) {
+      nextParams.target = currentTarget;
+    }
+    if (schemaKeys.includes("host") && currentTarget) {
+      nextParams.host = currentTarget;
+    }
+    if (schemaKeys.includes("dc") && currentTarget) {
+      nextParams.dc = currentTarget;
+    }
+    if (schemaKeys.includes("targets") && currentTarget) {
+      nextParams.targets = [currentTarget];
+    }
+    if (schemaKeys.includes("target_host") && currentTarget) {
+      nextParams.target_host = currentTarget;
+    }
+    if (schemaKeys.includes("rhost") && currentTarget) {
+      nextParams.rhost = currentTarget;
+    }
+
+    // 2. Transfer standard parameters across chains and pivots if valid in schema
+    const contextualKeys = ["port", "ports", "service", "domain", "username", "target_user", "use_ldaps"];
+    for (const key of contextualKeys) {
+      if (schemaKeys.includes(key)) {
+        if (incomingParams && incomingParams[key] !== undefined) {
+          nextParams[key] = incomingParams[key];
+        } else if (params[key] !== undefined) {
+          nextParams[key] = params[key];
+        }
+      }
+    }
+
+    // 3. Merge any specific incoming params passed explicitly
+    if (incomingParams) {
+      for (const [k, v] of Object.entries(incomingParams)) {
+        if (v !== undefined) {
+          nextParams[k] = v;
+        }
+      }
+    }
+
+    setParams(nextParams);
     setConfirmed(false);
     setDryRun(true);
-  }, [selectedId, setConfirmed, setDryRun, setParams]);
+  }, [selectedId, list, selectedCampaign, setConfirmed, setDryRun, setParams, searchParams, location.state]);
 
   return (
     <Page
@@ -2044,6 +2160,48 @@ export function ModulesPage() {
                 <span>Module Parameters</span>
                 <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
               </div>
+
+              {/* Quick Target Selector for In-Scope Campaign Hosts */}
+              {((selectedCampaign?.targets && selectedCampaign.targets.length > 0) || (selectedCampaign?.scope_cidrs && selectedCampaign.scope_cidrs.length > 0)) && (
+                <div className="p-2.5 rounded-sm bg-zinc-900/60 border border-zinc-800 space-y-1.5 text-xs font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5 font-semibold">
+                      <Target size={12} className="text-cyan-400 shrink-0" />
+                      QUICK ENGAGEMENT TARGETS:
+                    </span>
+                    <span className="text-[10px] text-zinc-500 font-sans">1-click populate</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {selectedCampaign?.targets?.map((tgt) => (
+                      <button
+                        key={tgt}
+                        type="button"
+                        onClick={() => setParams((prev) => ({ ...prev, target: tgt, host: tgt, dc: tgt, targets: [tgt] }))}
+                        className={`px-2 py-0.5 rounded-sm border text-[11px] transition-colors ${
+                          params.target === tgt || params.host === tgt || params.dc === tgt
+                            ? "bg-cyan-950 border-cyan-700 text-cyan-200 font-bold"
+                            : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
+                        }`}
+                        title={`Set target to ${tgt}`}
+                      >
+                        {tgt}
+                      </button>
+                    ))}
+                    {selectedCampaign?.scope_cidrs?.map((cidr) => (
+                      <button
+                        key={cidr}
+                        type="button"
+                        onClick={() => setParams((prev) => ({ ...prev, target: cidr, cidr }))}
+                        className="px-2 py-0.5 rounded-sm border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-[10px] transition-colors"
+                        title={`Set scope to ${cidr}`}
+                      >
+                        {cidr}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <ParamForm
                 schema={selected.param_schema}
                 values={params}
@@ -2111,11 +2269,36 @@ export function ModulesPage() {
       )}
       {activeTab === "Results" && (
         <section className="panel p-4">
-          <SectionHeader
-            title="Run Results"
-            eyebrow={selected ? selected.id : undefined}
-            action={persistedRun ? <span className={persistedRun.isError ? "badge badge-high" : "badge badge-low"}>{persistedRun.isError ? "error" : "latest"}</span> : null}
-          />
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/80">
+            <div>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider block">
+                {activeRun?.moduleId ? `Module: ${activeRun.moduleId}` : (selected ? selected.id : "Execution")}
+              </span>
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <span>Run Results</span>
+                {activeRun && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    <Lock size={10} className="text-amber-400" />
+                    <span>Locked View</span>
+                  </span>
+                )}
+              </h2>
+            </div>
+            {activeRun && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLastRunRecord(null);
+                  run.reset();
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-mono transition-colors"
+                title="Dismiss and close this run result"
+              >
+                <X size={12} />
+                <span>Close Result</span>
+              </button>
+            )}
+          </div>
           {runResult || runError ? (
             <>
               <ModuleRunSummary
@@ -3603,8 +3786,8 @@ function TelemetryPanel({ snapshot, loading, confirmedFindings }: { snapshot?: T
       </div>
 
       <details className="advanced-details">
-        <summary>Details</summary>
-        <pre className="json-box">{JSON.stringify(snapshot ?? {}, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Telemetry Engine Payload</summary>
+        <StructuredJsonViewer data={snapshot ?? {}} title="Telemetry Engine Snapshot" maxHeightClass="max-h-64" />
       </details>
     </section>
   );
@@ -3656,8 +3839,8 @@ function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
         </div>
       </div>
       <details className="advanced-details">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw CVSS Payload</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Inspect Raw CVSS Payload</summary>
+        <StructuredJsonViewer data={data} title="CVSS Risk Metrics" maxHeightClass="max-h-64" />
       </details>
     </section>
   );
@@ -3676,7 +3859,7 @@ function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
       </div>
       <details className="advanced-details" open>
         <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Detailed Delta Metrics</summary>
-        <pre className="json-box text-xs font-mono">{JSON.stringify(data, null, 2)}</pre>
+        <StructuredJsonViewer data={data} title="Campaign Delta Metrics" maxHeightClass="max-h-72" />
       </details>
     </section>
   );
@@ -3736,34 +3919,19 @@ function DataPanel({
     <section className="panel detail-panel mb-3">
       <div className="flex items-center justify-between mb-2">
         <strong className="text-xs font-semibold text-zinc-200">{title}</strong>
-        <div className="flex items-center gap-2">
-          {onClear && (
-            <button
-              className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50"
-              onClick={onClear}
-              type="button"
-              title="Clear payload preview"
-            >
-              <X size={12} />
-              <span>Clear</span>
-            </button>
-          )}
+        {onClear && (
           <button
-            className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1.5"
-            onClick={handleCopy}
+            className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 text-zinc-400 hover:text-rose-400 hover:border-rose-900/50"
+            onClick={onClear}
             type="button"
-            title="Copy payload to clipboard"
+            title="Clear payload preview"
           >
-            {copied ? <CheckCircle2 size={12} className="text-emerald-400" /> : <Copy size={12} />}
-            <span>{copied ? "Copied" : "Copy Payload"}</span>
+            <X size={12} />
+            <span>Clear</span>
           </button>
-          <span className="badge text-[10px] uppercase font-mono">Payload</span>
-        </div>
+        )}
       </div>
-      <details className="advanced-details">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Payload Details</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{jsonText}</pre>
-      </details>
+      <StructuredJsonViewer data={data} title={`${title} Telemetry`} maxHeightClass="max-h-96" defaultExpandedDepth={1} />
     </section>
   );
 }
@@ -3872,6 +4040,696 @@ function getTailoredFindingDetails(finding: Finding) {
   };
 }
 
+function DiscoveredPerimeterCard({
+  rawOutput,
+  onSelectModule,
+  findingsCount = 0
+}: {
+  rawOutput?: Record<string, unknown>;
+  onSelectModule?: (moduleId: string, params?: Record<string, unknown>) => void;
+  findingsCount?: number;
+}) {
+  const [copiedLootIdx, setCopiedLootIdx] = useState<number | null>(null);
+  const [showLoot, setShowLoot] = useState(false);
+  if (!rawOutput) return null;
+
+  const target = String(rawOutput.target ?? rawOutput.host ?? "");
+  const openPorts = Array.isArray(rawOutput.open_ports) ? (rawOutput.open_ports as (number | string)[]) : [];
+  const serviceMap = (rawOutput.service_map ?? {}) as Record<string, string>;
+  const serviceVersions = (rawOutput.service_versions ?? {}) as Record<string, Record<string, unknown> | string>;
+  const loot = Array.isArray(rawOutput.loot) ? (rawOutput.loot as Record<string, unknown>[]) : [];
+  const scanMs = typeof rawOutput.scan_ms === "number" ? rawOutput.scan_ms : null;
+  const totalScanned = typeof rawOutput.total_scanned === "number" ? rawOutput.total_scanned : null;
+
+  const hasPerimeter = openPorts.length > 0 || Object.keys(serviceVersions).length > 0;
+  if (!hasPerimeter && loot.length === 0) return null;
+
+  return (
+    <div className="space-y-2 mt-3">
+      {/* 1. Defensive Telemetry & Purple Loot (Collapsible Progressive Disclosure) */}
+      {loot.length > 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm overflow-hidden text-xs">
+          <button
+            type="button"
+            onClick={() => setShowLoot((prev) => !prev)}
+            className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left font-sans"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+              <span className="font-semibold text-zinc-200 text-xs">
+                Synthesized Detection Rules ({loot.length})
+              </span>
+              <span className="text-[10px] px-1.5 py-0.2 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded font-mono">
+                KQL & Sigma
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <span className="text-[11px]">{showLoot ? "Hide Rules" : "Show Rules"}</span>
+              <ChevronDown size={14} className={`transform transition-transform duration-200 ${showLoot ? "rotate-180" : ""}`} />
+            </div>
+          </button>
+
+          {showLoot && (
+            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50 font-mono">
+              {loot.map((item, idx) => {
+                const name = String(item.name ?? `Artifact #${idx + 1}`);
+                const lootType = String(item.loot_type ?? "rule");
+                const content = item.content as Record<string, unknown> | undefined;
+                const ruleText = typeof content?.kql === "string"
+                  ? content.kql
+                  : typeof content?.sigma === "string"
+                  ? content.sigma
+                  : typeof item.content === "string"
+                  ? item.content
+                  : JSON.stringify(item.content ?? item, null, 2);
+
+                const handleCopyRule = () => {
+                  void navigator.clipboard.writeText(ruleText);
+                  setCopiedLootIdx(idx);
+                  setTimeout(() => setCopiedLootIdx(null), 1500);
+                };
+
+                return (
+                  <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 truncate">
+                        <Terminal size={12} className="text-zinc-400 shrink-0" />
+                        <strong className="text-zinc-200 text-xs truncate">{name}</strong>
+                        <span className="badge text-[10px] py-0 px-1.5 uppercase">{lootType}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyRule}
+                        className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
+                        title="Copy detection rule query"
+                      >
+                        {copiedLootIdx === idx ? (
+                          <>
+                            <CheckCircle2 size={11} className="text-emerald-400" />
+                            <span className="text-emerald-400">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={11} />
+                            <span>Copy Rule</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
+                      {ruleText}
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. Perimeter Inventory Bar (Clean, non-redundant when findings are present) */}
+      {hasPerimeter && findingsCount > 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <Radio size={13} className="text-emerald-400 shrink-0" />
+            <span className="font-semibold text-zinc-300 text-[11px]">
+              Surface Inventory:
+            </span>
+            {target && (
+              <span className="text-zinc-400">
+                Host <strong className="text-zinc-100">{target}</strong>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-zinc-400 text-[11px]">
+            {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
+            {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+            <div className="flex items-center gap-1.5">
+              {openPorts.map((port) => (
+                <span key={String(port)} className="px-1.5 py-0.5 rounded-sm bg-zinc-900 border border-zinc-700/80 text-emerald-400 font-semibold text-[10px]">
+                  {String(port)}/TCP ({serviceMap[String(port)] ?? "active"})
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Discovered Services Grid (Rendered only if no findings exist, avoiding duplicate cards) */}
+      {hasPerimeter && findingsCount === 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3 space-y-2.5 font-mono text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
+            <div className="flex items-center gap-2">
+              <Radio size={14} className="text-emerald-400 shrink-0" />
+              <span className="font-semibold text-zinc-200 text-xs">
+                Discovered Target Services
+              </span>
+              {target && (
+                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm text-[11px]">
+                  Host: <strong className="text-zinc-100">{target}</strong>
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+              {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
+              {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {openPorts.map((port) => {
+              const portStr = String(port);
+              const service = serviceMap[portStr] ?? "unknown";
+              const versionInfo = serviceVersions[portStr];
+              const banner = typeof versionInfo === "object" && versionInfo !== null
+                ? String(versionInfo.banner ?? versionInfo.version ?? "")
+                : typeof versionInfo === "string" ? versionInfo : "";
+
+              return (
+                <div
+                  key={portStr}
+                  className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-1.5 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-zinc-100 bg-zinc-950 px-2 py-0.5 border border-zinc-800 rounded-sm">
+                      PORT {portStr}/TCP
+                    </span>
+                    <span className="text-[10px] text-emerald-400 uppercase font-semibold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                      OPEN ({service})
+                    </span>
+                  </div>
+
+                  {banner && (
+                    <div className="text-[10px] text-zinc-400 truncate bg-zinc-950/70 p-1 rounded-sm border border-zinc-800/40">
+                      <span className="text-zinc-500 font-semibold">Banner: </span>
+                      <span className="text-zinc-300 font-mono">{banner}</span>
+                    </div>
+                  )}
+
+                  {onSelectModule && (
+                    <div className="pt-1 flex items-center gap-1 flex-wrap">
+                      {portStr === "22" && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                          >
+                            Fingerprint SSH
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                          >
+                            SSH Pivot
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSelectModule("linux.privesc", { target })}
+                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
+                          >
+                            Privesc Audit
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function maskSecret(val: string): string {
+  if (!val) return "••••";
+  if (val.length <= 4) return "••••";
+  if (val.length <= 8) return val.slice(0, 2) + "••••" + val.slice(-1);
+  return val.slice(0, 3) + "••••••••" + val.slice(-3);
+}
+
+export function getPatternBadgeClass(pattern: string): string {
+  const p = pattern.toLowerCase();
+  if (p.includes("aws") || p.includes("cloud")) {
+    return "bg-amber-950/40 text-amber-300 border-amber-800/60";
+  }
+  if (p.includes("conn") || p.includes("sql") || p.includes("db")) {
+    return "bg-cyan-950/40 text-cyan-300 border-cyan-800/60";
+  }
+  if (p.includes("cert") || p.includes("private") || p.includes("rsa")) {
+    return "bg-emerald-950/40 text-emerald-300 border-emerald-800/60";
+  }
+  if (p.includes("pass") || p.includes("pwd") || p.includes("shadow")) {
+    return "bg-rose-950/40 text-rose-300 border-rose-800/60";
+  }
+  if (p.includes("key") || p.includes("token") || p.includes("api")) {
+    return "bg-purple-950/40 text-purple-300 border-purple-800/60";
+  }
+  return "bg-zinc-900 text-zinc-300 border-zinc-700/80";
+}
+
+export interface DiscoveredSecretHit {
+  file?: string;
+  line?: number;
+  pattern?: string;
+  snippet?: string;
+  extracted_secret?: string;
+  secret_value?: string;
+  entropy?: number;
+  confidence?: number;
+  is_placeholder?: boolean;
+  [key: string]: unknown;
+}
+
+export function DiscoveredSecretsEvidenceViewer({
+  hits,
+  title = "Discovered Secrets & Hardcoded Credentials"
+}: {
+  hits: DiscoveredSecretHit[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(hits.length <= 6);
+  const [revealedIdxs, setRevealedIdxs] = useState<Record<number, boolean>>({});
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null);
+  const [revealAll, setRevealAll] = useState(false);
+
+  if (!hits || hits.length === 0) return null;
+
+  const toggleReveal = (idx: number) => {
+    setRevealedIdxs((prev) => ({
+      ...prev,
+      [idx]: !prev[idx]
+    }));
+  };
+
+  const handleToggleRevealAll = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = !revealAll;
+    setRevealAll(next);
+    const updated: Record<number, boolean> = {};
+    hits.forEach((_, i) => {
+      updated[i] = next;
+    });
+    setRevealedIdxs(updated);
+  };
+
+  const copySecret = (text: string, idx: number) => {
+    void navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
+
+  const copyFile = (path: string, idx: number) => {
+    void navigator.clipboard.writeText(path);
+    setCopiedFileIdx(idx);
+    setTimeout(() => setCopiedFileIdx(null), 1500);
+  };
+
+  return (
+    <div className="mt-2.5 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      {/* Header */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setIsExpanded((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setIsExpanded((prev) => !prev);
+          }
+        }}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left cursor-pointer select-none"
+      >
+        <div className="flex items-center gap-2 flex-wrap">
+          <Key size={13} className="text-amber-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({hits.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 font-semibold">
+            LOOT EXTRACTED
+          </span>
+          {hits.some((h) => h.is_placeholder) && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+              SAMPLE / TEST IDENTIFIED
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={handleToggleRevealAll}
+            className="text-[11px] font-mono px-2 py-0.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
+            title={revealAll ? "Mask all discovered secret values" : "Reveal all discovered secret values"}
+          >
+            {revealAll ? <EyeOff size={11} className="text-zinc-400" /> : <Eye size={11} className="text-zinc-400" />}
+            <span>{revealAll ? "Mask All" : "Reveal All"}</span>
+          </button>
+          <div className="flex items-center gap-1 text-zinc-400 text-xs">
+            <span className="text-[11px] font-sans">{isExpanded ? "Hide Details" : "Show Details"}</span>
+            <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded Table */}
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3 font-medium">Source File & Line</th>
+                <th className="py-2 px-3 font-medium">Pattern</th>
+                <th className="py-2 px-3 font-medium">Discovered Credential / Value</th>
+                <th className="py-2 px-3 font-medium">Shannon Entropy</th>
+                <th className="py-2 px-3 font-medium">Confidence</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {hits.map((hit, idx) => {
+                const isRevealed = Boolean(revealedIdxs[idx]);
+                const secretVal = String(hit.secret_value || hit.extracted_secret || hit.snippet || "");
+                const displayVal = isRevealed ? secretVal : maskSecret(secretVal);
+                const entropyVal = typeof hit.entropy === "number" ? hit.entropy : null;
+                const confVal = typeof hit.confidence === "number" ? hit.confidence : null;
+                const patternName = String(hit.pattern ?? "credential");
+                const filePath = String(hit.file ?? "");
+                const lineNo = hit.line;
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40 transition-colors">
+                    {/* File Path & Line */}
+                    <td className="py-2.5 px-3 max-w-[240px]">
+                      <div className="flex items-center gap-1.5 truncate" title={filePath}>
+                        <FileText size={12} className="text-zinc-500 shrink-0" />
+                        <span className="text-zinc-200 truncate text-[11px] font-mono">
+                          {filePath.split(/\\|\//).slice(-2).join("/") || filePath}
+                        </span>
+                        {lineNo !== undefined && (
+                          <span className="text-[10px] text-amber-400 bg-zinc-900 px-1 py-0.2 border border-zinc-800 rounded shrink-0">
+                            :{lineNo}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => copyFile(filePath, idx)}
+                          className="text-zinc-500 hover:text-zinc-300 p-0.5 rounded transition-colors shrink-0"
+                          title="Copy file path"
+                        >
+                          {copiedFileIdx === idx ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* Pattern Badge */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <span className={`text-[10px] px-2 py-0.5 rounded border uppercase font-medium ${getPatternBadgeClass(patternName)}`}>
+                        {patternName.replace(/_/g, " ")}
+                      </span>
+                    </td>
+
+                    {/* Secret Value & Show/Hide + Copy */}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-1.5 max-w-sm">
+                        <div
+                          className="bg-zinc-900/90 border border-zinc-800/80 rounded px-2 py-1 font-mono text-[11px] text-zinc-100 truncate select-all flex-1 tracking-wider"
+                          title={isRevealed ? secretVal : "Value masked. Click Eye icon to reveal."}
+                        >
+                          {displayVal}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleReveal(idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+                          title={isRevealed ? "Mask secret" : "Reveal full secret value"}
+                        >
+                          {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copySecret(secretVal, idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors shrink-0"
+                          title="Copy secret value"
+                        >
+                          {copiedIdx === idx ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                        </button>
+                      </div>
+                      {hit.snippet && hit.snippet !== hit.extracted_secret && isRevealed && (
+                        <div className="mt-1 text-[10px] font-mono text-zinc-500 bg-zinc-950/70 p-1 rounded border border-zinc-900 truncate" title={hit.snippet}>
+                          Context: <code className="text-zinc-400">{hit.snippet}</code>
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Shannon Entropy */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      {entropyVal !== null ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`font-semibold ${
+                              entropyVal >= 3.5
+                                ? "text-emerald-400"
+                                : entropyVal >= 2.5
+                                ? "text-amber-400"
+                                : "text-zinc-500"
+                            }`}
+                          >
+                            {entropyVal.toFixed(2)}
+                          </span>
+                          <span className="text-[10px] text-zinc-500">bits</span>
+                          <span
+                            className="text-[9px] px-1 py-0.2 rounded uppercase border text-zinc-400 border-zinc-800"
+                            title={
+                              entropyVal >= 3.5
+                                ? "High entropy (Likely true random credential/key)"
+                                : entropyVal >= 2.5
+                                ? "Moderate entropy (Standard passphrase)"
+                                : "Low entropy (Dictionary word or placeholder)"
+                            }
+                          >
+                            {entropyVal >= 3.5 ? "HIGH" : entropyVal >= 2.5 ? "MED" : "LOW"}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">n/a</span>
+                      )}
+                    </td>
+
+                    {/* Confidence & Placeholder Pill */}
+                    <td className="py-2.5 px-3 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        {confVal !== null ? (
+                          <span
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-medium font-mono ${
+                              confVal >= 0.85
+                                ? "text-emerald-300 bg-emerald-950/50 border-emerald-800/60"
+                                : confVal >= 0.60
+                                ? "text-amber-300 bg-amber-950/50 border-amber-800/60"
+                                : "text-rose-300 bg-rose-950/50 border-rose-800/60"
+                            }`}
+                          >
+                            {confVal >= 0.95 ? "100% Confirmed" : `${Math.round(confVal * 100)}%`}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-500 text-[10px]">Standard</span>
+                        )}
+
+                        {hit.is_placeholder && (
+                          <span
+                            className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 uppercase tracking-tight"
+                            title="Identified as test sample or mock placeholder"
+                          >
+                            Placeholder
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveredHashesEvidenceViewer({
+  hashes,
+  title = "Discovered Hashes & Account Secrets"
+}: {
+  hashes: Record<string, unknown>[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(hashes.length <= 6);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+
+  if (!hashes || hashes.length === 0) return null;
+
+  const copyHash = (hash: string, idx: number) => {
+    void navigator.clipboard.writeText(hash);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 1500);
+  };
+
+  return (
+    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((p) => !p)}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Key size={13} className="text-purple-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({hashes.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-950/50 border border-purple-800/60 text-purple-300 font-semibold">
+            HASH REPOSITORY
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-zinc-400 text-xs">
+          <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
+          <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3">Principal / Account</th>
+                <th className="py-2 px-3">Type</th>
+                <th className="py-2 px-3">Extracted Hash</th>
+                <th className="py-2 px-3">Privilege</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {hashes.map((item, idx) => {
+                const user = String(item.username || item.account || item.user || "unknown");
+                const hash = String(item.hash || item.ntlm_hash || item.value || "");
+                const type = String(item.hash_type || item.type || "crypt");
+                const isAdmin = Boolean(item.is_admin || item.is_domain_admin || item.privilege === "Domain Admin");
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40">
+                    <td className="py-2 px-3 font-semibold text-zinc-200">{user}</td>
+                    <td className="py-2 px-3">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 uppercase">
+                        {type}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3">
+                      <div className="flex items-center gap-1.5 max-w-md">
+                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1">
+                          {hash}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => copyHash(hash, idx)}
+                          className="p-1 rounded bg-zinc-900 border border-zinc-700/80 text-zinc-400 hover:text-zinc-200"
+                          title="Copy hash"
+                        >
+                          {copiedIdx === idx ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {isAdmin ? (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 font-semibold">
+                          Domain Admin
+                        </span>
+                      ) : (
+                        <span className="text-zinc-500 text-[10px]">Standard User</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiscoveredTicketsEvidenceViewer({
+  tickets,
+  title = "Discovered Kerberos Tickets & TGTs"
+}: {
+  tickets: Record<string, unknown>[];
+  title?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(tickets.length <= 6);
+
+  if (!tickets || tickets.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+      <button
+        type="button"
+        onClick={() => setIsExpanded((p) => !p)}
+        className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Key size={13} className="text-cyan-400 shrink-0" />
+          <strong className="text-zinc-200 text-xs font-sans tracking-tight">
+            {title} ({tickets.length})
+          </strong>
+          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/60 text-cyan-300 font-semibold">
+            KERBEROS CREDENTIAL CACHE
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-zinc-400 text-xs">
+          <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
+          <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-zinc-800/80 overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
+                <th className="py-2 px-3">Client Principal</th>
+                <th className="py-2 px-3">Service Principal</th>
+                <th className="py-2 px-3">Expiry</th>
+                <th className="py-2 px-3">Cache Path / Origin</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {tickets.map((t, idx) => {
+                const client = String(t.client || t.client_principal || "n/a");
+                const server = String(t.server || t.service_principal || "krbtgt");
+                const expiry = String(t.endtime || t.expiry || t.expires || "valid");
+                const path = String(t.path || t.ccache_path || t.source || "/tmp/krb5cc_*");
+
+                return (
+                  <tr key={idx} className="hover:bg-zinc-900/40">
+                    <td className="py-2 px-3 font-semibold text-zinc-200">{client}</td>
+                    <td className="py-2 px-3 text-zinc-300">{server}</td>
+                    <td className="py-2 px-3 text-zinc-400 text-[11px]">{expiry}</td>
+                    <td className="py-2 px-3 text-zinc-500 font-mono text-[11px]">{path}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModuleRunSummary({
   result,
   error,
@@ -3915,15 +4773,19 @@ function ModuleRunSummary({
   const warnings = Array.isArray(result?.warnings) ? result.warnings.map(String) : [];
   const nextSteps = Array.isArray(result?.operator_next_steps) ? result.operator_next_steps.map(String) : [];
   const hasOutcomeError = ["operator_error", "dependency_error", "network_error", "unsupported", "module_error", "failed", "timeout"].includes(displayOutcome);
+  const openPorts = Array.isArray(rawOutput?.open_ports) ? (rawOutput.open_ports as (number | string)[]) : [];
+  const hasPerimeter = openPorts.length > 0 || Object.keys((rawOutput?.service_versions ?? {}) as object).length > 0;
   const emptyText = dryRun
     ? "No live execution was performed."
     : rawError
       ? `Module halted with status '${rawError}'. See execution notice above.`
-      : outcome === "completed_no_findings"
-        ? "No confirmed findings. The module completed without observing an exploitable condition."
-        : runError
-          ? "No findings recorded because execution failed."
-          : "No findings returned.";
+      : hasPerimeter
+        ? `Target perimeter active: ${openPorts.length} port(s) identified. Review reconnaissance telemetry below.`
+        : outcome === "completed_no_findings"
+          ? "No confirmed findings. The module completed without observing an exploitable condition."
+          : runError
+            ? "No findings recorded because execution failed."
+            : "No findings returned.";
 
   return (
     <section className="mt-4 space-y-3 font-sans">
@@ -4001,6 +4863,9 @@ function ModuleRunSummary({
         </div>
       )}
 
+      {/* Discovered Target Perimeter Matrix & Purple Team Loot */}
+      <DiscoveredPerimeterCard rawOutput={rawOutput} onSelectModule={onSelectModule} findingsCount={findings.length} />
+
       {/* Findings Telemetry Stream (High-Density Tactical Matrix) */}
       {findings.length > 0 ? (
         <div className="space-y-2 mt-2">
@@ -4013,6 +4878,22 @@ function ModuleRunSummary({
                 : normSev.includes("med")
                 ? "border-l-amber-500"
                 : "border-l-zinc-700";
+
+            const evidence = (finding.evidence ?? {}) as Record<string, unknown>;
+            const rawSecretHits = (
+              Array.isArray(evidence.hits)
+                ? evidence.hits
+                : Array.isArray(evidence.discovered_secrets)
+                ? evidence.discovered_secrets
+                : Array.isArray(rawOutput?.discovered_secrets) &&
+                  (finding.module_id === "exfil.secrets_scan" ||
+                    String(finding.title ?? "").toLowerCase().includes("secrets"))
+                ? rawOutput.discovered_secrets
+                : []
+            ) as DiscoveredSecretHit[];
+
+            const hashes = Array.isArray(evidence.hashes) ? (evidence.hashes as Record<string, unknown>[]) : [];
+            const tickets = Array.isArray(evidence.tickets) ? (evidence.tickets as Record<string, unknown>[]) : [];
 
             return (
               <div
@@ -4064,10 +4945,25 @@ function ModuleRunSummary({
                   <h3 className="font-sans font-semibold text-sm text-zinc-100 tracking-tight">
                     {finding.title ?? `Observation #${index + 1}`}
                   </h3>
-                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans">
+                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
                     {String(finding.description ?? "")}
                   </p>
                 </div>
+
+                {/* Discovered Secrets Evidence (Hardcoded Credentials, Keys & Tokens) */}
+                {rawSecretHits.length > 0 && (
+                  <DiscoveredSecretsEvidenceViewer hits={rawSecretHits} />
+                )}
+
+                {/* Discovered Hashes Evidence Repository */}
+                {hashes.length > 0 && (
+                  <DiscoveredHashesEvidenceViewer hashes={hashes} />
+                )}
+
+                {/* Discovered Kerberos Tickets Evidence Repository */}
+                {tickets.length > 0 && (
+                  <DiscoveredTicketsEvidenceViewer tickets={tickets} />
+                )}
 
                 {/* Technical Remediation */}
                 {details.tailoredRemediation && (
@@ -4079,11 +4975,11 @@ function ModuleRunSummary({
                   </div>
                 )}
 
-                {/* Tactical Pivot Pathways (No emojis, sleek mono buttons) */}
+                {/* Next Actions */}
                 {details.nextModules.length > 0 && onSelectModule && (
                   <div className="pt-2 border-t border-zinc-800/50 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider shrink-0">
-                      PIVOT PATHWAYS:
+                      Next Actions:
                     </span>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {details.nextModules.map((nextMod) => (
@@ -4095,7 +4991,7 @@ function ModuleRunSummary({
                           title={`Arm and execute ${nextMod} on ${finding.host}`}
                         >
                           <Terminal size={11} className="text-zinc-400" />
-                          <span>RUN: <strong className="text-zinc-100">{nextMod}</strong></span>
+                          <span>Execute: <strong className="text-zinc-100">{nextMod}</strong></span>
                           <ArrowRight size={11} className="text-zinc-400" />
                         </button>
                       ))}
@@ -4199,8 +5095,8 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
         <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
       <details className="advanced-details mt-3">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer">Inspect Raw Scope Parameters</summary>
-        <pre className="json-box mt-2 text-xs font-mono">{JSON.stringify(campaign, null, 2)}</pre>
+        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Inspect Raw Scope Parameters</summary>
+        <StructuredJsonViewer data={campaign} title="Campaign Scope & Target Configuration" maxHeightClass="max-h-72" />
       </details>
     </div>
   );
@@ -4399,9 +5295,17 @@ function LiveEventCard({
         </div>
         <p>{message}</p>
         {created ? <small>{created}</small> : null}
-        <details className="advanced-details compact">
-          <summary>Details</summary>
-          <pre className="json-box">{JSON.stringify(serializeError(event), null, 2)}</pre>
+        <details className="advanced-details compact mt-2">
+          <summary className="text-[11px] font-mono text-zinc-400 hover:text-zinc-200 cursor-pointer">Telemetry Details</summary>
+          <div className="mt-1.5">
+            <StructuredJsonViewer
+              data={serializeError(event)}
+              title="Event Telemetry"
+              defaultExpandedDepth={1}
+              maxHeightClass="max-h-56"
+              showSummaryStrip={false}
+            />
+          </div>
         </details>
       </div>
     </article>

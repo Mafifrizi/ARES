@@ -110,6 +110,11 @@ class HostState:
             self.ip_address = self.ip
         elif self.ip_address and not self.ip:
             self.ip = self.ip_address
+        if self.domain_role.lower() in ("domain_controller", "dc", "primary_dc"):
+            self.is_dc = True
+        elif self.is_dc and not self.domain_role:
+            self.domain_role = "domain_controller"
+
 
     def update_defense_profile(self, controls: dict[str, Any] | None = None, **kwargs: Any) -> None:
         """Update or merge detected defense controls and security posture."""
@@ -348,7 +353,11 @@ class OperatorSession:
         ]
 
     def domain_controllers(self) -> list[HostState]:
-        return [h for h in self._hosts.values() if h.is_dc]
+        return [
+            h for h in self._hosts.values()
+            if h.is_dc or h.domain_role.lower() in ("domain_controller", "dc", "primary_dc")
+        ]
+
 
     # ── Pivot management ──────────────────────────────────────────────────
 

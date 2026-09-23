@@ -1277,8 +1277,12 @@ class AresEngine:
                     ),
                     "committed_finding_broadcast",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "committed_finding_broadcast_failed",
+                    finding_id=getattr(finding, "id", None),
+                    error=str(exc)[:120],
+                )
 
         if self.db and runtime_state.vault is not None:
             try:

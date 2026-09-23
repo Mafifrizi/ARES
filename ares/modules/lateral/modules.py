@@ -74,7 +74,7 @@ class LateralResult:
     output:       str = ""
     error:        str = ""
     duration_ms:  float = 0.0
-    auth_type:    str = "ntlm"
+    auth_type:    str = "password"
     kerberos_used: bool = False
 
 
@@ -320,7 +320,8 @@ class BaseLateralModule(BaseModule):
         username = ctx.params.get("username") or (cred.username if cred else "")
         domain   = getattr(ctx, "domain", "") or ctx.params.get("domain", "")
         target   = getattr(ctx, "target", "") or ctx.params.get("target", "")
-        command  = ctx.params.get("command", "whoami /all")
+        default_cmd = "id" if self.MODULE_ID == "lateral.ssh_pivot" else "whoami /all"
+        command  = ctx.params.get("command") or default_cmd
 
         params = dict(ctx.params)
         for key in ("target", "username", "domain", "secret", "command"):
@@ -352,32 +353,69 @@ class BaseLateralModule(BaseModule):
 
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis for Lateral Movement
         tech_target = target or "TargetHost"
-        tech_user = username or "Administrator"
-        kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Lateral Movement via {self.MODULE_NAME} ({self.MODULE_ID})\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4624, 4688, 7045, 5145)\n"
-            f"| where TargetUserName has \"{tech_user}\" or WorkstationName has \"{tech_target}\" or Computer has \"{tech_target}\"\n"
-            f"| project TimeGenerated, Computer, TargetUserName, WorkstationName, IpAddress, EventID, Activity\n"
-        )
-        sigma_rule = (
-            f"title: Lateral Movement Detection via {self.MODULE_NAME} ({tech_user} to {tech_target})\n"
-            f"id: 3c4d5e6f-ares-lateral-{abs(hash(self.MODULE_ID + tech_target)) % 1000000:06d}\n"
-            f"status: experimental\n"
-            f"description: Detects lateral movement execution using {self.MODULE_NAME} targeting {tech_target}.\n"
-            f"logsource:\n"
-            f"  product: windows\n"
-            f"  service: security\n"
-            f"detection:\n"
-            f"  selection:\n"
-            f"    EventID: 4624\n"
-            f"    TargetUserName|contains: '{tech_user}'\n"
-            f"  condition: selection\n"
-            f"level: high\n"
-            f"tags:\n"
-            f"  - attack.lateral_movement\n"
-            f"  - attack.t1021\n"
-        )
+        tech_user = username or ("root" if self.MODULE_ID == "lateral.ssh_pivot" else "Administrator")
+        is_ssh = self.MODULE_ID == "lateral.ssh_pivot"
+
+        if is_ssh:
+            kql_query = (
+                f"// ARES Closed-Loop Telemetry: Detect Linux SSH Lateral Movement ({self.MODULE_ID})\n"
+                f"Syslog\n"
+                f"| where ProcessName =~ \"sshd\"\n"
+                f"| where SyslogMessage has_any (\"Accepted\", \"session opened\", \"Accepted password\", \"Accepted publickey\")\n"
+                f"| where SyslogMessage has \"{tech_user}\" or HostIP has \"{tech_target}\" or Computer has \"{tech_target}\"\n"
+                f"| project TimeGenerated, Computer, HostIP, ProcessName, Facility, SyslogMessage\n"
+            )
+            sigma_rule = (
+                f"title: Linux SSH Lateral Movement Detection ({tech_user} to {tech_target})\n"
+                f"id: 3c4d5e6f-ares-ssh-{abs(hash(self.MODULE_ID + tech_target)) % 1000000:06d}\n"
+                f"status: experimental\n"
+                f"description: Detects SSH lateral movement authentication and session establishment on Linux targeting {tech_target}.\n"
+                f"logsource:\n"
+                f"  product: linux\n"
+                f"  service: auth\n"
+                f"detection:\n"
+                f"  selection:\n"
+                f"    process: 'sshd'\n"
+                f"    message|contains:\n"
+                f"      - 'Accepted'\n"
+                f"      - '{tech_user}'\n"
+                f"  condition: selection\n"
+                f"level: high\n"
+                f"tags:\n"
+                f"  - attack.lateral_movement\n"
+                f"  - attack.t1021.004\n"
+            )
+            loot_tags_kql = ["detection", "kql", "sentinel", "linux", "ssh", "lateral_movement"]
+            loot_tags_sigma = ["detection", "sigma", "linux", "auth", "ssh", "lateral_movement"]
+        else:
+            kql_query = (
+                f"// ARES Closed-Loop Telemetry: Detect Lateral Movement via {self.MODULE_NAME} ({self.MODULE_ID})\n"
+                f"SecurityEvent\n"
+                f"| where EventID in (4624, 4688, 7045, 5145)\n"
+                f"| where TargetUserName has \"{tech_user}\" or WorkstationName has \"{tech_target}\" or Computer has \"{tech_target}\"\n"
+                f"| project TimeGenerated, Computer, TargetUserName, WorkstationName, IpAddress, EventID, Activity\n"
+            )
+            sigma_rule = (
+                f"title: Lateral Movement Detection via {self.MODULE_NAME} ({tech_user} to {tech_target})\n"
+                f"id: 3c4d5e6f-ares-lateral-{abs(hash(self.MODULE_ID + tech_target)) % 1000000:06d}\n"
+                f"status: experimental\n"
+                f"description: Detects lateral movement execution using {self.MODULE_NAME} targeting {tech_target}.\n"
+                f"logsource:\n"
+                f"  product: windows\n"
+                f"  service: security\n"
+                f"detection:\n"
+                f"  selection:\n"
+                f"    EventID: 4624\n"
+                f"    TargetUserName|contains: '{tech_user}'\n"
+                f"  condition: selection\n"
+                f"level: high\n"
+                f"tags:\n"
+                f"  - attack.lateral_movement\n"
+                f"  - attack.t1021\n"
+            )
+            loot_tags_kql = ["detection", "kql", "sentinel", "lateral_movement"]
+            loot_tags_sigma = ["detection", "sigma", "lateral_movement"]
+
         loot_items: list[dict[str, Any]] = raw.get("loot", [])
         if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
             loot_items.extend([
@@ -386,14 +424,14 @@ class BaseLateralModule(BaseModule):
                     "loot_type": "detection_rule_kql",
                     "description": f"Microsoft Sentinel KQL query for {self.MODULE_NAME} lateral movement detection",
                     "content": {"kql": kql_query, "target": tech_target, "username": tech_user},
-                    "tags": ["detection", "kql", "sentinel", "lateral_movement"],
+                    "tags": loot_tags_kql,
                 },
                 {
                     "name": f"Detection Rule (Sigma): Lateral Movement {self.MODULE_NAME}",
                     "loot_type": "detection_rule_sigma",
                     "description": f"Sigma detection rule for {self.MODULE_NAME} lateral movement",
                     "content": {"sigma": sigma_rule, "target": tech_target, "username": tech_user},
-                    "tags": ["detection", "sigma", "lateral_movement"],
+                    "tags": loot_tags_sigma,
                 },
             ])
         raw["loot"] = loot_items
@@ -413,7 +451,8 @@ class BaseLateralModule(BaseModule):
         username = kwargs.get("username", "")
         domain   = kwargs.get("domain", "")
         secret   = kwargs.get("secret", "")
-        command  = kwargs.get("command", "whoami /all")
+        default_cmd = "id" if self.MODULE_ID == "lateral.ssh_pivot" else "whoami /all"
+        command  = kwargs.get("command") or default_cmd
 
         self._bind_log_context(target=target)
         await self.before_request(target, "default")
@@ -425,11 +464,28 @@ class BaseLateralModule(BaseModule):
         findings: list[Finding] = []
 
         if result.success:
+            if result.technique == LateralTechnique.SSH or self.MODULE_ID == "lateral.ssh_pivot":
+                remediation = (
+                    "Harden SSH daemon configuration (/etc/ssh/sshd_config): enforce PubkeyAuthentication with strong ed25519/RSA keys, "
+                    "disable password authentication ('PasswordAuthentication no'), disable remote root login ('PermitRootLogin no'), "
+                    "and limit login grace time and authentication attempts ('MaxAuthTries 3'). "
+                    "Restrict network exposure using host-based firewalls (nftables/iptables) or cloud security groups to authorized jump hosts only. "
+                    "Deploy PAM-based multi-factor authentication and configure auditd/fail2ban for real-time alerting on unauthorized interactive sessions."
+                )
+            else:
+                remediation = (
+                    "Segment network to prevent lateral movement. "
+                    "Implement Privileged Access Workstations (PAW). "
+                    "Enable Windows Firewall, restrict SMB/WMI/WinRM access. "
+                    "Deploy CrowdStrike or Defender for Endpoint for lateral movement detection."
+                )
+
+            account_label = f"{domain}\\{username}" if domain else username
             findings.append(self.finding(
                 title       = f"Lateral Movement: {self.MODULE_NAME} → {target}",
                 description = (
                     f"Successfully moved laterally to {target} as "
-                    f"{domain}\\{username} via {result.technique.value}. "
+                    f"{account_label} via {result.technique.value}. "
                     f"Privilege: {result.privilege or 'unknown'}."
                 ),
                 severity        = Severity.CRITICAL,
@@ -441,16 +497,12 @@ class BaseLateralModule(BaseModule):
                     "domain":    domain,
                     "technique": result.technique.value,
                     "privilege": result.privilege,
+                    "auth_type": getattr(result, "auth_type", "password"),
                     "output":    result.output[:500] if result.output else "",
                 },
-                remediation = (
-                    "Segment network to prevent lateral movement. "
-                    "Implement Privileged Access Workstations (PAW). "
-                    "Enable Windows Firewall, restrict SMB/WMI/WinRM access. "
-                    "Deploy CrowdStrike or Defender for Endpoint for lateral movement detection."
-                ),
-                host       = target,
-                confidence = 1.0,
+                remediation = remediation,
+                host        = target,
+                confidence  = 1.0,
             ))
             audit(
                 "lateral_move_success",
@@ -1212,10 +1264,12 @@ class SSHPivot(BaseLateralModule):
 
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: client.connect(**connect_kwargs))
+            auth_type = "publickey" if ("pkey" in connect_kwargs) else "password"
 
-            # Run command
+            # Run command (defaulting to 'id' on Linux if whoami /all was passed)
+            effective_cmd = "id" if (not command or command == "whoami /all") else command
             _, stdout_fh, stderr_fh = await loop.run_in_executor(
-                None, lambda: client.exec_command(command, timeout=30)
+                None, lambda: client.exec_command(effective_cmd, timeout=30)
             )
             output   = await loop.run_in_executor(None, stdout_fh.read)
             err_out  = await loop.run_in_executor(None, stderr_fh.read)
@@ -1224,12 +1278,14 @@ class SSHPivot(BaseLateralModule):
 
             # Determine privilege from id output
             privilege = "user"
-            if "uid=0" in output or "root" in output:
+            if "uid=0" in output or "root" in output or "root" in err_out:
                 privilege = "root"
             elif "Administrators" in output or "NT AUTHORITY\\SYSTEM" in output:
                 privilege = "SYSTEM"
 
             await loop.run_in_executor(None, client.close)
+
+            final_output = output if output else (err_out if err_out else f"Authenticated as {username}")
 
             return LateralResult(
                 technique=LateralTechnique.SSH,
@@ -1239,8 +1295,10 @@ class SSHPivot(BaseLateralModule):
                 domain=domain,
                 success=True,
                 privilege=privilege,
-                output=output[:1000],
+                output=final_output[:1000],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type=auth_type,
+                kerberos_used=False,
             )
 
         except ImportError:
@@ -1253,6 +1311,8 @@ class SSHPivot(BaseLateralModule):
                 success=False,
                 error="paramiko not installed - run: pip install paramiko",
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type="publickey" if (key_path or secret.strip().startswith("-----BEGIN")) else "password",
+                kerberos_used=False,
             )
         except Exception as exc:
             logger.warning("ssh_pivot_failed", target=target, error=str(exc)[:200])
@@ -1265,6 +1325,8 @@ class SSHPivot(BaseLateralModule):
                 success=False,
                 error=str(exc)[:300],
                 duration_ms=round((time.monotonic() - t0) * 1000, 2),
+                auth_type="publickey" if (key_path or secret.strip().startswith("-----BEGIN")) else "password",
+                kerberos_used=False,
             )
 
     async def establish_socks5(

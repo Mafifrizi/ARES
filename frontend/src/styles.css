@@ -841,6 +841,11 @@ button:disabled {
   padding: 1rem 1.2rem 2rem;
 }
 
+.content-shell:has(.cobalt-graph-container) {
+  padding: 0.35rem 0.75rem 0.5rem;
+  max-width: 100%;
+}
+
 .page {
   display: grid;
   gap: 1rem;

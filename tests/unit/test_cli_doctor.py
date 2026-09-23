@@ -746,11 +746,10 @@ def test_python_setup_cleans_invalid_browser_origin_placeholder(tmp_path, capsys
 
 
 def test_doctor_validates_browser_session_policy(monkeypatch, capsys):
-    from ares.cli import typer_main
     from ares.core.browser_sessions import BrowserSessionPolicy
+    import ares.cli.typer_main as tm
 
     # Test OK path
-    called = []
     fake_policy = BrowserSessionPolicy(
         origin="http://127.0.0.1:5173",
         authority="127.0.0.1:5173",
@@ -764,17 +763,31 @@ def test_doctor_validates_browser_session_policy(monkeypatch, capsys):
         lambda settings: fake_policy,
     )
 
-    # Invoke doctor check directly or simulate doctor
-    # Verify doctor check prints Browser session policy [OK]
-    import ares.cli.typer_main as tm
     console_out = []
     monkeypatch.setattr(tm.console, "print", lambda *args, **kwargs: console_out.append(str(args)))
 
-    # Doctor will run checks
     try:
         tm.doctor()
-    except Exception:
+    except typer.Exit:
         pass
 
-    assert any("Browser session policy" in line for line in console_out)
+    assert any("Browser session policy" in line and "[OK]" in line for line in console_out)
+
+    # Test WARN path when browser session policy cannot be built
+    from unittest.mock import MagicMock
+    console_out.clear()
+    monkeypatch.setattr(
+        "ares.core.browser_sessions.build_browser_session_policy",
+        MagicMock(side_effect=ValueError("origin mismatch in production")),
+    )
+
+    try:
+        tm.doctor()
+    except typer.Exit:
+        pass
+
+    assert any(
+        "Browser session policy" in line and "[WARN]" in line and "origin mismatch in production" in line
+        for line in console_out
+    )
 

@@ -14,6 +14,10 @@ try:
     from ares.modules.linux.nfs_escape import NFSEscapeModule  # noqa: F401
     from ares.modules.linux.privesc import LinuxPrivescModule  # noqa: F401
     from ares.modules.linux.service_hijack import ServiceHijackModule  # noqa: F401
+    from ares.modules.linux.sssd_harvest import SssdHarvestModule  # noqa: F401
+    from ares.modules.linux.ccache_hunt import CcacheHuntModule  # noqa: F401
+    from ares.modules.linux.keytab_abuse import KeytabAbuseModule  # noqa: F401
+    from ares.modules.linux.samba_secrets import SambaSecretsModule  # noqa: F401
 except ImportError:
     pass  # optional deps (impacket, ldap3, etc.) not installed
 
@@ -24,4 +28,8 @@ __all__ = [
     "NFSEscapeModule",
     "LinuxPrivescModule",
     "ServiceHijackModule",
+    "SssdHarvestModule",
+    "CcacheHuntModule",
+    "KeytabAbuseModule",
+    "SambaSecretsModule",
 ]

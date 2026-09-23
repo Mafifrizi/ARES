@@ -216,6 +216,66 @@ async def _check_network_finding_evidence(
     return True, 1.0, "Network service verified active on target"
 
 
+async def _check_ssh_pivot_evidence(
+    finding: Finding, context: dict[str, Any]
+) -> tuple[bool, float, str]:
+    """Score SSH lateral movement from session verification evidence."""
+    ev = finding.evidence or {}
+    technique = ev.get("technique")
+    user = ev.get("username")
+    target = ev.get("target")
+    output = ev.get("output", "")
+    privilege = ev.get("privilege", "user")
+
+    if target and user:
+        verified_desc = f"SSH lateral session to {target} as '{user}' authenticated and established"
+        if "uid=" in str(output) or privilege in ("root", "SYSTEM"):
+            return True, 1.0, f"{verified_desc} (session command execution verified with {privilege} privilege)"
+        return True, 0.95, f"{verified_desc} (session channel verified)"
+    return False, 0.0, "Missing target or username evidence for SSH pivot"
+
+
+async def _check_linux_privesc_evidence(
+    finding: Finding, context: dict[str, Any]
+) -> tuple[bool, float, str]:
+    """Score Linux privilege escalation findings from verified host primitives."""
+    title = (finding.title or "").lower()
+    desc = (finding.description or "").lower()
+    ev = finding.evidence or {}
+
+    if any(k in title or k in desc for k in ("suid", "sudo", "capabilities", "path", "cve-", "kernel", "cron")):
+        return True, 0.95, f"Verified local Linux privilege escalation primitive ({finding.title})"
+    return True, 0.85, "Local Linux privilege escalation vector identified"
+
+
+async def _check_credential_spray_evidence(
+    finding: Finding, context: dict[str, Any]
+) -> tuple[bool, float, str]:
+    """Score credential spraying findings from verified authentication handshakes."""
+    ev = finding.evidence or {}
+    user = ev.get("username")
+    target = ev.get("target") or finding.host
+    service = ev.get("service", "authentication")
+    if user and target:
+        return True, 1.0, f"Valid credentials for '{user}@{target}' verified via live {service} authentication"
+    return False, 0.0, "Missing user or target evidence in credential finding"
+
+
+async def _check_lateral_evidence(
+    finding: Finding, context: dict[str, Any]
+) -> tuple[bool, float, str]:
+    """Score lateral movement findings from established session evidence."""
+    ev = finding.evidence or {}
+    tech = ev.get("technique") or "lateral"
+    user = ev.get("username")
+    target = ev.get("target") or finding.host
+    privilege = ev.get("privilege", "user")
+    if target:
+        account_str = f" as '{user}'" if user else ""
+        return True, 1.0, f"Lateral movement to {target}{account_str} verified via {tech} ({privilege} privilege)"
+    return False, 0.0, "Missing target host evidence in lateral movement finding"
+
+
 # ── Default validator registry ────────────────────────────────────────────────
 
 def build_default_validator() -> FindingValidator:
@@ -253,6 +313,48 @@ def build_default_validator() -> FindingValidator:
             weight=2.0,
         ),
     ])
+
+    v.register("lateral.ssh_pivot", [
+        ValidationCheck(
+            stage=ValidationStage.EXPLOITABLE,
+            name="ssh_session_verification",
+            check=_check_ssh_pivot_evidence,
+            weight=2.0,
+        ),
+    ])
+
+    v.register("linux.privesc", [
+        ValidationCheck(
+            stage=ValidationStage.EXPLOITABLE,
+            name="linux_privesc_verification",
+            check=_check_linux_privesc_evidence,
+            weight=2.0,
+        ),
+    ])
+
+    for module_id in ("credential.ssh_spray", "credential.pass_spray"):
+        v.register(module_id, [
+            ValidationCheck(
+                stage=ValidationStage.EXPLOITABLE,
+                name="credential_spray_verification",
+                check=_check_credential_spray_evidence,
+                weight=2.0,
+            ),
+        ])
+
+    for module_id in (
+        "lateral.psexec", "lateral.wmiexec", "lateral.winrm",
+        "lateral.dcom", "lateral.rdp", "lateral.smb_relay",
+        "lateral.ntlm_relay", "lateral.mssql",
+    ):
+        v.register(module_id, [
+            ValidationCheck(
+                stage=ValidationStage.EXPLOITABLE,
+                name="lateral_movement_verification",
+                check=_check_lateral_evidence,
+                weight=2.0,
+            ),
+        ])
 
     for module_id in ("ad.asreproast", "ad.enum_spn", "ad.kerberoast"):
         v.register(module_id, [

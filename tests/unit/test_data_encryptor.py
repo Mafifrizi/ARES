@@ -92,14 +92,10 @@ class TestKeyMismatch:
         assert enc2.decrypt(token) is None
 
     def test_empty_key_fails_gracefully(self):
-        """Empty key should not crash - returns None on decrypt."""
-        try:
-            enc = DataEncryptor("")
-            token = enc.encrypt("test")
-            result = enc.decrypt(token)
-            assert result is None or result == "test"
-        except Exception:
-            pass  # construction may fail - that is also acceptable
+        """Empty key must fail closed with a clear ValueError requiring at least 32 characters."""
+        with pytest.raises(ValueError, match="at least 32 characters"):
+            DataEncryptor("")
+
 
     def test_key_with_special_characters(self):
         key = "key-with-!@#$%^&*()-special-chars!"

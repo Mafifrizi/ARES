@@ -631,6 +631,7 @@ _MODULE_TECHNIQUE_MAP: dict[str, list[str]] = {
     # ── Credential Access ─────────────────────────────────────────────────────
     "credential.pass_the_hash":   ["T1550.002"],
     "credential.pass_spray":      ["T1110.003"],
+    "credential.ssh_spray":       ["T1110.003", "T1021.004"],
     "credential.golden_ticket":   ["T1558.001"],
     "credential.reuse":           ["T1078", "T1550.002"],
     "credential.crack":           ["T1110.002"],

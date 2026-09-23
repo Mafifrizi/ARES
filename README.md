@@ -31,7 +31,7 @@
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 30+ production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 69 production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
 
 ---
 
@@ -391,7 +391,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 | :--- | :--- | :--- | :--- |
 | **Overview** | Executive health, telemetry counters, finding severity metrics. | Single Pane | All Stakeholders |
 | **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
-| **Modules** | 30+ module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
+| **Modules** | 69 module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
 | **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
 | **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
 | **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
@@ -471,7 +471,8 @@ ARES implements 30+ production execution modules mapping to 60+ adversary techni
 └─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┴──────────────────────────┘
 ```
 
-- **Active Directory Lab Suites**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
+- **Active Directory & Kerberos Suites (Windows & Linux)**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
+- **Linux Active Directory Tradecraft (RFC-ARES-2026-001)**: Native, zero-subprocess post-exploitation suite targeting Linux domain members: SSSD cache harvesting (`linux.sssd_harvest`), pure-Python Kerberos ccache ticket hunting (`linux.ccache_hunt`), keytab parsing & Silver Ticket generation (`linux.keytab_abuse`), Samba machine secrets extraction (`linux.samba_secrets`), and bidirectional ccache <-> kirbi ticket transcoding (`credential.ticket_converter`).
 - **Endpoint Posture Checkers**: Windows UAC Bypass methods, registry key persistence inspection, Linux container breakouts, and Sudo privilege enumeration.
 - **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token hijacking (`cloud.phantom_token`).
 

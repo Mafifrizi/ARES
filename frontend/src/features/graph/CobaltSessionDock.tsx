@@ -116,22 +116,41 @@ export function CobaltSessionDock({
   campaignName?: string;
   activeNodes?: Array<{ id: string; label: string; type?: string; metadata?: Record<string, any> }>;
 }) {
+  // Helper to determine OS and attributes for a session node
+  function getNodeOsInfo(nodeLabel: string, metadata?: Record<string, any>) {
+    const rawOs = String(metadata?.os || metadata?.os_info || "").toLowerCase();
+    const isLinux = rawOs.includes("linux") || rawOs.includes("kali") || rawOs.includes("ubuntu") || rawOs.includes("debian") || nodeLabel.includes("192.168.56.105");
+    return { isLinux, rawOs };
+  }
+
   const [sessions, setSessions] = useState<BeaconSession[]>(() => {
     if (activeNodes.length > 0) {
-      return activeNodes.slice(0, 5).map((node, idx) => ({
-        id: `node-${node.id}`,
-        name: `Beacon ${node.label}@${node.metadata?.pid || 1000 + idx * 450}`,
-        type: "beacon",
-        host: node.label,
-        user: node.metadata?.privilege === "system" ? "SYSTEM *" : (node.metadata?.user || "operator"),
-        pid: node.metadata?.pid || 1000 + idx * 450,
-        lastSeen: "1s",
-        row: (idx % 2 === 0 ? 1 : 2) as 1 | 2,
-        logs: [
-          { type: "info", text: `[*] Initialized telemetry listener for campaign: ${campaignName || campaignId || "ARES"}` },
-          { type: "success", text: `[+] Synced session on host: ${node.label} (${node.metadata?.ip || "in-scope"})` }
-        ]
-      }));
+      return activeNodes.slice(0, 5).map((node, idx) => {
+        const { isLinux } = getNodeOsInfo(node.label, node.metadata);
+        const isSystem = node.metadata?.privilege === "system" || node.metadata?.privilege === "root";
+        const user = isLinux
+          ? (isSystem ? "root" : (String(node.metadata?.user || "operator")))
+          : (isSystem ? "SYSTEM *" : (String(node.metadata?.user || "operator")));
+        const transport = isLinux
+          ? "SSH-2.0 Session (Port 22) // Protocol: ChaCha20-Poly1305"
+          : "Named Pipe \\pipe\\browser // Protocol: AES-256";
+
+        return {
+          id: `node-${node.id}`,
+          name: `Beacon ${node.label}@${node.metadata?.pid || 1000 + idx * 450}`,
+          type: "beacon",
+          host: node.label,
+          user,
+          pid: node.metadata?.pid || 1000 + idx * 450,
+          lastSeen: "1s",
+          row: (idx % 2 === 0 ? 1 : 2) as 1 | 2,
+          logs: [
+            { type: "info", text: `[*] Initialized telemetry listener for campaign: ${campaignName || campaignId || "ARES"}` },
+            { type: "success", text: `[+] Synced session on host: ${node.label} (${node.metadata?.ip || "in-scope"})` },
+            { type: "info", text: `[*] Transport: ${transport}` }
+          ]
+        };
+      });
     }
     return DEFAULT_SESSIONS;
   });
@@ -143,21 +162,32 @@ export function CobaltSessionDock({
   // Sync sessions when campaign or activeNodes change
   useEffect(() => {
     if (activeNodes.length > 0) {
-      const derived: BeaconSession[] = activeNodes.slice(0, 6).map((node, idx) => ({
-        id: `node-${node.id}`,
-        name: `Beacon ${node.label}@${node.metadata?.pid || 1000 + idx * 450}`,
-        type: "beacon",
-        host: node.label,
-        user: node.metadata?.privilege === "system" ? "SYSTEM *" : (node.metadata?.user || "operator"),
-        pid: node.metadata?.pid || 1000 + idx * 450,
-        lastSeen: "2s",
-        row: (idx % 2 === 0 ? 1 : 2) as 1 | 2,
-        logs: [
-          { type: "info", text: `[*] Campaign Scope: ${campaignName || campaignId || "Default"}` },
-          { type: "success", text: `[+] Active telemetry node: ${node.label}` },
-          { type: "info", text: `[*] Transport: Named Pipe \\pipe\\browser // Protocol: AES-256` }
-        ]
-      }));
+      const derived: BeaconSession[] = activeNodes.slice(0, 6).map((node, idx) => {
+        const { isLinux } = getNodeOsInfo(node.label, node.metadata);
+        const isSystem = node.metadata?.privilege === "system" || node.metadata?.privilege === "root";
+        const user = isLinux
+          ? (isSystem ? "root" : (String(node.metadata?.user || "operator")))
+          : (isSystem ? "SYSTEM *" : (String(node.metadata?.user || "operator")));
+        const transport = isLinux
+          ? "SSH-2.0 Session (Port 22) // Protocol: ChaCha20-Poly1305"
+          : "Named Pipe \\pipe\\browser // Protocol: AES-256";
+
+        return {
+          id: `node-${node.id}`,
+          name: `Beacon ${node.label}@${node.metadata?.pid || 1000 + idx * 450}`,
+          type: "beacon",
+          host: node.label,
+          user,
+          pid: node.metadata?.pid || 1000 + idx * 450,
+          lastSeen: "2s",
+          row: (idx % 2 === 0 ? 1 : 2) as 1 | 2,
+          logs: [
+            { type: "info", text: `[*] Campaign Scope: ${campaignName || campaignId || "Default"}` },
+            { type: "success", text: `[+] Active telemetry node: ${node.label}` },
+            { type: "info", text: `[*] Transport: ${transport}` }
+          ]
+        };
+      });
       setSessions(derived);
       setActiveSessionId(derived[0].id);
     }
@@ -172,12 +202,19 @@ export function CobaltSessionDock({
         setActiveSessionId(existing.id);
         return prev;
       }
+      const matchedNode = activeNodes.find((n) => n.id === selectedNodeId || n.label === selectedNodeLabel);
+      const { isLinux } = getNodeOsInfo(selectedNodeLabel, matchedNode?.metadata);
+      const isSystem = matchedNode?.metadata?.privilege === "system" || matchedNode?.metadata?.privilege === "root";
+      const user = isLinux
+        ? (isSystem ? "root" : (String(matchedNode?.metadata?.user || "operator")))
+        : (isSystem ? "SYSTEM *" : (String(matchedNode?.metadata?.user || "operator")));
+
       const newSession: BeaconSession = {
         id: `node-${selectedNodeId}`,
         name: `Beacon: ${selectedNodeLabel}`,
         type: "beacon",
         host: selectedNodeLabel,
-        user: "SYSTEM *",
+        user,
         pid: Math.floor(1000 + Math.random() * 8000),
         lastSeen: "1s",
         row: 2,
@@ -191,7 +228,7 @@ export function CobaltSessionDock({
       setActiveSessionId(newSession.id);
       return [...prev, newSession];
     });
-  }, [selectedNodeId, selectedNodeLabel]);
+  }, [selectedNodeId, selectedNodeLabel, activeNodes]);
 
   // Scroll to bottom when logs update
   useEffect(() => {
@@ -217,17 +254,63 @@ export function CobaltSessionDock({
     let responseLog: { type: "success" | "info" | "warn"; text: string };
     const lower = trimmed.toLowerCase();
 
+    // Match active session to activeNode to determine real host OS and credentials
+    const activeNode = activeNodes.find(
+      (n) => `node-${n.id}` === activeSession.id || n.label === activeSession.host || n.id === activeSession.id.replace("node-", "")
+    );
+    const { isLinux } = getNodeOsInfo(activeSession.host, activeNode?.metadata);
+
     if (lower === "whoami") {
-      const userVal = activeSession.user || "operator";
-      const hostVal = activeSession.host || "TARGET";
-      const integrity = userVal.includes("*") || userVal.includes("SYSTEM") ? "High/System" : "Medium";
-      responseLog = { type: "success", text: `${hostVal}\\${userVal} (Integrity: ${integrity})` };
+      if (isLinux) {
+        const userVal = activeSession.user === "SYSTEM *" ? "root" : (activeSession.user || "operator");
+        const hostVal = activeSession.host || "localhost";
+        const uid = userVal === "root" ? 0 : 1000;
+        responseLog = { type: "success", text: `${userVal}@${hostVal} (uid=${uid}, gid=${uid})` };
+      } else {
+        const userVal = activeSession.user || "operator";
+        const hostVal = activeSession.host || "TARGET";
+        const integrity = userVal.includes("*") || userVal.includes("SYSTEM") ? "High/System" : "Medium";
+        responseLog = { type: "success", text: `${hostVal}\\${userVal} (Integrity: ${integrity})` };
+      }
     } else if (lower.includes("ppid")) {
       responseLog = { type: "info", text: `[*] Tasked beacon to spoof PPID (sent 16 bytes)` };
     } else if (lower.includes("ssh")) {
       responseLog = { type: "info", text: `[*] Tasked beacon to SSH: ${trimmed}` };
     } else if (lower.includes("hashdump") || lower.includes("creds")) {
-      responseLog = { type: "success", text: `[+] Administrator:500:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::` };
+      if (isLinux) {
+        // True technical honesty: Linux does NOT have Windows SAM hashdumps
+        responseLog = {
+          type: "warn",
+          text: `[-] 'hashdump' (SAM/LSASS) is not applicable to Linux endpoints (${activeSession.host}).\n[*] For Linux credential access: execute 'linux.ccache_hunt' (Kerberos TGTs), 'linux.sssd_harvest' (cached LDAP hashes), or dump '/etc/shadow' (requires root).`
+        };
+      } else {
+        // Check for real credential nodes associated with this host in activeNodes
+        const hostCreds = activeNodes.filter(
+          (n) => n.type === "credential" && (
+            !n.metadata?.source_host ||
+            n.metadata?.source_host === activeSession.host ||
+            n.metadata?.target_host === activeSession.host
+          )
+        );
+        if (hostCreds.length > 0) {
+          const lines = hostCreds.map((c) => {
+            const u = String(c.metadata?.username || c.label || "Administrator");
+            const d = c.metadata?.domain ? `${String(c.metadata.domain)}\\` : "";
+            const t = String(c.metadata?.cred_type || "NTLM");
+            const h = String(c.metadata?.hash_value || c.metadata?.nt_hash || "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0");
+            return `[+] ${d}${u} (${t}): ${h}`;
+          }).join("\n");
+          responseLog = { type: "success", text: lines };
+        } else if (activeSession.host === "DEVELOPER45") {
+          // Default demo session fallback for developer test workspace
+          responseLog = { type: "success", text: `[+] Administrator:500:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::` };
+        } else {
+          responseLog = {
+            type: "info",
+            text: `[-] No dumped hashes available for ${activeSession.host} in campaign vault.\n[*] Execute 'windows.lsass_dump' or 'windows.lsa_secrets' to harvest credentials from memory.`
+          };
+        }
+      }
     } else if (lower.includes("ps") || lower.includes("process")) {
       responseLog = { type: "info", text: `[+] Active process tree enumerated on ${activeSession.host}. Parent PID resolved.` };
     } else if (lower.includes("net view") || lower.includes("recon") || lower === "hosts") {

@@ -92,7 +92,7 @@ async def test_scope_enforcement_interceptor_blocks_out_of_scope():
 
 @pytest.mark.asyncio
 async def test_secret_sanitizer_interceptor_scrubs_sensitive_data():
-    sanitizer = SecretSanitizationInterceptor()
+    sanitizer = SecretSanitizationInterceptor(enabled=True)
     ctx = ExecutionContext.for_test()
     result = ModuleResult(
         status="success",
@@ -101,6 +101,9 @@ async def test_secret_sanitizer_interceptor_scrubs_sensitive_data():
             "safe_metric": 42,
             "user_password": "super_secret_plaintext_password_123",
             "nested": {"private_key": "MIIBO...SECRET"},
+            "hardcoded_secrets_detected": True,
+            "private_key_exposure": False,
+            "filesystem_secret_audit_complete": True,
         },
     )
 
@@ -108,6 +111,9 @@ async def test_secret_sanitizer_interceptor_scrubs_sensitive_data():
     assert sanitized.raw["safe_metric"] == 42
     assert "REDACTED_BY_SANITIZER" in sanitized.raw["user_password"]
     assert "REDACTED_BY_SANITIZER" in sanitized.raw["nested"]["private_key"]
+    assert sanitized.raw["hardcoded_secrets_detected"] is True
+    assert sanitized.raw["private_key_exposure"] is False
+    assert sanitized.raw["filesystem_secret_audit_complete"] is True
 
 
 # ── 2. Capability Sandboxing Tests ───────────────────────────────────────────

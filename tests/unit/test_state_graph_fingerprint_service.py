@@ -180,7 +180,11 @@ class TestOperatorSession:
         h = sess.add_host("10.0.0.1", hostname="DC01", os_type="Windows Server",
                           domain_role="domain_controller")
         controllers = sess.domain_controllers()
-        assert len(controllers) >= 0  # depends on implementation detail
+        assert len(controllers) == 1
+        assert controllers[0].hostname == "DC01"
+        assert controllers[0].is_dc is True
+        assert controllers[0].domain_role == "domain_controller"
+
 
     def test_record_attack(self):
         sess = _session()

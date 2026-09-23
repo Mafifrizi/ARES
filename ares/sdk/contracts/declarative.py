@@ -51,7 +51,9 @@ def module_contract(
         if interceptors:
             for ic in interceptors:
                 pipeline.add_interceptor(ic)
-        pipeline.add_interceptor(SecretSanitizationInterceptor())
+        # SecretSanitizationInterceptor is disabled by default in operational pipelines
+        # so Red Team operators receive real findings and verification evidence without censorship.
+        pipeline.add_interceptor(SecretSanitizationInterceptor(enabled=False))
         pipeline.add_interceptor(AuditProvenanceInterceptor())
         cls.EXECUTION_PIPELINE = pipeline  # type: ignore[attr-defined]
 

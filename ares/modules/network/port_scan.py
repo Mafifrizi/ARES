@@ -60,6 +60,22 @@ _PORT_NAMES: dict[int, str] = {
 
 # Services that suggest high-value attack paths
 _SERVICE_INTELLIGENCE: dict[int, dict[str, Any]] = {
+    22: {
+        "title": "Secure Shell (SSH) Service Active on Port 22",
+        "service": "ssh",
+        "role": "Linux Remote Administration & Shell Endpoint",
+        "severity": Severity.LOW,
+        "description": (
+            "OpenSSH service is reachable on {target}:22. "
+            "Primary vector for Linux remote access, credential password spraying, "
+            "and SSH key-based lateral movement."
+        ),
+        "remediation": (
+            "Disable password authentication in favor of ed25519/RSA keys, disable root login (PermitRootLogin no), "
+            "and restrict SSH access via firewall rules or VPN."
+        ),
+        "next_modules": ["lateral.ssh_pivot", "linux.privesc", "exfil.secrets_scan"],
+    },
     88: {
         "title": "Active Directory KDC (Kerberos) Detected on Port 88",
         "service": "kerberos",

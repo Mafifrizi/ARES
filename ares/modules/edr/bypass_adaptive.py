@@ -388,17 +388,21 @@ class EDRAdaptiveBypassModule(BaseModule):
         if not edr_vendor:
             edr_vendor = self._detect_vendor_from_artifacts(ctx)
 
-        target = getattr(ctx, "target", "") or ctx.params.get("target", "")
+        target = getattr(ctx, "target", "")
+        params_dict = ctx.params.model_dump() if hasattr(ctx.params, "model_dump") else (ctx.params if isinstance(ctx.params, dict) else {})
+        if not target:
+            target = params_dict.get("target", "")
+
         passthrough_params = {
             key: value
-            for key, value in ctx.params.items()
+            for key, value in params_dict.items()
             if key not in {"edr_vendor", "target", "os_version"}
         }
 
         findings, raw = await self.run(
             edr_vendor=edr_vendor,
             target=target,
-            os_version=ctx.params.get("os_version", ""),
+            os_version=params_dict.get("os_version", ""),
             **passthrough_params,
         )
 
