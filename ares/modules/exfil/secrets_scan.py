@@ -58,11 +58,158 @@ _GREP_PATTERN = "|".join([
 ])
 
 
+import math
+from collections import Counter
+
+def calculate_shannon_entropy(data: str) -> float:
+    """Calculate Shannon entropy for a given string."""
+    if not data:
+        return 0.0
+    entropy = 0.0
+    length = len(data)
+    for count in Counter(data).values():
+        p = count / length
+        entropy -= p * math.log2(p)
+    return round(entropy, 2)
+
+
+_PLACEHOLDER_WORDS = frozenset({
+    "password", "p@ssword", "pass", "pwd", "123456", "12345678",
+    "changeme", "change_me", "your_password", "yourpassword",
+    "secret", "dummy", "admin", "test", "todo", "xxx", "placeholder",
+    "example", "sample", "replace_me", "none", "null",
+})
+
+
 def _classify(line: str) -> str:
     for name, pat in _SECRET_PATTERNS.items():
         if re.search(pat, line, re.IGNORECASE):
             return name
     return "generic_credential"
+
+
+def extract_secret_metadata(snippet: str, file_path: str = "") -> dict[str, Any]:
+    """Parse line snippet, isolate secret value, compute entropy and dynamic confidence."""
+    raw_snippet = snippet.strip()
+    file_lower = file_path.lower()
+
+    # 1. AWS Access Key (AKIA... 20 chars)
+    m_aws = re.search(r"\b(AKIA[0-9A-Z]{16})\b", raw_snippet)
+    if m_aws:
+        token = m_aws.group(1)
+        entropy = calculate_shannon_entropy(token)
+        return {
+            "pattern": "aws_access_key",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": token,
+            "secret_value": token,
+            "entropy": entropy,
+            "confidence": 0.96,
+            "is_placeholder": False,
+        }
+
+    # 2. Private Key Header
+    m_key = re.search(r"(-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----)", raw_snippet)
+    if m_key:
+        token = m_key.group(1)
+        entropy = calculate_shannon_entropy(token)
+        return {
+            "pattern": "private_key_pem",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": token,
+            "secret_value": token,
+            "entropy": entropy,
+            "confidence": 0.98,
+            "is_placeholder": False,
+        }
+
+    # 3. JWT Token
+    m_jwt = re.search(r"\b(eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)\b", raw_snippet)
+    if m_jwt:
+        token = m_jwt.group(1)
+        entropy = calculate_shannon_entropy(token)
+        return {
+            "pattern": "jwt_token",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": token,
+            "secret_value": token,
+            "entropy": entropy,
+            "confidence": 0.94,
+            "is_placeholder": False,
+        }
+
+    # 4. Connection String
+    m_conn = re.search(r'''(?i)(?:connectionString=["']?)([^"'>\r\n]+)''', raw_snippet)
+    m_pwd_in_conn = re.search(r'''(?i)(?:password|pwd)\s*=\s*['"]?([^;'">\s]+)''', raw_snippet)
+    if m_conn or ("server=" in raw_snippet.lower() and "password=" in raw_snippet.lower()):
+        conn_str = m_conn.group(1) if m_conn else raw_snippet
+        pwd_val = m_pwd_in_conn.group(1) if m_pwd_in_conn else ""
+        is_placeholder = bool(pwd_val and pwd_val.lower() in _PLACEHOLDER_WORDS)
+        conf = 0.45 if is_placeholder else 0.92
+        entropy = calculate_shannon_entropy(pwd_val or conn_str)
+        return {
+            "pattern": "connection_string",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": conn_str,
+            "secret_value": pwd_val or conn_str,
+            "entropy": entropy,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
+        }
+
+    # 5. Generic API Key
+    m_api = re.search(r"(?i)(?:api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*['\"]?([A-Za-z0-9_\-]{16,})", raw_snippet)
+    if m_api:
+        token = m_api.group(1)
+        entropy = calculate_shannon_entropy(token)
+        is_placeholder = bool(token.lower() in _PLACEHOLDER_WORDS or entropy < 2.5)
+        conf = 0.40 if is_placeholder else (0.88 if entropy >= 3.2 else 0.70)
+        return {
+            "pattern": "generic_api_key",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": token,
+            "secret_value": token,
+            "entropy": entropy,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
+        }
+
+    # 6. Password Field
+    m_pass = re.search(r"(?i)(?:password|passwd|pwd)\s*[=:]\s*['\"]?([^'\";\r\n\s>]{3,})", raw_snippet)
+    if m_pass:
+        token = m_pass.group(1)
+        entropy = calculate_shannon_entropy(token)
+        is_placeholder = bool(token.lower() in _PLACEHOLDER_WORDS)
+        if is_placeholder:
+            conf = 0.35
+        elif len(token) >= 8 and entropy >= 3.0:
+            conf = 0.86
+        else:
+            conf = 0.68
+        if any(f in file_lower for f in ("test", "fixture", "mock", "example", "sample")):
+            conf = max(0.20, conf - 0.30)
+            is_placeholder = True
+        return {
+            "pattern": "password_field",
+            "snippet": raw_snippet[:150],
+            "extracted_secret": token,
+            "secret_value": token,
+            "entropy": entropy,
+            "confidence": conf,
+            "is_placeholder": is_placeholder,
+        }
+
+    # Fallback
+    entropy = calculate_shannon_entropy(raw_snippet)
+    return {
+        "pattern": _classify(raw_snippet),
+        "snippet": raw_snippet[:150],
+        "extracted_secret": raw_snippet,
+        "secret_value": raw_snippet,
+        "entropy": entropy,
+        "confidence": 0.50,
+        "is_placeholder": True,
+    }
 
 
 def _ssh_scan(target: str, username: str, password: str = "",
@@ -118,12 +265,18 @@ def _ssh_scan(target: str, username: str, password: str = "",
             for match_line in fout.read().decode(errors="replace").splitlines():
                 parts = match_line.split(":", 2)
                 lineno = int(parts[0]) if parts[0].isdigit() else 0
-                content = parts[-1][:120] if len(parts) > 1 else match_line[:120]
+                content = parts[-1][:150] if len(parts) > 1 else match_line[:150]
+                meta = extract_secret_metadata(content, fpath)
                 hits.append({
-                    "file":    fpath,
-                    "line":    lineno,
-                    "pattern": _classify(content),
-                    "snippet": content,
+                    "file":             fpath,
+                    "line":             lineno,
+                    "pattern":          meta["pattern"],
+                    "snippet":          meta["snippet"],
+                    "extracted_secret": meta["extracted_secret"],
+                    "secret_value":     meta["secret_value"],
+                    "entropy":          meta["entropy"],
+                    "confidence":       meta["confidence"],
+                    "is_placeholder":   meta["is_placeholder"],
                 })
     finally:
         client.close()
@@ -148,7 +301,7 @@ def _wmi_scan(target: str, username: str, password: str = "",
         r"      $pat=$_; "
         r"      Select-String -Path $f -Pattern $pat -ErrorAction SilentlyContinue | "
         r"      Select-Object -First 3 | ForEach-Object { "
-        r"        $hits += [PSCustomObject]@{file=$f;line=$_.LineNumber;snippet=$_.Line.Substring(0,[math]::Min(120,$_.Line.Length))} "
+        r"        $hits += [PSCustomObject]@{file=$f;line=$_.LineNumber;snippet=$_.Line.Substring(0,[math]::Min(150,$_.Line.Length))} "
         r"      } "
         r"    } "
         r"  } "
@@ -167,11 +320,19 @@ def _wmi_scan(target: str, username: str, password: str = "",
         if isinstance(raw, dict):
             raw = [raw]
         for item in raw:
+            fpath = item.get("file", "")
+            snippet = item.get("snippet", "")[:150]
+            meta = extract_secret_metadata(snippet, fpath)
             hits.append({
-                "file":    item.get("file", ""),
-                "line":    item.get("line", 0),
-                "pattern": _classify(item.get("snippet", "")),
-                "snippet": item.get("snippet", "")[:120],
+                "file":             fpath,
+                "line":             item.get("line", 0),
+                "pattern":          meta["pattern"],
+                "snippet":          meta["snippet"],
+                "extracted_secret": meta["extracted_secret"],
+                "secret_value":     meta["secret_value"],
+                "entropy":          meta["entropy"],
+                "confidence":       meta["confidence"],
+                "is_placeholder":   meta["is_placeholder"],
             })
     except Exception:
         pass
@@ -251,12 +412,14 @@ class SecretsScan(BaseModule):
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
         evidence_chain: list[EvidenceRecord] = []
+        all_hits: list[dict[str, Any]] = []
         for finding in findings:
             hits = (
                 finding.evidence.get("hits", [])
                 if hasattr(finding, "evidence") and isinstance(finding.evidence, dict)
                 else []
             )
+            all_hits.extend(hits)
             for hit in hits[:20]:
                 ev = EvidenceRecord(
                     artifact_id=f"secret-{str(hit.get('pattern', 'hit')).lower().replace('_', '-')}",
@@ -266,6 +429,12 @@ class SecretsScan(BaseModule):
                         "pattern": hit.get("pattern"),
                         "file": hit.get("file"),
                         "line": hit.get("line"),
+                        "snippet": hit.get("snippet"),
+                        "extracted_secret": hit.get("extracted_secret"),
+                        "secret_value": hit.get("secret_value"),
+                        "entropy": hit.get("entropy"),
+                        "confidence": hit.get("confidence"),
+                        "is_placeholder": hit.get("is_placeholder", False),
                     },
                     tags=["exfil", "secrets_scan", "t1552"],
                 )
@@ -273,6 +442,7 @@ class SecretsScan(BaseModule):
 
         raw["evidence_chain"] = [e.data for e in evidence_chain]
         raw["evidence_integrity"] = [e.record_hash for e in evidence_chain]
+        raw["discovered_secrets"] = all_hits
 
         # Closed-loop Purple Telemetry Synthesis (Sentinel KQL + Sigma YAML)
         kql_rule = (
@@ -316,6 +486,7 @@ class SecretsScan(BaseModule):
             "    - attack.t1552.001"
         )
         raw.setdefault("loot", {})
+        raw["loot"]["extracted_secrets"] = all_hits
         raw["loot"]["detection_kql"] = kql_rule
         raw["loot"]["detection_sigma"] = sigma_rule
         raw["hardcoded_secrets_detected"] = bool(raw.get("credential_list"))
@@ -353,25 +524,46 @@ class SecretsScan(BaseModule):
 
         if dry_run:
             mock_hits = [
-                {"file": r"C:\inetpub\wwwroot\web.config",
-                 "pattern": "connection_string", "line": 42,
-                 "snippet": "connectionString=\"Server=db01;Password=P@ss1234\""},
-                {"file": r"C:\Users\svc_deploy\.aws\credentials",
-                 "pattern": "aws_access_key", "line": 3,
-                 "snippet": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE"},
+                {
+                    "file": r"C:\inetpub\wwwroot\web.config",
+                    "pattern": "connection_string",
+                    "line": 42,
+                    "snippet": "connectionString=\"Server=db01;Password=P@ss1234\"",
+                    "extracted_secret": "Server=db01;Password=P@ss1234",
+                    "secret_value": "P@ss1234",
+                    "entropy": 3.78,
+                    "confidence": 0.92,
+                    "is_placeholder": False,
+                },
+                {
+                    "file": r"C:\Users\svc_deploy\.aws\credentials",
+                    "pattern": "aws_access_key",
+                    "line": 3,
+                    "snippet": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE",
+                    "extracted_secret": "AKIAIOSFODNN7EXAMPLE",
+                    "secret_value": "AKIAIOSFODNN7EXAMPLE",
+                    "entropy": 3.82,
+                    "confidence": 0.96,
+                    "is_placeholder": False,
+                },
             ]
+            dynamic_conf = round(sum(h["confidence"] for h in mock_hits) / len(mock_hits), 2)
             return [Finding(
                 title       = f"Secrets found in filesystem on {target}",
                 description = (f"Pattern scan found {len(mock_hits)} potential secret(s): "
                                + ", ".join(h["pattern"] for h in mock_hits)),
-                severity=Severity.CRITICAL, confidence=0.80,
+                severity=Severity.CRITICAL, confidence=dynamic_conf,
                 module_id=self.MODULE_ID, host=target,
                 mitre_technique="T1552.001", mitre_tactic="Credential Access",
                 evidence={"hits": mock_hits},
                 remediation="Remove hardcoded credentials. Use vault/secrets manager.",
-            )], {"dry_run": True,
-                 "credential_list": [h["file"] for h in mock_hits],
-                 "sensitive_data_found": True, "hit_count": len(mock_hits)}
+            )], {
+                "dry_run": True,
+                "credential_list": [h["file"] for h in mock_hits],
+                "discovered_secrets": mock_hits,
+                "sensitive_data_found": True,
+                "hit_count": len(mock_hits),
+            }
 
         if not username:
             return [], {"error": "no_credential_username"}
@@ -396,6 +588,7 @@ class SecretsScan(BaseModule):
             raise self._classify_error(exc) from exc
 
         if hits:
+            dynamic_conf = round(sum(h.get("confidence", 0.85) for h in hits) / len(hits), 2)
             self.finding(
                 title       = f"Secrets found in filesystem on {target}",
                 description = (
@@ -403,7 +596,7 @@ class SecretsScan(BaseModule):
                     + "\n".join(f"  [{h['pattern']}] {h['file']}:{h['line']}" for h in hits[:20])
                     + (f"\n...and {len(hits)-20} more" if len(hits) > 20 else "")
                 ),
-                severity=Severity.CRITICAL, confidence=0.80,
+                severity=Severity.CRITICAL, confidence=dynamic_conf,
                 mitre_technique="T1552.001", mitre_tactic="Credential Access",
                 evidence={"hits": hits[:50]},
                 remediation=(
@@ -416,6 +609,7 @@ class SecretsScan(BaseModule):
 
         return self._findings[:], {
             "credential_list":     list({h["file"] for h in hits}),
+            "discovered_secrets":  hits,
             "sensitive_data_found": bool(hits),
             "hit_count":           len(hits),
         }

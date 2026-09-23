@@ -100,9 +100,23 @@ class AdaptiveNoiseInterceptor(BaseExecutionInterceptor):
 class SecretSanitizationInterceptor(BaseExecutionInterceptor):
     """Scrubs plaintext credentials and sensitive tokens from execution results."""
 
+    def __init__(self, enabled: bool = False) -> None:
+        self.enabled = enabled
+
     async def post_execute(
         self, module: Any, ctx: ExecutionContext, result: ModuleResult
     ) -> ModuleResult:
+        if not self.enabled:
+            return result
+
+        # Check if context or execution params request preserving raw loot
+        if (
+            getattr(ctx, "skip_sanitization", False)
+            or getattr(ctx, "preserve_loot", False)
+            or getattr(ctx, "raw_telemetry", False)
+        ):
+            return result
+
         # Scrub credentials in raw output dictionary if marked sensitive
         if isinstance(result.raw, dict):
             sanitized_raw = self._scrub_dict(result.raw)
@@ -113,13 +127,28 @@ class SecretSanitizationInterceptor(BaseExecutionInterceptor):
         scrubbed: dict[str, Any] = {}
         for k, v in d.items():
             k_lower = str(k).lower()
+
+            # Metadata indicators, boolean audit flags, counts, and status indicators must NEVER be redacted
+            if (
+                isinstance(v, bool)
+                or isinstance(v, (int, float))
+                or any(k_lower.endswith(sfx) for sfx in ("_detected", "_complete", "_exposure", "_count", "_status", "_flag", "_found", "_valid", "_verified", "_list", "_schema"))
+                or k_lower in ("status", "count", "error", "line", "port", "target", "host", "username", "evidence_integrity", "file")
+            ):
+                scrubbed[k] = v
+                continue
+
             if any(s in k_lower for s in ("password", "secret", "private_key", "nt_hash", "kerberos_hash")):
                 if isinstance(v, str) and len(v) > 4:
                     scrubbed[k] = f"{v[:2]}...[REDACTED_BY_SANITIZER]...{v[-2:]}"
-                else:
+                elif isinstance(v, str):
                     scrubbed[k] = "[REDACTED_BY_SANITIZER]"
+                else:
+                    scrubbed[k] = v
             elif isinstance(v, dict):
                 scrubbed[k] = self._scrub_dict(v)
+            elif isinstance(v, list):
+                scrubbed[k] = [self._scrub_dict(item) if isinstance(item, dict) else item for item in v]
             else:
                 scrubbed[k] = v
         return scrubbed

@@ -11,6 +11,7 @@ import {
   Info,
   Layers,
   Loader2,
+  Lock,
   Menu,
   Plus,
   Radio,
@@ -1904,9 +1905,10 @@ export function ModulesPage() {
   const canRun = Boolean(campaignId && selectedId) && executionConditionBlocked;
   const runBlocked = !canRun;
   const runHint = moduleRunHint(campaignId, selected, selectedCampaign, sensitive, confirmed, dryRun);
-  const persistedRun = lastRunRecord?.campaignId === campaignId && lastRunRecord.moduleId === selectedId ? lastRunRecord : null;
-  const runResult = (run.data ?? (!persistedRun?.isError ? persistedRun?.payload : undefined)) as Record<string, unknown> | undefined;
-  const runError = run.error ?? (persistedRun?.isError ? persistedRun.payload : undefined);
+  const activeRun = (run.data ? { campaignId, moduleId: selectedId, payload: run.data, isError: false } : null) ??
+    (lastRunRecord?.campaignId === campaignId ? lastRunRecord : null);
+  const runResult = (!activeRun?.isError ? activeRun?.payload : undefined) as Record<string, unknown> | undefined;
+  const runError = run.error ?? (activeRun?.isError ? activeRun.payload : undefined);
 
   useEffect(() => {
     let incomingParams: Record<string, unknown> | null = null;
@@ -2262,11 +2264,36 @@ export function ModulesPage() {
       )}
       {activeTab === "Results" && (
         <section className="panel p-4">
-          <SectionHeader
-            title="Run Results"
-            eyebrow={selected ? selected.id : undefined}
-            action={persistedRun ? <span className={persistedRun.isError ? "badge badge-high" : "badge badge-low"}>{persistedRun.isError ? "error" : "latest"}</span> : null}
-          />
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/80">
+            <div>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider block">
+                {activeRun?.moduleId ? `Module: ${activeRun.moduleId}` : (selected ? selected.id : "Execution")}
+              </span>
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <span>Run Results</span>
+                {activeRun && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    <Lock size={10} className="text-amber-400" />
+                    <span>Locked View</span>
+                  </span>
+                )}
+              </h2>
+            </div>
+            {activeRun && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLastRunRecord(null);
+                  run.reset();
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-mono transition-colors"
+                title="Dismiss and close this run result"
+              >
+                <X size={12} />
+                <span>Close Result</span>
+              </button>
+            )}
+          </div>
           {runResult || runError ? (
             <>
               <ModuleRunSummary
@@ -4010,12 +4037,15 @@ function getTailoredFindingDetails(finding: Finding) {
 
 function DiscoveredPerimeterCard({
   rawOutput,
-  onSelectModule
+  onSelectModule,
+  findingsCount = 0
 }: {
   rawOutput?: Record<string, unknown>;
   onSelectModule?: (moduleId: string, params?: Record<string, unknown>) => void;
+  findingsCount?: number;
 }) {
   const [copiedLootIdx, setCopiedLootIdx] = useState<number | null>(null);
+  const [showLoot, setShowLoot] = useState(false);
   if (!rawOutput) return null;
 
   const target = String(rawOutput.target ?? rawOutput.host ?? "");
@@ -4030,25 +4060,134 @@ function DiscoveredPerimeterCard({
   if (!hasPerimeter && loot.length === 0) return null;
 
   return (
-    <div className="space-y-3 mt-3">
-      {hasPerimeter && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3.5 space-y-3 font-mono text-xs">
+    <div className="space-y-2 mt-3">
+      {/* 1. Defensive Telemetry & Purple Loot (Collapsible Progressive Disclosure) */}
+      {loot.length > 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm overflow-hidden text-xs">
+          <button
+            type="button"
+            onClick={() => setShowLoot((prev) => !prev)}
+            className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left font-sans"
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
+              <span className="font-semibold text-zinc-200 text-xs">
+                Synthesized Detection Rules ({loot.length})
+              </span>
+              <span className="text-[10px] px-1.5 py-0.2 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded font-mono">
+                KQL & Sigma
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <span className="text-[11px]">{showLoot ? "Hide Rules" : "Show Rules"}</span>
+              <ChevronDown size={14} className={`transform transition-transform duration-200 ${showLoot ? "rotate-180" : ""}`} />
+            </div>
+          </button>
+
+          {showLoot && (
+            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50 font-mono">
+              {loot.map((item, idx) => {
+                const name = String(item.name ?? `Artifact #${idx + 1}`);
+                const lootType = String(item.loot_type ?? "rule");
+                const content = item.content as Record<string, unknown> | undefined;
+                const ruleText = typeof content?.kql === "string"
+                  ? content.kql
+                  : typeof content?.sigma === "string"
+                  ? content.sigma
+                  : typeof item.content === "string"
+                  ? item.content
+                  : JSON.stringify(item.content ?? item, null, 2);
+
+                const handleCopyRule = () => {
+                  void navigator.clipboard.writeText(ruleText);
+                  setCopiedLootIdx(idx);
+                  setTimeout(() => setCopiedLootIdx(null), 1500);
+                };
+
+                return (
+                  <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 truncate">
+                        <Terminal size={12} className="text-zinc-400 shrink-0" />
+                        <strong className="text-zinc-200 text-xs truncate">{name}</strong>
+                        <span className="badge text-[10px] py-0 px-1.5 uppercase">{lootType}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyRule}
+                        className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
+                        title="Copy detection rule query"
+                      >
+                        {copiedLootIdx === idx ? (
+                          <>
+                            <CheckCircle2 size={11} className="text-emerald-400" />
+                            <span className="text-emerald-400">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={11} />
+                            <span>Copy Rule</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
+                      {ruleText}
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. Perimeter Inventory Bar (Clean, non-redundant when findings are present) */}
+      {hasPerimeter && findingsCount > 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          <div className="flex items-center gap-2">
+            <Radio size={13} className="text-emerald-400 shrink-0" />
+            <span className="font-semibold text-zinc-300 text-[11px]">
+              Surface Inventory:
+            </span>
+            {target && (
+              <span className="text-zinc-400">
+                Host <strong className="text-zinc-100">{target}</strong>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 text-zinc-400 text-[11px]">
+            {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
+            {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+            <div className="flex items-center gap-1.5">
+              {openPorts.map((port) => (
+                <span key={String(port)} className="px-1.5 py-0.5 rounded-sm bg-zinc-900 border border-zinc-700/80 text-emerald-400 font-semibold text-[10px]">
+                  {String(port)}/TCP ({serviceMap[String(port)] ?? "active"})
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Discovered Services Grid (Rendered only if no findings exist, avoiding duplicate cards) */}
+      {hasPerimeter && findingsCount === 0 && (
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3 space-y-2.5 font-mono text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
             <div className="flex items-center gap-2">
-              <Radio size={14} className="text-emerald-400 animate-pulse shrink-0" />
-              <span className="font-semibold text-zinc-200 uppercase tracking-wider text-[11px]">
-                DISCOVERED TARGET PERIMETER & SERVICES
+              <Radio size={14} className="text-emerald-400 shrink-0" />
+              <span className="font-semibold text-zinc-200 text-xs">
+                Discovered Target Services
               </span>
               {target && (
                 <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm text-[11px]">
-                  HOST: <strong className="text-zinc-100">{target}</strong>
+                  Host: <strong className="text-zinc-100">{target}</strong>
                 </span>
               )}
             </div>
             <div className="flex items-center gap-3 text-[11px] text-zinc-400">
               {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
               {scanMs !== null && <span>Latency: {scanMs}ms</span>}
-              <span className="text-emerald-400 font-semibold">[SURFACE ACTIVE]</span>
             </div>
           </div>
 
@@ -4078,7 +4217,7 @@ function DiscoveredPerimeterCard({
 
                   {banner && (
                     <div className="text-[10px] text-zinc-400 truncate bg-zinc-950/70 p-1 rounded-sm border border-zinc-800/40">
-                      <span className="text-zinc-500 font-semibold">BANNER: </span>
+                      <span className="text-zinc-500 font-semibold">Banner: </span>
                       <span className="text-zinc-300 font-mono">{banner}</span>
                     </div>
                   )}
@@ -4091,7 +4230,6 @@ function DiscoveredPerimeterCard({
                             type="button"
                             onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
                             className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                            title="Fingerprint OpenSSH version"
                           >
                             Fingerprint SSH
                           </button>
@@ -4099,7 +4237,6 @@ function DiscoveredPerimeterCard({
                             type="button"
                             onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
                             className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                            title="Arm SSH Pivot"
                           >
                             SSH Pivot
                           </button>
@@ -4107,110 +4244,13 @@ function DiscoveredPerimeterCard({
                             type="button"
                             onClick={() => onSelectModule("linux.privesc", { target })}
                             className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                            title="Arm Linux Privesc"
                           >
                             Privesc Audit
                           </button>
                         </>
                       )}
-                      {(portStr === "80" || portStr === "443" || portStr === "8080" || portStr === "8443") && (
-                        <button
-                          type="button"
-                          onClick={() => onSelectModule("network.http_fingerprint", { target, ports: [Number(portStr)] })}
-                          className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                        >
-                          HTTP Fingerprint
-                        </button>
-                      )}
-                      {(portStr === "88" || portStr === "389" || portStr === "636") && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("ad.enum_users", { target, domain: "" })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Enum Users
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("ad.kerberoast", { target, domain: "" })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Kerberoast
-                          </button>
-                        </>
-                      )}
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Closed-Loop Defensive Telemetry & Purple Team Loot */}
-      {loot.length > 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3.5 space-y-2.5 font-mono text-xs">
-          <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
-              <span className="font-semibold text-zinc-200 uppercase tracking-wider text-[11px]">
-                CLOSED-LOOP DEFENSIVE TELEMETRY & PURPLE LOOT ({loot.length})
-              </span>
-            </div>
-            <span className="text-[10px] text-zinc-400 uppercase font-semibold">SYNTHESIZED DETECTION RULES</span>
-          </div>
-
-          <div className="space-y-2">
-            {loot.map((item, idx) => {
-              const name = String(item.name ?? `Artifact #${idx + 1}`);
-              const lootType = String(item.loot_type ?? "rule");
-              const content = item.content as Record<string, unknown> | undefined;
-              const ruleText = typeof content?.kql === "string"
-                ? content.kql
-                : typeof content?.sigma === "string"
-                ? content.sigma
-                : typeof item.content === "string"
-                ? item.content
-                : JSON.stringify(item.content ?? item, null, 2);
-
-              const handleCopyRule = () => {
-                void navigator.clipboard.writeText(ruleText);
-                setCopiedLootIdx(idx);
-                setTimeout(() => setCopiedLootIdx(null), 1500);
-              };
-
-              return (
-                <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/50 space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 truncate">
-                      <Terminal size={12} className="text-zinc-400 shrink-0" />
-                      <strong className="text-zinc-200 text-xs truncate">{name}</strong>
-                      <span className="badge text-[10px] py-0 px-1.5 uppercase font-mono">{lootType}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyRule}
-                      className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
-                      title="Copy detection rule query"
-                    >
-                      {copiedLootIdx === idx ? (
-                        <>
-                          <CheckCircle2 size={11} className="text-emerald-400" />
-                          <span className="text-emerald-400">Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={11} />
-                          <span>Copy Rule</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
-                    {ruleText}
-                  </pre>
                 </div>
               );
             })}
@@ -4355,7 +4395,7 @@ function ModuleRunSummary({
       )}
 
       {/* Discovered Target Perimeter Matrix & Purple Team Loot */}
-      <DiscoveredPerimeterCard rawOutput={rawOutput} onSelectModule={onSelectModule} />
+      <DiscoveredPerimeterCard rawOutput={rawOutput} onSelectModule={onSelectModule} findingsCount={findings.length} />
 
       {/* Findings Telemetry Stream (High-Density Tactical Matrix) */}
       {findings.length > 0 ? (
@@ -4435,11 +4475,11 @@ function ModuleRunSummary({
                   </div>
                 )}
 
-                {/* Tactical Pivot Pathways (No emojis, sleek mono buttons) */}
+                {/* Next Actions */}
                 {details.nextModules.length > 0 && onSelectModule && (
                   <div className="pt-2 border-t border-zinc-800/50 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider shrink-0">
-                      PIVOT PATHWAYS:
+                      Next Actions:
                     </span>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {details.nextModules.map((nextMod) => (
@@ -4451,7 +4491,7 @@ function ModuleRunSummary({
                           title={`Arm and execute ${nextMod} on ${finding.host}`}
                         >
                           <Terminal size={11} className="text-zinc-400" />
-                          <span>RUN: <strong className="text-zinc-100">{nextMod}</strong></span>
+                          <span>Execute: <strong className="text-zinc-100">{nextMod}</strong></span>
                           <ArrowRight size={11} className="text-zinc-400" />
                         </button>
                       ))}
