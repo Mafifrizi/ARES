@@ -2409,13 +2409,40 @@ class AresDatabase:
         auth_provider: str = "sso",
     ) -> dict[str, Any]:
         """JIT provision or look up an SSO user adhering to the canonical schema."""
-        async with self._conn.execute(
-            """SELECT * FROM users
-               WHERE (external_subject_id=? AND external_subject_id IS NOT NULL AND external_subject_id != '')
-                  OR username=?""",
-            (external_id, username),
-        ) as cur:
-            row = await cur.fetchone()
+        row = None
+        if external_id:
+            async with self._conn.execute(
+                """SELECT * FROM users
+                   WHERE external_subject_id=? AND external_subject_id IS NOT NULL AND external_subject_id != ''
+                     AND auth_provider=?""",
+                (external_id, auth_provider),
+            ) as cur:
+                row = await cur.fetchone()
+
+        async with self._conn.execute("SELECT * FROM users WHERE username=?", (username,)) as cur:
+            username_row = await cur.fetchone()
+
+        if username_row:
+            existing_by_username = dict(username_row)
+            if row and row["id"] == existing_by_username["id"]:
+                pass
+            else:
+                existing_provider = existing_by_username.get("auth_provider")
+                if existing_provider == "local":
+                    raise ValueError(
+                        f"SSO identity conflict: username '{username}' collides with an existing local account"
+                    )
+                if existing_provider and existing_provider != auth_provider:
+                    raise ValueError(
+                        f"SSO identity conflict: username '{username}' is already registered with provider '{existing_provider}'"
+                    )
+                existing_org = existing_by_username.get("org_id")
+                if existing_org and existing_org != org_id:
+                    raise ValueError(
+                        f"SSO identity conflict: username '{username}' is registered under a different organization"
+                    )
+                if not row:
+                    row = username_row
 
         if row:
             user = dict(row)

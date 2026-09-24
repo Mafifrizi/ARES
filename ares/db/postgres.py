@@ -5942,17 +5942,46 @@ class PostgresDatabase:
         await self._ensure_sso_ready()
         async with self._pool.acquire() as conn:
             async with conn.transaction():
-                row = await conn.fetchrow(
-                    """SELECT * FROM users
-                       WHERE (
-                           external_subject_id=$1
-                           AND external_subject_id IS NOT NULL
-                           AND external_subject_id != ''
-                       ) OR username=$2
-                       FOR UPDATE""",
-                    external_id,
+                row = None
+                if external_id:
+                    row = await conn.fetchrow(
+                        """SELECT * FROM users
+                           WHERE external_subject_id=$1
+                             AND external_subject_id IS NOT NULL
+                             AND external_subject_id != ''
+                             AND auth_provider=$2
+                           FOR UPDATE""",
+                        external_id,
+                        auth_provider,
+                    )
+
+                username_row = await conn.fetchrow(
+                    "SELECT * FROM users WHERE username=$1 FOR UPDATE",
                     username,
                 )
+
+                if username_row:
+                    existing_by_username = self._row_to_dict(username_row)
+                    if row and row["id"] == existing_by_username["id"]:
+                        pass
+                    else:
+                        existing_provider = existing_by_username.get("auth_provider")
+                        if existing_provider == "local":
+                            raise ValueError(
+                                f"SSO identity conflict: username '{username}' collides with an existing local account"
+                            )
+                        if existing_provider and existing_provider != auth_provider:
+                            raise ValueError(
+                                f"SSO identity conflict: username '{username}' is already registered with provider '{existing_provider}'"
+                            )
+                        existing_org = existing_by_username.get("org_id")
+                        if existing_org and existing_org != org_id:
+                            raise ValueError(
+                                f"SSO identity conflict: username '{username}' is registered under a different organization"
+                            )
+                        if not row:
+                            row = username_row
+
                 if row:
                     user = self._row_to_dict(row)
                     updates = []

@@ -1634,13 +1634,20 @@ async def sso_saml_acs(
             status_code=303,
         )
 
-    user = await db.provision_or_get_sso_user(
-        org_id=flow_record["org_id"],
-        username=profile["username"],
-        role=profile["role"],
-        external_id=profile["external_id"],
-        auth_provider="saml",
-    )
+    try:
+        user = await db.provision_or_get_sso_user(
+            org_id=flow_record["org_id"],
+            username=profile["username"],
+            role=profile["role"],
+            external_id=profile["external_id"],
+            auth_provider="saml",
+        )
+    except Exception as exc:
+        logger.warning("saml_provisioning_failed", error=str(exc))
+        return RedirectResponse(
+            f"/dashboard/login?error={quote(str(exc))}",
+            status_code=303,
+        )
 
     def _token_factory(claims: Mapping[str, Any]) -> str:
         return create_access_token(
@@ -1731,13 +1738,20 @@ async def sso_oidc_callback(
             status_code=303,
         )
 
-    user = await db.provision_or_get_sso_user(
-        org_id=flow_record["org_id"],
-        username=profile["username"],
-        role=profile["role"],
-        external_id=profile["external_id"],
-        auth_provider="oidc",
-    )
+    try:
+        user = await db.provision_or_get_sso_user(
+            org_id=flow_record["org_id"],
+            username=profile["username"],
+            role=profile["role"],
+            external_id=profile["external_id"],
+            auth_provider="oidc",
+        )
+    except Exception as exc:
+        logger.warning("oidc_provisioning_failed", error=str(exc))
+        return RedirectResponse(
+            f"/dashboard/login?error={quote(str(exc))}",
+            status_code=303,
+        )
 
     def _token_factory(claims: Mapping[str, Any]) -> str:
         return create_access_token(
