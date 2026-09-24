@@ -1412,6 +1412,11 @@ class AresEngine:
 
         for artifact in runtime_state.artifact_store.hosts():
             if artifact.ip_address:
+                if (
+                    hasattr(campaign, "is_in_scope")
+                    and not campaign.is_in_scope(artifact.ip_address)
+                ):
+                    continue
                 runtime_state.session.add_host(
                     artifact.ip_address,
                     hostname=artifact.hostname,
@@ -1425,6 +1430,11 @@ class AresEngine:
 
         for host in runtime_state.session.all_hosts():
             if not host.ip_address:
+                continue
+            if (
+                hasattr(campaign, "is_in_scope")
+                and not campaign.is_in_scope(host.ip_address)
+            ):
                 continue
             try:
                 await self.db.upsert_host(

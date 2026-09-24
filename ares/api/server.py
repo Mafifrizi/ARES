@@ -2617,7 +2617,12 @@ async def run_module(
             return False
 
         try:
-            if module_result and module_result.status in ("success", "partial") and _is_valid_target_ip(target_ip):
+            if (
+                module_result
+                and module_result.status in ("success", "partial")
+                and _is_valid_target_ip(target_ip)
+                and (not hasattr(c_obj, "is_in_scope") or c_obj.is_in_scope(target_ip))
+            ):
                 from ares.db.database import Host as DBHost
                 raw_ports = raw.get("open_ports") or []
                 clean_ports: list[int] = []
