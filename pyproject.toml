@@ -50,7 +50,8 @@ dependencies = [
 
     # Database (async + sync SQLite + migrations)
     "aiosqlite>=0.20",
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "greenlet>=3.0",
     "aiofiles>=23.2",
     "alembic>=1.13",       # DB migrations - required for revoked_access_tokens table
 

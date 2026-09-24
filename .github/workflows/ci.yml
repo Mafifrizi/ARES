@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
+      - run: pip install greenlet "sqlalchemy[asyncio]>=2.0"
       - run: pip install -e ".[dev]"
       - run: python -m compileall ares tests
       - run: pytest tests/unit -q --tb=short --timeout=60 --timeout-method=thread --maxfail=1
@@ -56,6 +57,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
+      - run: pip install greenlet "sqlalchemy[asyncio]>=2.0"
       - run: pip install -e ".[dev,postgres]"
       - env:
           ARES_TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
