@@ -580,6 +580,7 @@ function CobaltGraphInner({
 
   return (
     <div className="cobalt-canvas-area" aria-label="Cobalt Strike Pivot Graph">
+
       {/* Tactical Locked Pathway Tracking HUD Banner */}
       {isLocked && trackedPathway && (
         <div className="cobalt-track-hud" role="status" aria-live="polite">
@@ -639,6 +640,14 @@ function CobaltGraphInner({
               onSelect(null);
             } else {
               onSelect({ kind: "node", value: selectedNode });
+
+              // TRIGGER LOGIC: Significant event - First-time pathway unlock to this host
+              const isFirewall =
+                selectedNode.type === "firewall" ||
+                selectedNode.id.includes("firewall") ||
+                selectedNode.id.includes("ingress");
+              if (!isFirewall) {
+              }
             }
           }
         }}
@@ -845,11 +854,11 @@ export default function GraphPage({
         </div>
       )}
 
-      {/* Authentic Cobalt Strike Desktop Window Title Bar */}
+      {/* Authentic Desktop Window Title Bar */}
       <div className="cobalt-window-titlebar">
         <div className="cobalt-window-title">
           <Shield size={13} />
-          <span>Cobalt Strike</span>
+          <span>ARES</span>
         </div>
         <div className="cobalt-window-controls">
           <button
@@ -879,17 +888,17 @@ export default function GraphPage({
         </div>
       </div>
 
-      {/* Classic Cobalt Strike Desktop Window Menu Bar */}
+      {/* Classic Desktop Window Menu Bar */}
       <div className="cobalt-menubar">
         <div className="cobalt-menubar-items">
           <span
             className="cobalt-menu-item font-bold"
             onClick={() => setShowAboutDialog(true)}
-            title="About Cobalt Strike C2 Visualizer Engine"
+            title="About ARES Tactical Visualizer Engine"
             role="button"
             tabIndex={0}
           >
-            Cobalt Strike
+            ARES
           </span>
           <span
             className="cobalt-menu-item"
@@ -1353,7 +1362,7 @@ export default function GraphPage({
         <div className="cobalt-dialog-overlay" onClick={() => setShowHelpDialog(false)}>
           <div className="cobalt-dialog-window" style={{ width: "680px" }} onClick={(e) => e.stopPropagation()}>
             <div className="cobalt-dialog-titlebar">
-              <span>Cobalt Strike C2 - Operator Reference & Help Manual</span>
+              <span>ARES C2 - Operator Reference & Help Manual</span>
               <button className="cobalt-win-btn close" onClick={() => setShowHelpDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
@@ -1528,7 +1537,7 @@ export default function GraphPage({
         <div className="cobalt-dialog-overlay" onClick={() => setShowAboutDialog(false)}>
           <div className="cobalt-dialog-window" style={{ width: "480px" }} onClick={(e) => e.stopPropagation()}>
             <div className="cobalt-dialog-titlebar">
-              <span>About ARES Cobalt Strike Visualizer Engine</span>
+              <span>About ARES Tactical Visualizer Engine</span>
               <button className="cobalt-win-btn close" onClick={() => setShowAboutDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
@@ -1537,7 +1546,7 @@ export default function GraphPage({
                   <Shield size={24} />
                 </div>
                 <div>
-                  <div className="font-bold text-sm tracking-wide">ARES Cobalt Strike C2 Visualizer</div>
+                  <div className="font-bold text-sm tracking-wide">ARES Tactical C2 Visualizer</div>
                   <div className="text-[10px] text-zinc-400 font-mono">v6.0 Enterprise Edition · Automated Red Team Engine</div>
                 </div>
               </div>

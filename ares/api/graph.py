@@ -640,14 +640,14 @@ def build_campaign_graph(
         add_node(APIGraphNode(
             id    = find_node_id,
             type  = "finding",
-            label = f"[{sev.upper()}]\n{title[:30]}",
+            label = title,
             data  = {
                 "title":           title,
                 "severity":        sev,
                 "mitre_technique": getattr(finding, "mitre_technique", ""),
                 "mitre_tactic":    getattr(finding, "mitre_tactic", ""),
                 "module_id":       getattr(finding, "module_id", ""),
-                "description":     getattr(finding, "description", "")[:200],
+                "description":     getattr(finding, "description", "")[:1000],
             },
             color = _SEVERITY_COLORS.get(sev, "#6c757d"),
             shape = "triangle",
@@ -849,16 +849,23 @@ def merge_durable_attack_graph(
         node_id = f"artifact:{raw_id}"
         node_map[raw_id] = node_id
         node_type = str(raw_node.get("type") or "artifact")
+        props = _safe_graph_data(raw_node.get("properties", {}))
+        node_data = {
+            "risk": raw_node.get("risk", 0.0),
+            "is_target": bool(raw_node.get("is_target", False)),
+            "properties": props,
+            "source": "durable_artifact_graph",
+        }
+        if node_type == "finding":
+            node_data["title"] = raw_label
+            node_data["severity"] = props.get("severity") or raw_node.get("severity", "info")
+            node_data["mitre_technique"] = props.get("mitre_technique", "")
+            node_data["description"] = props.get("description", "")
         nodes.append(APIGraphNode(
             id=node_id,
             type=node_type,
             label=raw_label,
-            data={
-                "risk": raw_node.get("risk", 0.0),
-                "is_target": bool(raw_node.get("is_target", False)),
-                "properties": _safe_graph_data(raw_node.get("properties", {})),
-                "source": "durable_artifact_graph",
-            },
+            data=node_data,
             color=str(raw_node.get("color") or "#64748b"),
             shape="diamond" if bool(raw_node.get("is_target", False)) else "circle",
             size=24 if bool(raw_node.get("is_target", False)) else 18,

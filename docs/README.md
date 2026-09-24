@@ -40,7 +40,7 @@ The documentation is organized into six functional pillars:
 | Document | Description | Target Audience |
 | --- | --- | --- |
 | [frontend.md](frontend.md) | React 18 + Vite dashboard architecture, Web Locks, session management, and state coordination. | Frontend Engineers |
-| [dashboard-guide.md](dashboard-guide.md) | Complete operational cockpit guide: campaigns, modules, telemetry, and live telemetry. | Red Team Operators |
+| [dashboard-guide.md](dashboard-guide.md) | Complete operational cockpit guide: campaigns, modules, tactical pivot graph & beacon console, and live telemetry. | Red Team Operators |
 
 ### Release and Community
 | Document | Description | Target Audience |

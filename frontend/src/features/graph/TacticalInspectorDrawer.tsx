@@ -1,25 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Server,
-  Terminal,
   ShieldAlert,
-  ShieldCheck,
-  Cpu,
-  ArrowRight,
   Copy,
   CheckCircle2,
   X,
-  Activity,
-  Flame,
-  Zap,
-  Lock,
   Wifi,
-  ExternalLink,
-  Layers,
-  Crosshair,
-  Key,
-  Share2
+  Layers
 } from "lucide-react";
 import type { SafeGraphNode, SafeGraphEdge } from "./graphModel";
 import { inferCobaltNodeData } from "./graphModel";
@@ -59,6 +46,35 @@ export function TacticalInspectorDrawer({
 
   const targetVal = targetIp || node?.label || "";
   const isWindows = targetOs.toLowerCase().includes("win");
+
+  // Deduplicate and group findings to present a clean, high-signal list
+  const groupedFindings = useMemo(() => {
+    const map = new Map<string, { finding: Record<string, unknown>; count: number }>();
+    for (const f of findings) {
+      let cleanTitle = String(f.title ?? "").trim();
+      cleanTitle = cleanTitle.replace(/^\[(CRITICAL|HIGH|MEDIUM|LOW|INFO)\]\s*/i, "").trim();
+      if ((cleanTitle.endsWith(" on") || cleanTitle.endsWith(" on ")) && targetVal) {
+        cleanTitle = `${cleanTitle.trim()} ${targetVal}`;
+      }
+      if (/\(\d*\s*$/.test(cleanTitle)) {
+        cleanTitle = cleanTitle.replace(/\(\d*\s*$/, "").trim();
+      }
+      const sev = String(f.severity ?? "info").toLowerCase();
+      const tech = String(f.mitre_technique ?? "");
+      const desc = String(f.description ?? "").trim();
+      const key = `${cleanTitle.toLowerCase()}:::${sev}:::${tech}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+        if (!existing.finding.description && desc) {
+          existing.finding.description = desc;
+        }
+      } else {
+        map.set(key, { finding: { ...f, title: cleanTitle, description: desc || null }, count: 1 });
+      }
+    }
+    return Array.from(map.values());
+  }, [findings, targetVal]);
 
   const hasPrivescFinding = findings.some((f) => {
     const title = String(f.title || f.label || "").toLowerCase();
@@ -215,309 +231,6 @@ export function TacticalInspectorDrawer({
           </div>
         )}
 
-        {/* Execution Lifecycle & Action Plan */}
-        {isNode && targetIp && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between pb-1 border-b border-zinc-800/60">
-              <span className="text-[11px] font-sans font-semibold text-zinc-300 flex items-center gap-1.5">
-                <Crosshair size={13} className="text-cyan-400" />
-                Execution Plan
-              </span>
-              <span className="text-[10px] font-mono text-zinc-400">
-                {isElevated ? "Stage 4 of 5" : isCompromised ? "Stage 3 of 5" : "Stage 1 of 5"}
-              </span>
-            </div>
-
-            <div className="space-y-1.5">
-              {/* STAGE 1: Service Recon */}
-              <div className="p-2.5 rounded-sm border border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50 transition-colors flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="p-1.5 rounded-sm bg-emerald-900/40 text-emerald-400 shrink-0">
-                    <Activity size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <strong className="text-[11px] font-mono text-emerald-300 block truncate">
-                      Stage 1: Service Recon
-                    </strong>
-                    <span className="text-[10px] text-zinc-400 block font-sans truncate">
-                      {openPorts.length > 0 ? `${openPorts.join(", ")}/TCP Active · Services identified` : "Perimeter discovered · Host reachable"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <CheckCircle2 size={13} className="text-emerald-400" />
-                  <button
-                    type="button"
-                    onClick={() => handlePivotModule("network.service_detect", { ports: openPorts.join(",") || "22,80,443" })}
-                    className="text-[10px] font-mono text-zinc-400 hover:text-emerald-300 transition-colors"
-                    title="Re-run fingerprint scan"
-                  >
-                    Re-scan ↗
-                  </button>
-                </div>
-              </div>
-
-              {/* STAGE 2: Foothold & Spray */}
-              <div className={`p-2.5 rounded-sm border transition-colors flex items-center justify-between gap-3 ${
-                isCompromised
-                  ? "border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50"
-                  : "border-zinc-800 bg-zinc-900/70 hover:border-zinc-700"
-              }`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-sm shrink-0 ${
-                    isCompromised ? "bg-emerald-900/40 text-emerald-400" : "bg-amber-900/40 text-amber-400"
-                  }`}>
-                    <Terminal size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <strong className={`text-[11px] font-mono block truncate ${
-                      isCompromised ? "text-emerald-300" : "text-zinc-200"
-                    }`}>
-                      Stage 2: {isWindows ? "Domain Authentication" : "SSH Foothold & Spray"}
-                    </strong>
-                    <span className="text-[10px] text-zinc-400 block font-sans truncate">
-                      {isCompromised
-                        ? "Session authenticated: \\kraii active"
-                        : (isWindows ? "Password spray across SMB & LDAP surface" : "Low-and-slow authentication audit on port 22")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {isCompromised ? (
-                    <>
-                      <CheckCircle2 size={13} className="text-emerald-400" />
-                      <button
-                        type="button"
-                        onClick={() => handlePivotModule(
-                          isWindows ? "credential.pass_spray" : "credential.ssh_spray",
-                          isWindows
-                            ? { domain: "local" }
-                            : { target: targetVal, port: 22, users: ["root", "admin", "kali", "ubuntu", "kraii"], passwords: ["Password123!", "admin", "root", "toor", "kraii"] }
-                        )}
-                        className="text-[10px] font-mono text-zinc-400 hover:text-emerald-300 transition-colors"
-                        title="Re-run spray"
-                      >
-                        Pivot ↗
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handlePivotModule(
-                        isWindows ? "credential.pass_spray" : "credential.ssh_spray",
-                        isWindows
-                          ? { domain: "local" }
-                          : { target: targetVal, port: 22, users: ["root", "admin", "kali", "ubuntu", "kraii"], passwords: ["Password123!", "admin", "root", "toor", "kraii"] }
-                      )}
-                      className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-sm text-amber-300 text-[10px] font-mono flex items-center gap-1 transition-colors"
-                    >
-                      <span>Execute</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* STAGE 3: Privilege Escalation */}
-              <div className={`p-2.5 rounded-sm border transition-colors flex items-center justify-between gap-3 ${
-                isElevated
-                  ? "border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50"
-                  : isCompromised
-                  ? "border-rose-600/40 bg-zinc-900/80 hover:border-rose-500/60"
-                  : "border-zinc-800/80 bg-zinc-900/30 opacity-60"
-              }`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-sm shrink-0 ${
-                    isElevated
-                      ? "bg-emerald-900/40 text-emerald-400"
-                      : isCompromised
-                      ? "bg-rose-900/40 text-rose-400"
-                      : "bg-zinc-800 text-zinc-500"
-                  }`}>
-                    <Flame size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <strong className={`text-[11px] font-mono block truncate ${
-                      isElevated ? "text-emerald-300" : isCompromised ? "text-zinc-200" : "text-zinc-400"
-                    }`}>
-                      Stage 3: Privilege Escalation
-                    </strong>
-                    <span className="text-[10px] text-zinc-400 block font-sans truncate">
-                      {isElevated
-                        ? "Root / System privilege confirmed"
-                        : isCompromised
-                        ? (isWindows ? "Token impersonation & AD ACL escalation" : "Sudo, SUID binaries & capabilities audit")
-                        : "Requires initial foothold session"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {isElevated ? (
-                    <>
-                      <CheckCircle2 size={13} className="text-emerald-400" />
-                      <button
-                        type="button"
-                        onClick={() => handlePivotModule(isWindows ? "windows.token_impersonation" : "linux.privesc", isWindows ? {} : { host: targetVal, ssh_user: "kraii", ssh_port: 22 })}
-                        className="text-[10px] font-mono text-zinc-400 hover:text-emerald-300 transition-colors"
-                        title="Re-run privilege escalation"
-                      >
-                        Re-check ↗
-                      </button>
-                    </>
-                  ) : isCompromised ? (
-                    <button
-                      type="button"
-                      onClick={() => handlePivotModule(isWindows ? "windows.token_impersonation" : "linux.privesc", isWindows ? {} : { host: targetVal, ssh_user: "kraii", ssh_port: 22 })}
-                      className="px-2 py-1 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/40 rounded-sm text-rose-300 text-[10px] font-mono flex items-center gap-1 transition-colors"
-                    >
-                      <span>Execute</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-500">
-                      <Lock size={11} />
-                      <span>Locked</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* STAGE 4: Credential & Kerberos Harvesting */}
-              <div className={`p-2.5 rounded-sm border transition-colors flex items-center justify-between gap-3 ${
-                hasHarvestFinding
-                  ? "border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50"
-                  : isElevated
-                  ? "border-amber-600/40 bg-zinc-900/80 hover:border-amber-500/60"
-                  : "border-zinc-800/80 bg-zinc-900/30 opacity-60"
-              }`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-sm shrink-0 ${
-                    hasHarvestFinding
-                      ? "bg-emerald-900/40 text-emerald-400"
-                      : isElevated
-                      ? "bg-amber-900/40 text-amber-400"
-                      : "bg-zinc-800 text-zinc-500"
-                  }`}>
-                    <Key size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <strong className={`text-[11px] font-mono block truncate ${
-                      hasHarvestFinding
-                        ? "text-emerald-300"
-                        : isElevated
-                        ? "text-zinc-200"
-                        : "text-zinc-400"
-                    }`}>
-                      Stage 4: {isWindows ? "LSASS & Kerberos Roasting" : "Kerberos Ccache & SSSD"}
-                    </strong>
-                    <span className="text-[10px] text-zinc-400 block font-sans truncate">
-                      {hasHarvestFinding
-                        ? (isWindows ? "LSASS memory & credential loot harvested" : "Credential loot & filesystem secrets collected")
-                        : isElevated
-                        ? (isWindows ? "Harvest LSASS memory & ticket cache" : "Dump TGTs, ccache tickets & SSSD cache via root")
-                        : "Requires elevated root / system access"}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {hasHarvestFinding ? (
-                    <>
-                      <CheckCircle2 size={13} className="text-emerald-400" />
-                      <button
-                        type="button"
-                        onClick={() => handlePivotModule(isWindows ? "windows.lsass_dump" : (isWindows ? "linux.ccache_hunt" : "exfil.secrets_scan"), isWindows ? {} : { host: targetVal, ssh_user: "kraii" })}
-                        className="text-[10px] font-mono text-zinc-400 hover:text-emerald-300 transition-colors"
-                        title="Re-harvest credentials"
-                      >
-                        Re-harvest ↗
-                      </button>
-                    </>
-                  ) : isElevated ? (
-                    <button
-                      type="button"
-                      onClick={() => handlePivotModule(isWindows ? "windows.lsass_dump" : "linux.ccache_hunt", isWindows ? {} : { host: targetVal, ssh_user: "kraii" })}
-                      className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-sm text-amber-300 text-[10px] font-mono flex items-center gap-1 transition-colors"
-                    >
-                      <span>Harvest</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-500">
-                      <Lock size={11} />
-                      <span>Locked</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* STAGE 5: Lateral Movement */}
-              <div className={`p-2.5 rounded-sm border transition-colors flex items-center justify-between gap-3 ${
-                hasLateralFinding
-                  ? "border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50"
-                  : isElevated
-                  ? "border-zinc-800 bg-zinc-900/70 hover:border-zinc-700"
-                  : "border-zinc-800/80 bg-zinc-900/30 opacity-60"
-              }`}>
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className={`p-1.5 rounded-sm shrink-0 ${
-                    hasLateralFinding
-                      ? "bg-emerald-900/40 text-emerald-400"
-                      : isElevated
-                      ? "bg-cyan-900/40 text-cyan-400"
-                      : "bg-zinc-800 text-zinc-500"
-                  }`}>
-                    <Share2 size={13} />
-                  </div>
-                  <div className="min-w-0">
-                    <strong className={`text-[11px] font-mono block truncate ${
-                      hasLateralFinding
-                        ? "text-emerald-300"
-                        : isElevated
-                        ? "text-zinc-200"
-                        : "text-zinc-400"
-                    }`}>
-                      Stage 5: Lateral Movement
-                    </strong>
-                    <span className="text-[10px] text-zinc-400 block font-sans truncate">
-                      {hasLateralFinding
-                        ? "Lateral pivot active on target endpoint"
-                        : (isWindows ? "lateral.wmiexec / psexec to adjacent targets" : "persistence.scheduled_task & SSH pivoting")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {hasLateralFinding ? (
-                    <>
-                      <CheckCircle2 size={13} className="text-emerald-400" />
-                      <button
-                        type="button"
-                        onClick={() => handlePivotModule(isWindows ? "lateral.wmiexec" : "lateral.ssh_pivot", { target: targetVal })}
-                        className="text-[10px] font-mono text-zinc-400 hover:text-emerald-300 transition-colors"
-                        title="Re-run lateral movement"
-                      >
-                        Re-pivot ↗
-                      </button>
-                    </>
-                  ) : isElevated ? (
-                    <button
-                      type="button"
-                      onClick={() => handlePivotModule(isWindows ? "lateral.wmiexec" : "persistence.scheduled_task", { target: targetVal })}
-                      className="px-2 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/40 rounded-sm text-cyan-300 text-[10px] font-mono flex items-center gap-1 transition-colors"
-                    >
-                      <span>Expand</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-500">
-                      <Lock size={11} />
-                      <span>Locked</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Discovered Open Ports Matrix */}
         {openPorts.length > 0 && (
@@ -554,34 +267,52 @@ export function TacticalInspectorDrawer({
               <ShieldAlert size={11} className="text-rose-400" />
               CONFIRMED VULNERABILITIES & FINDINGS ({findings.length})
             </span>
-            <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
-              {findings.map((f, idx) => {
+            <div className="space-y-2">
+              {groupedFindings.map(({ finding: f, count }, idx) => {
                 const sev = String(f.severity ?? "info").toLowerCase();
                 const sevBadge =
                   sev.includes("high") || sev.includes("crit")
-                    ? "bg-rose-950 text-rose-300 border-rose-800"
+                    ? "bg-rose-950/90 text-rose-300 border-rose-800"
                     : sev.includes("med")
-                    ? "bg-amber-950 text-amber-300 border-amber-800"
+                    ? "bg-amber-950/90 text-amber-300 border-amber-800"
                     : "bg-zinc-900 text-zinc-300 border-zinc-800";
+
+                const cleanTitle = String(f.title ?? `Finding #${idx + 1}`);
+                const desc = f.description ? String(f.description).trim() : null;
 
                 return (
                   <div
                     key={idx}
-                    className="p-2 bg-zinc-900/70 border border-zinc-800/80 rounded-sm space-y-1"
+                    className="p-2.5 bg-zinc-900/80 border border-zinc-800 rounded-sm space-y-1.5 hover:border-zinc-700 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
-                      <span className={`px-1 py-0.5 rounded border uppercase font-semibold ${sevBadge}`}>
-                        {sev}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-1.5 py-0.5 rounded border uppercase font-bold text-[9px] tracking-wide ${sevBadge}`}>
+                          {sev}
+                        </span>
+                        {count > 1 && (
+                          <span
+                            className="px-1.5 py-0.2 rounded border border-zinc-700/80 bg-zinc-800/90 text-zinc-300 font-mono text-[9px]"
+                            title={`${count} instances detected`}
+                          >
+                            ×{count}
+                          </span>
+                        )}
+                      </div>
                       {Boolean(f.mitre_technique) && (
-                        <span className="text-zinc-500 border border-zinc-800 px-1 py-0.5 rounded">
+                        <span className="text-zinc-300 bg-zinc-950 border border-zinc-700/80 px-1.5 py-0.5 rounded font-mono text-[10px]">
                           {String(f.mitre_technique)}
                         </span>
                       )}
                     </div>
-                    <h4 className="text-[11px] font-semibold text-zinc-200 leading-snug">
-                      {String(f.title ?? `Finding #${idx + 1}`)}
+                    <h4 className="text-[12px] font-semibold text-zinc-100 leading-snug break-words">
+                      {cleanTitle}
                     </h4>
+                    {desc && (
+                      <p className="text-[11px] text-zinc-400 font-sans leading-relaxed break-words">
+                        {desc}
+                      </p>
+                    )}
                   </div>
                 );
               })}

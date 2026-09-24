@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttackPath, CampaignGraph } from "../../api/types";
-import { filterGraph, getPathHighlight, isGraphEmpty, toSafeGraph } from "./graphModel";
+import { adaptApiGraphToCobalt, filterGraph, getPathHighlight, isGraphEmpty, toSafeGraph } from "./graphModel";
 
 const payload: CampaignGraph = {
   nodes: [
@@ -85,5 +85,37 @@ describe("graph model", () => {
 
     expect(graph.nodes).toHaveLength(1);
     expect(graph.edges).toHaveLength(1);
+  });
+
+  it("cleans dangling open parenthesis from truncated finding titles without stripping valid parentheses", () => {
+    const testGraph = toSafeGraph({
+      nodes: [
+        { id: "host:192.168.56.105", type: "host", label: "192.168.56.105", data: { ip: "192.168.56.105" } },
+        {
+          id: "finding:1",
+          type: "finding",
+          label: "Dangerous Linux Capabilities (",
+          data: { severity: "high", title: "Dangerous Linux Capabilities (" }
+        },
+        {
+          id: "finding:2",
+          type: "finding",
+          label: "Dangerous Linux Capabilities (3)",
+          data: { severity: "high", title: "Dangerous Linux Capabilities (3)" }
+        }
+      ],
+      edges: [
+        { source: "host:192.168.56.105", target: "finding:1", type: "finding" },
+        { source: "host:192.168.56.105", target: "finding:2", type: "finding" }
+      ]
+    });
+
+    const adapted = adaptApiGraphToCobalt(testGraph);
+    const hostNode = adapted.nodes.find((n) => n.id === "host:192.168.56.105");
+    expect(hostNode).toBeDefined();
+    const findings = (hostNode?.metadata?.findings ?? []) as Array<{ title: string }>;
+    expect(findings).toHaveLength(2);
+    expect(findings[0].title).toBe("Dangerous Linux Capabilities");
+    expect(findings[1].title).toBe("Dangerous Linux Capabilities (3)");
   });
 });

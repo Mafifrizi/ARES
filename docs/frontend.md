@@ -76,7 +76,7 @@ Then open `http://127.0.0.1:5173/dashboard/`.
 - `/campaigns`: `List`, `Scope`, and `Findings` tabs for list/create/detail/delete, findings, CVSS, diff, restore, and dry-run plan actions
 - `/modules`: `Catalog`, `Run Panel`, and `Results` tabs for catalog filters, backend-derived dynamic params, dry-run default, and execution output
 - `/reports`: `Generate` tab for report creation; `Library` tab for listing artifacts, authenticated download, per-report delete, and Delete all/Clear library cleanup. Successful delete actions update rows and artifact counts without a full page reload.
-- `/graph`: `Entities`, `Attack Paths`, and `Ingest` tabs for graph review, attack paths, and BloodHound ingest
+- `/graph`: Interactive ARES Tactical Pivot Graph & Beacon Console (`Entities`, `Attack Paths`, and `Ingest` tabs) featuring perimeter ingress firewall with animated flames, click-to-lock pathway tracking, slide-over Tactical Inspector Drawer (with deduplicated vulnerability grouping and unified custom dark scrollbar), and multi-tabbed Beacon session terminal dock.
 - `/templates`: `Templates` and `Plan Builder` tabs for listing templates and generating plans
 - `/strategy`: `Objective`, `Active`, and `Result` tabs for active engagements and role-gated engagement start
 - `/security`: `Account`, `API Keys`, and `Audit` tabs for profile, password change, API keys, audit, and users

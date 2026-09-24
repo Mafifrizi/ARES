@@ -1,5 +1,6 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo, type ReactNode } from "react";
+import { AnimatedFirewallFlames } from "./AnimatedFirewallFlames";
 
 export interface PivotNodeData extends Record<string, unknown> {
   label: string;
@@ -91,26 +92,30 @@ function LinuxTuxEmblem() {
 
 
 /**
- * Brick Wall + Flames (Cobalt Strike Gateway / Firewall Node)
+ * Brick Wall + Animated Flames (Cobalt Strike Gateway / PERIMETER INGRESS Node)
  */
-export const PivotFirewallNode = memo(function PivotFirewallNode({ data, selected }: NodeProps) {
+export const PivotFirewallNode = memo(function PivotFirewallNode({ id, data, selected }: NodeProps) {
   const nodeData = data as unknown as PivotNodeData;
+  const nodeId = id || (nodeData.id as string) || "node:firewall";
+
   return (
-    <div className={`cobalt-firewall-node${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}${nodeData.isTracked ? " in-pathway" : ""}`}>
+    <div
+      className={`cobalt-firewall-node${selected ? " selected" : ""}${nodeData.dimmed ? " dimmed opacity-30" : ""}${nodeData.isTracked ? " in-pathway" : ""}`}
+      title="PERIMETER INGRESS / Firewall Gateway"
+      data-node-id={nodeId}
+    >
       <Handle type="target" position={Position.Left} id="left-target" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="source" position={Position.Left} id="left-source" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="target" position={Position.Top} id="top-target" className="opacity-0 pointer-events-none" isConnectable={false} />
       <Handle type="source" position={Position.Top} id="top-source" className="opacity-0 pointer-events-none" isConnectable={false} />
 
       <div className="cobalt-firewall-brick">
-        {/* Stylized Flames and Brickwork */}
+        {/* Animated Flames + Authentic Brick Wall (Firewall Boundary Barrier) */}
         <svg className="w-20 h-16" viewBox="0 0 80 64" fill="none">
-          {/* Flames behind wall */}
-          <path
-            d="M12 36C8 28 14 16 20 8C22 18 28 22 30 14C34 6 42 2 48 10C54 18 56 12 60 4C66 12 70 24 64 36H12Z"
-            fill="url(#fireGradient)"
-          />
-          {/* Brick Wall Grid */}
+          {/* 1. Organic, looping animated flames behind the wall */}
+          <AnimatedFirewallFlames />
+
+          {/* 2. Authentic Brick Wall Grid (Firewall Boundary Barrier) */}
           <rect x="10" y="32" width="60" height="28" rx="2" fill="#991b1b" stroke="#f87171" strokeWidth="1.5" />
           {/* Mortar horizontal lines */}
           <line x1="10" y1="41" x2="70" y2="41" stroke="#450a0a" strokeWidth="1.5" />
@@ -121,14 +126,6 @@ export const PivotFirewallNode = memo(function PivotFirewallNode({ data, selecte
           <line x1="40" y1="41" x2="40" y2="50" stroke="#450a0a" strokeWidth="1.5" />
           <line x1="25" y1="50" x2="25" y2="60" stroke="#450a0a" strokeWidth="1.5" />
           <line x1="55" y1="50" x2="55" y2="60" stroke="#450a0a" strokeWidth="1.5" />
-          {/* Flame gradient definition */}
-          <defs>
-            <linearGradient id="fireGradient" x1="40" y1="0" x2="40" y2="36" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stopColor="#fef08a" />
-              <stop offset="35%" stopColor="#f97316" />
-              <stop offset="100%" stopColor="#dc2626" />
-            </linearGradient>
-          </defs>
         </svg>
       </div>
 

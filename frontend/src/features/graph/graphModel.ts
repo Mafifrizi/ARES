@@ -543,12 +543,23 @@ export function adaptApiGraphToCobalt(
           pid: inference.pid !== undefined ? inference.pid : null,
           subLabel: inference.subLabel || null,
           findingCount: hostFindings.length,
-          findings: hostFindings.map((f) => ({
-            title: f.label,
-            severity: f.severity || "info",
-            mitre_technique: f.metadata?.mitre_technique || f.metadata?.mitre || null,
-            description: f.metadata?.description || null
-          })),
+          findings: hostFindings.map((f) => {
+            let fullTitle = String(f.metadata?.title || f.label || "Finding").trim();
+            fullTitle = fullTitle.replace(/^\[(CRITICAL|HIGH|MEDIUM|LOW|INFO)\]\s*/i, "").trim();
+            const hostIp = String(f.metadata?.host || hostKey || n.label || "").trim();
+            if ((fullTitle.endsWith(" on") || fullTitle.endsWith(" on ")) && hostIp) {
+              fullTitle = `${fullTitle.trim()} ${hostIp}`;
+            }
+            if (/\(\d*\s*$/.test(fullTitle)) {
+              fullTitle = fullTitle.replace(/\(\d*\s*$/, "").trim();
+            }
+            return {
+              title: fullTitle,
+              severity: (f.metadata?.severity as string) || f.severity || "info",
+              mitre_technique: f.metadata?.mitre_technique || f.metadata?.mitre || null,
+              description: f.metadata?.description || null
+            };
+          }),
           maxSeverity: (hasCrit || hasPrivesc) ? "critical" : hasHigh ? "high" : hostFindings.length > 0 ? "medium" : null,
         }
       };

@@ -186,29 +186,35 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 5. Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Dock
+### 5. Multi-Vector Pivot Graph & ARES Beacon Terminal Console
 
-*Interactive Cobalt Strike-styled hierarchical lateral pivot topology graph paired with a real-time multi-tabbed Beacon session terminal console.*
+*Interactive hierarchical lateral pivot topology graph with perimeter firewall flame effects, slide-over Tactical Inspector Drawer, and a real-time docked Beacon session terminal console.*
 
 <div align="center">
 
-![ARES Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
+![ARES Multi-Vector Pivot Graph & Interactive Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Terminal Console - Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege borders (SYSTEM * / ADMIN / BEACON), and real-time interactive command terminal.*
+*ARES Tactical Pivot Graph & Interactive Beacon Terminal Console - Live enterprise campaign topology (`Kali test`), perimeter ingress firewall with animated flames, Linux/Windows compromised footholds, slide-over Tactical Inspector Drawer, and real-time interactive beacon terminal.*
 
 </div>
 
 - **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
 - **Key Capabilities**:
-  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`K8S-INGRESS-01`), initial foothold workstations (`WS-FIN-042`, `AWS-IMDS-GW`), internal database and file servers (`SQL01`, `FS01`), and high-value Active Directory Domain Controllers (`DC01`).
-  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
+  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`PERIMETER INGRESS 0.0.0.0/0`), initial foothold workstations and services, internal servers, and high-value Active Directory Domain Controllers (`DC01`).
+  - **Perimeter Ingress Firewall with Animated Flames**: Dedicated perimeter boundary node featuring an ambient breathing aura and multi-layered CSS animated flame particle effects above a classic red brick firewall icon, designating the external ingress boundary.
+  - **Slide-Over Tactical Inspector Drawer**: Instant deep-dive host and lateral traversal intelligence panel:
+    - **Live Compromise & OS State**: Real-time status indicators (`COMPROMISED (ACTIVE)` vs `RECON TARGET`), OS detection, and perimeter access ports (e.g. `22/TCP`).
+    - **Confirmed Vulnerabilities & Findings**: Full-fidelity finding titles without premature truncation, MITRE ATT&CK technique badges (e.g. `T1548.001`, `T1552.001`), and pattern summaries.
+    - **Intelligent Finding Deduplication**: Redundant finding records on the same target are automatically grouped with instance multipliers (`×4`, `×3`) to preserve a clean, high-signal view.
+    - **Unified Dark Scrollbar**: Single sleek custom scrollbar matching the dark theme, eliminating nested OS scrollbars.
+  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers and root access, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
   - **Organic Cubic Bezier Routing & Telemetry Stream**: Fluid vector curves with directional arrowheads and animated glowing particle pulses visualizing live command-and-control and pivot traffic.
   - **Persistent Click-to-Lock Pathway Tracking**: Click any node to instantly freeze its upstream compromise lineage and downstream lateral reachability, complete with a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan across complex topologies without losing situational focus.
   - **Docked Multi-Row Beacon Terminal Console (`CobaltSessionDock`)**:
     - **Dual-Row Java Swing Session Tabs**: Automatic focus and session switching when clicking nodes on the canvas.
-    - **Cobalt Strike Status Bar**: Real-time privilege context (`[HOST] operator` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
+    - **Real-Time Status Bar**: Privilege context (`[HOST] root` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
     - **Interactive Command Prompt (`beacon>`)**:
-      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *`).
+      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *` or `root`).
       - `hashdump` / `creds`: Harvests and displays cached NTLM SAM/LSA hashes.
       - `ps` / `process`: Enumerates active process trees and resolves parent PIDs.
       - `ppid <pid>`: Tasks beacon to spoof parent process IDs for EDR evasion.

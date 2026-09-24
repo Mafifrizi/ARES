@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { CobaltSessionDock } from "./CobaltSessionDock";
+import { PivotFirewallNode } from "./CobaltStrikeNodes";
 import {
   adaptApiGraphToCobalt,
   generateCobaltPivotTopology,
@@ -173,4 +175,52 @@ describe("Cobalt Strike Visualizer Components & Integration", () => {
       expect(benchmark.nodes.some((n) => n.id === "node:dc01")).toBe(true);
     });
   });
+
+  describe("PivotFirewallNode (PERIMETER INGRESS)", () => {
+    it("renders animated firewall flames and authentic brick wall without dragon elements", () => {
+      const { container } = render(
+        <ReactFlowProvider>
+          <PivotFirewallNode
+            {...({
+              id: "node:firewall",
+              data: { label: "FIREWALL", subLabel: "Ingress / Egress", os: "firewall" },
+              selected: false,
+              type: "pivotFirewall",
+              zIndex: 1,
+              isConnectable: false,
+              positionAbsoluteX: 0,
+              positionAbsoluteY: 0,
+              dragging: false,
+              draggable: false,
+              selectable: true,
+              deletable: false,
+            } as any)}
+          />
+        </ReactFlowProvider>
+      );
+
+      // Verify node container and label
+      expect(container.querySelector(".cobalt-firewall-node")).toBeDefined();
+      expect(screen.getByText("FIREWALL")).toBeDefined();
+      expect(screen.getByText("Ingress / Egress")).toBeDefined();
+
+      // Verify authentic brick wall elements are intact
+      const brickRect = container.querySelector('rect[fill="#991b1b"]');
+      expect(brickRect).not.toBeNull();
+      const mortarLines = container.querySelectorAll("line");
+      expect(mortarLines.length).toBeGreaterThanOrEqual(7);
+
+      // Verify animated flames & embers are intact
+      expect(container.querySelector(".ares-firewall-flame-group")).not.toBeNull();
+      expect(container.querySelector(".ares-flame-ambient-aura")).not.toBeNull();
+      expect(container.querySelector(".ares-flame-tongue-center")).not.toBeNull();
+      expect(container.querySelector(".ares-ember-1")).not.toBeNull();
+
+      // Verify dragon character element is completely removed
+      expect(container.querySelector(".ares-cyber-dragon")).toBeNull();
+      expect(container.querySelector(".ares-dragon-body-tail")).toBeNull();
+      expect(container.querySelector(".ares-dragon-wing-left")).toBeNull();
+    });
+  });
 });
+

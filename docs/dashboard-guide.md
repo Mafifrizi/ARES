@@ -72,8 +72,7 @@ keys, bearer tokens, or sensitive report URLs.
 | Overview (Standby / Zero-State) | `docs/assets/screenshots/dashboard-overview-empty.png` | Clean onboarding hero, platform readiness strip, and initialization quick actions. |
 | Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
 | Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
-| Modules | `docs/assets/screenshots/dashboard-modules-catalog.png` | Module catalog filters, OPSEC labels, campaign selection, and parameter forms. |
-| Graph & Beacon Console | `docs/assets/screenshots/dashboard-graph.png` | Cobalt Strike Hierarchical Pivot Graph & docked dual-row Beacon session terminal with real-time command execution and privilege status. |
+| Graph & Beacon Console | `docs/assets/screenshots/dashboard-graph.png` | ARES Tactical Pivot Graph, Perimeter Ingress with animated flames, slide-over Tactical Inspector Drawer, & docked Beacon session terminal. |
 | Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
 
 ## Dashboard Shell
@@ -322,30 +321,36 @@ artifact count without a full page reload. If deletion fails, the page keeps
 the row and shows an error notice. When no reports remain, the Library shows
 the clean empty state: `No reports generated for this campaign yet.`
 
-### Graph & Cobalt Strike Beacon Terminal Dock
+### Graph & ARES Beacon Terminal Console
 
-Purpose: understand lateral pivot relationships, trace multi-hop compromise routes, and interact with compromised hosts directly from a docked Beacon terminal console.
+Purpose: understand lateral pivot relationships, trace multi-hop compromise routes, inspect tactical host vulnerabilities in a slide-over drawer, and interact with compromised hosts directly from a docked Beacon terminal console.
 
-![Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal](assets/screenshots/dashboard-graph.png)
+![ARES Tactical Pivot Graph & Docked Beacon Session Terminal](assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Session Terminal Console - Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege styling, and interactive command execution.*
+*ARES Tactical Pivot Graph & Docked Beacon Session Terminal Console - Live enterprise campaign topology (`Kali test`), perimeter ingress firewall with animated flames, Linux/Windows compromised footholds, slide-over Tactical Inspector Drawer, and interactive command execution.*
 
 #### Graph Topology & Navigation
 
 - **Hierarchical Column Layout**:
-  - **Left**: Perimeter gateways and uncompromised target findings (assets and services identified during initial reconnaissance).
-  - **Center**: Active compromise footholds and intermediate pivot workstations (`10.10.10.198`, `DEVELOPER45`, etc.).
+  - **Left**: Perimeter Ingress firewall (`PERIMETER INGRESS 0.0.0.0/0`) with ambient breathing aura and multi-layered CSS animated flame particle effects above a classic red brick wall icon, clearly designating the external boundary.
+  - **Center**: Active compromise footholds and intermediate pivot workstations (`192.168.56.105`, `DEVELOPER45`, etc.).
   - **Right**: High-value internal infrastructure, Active Directory Domain Controllers (`DC01`), and Crown Jewels.
 - **Organic Bezier Connections & Particle Streams**: Replaces rigid 90-degree lines with fluid cubic curves, 22px vector directional arrowheads, and real-time streaming particle pulses indicating live C2/pivot communications.
 - **Persistent Click-to-Lock Pathway Tracking**:
   - Clicking any host locks its upstream compromise lineage (how the host was reached) and downstream lateral reachability (what other hosts can be compromised from it).
   - A top HUD banner displays: `• PATHWAY LOCKED: [HOST] | N NODES | N HOPS` with quick pan/zoom persistence.
   - To release the lock, click on the empty canvas, press `ESC`, or click the `[CLEAR TRACK [ESC]]` button on the banner.
+- **Slide-Over Tactical Inspector Drawer**:
+  - Clicking a host node opens the dedicated Tactical Inspector Drawer on the right.
+  - **Compromise & OS State**: Real-time status badge (`COMPROMISED (ACTIVE)` / `RECON TARGET`), detected operating system (e.g. `linux`), and perimeter access status (`1 Open Port`).
+  - **Discovered Perimeter Ports**: Lists open network ports detected during scanning (e.g. `22/TCP`).
+  - **Confirmed Vulnerabilities & Findings**: Displays confirmed vulnerability cards with full titles (no truncated parentheses), MITRE ATT&CK technique tags (e.g. `T1548.001`, `T1552.001`, `T1574.006`), and finding details. Redundant detections on the same host are automatically deduplicated and badged with instance counts (`×4`, `×3`).
+  - **Single Dark Scrollbar**: Clean 6px custom scrollbar integrated into the drawer body, eliminating double or nested scrollbars.
 - **Operational Mode Toggle**:
   - `Mode: LIVE CAMPAIGN`: Visualizes real-time scoped targets and discovered findings from the active engagement. Targets that have not yet been pivoted appear on the left with in-degree 0; active footholds with live pivot tunnels appear connected. Click `[Active Pivots Only]` on the toolbar to filter out unpivoted targets.
   - `Mode: DEMO SAMPLE`: Loads the reference 9-node interconnected enterprise pivot topology showing multi-hop infiltration chains.
 
-#### Cobalt Strike Beacon Terminal Console (`CobaltSessionDock`)
+#### ARES Beacon Terminal Console (`CobaltSessionDock`)
 
 Located directly below the graph canvas, the Beacon Terminal Dock provides a full operator console synchronized with the graph:
 

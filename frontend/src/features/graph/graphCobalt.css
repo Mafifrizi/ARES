@@ -1030,10 +1030,190 @@
 .cobalt-inspector-body {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 #090a0f;
 }
 
+.cobalt-inspector-body::-webkit-scrollbar {
+  width: 6px;
+}
 
+.cobalt-inspector-body::-webkit-scrollbar-track {
+  background: #090a0f;
+}
+
+.cobalt-inspector-body::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+
+.cobalt-inspector-body::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* ── PERIMETER INGRESS Animated Firewall Flames & Dragon Sentinel ──────────── */
+
+/* Ambient breathing aura behind the firewall brick */
+.ares-flame-ambient-aura {
+  animation: aresFlameAuraPulse 3s ease-in-out infinite;
+  transform-origin: 40px 22px;
+}
+
+@keyframes aresFlameAuraPulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
+/* Back billowing flame layer */
+.ares-flame-layer-back {
+  animation: aresFlameBackBillow 2.2s ease-in-out infinite alternate;
+  transform-origin: 40px 36px;
+}
+
+@keyframes aresFlameBackBillow {
+  0% {
+    transform: scaleY(0.94) skewX(-1.5deg);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scaleY(1.04) skewX(1deg);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scaleY(0.97) skewX(-0.5deg);
+    opacity: 0.9;
+  }
+}
+
+/* Main Dynamic Flame Tongues (Leaping & Flickering naturally) */
+.ares-flame-tongue {
+  transform-origin: bottom center;
+}
+
+.ares-flame-tongue-left {
+  animation: aresFlameTongueLeft 1.6s ease-in-out infinite alternate;
+  transform-origin: 20px 36px;
+}
+
+@keyframes aresFlameTongueLeft {
+  0% {
+    transform: scaleY(0.92) scaleX(0.95) rotate(-2deg);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scaleY(1.1) scaleX(1.05) rotate(1.5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(0.98) scaleX(0.92) rotate(-1deg);
+    opacity: 0.9;
+  }
+}
+
+.ares-flame-tongue-center {
+  animation: aresFlameTongueCenter 1.3s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  transform-origin: 40px 36px;
+}
+
+@keyframes aresFlameTongueCenter {
+  0% {
+    transform: scaleY(0.94) scaleX(0.96);
+  }
+  40% {
+    transform: scaleY(1.12) scaleX(1.04);
+  }
+  100% {
+    transform: scaleY(0.98) scaleX(0.98);
+  }
+}
+
+.ares-flame-tongue-right {
+  animation: aresFlameTongueRight 1.7s ease-in-out infinite alternate;
+  transform-origin: 58px 36px;
+}
+
+@keyframes aresFlameTongueRight {
+  0% {
+    transform: scaleY(0.95) scaleX(0.92) rotate(2deg);
+    opacity: 0.88;
+  }
+  50% {
+    transform: scaleY(1.08) scaleX(1.06) rotate(-1deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(0.92) scaleX(0.95) rotate(1deg);
+    opacity: 0.85;
+  }
+}
+
+/* Incandescent Hot Flame Core */
+.ares-flame-core {
+  animation: aresFlameCoreGlow 0.9s ease-in-out infinite alternate;
+  transform-origin: 40px 36px;
+}
+
+@keyframes aresFlameCoreGlow {
+  0% {
+    opacity: 0.75;
+    transform: scaleY(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1.08);
+  }
+}
+
+/* Floating Ember Sparks */
+.ares-ember {
+  animation: aresEmberDrift 2.4s ease-in infinite;
+  transform-origin: center center;
+}
+
+.ares-ember-1 { animation-delay: 0.1s; animation-duration: 2.2s; }
+.ares-ember-2 { animation-delay: 0.7s; animation-duration: 1.8s; }
+.ares-ember-3 { animation-delay: 1.2s; animation-duration: 2.5s; }
+.ares-ember-4 { animation-delay: 0.4s; animation-duration: 2.0s; }
+.ares-ember-5 { animation-delay: 1.6s; animation-duration: 2.3s; }
+
+@keyframes aresEmberDrift {
+  0% {
+    transform: translateY(12px) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-16px) scale(0.2) translateX(4px);
+    opacity: 0;
+  }
+}
+
+/* ── Accessibility: Respect prefers-reduced-motion ────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ares-flame-ambient-aura,
+  .ares-flame-layer-back,
+  .ares-flame-tongue-left,
+  .ares-flame-tongue-center,
+  .ares-flame-tongue-right,
+  .ares-flame-core,
+  .ares-ember {
+    animation: none !important;
+    transition: none !important;
+  }
+}
