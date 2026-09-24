@@ -4,7 +4,7 @@ Active Recon & Exploitation Suite for structured, AI-guided penetration testing.
 
 Quickstart:
     from ares.core.campaign import Campaign, NoiseProfile
-    from ares.goal.engine import GoalEngine, Goal
+    from ares.core.engine import AresEngine
     from ares.state.target_state import OperatorSession
     from ares.cli.typer_main import cli
 """
