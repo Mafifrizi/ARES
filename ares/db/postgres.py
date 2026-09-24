@@ -81,6 +81,7 @@ logger = get_logger("ares.db.postgres")
 
 _REFRESH_TOKEN_LOCK_NAMESPACE = b"ares:refresh-token-user:v1\x00"
 _CAMPAIGN_DELETE_OPERATION_DOMAIN = b"ares.campaign-delete.compat-operation.v1\x00"
+_CAMPAIGN_SLUG_TARGET_DOMAIN = b"ares.campaign-slug.target-uuid.v1\x00"
 
 
 def _campaign_delete_operation_id(campaign_id: str) -> str:
@@ -93,6 +94,19 @@ def _campaign_delete_operation_id(campaign_id: str) -> str:
     digest[6] = (digest[6] & 0x0F) | 0x40
     digest[8] = (digest[8] & 0x3F) | 0x80
     return str(uuid.UUID(bytes=bytes(digest)))
+
+
+def _campaign_target_uuid(campaign_id: str) -> str:
+    """Return campaign_id if it's already a valid UUID, otherwise derive a stable UUIDv4 from its slug."""
+    if valid_uuid(campaign_id):
+        return campaign_id
+    digest = bytearray(
+        hashlib.sha256(_CAMPAIGN_SLUG_TARGET_DOMAIN + campaign_id.encode("utf-8")).digest()[:16]
+    )
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
+
 
 
 def _refresh_token_user_lock_key(user_id: str) -> int:
@@ -4850,21 +4864,20 @@ class PostgresDatabase:
             return OperationResult(FixedResult.INVALID_CONTRACT, None)
         resolved_operation_id = operation_id if operation_id is not None else lifecycle_operation_id
         if resolved_operation_id is None:
-            if not valid_uuid(campaign_id):
-                return OperationResult(FixedResult.INVALID_CONTRACT, None)
             resolved_operation_id = _campaign_delete_operation_id(campaign_id)
         if principal_subject_ref is None:
             if principal_kind != "system":
                 return OperationResult(FixedResult.INVALID_CONTRACT, None)
             principal_subject_ref = SYSTEM_PRINCIPAL_SUBJECT_REF
 
+        receipt_target_id = _campaign_target_uuid(campaign_id)
         store = ExecutionLifecycleStore(self._pool, "postgresql")
         try:
             receipt_spec = store._receipt_spec(
                 operation_id=resolved_operation_id,
                 operation_code="campaign_delete",
-                campaign_id=campaign_id,
-                primary_target_id=campaign_id,
+                campaign_id=receipt_target_id,
+                primary_target_id=receipt_target_id,
                 principal_kind=principal_kind,
                 principal_subject_ref=principal_subject_ref,
                 principal_user_id=principal_user_id,
@@ -4878,7 +4891,7 @@ class PostgresDatabase:
             replay = await store._classify_receipt(conn, receipt_spec, current_revision=None)
             if replay is not None:
                 return replay
-            await store._acquire_transaction_key(conn, campaign_id)
+            await store._acquire_transaction_key(conn, receipt_target_id)
             await conn.fetchrow(
                 "SELECT singleton_id FROM execution_gateway_state WHERE singleton_id=1 FOR UPDATE"
             )
@@ -5055,7 +5068,7 @@ class PostgresDatabase:
                 receipt_spec,
                 result=FixedResult.APPLIED,
                 exact_replay_code=FixedResult.REPLAYED,
-                result_identity=campaign_id,
+                result_identity=receipt_target_id,
                 result_revision=None,
                 result_fields=(("deleted", True),),
             )
