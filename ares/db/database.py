@@ -3011,7 +3011,6 @@ class AresDatabase:
                     or handle.bearer_auth_epoch is None
                 ):
                     return None
-                source_expiry = format_sqlite_utc(handle.bearer_expires_at)
                 async with connection.execute(
                     """
                     SELECT u.id, u.username, u.role
@@ -3030,7 +3029,6 @@ class AresDatabase:
                       AND u.role IN (
                           'team_lead', 'operator', 'recon', 'reporter'
                       )
-                      AND julianday(?) > julianday('now')
                       AND NOT EXISTS (
                           SELECT 1
                           FROM revoked_access_tokens AS rat
@@ -3047,7 +3045,6 @@ class AresDatabase:
                         handle.user_id,
                         handle.bearer_subject,
                         handle.bearer_auth_epoch,
-                        source_expiry,
                         handle.bearer_jti,
                     ),
                 ) as cursor:

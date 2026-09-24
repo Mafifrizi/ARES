@@ -6364,21 +6364,20 @@ class PostgresDatabase:
                     SELECT u.id, u.username, u.role
                     FROM users AS u
                     JOIN refresh_token_families AS f
-                      ON f.id=$6 AND f.user_id=u.id
+                      ON f.id=$5 AND f.user_id=u.id
                     JOIN campaigns AS c ON c.id=$1
                     WHERE u.id=$2
                       AND u.username=$3
                       AND u.is_active=1
-                      AND u.auth_epoch=$7
+                      AND u.auth_epoch=$6
                       AND f.auth_epoch=u.auth_epoch
                       AND f.state='active'
                       AND f.revoked_at IS NULL
                       AND f.absolute_expires_at > now()
                       AND u.role IN ('team_lead','operator','recon','reporter')
-                      AND $4 > now()
                       AND NOT EXISTS (
                           SELECT 1 FROM revoked_access_tokens AS rat
-                          WHERE rat.jti=$5
+                          WHERE rat.jti=$4
                       )
                       AND (
                           u.role='team_lead'
@@ -6388,7 +6387,6 @@ class PostgresDatabase:
                     consumed.campaign_id,
                     consumed.user_id,
                     consumed.bearer_subject,
-                    consumed.bearer_expires_at,
                     consumed.bearer_jti,
                     consumed.bearer_family_id,
                     consumed.bearer_auth_epoch,

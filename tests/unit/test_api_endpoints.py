@@ -5255,12 +5255,18 @@ class TestMainWebSocketAuthoritativeLifetime:
         )
         await database.save_campaign(campaign)
         original_db = getattr(server.app.state, "db", None)
+        original_db_override = server.app.dependency_overrides.get(server.get_db)
         server.app.state.db = database
+        server.app.dependency_overrides[server.get_db] = lambda: database
         server._ws_connections.clear()
         _reset_rate_limiter()
         try:
             yield server, database, user_id, username, token, campaign, server.app
         finally:
+            if original_db_override is None:
+                server.app.dependency_overrides.pop(server.get_db, None)
+            else:
+                server.app.dependency_overrides[server.get_db] = original_db_override
             server._ws_connections.clear()
             server.app.state.db = original_db
             await database.close()
@@ -5895,18 +5901,18 @@ class TestMainWebSocketAuthoritativeLifetime:
                     (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
                 )
             elif state_change == "expired":
-                from dataclasses import replace
-                from datetime import datetime, timezone
-
                 contexts = list(server._ws_connections.get(campaign.id, set()))
                 _require_fixed(
                     len(contexts) == 1,
                     "expected one registered ticket handle",
                 )
-                contexts[0].ticket_handle = replace(
-                    contexts[0].ticket_handle,
-                    bearer_expires_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+                await database.conn.execute(
+                    "UPDATE refresh_token_families SET created_at='1999-01-01T00:00:00.000Z', "
+                    "absolute_expires_at='2000-01-01T00:00:00.000Z', retain_until='2000-01-02T00:00:00.000Z' "
+                    "WHERE id=?",
+                    (contexts[0].ticket_handle.bearer_family_id,),
                 )
+                await database.conn.commit()
             else:
                 await database.conn.execute(
                     "UPDATE users SET role='operator' WHERE id=?",

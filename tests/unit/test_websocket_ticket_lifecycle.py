@@ -1296,13 +1296,21 @@ async def test_sqlite_bearer_resolver_complete_authority_mutations(
         await connection.commit()
         unrevoked = await database.resolve_websocket_ticket_principal(handle)
 
-        expired_handle = replace(
-            handle,
-            bearer_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        await connection.execute(
+            "UPDATE refresh_token_families SET created_at='1999-01-01T00:00:00.000Z', "
+            "absolute_expires_at='2000-01-01T00:00:00.000Z', retain_until='2000-01-02T00:00:00.000Z' "
+            "WHERE id=?",
+            (handle.bearer_family_id,),
         )
-        expired_source = await database.resolve_websocket_ticket_principal(
-            expired_handle
+        await connection.commit()
+        expired_source = await database.resolve_websocket_ticket_principal(handle)
+        await connection.execute(
+            "UPDATE refresh_token_families SET created_at='2020-01-01T00:00:00.000Z', "
+            "absolute_expires_at='2099-01-01T00:00:00.000Z', retain_until='2099-01-02T00:00:00.000Z' "
+            "WHERE id=?",
+            (handle.bearer_family_id,),
         )
+        await connection.commit()
 
         renamed_username = f"renamed_{uuid4().hex}"
         await connection.execute(
