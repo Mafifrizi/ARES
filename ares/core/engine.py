@@ -559,6 +559,15 @@ class AresEngine:
             )
         runtime_state = await self.ensure_campaign_runtime(campaign)
 
+        is_disabled = getattr(self.registry, "is_disabled", None)
+        if callable(is_disabled) and is_disabled(module_id) is True:
+            reason = getattr(self.registry, "get_disabled_reason", lambda _: None)(module_id) or "module disabled: implementation incomplete, see MOD-005"
+            return EngineModuleResult(
+                module_id=module_id,
+                status=ModuleStatus.FAILED,
+                error=reason,
+            )
+
         if module_id not in self.registry:
             return EngineModuleResult(
                 module_id=module_id,
@@ -1124,6 +1133,20 @@ class AresEngine:
         raw_params = params or {}
         cls = self.registry.get(module_id)
         summary = redact_module_params(module_id, raw_params)
+        is_disabled = getattr(self.registry, "is_disabled", None)
+        if callable(is_disabled) and is_disabled(module_id) is True:
+            reason = getattr(self.registry, "get_disabled_reason", lambda _: None)(module_id) or "module disabled: implementation incomplete, see MOD-005"
+            return {
+                "dry_run": True,
+                "status": "disabled",
+                "module_id": module_id,
+                "validated_params_summary": summary,
+                "missing_params": list(missing_params or []),
+                "missing_dependencies": [],
+                "would_execute": False,
+                "warnings": [reason],
+                "operator_next_steps": [reason],
+            }
         if cls is None:
             return {
                 "dry_run": True,
@@ -1196,6 +1219,16 @@ class AresEngine:
         session state, and noise profile without executing active operations.
         """
         from ares.modules.base import FeasibilityReport
+
+        is_disabled = getattr(self.registry, "is_disabled", None)
+        if callable(is_disabled) and is_disabled(module_id) is True:
+            reason = getattr(self.registry, "get_disabled_reason", lambda _: None)(module_id) or "module disabled: implementation incomplete, see MOD-005"
+            return FeasibilityReport(
+                feasible=False,
+                score=0.0,
+                risk_level="high_noise",
+                blockers=[reason],
+            )
 
         if module_id not in self.registry:
             return FeasibilityReport(

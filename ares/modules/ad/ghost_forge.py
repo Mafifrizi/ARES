@@ -20,6 +20,7 @@ import hashlib
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
+from ares.core.errors import ModuleError, ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
@@ -65,123 +66,48 @@ class GhostForgeModule(BaseModule[GhostForgeParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1649", "T1558"]
     MODULE_TIMEOUT_SECONDS: int | None = 120
     PARAMS_MODEL       = GhostForgeParams
+    ENABLED            = False
+    DISABLED_REASON    = "module disabled: implementation incomplete, see MOD-005"
 
     async def assess_feasibility(self, ctx: Any) -> Any:
         from ares.modules.base import FeasibilityReport
-        blockers: list[str] = []
-        score = 1.0
-        risk = "medium"
 
-        p = getattr(ctx, "params", {})
-        dc = getattr(ctx, "target", "") or (p.get("dc") if isinstance(p, dict) else getattr(p, "dc", ""))
-        if not dc:
-            blockers.append("No Domain Controller (dc) specified for PKINIT exchange")
-            score -= 0.4
-
-        ca = (p.get("ca_server") if isinstance(p, dict) else getattr(p, "ca_server", ""))
-        if not ca:
-            blockers.append("No CA server specified for certificate enrollment")
-            score -= 0.4
-
-        technique = (p.get("target_technique") if isinstance(p, dict) else getattr(p, "target_technique", "auto")) or "auto"
-        policy_oid = (p.get("policy_oid") if isinstance(p, dict) else getattr(p, "policy_oid", None))
-        if technique == "esc13" and not policy_oid:
-            blockers.append("ESC13 evaluation requires 'policy_oid' to map to target group")
-            score -= 0.3
-
+        # MITIGATION (MOD-005): Module is temporarily disabled from execution pipeline.
         return FeasibilityReport(
-            feasible=len(blockers) == 0 and score >= 0.5,
-            score=max(0.0, min(1.0, score)),
-            risk_level=risk,
-            blockers=blockers,
+            feasible=False,
+            score=0.0,
+            risk_level="high_noise",
+            blockers=["module disabled: implementation incomplete, see MOD-005"],
             recommended_alternatives=["ad.adcs"],
             details={
-                "dc_specified": bool(dc),
-                "ca_specified": bool(ca),
-                "target_technique": technique,
-                "strong_mapping_ready": True,
+                "disabled": True,
+                "reason": "module disabled: implementation incomplete, see MOD-005",
             },
         )
 
     async def validate(self, ctx: Any) -> None:
-        from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        p = getattr(ctx, "params", {})
-        dc = (p.get("dc") if isinstance(p, dict) else getattr(p, "dc", None)) or getattr(ctx, "target", "")
-        ca = p.get("ca_server") if isinstance(p, dict) else getattr(p, "ca_server", None)
-        user = p.get("username") if isinstance(p, dict) else getattr(p, "username", None)
-        if not dc:
-            raise ModuleValidationError("ad.ghost_forge requires 'dc'.", module_id=self.MODULE_ID, field="dc")
-        if not ca:
-            raise ModuleValidationError("ad.ghost_forge requires 'ca_server'.", module_id=self.MODULE_ID, field="ca_server")
-        if not user:
-            raise ModuleValidationError("ad.ghost_forge requires 'username'.", module_id=self.MODULE_ID, field="username")
-        await super().validate(ctx)
+        # MITIGATION (MOD-005): Fail fast with explicit error before parameter checks
+        raise ModuleValidationError(
+            "module disabled: implementation incomplete, see MOD-005",
+            module_id=self.MODULE_ID,
+        )
 
     async def execute(self, ctx: ExecutionContext[GhostForgeParams]) -> ModuleResult:
-        if isinstance(ctx.params, GhostForgeParams):
-            p = ctx.params
-        elif isinstance(ctx.params, dict):
-            p = GhostForgeParams.model_validate(ctx.params)
-        else:
-            p = GhostForgeParams()
-
-        kwargs = p.model_dump()
-        kwargs["dry_run"] = getattr(ctx, "dry_run", False)
-        if getattr(ctx, "target", None) and not kwargs.get("dc"):
-            kwargs["dc"] = ctx.target
-
-        findings, raw = await self.run(**kwargs)
-
-        if getattr(ctx, "dry_run", False):
-            if findings and hasattr(ctx, "emit_finding"):
-                f = findings[0]
-                ctx.emit_finding(
-                    title=f.title,
-                    severity=f.severity,
-                    description=f.description,
-                    mitre_technique=f.mitre_technique,
-                )
-            return ModuleResult(
-                status="dry_run",
-                module_id=self.MODULE_ID,
-                raw=raw,
-            )
-
-        if findings and hasattr(ctx, "emit_finding"):
-            f = findings[0]
-            ctx.emit_finding(
-                title=f.title,
-                severity=f.severity,
-                description=f.description,
-                mitre_technique=f.mitre_technique,
-                mitre_tactic=f.mitre_tactic,
-                evidence=f.evidence,
-                remediation=f.remediation,
-            )
-
-        target_account = raw.get("impersonated_user", "Administrator")
-        cert_thumbprint = raw.get("certificate_thumbprint", "")
-        if hasattr(ctx, "record_credential"):
-            ctx.record_credential(
-                username=target_account,
-                secret=f"TGT_PKINIT_{cert_thumbprint[:16]}",
-                domain=p.domain,
-                cred_type="ticket",
-            )
-
-        return ModuleResult(
-            status="success",
-            findings=findings,
-            raw=raw,
+        # MITIGATION (MOD-005): Disabled from execution pipeline to prevent fictitious findings
+        # and vault contamination while final architectural decision is pending.
+        raise ModuleError(
+            "module disabled: implementation incomplete, see MOD-005",
             module_id=self.MODULE_ID,
-            execution_id=getattr(ctx, "execution_id", ""),
         )
 
     @trace_module("ad.ghost_forge")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        # MITIGATION (MOD-005): Disabled from execution pipeline to prevent fictitious findings
+        # and vault contamination while final architectural decision is pending.
+        raise ModuleError(
+            "module disabled: implementation incomplete, see MOD-005",
+            module_id=self.MODULE_ID,
+        )
         self._findings = []
         ctx = kwargs.get("ctx") or kwargs
         dc = str(ctx.get("dc") or ctx.get("target") or "")

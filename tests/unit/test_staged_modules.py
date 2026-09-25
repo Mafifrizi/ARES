@@ -56,10 +56,28 @@ class TestPhantomTokenModule:
 class TestGhostForgeModule:
     def test_module_attributes(self):
         assert GhostForgeModule.MODULE_ID == "ad.ghost_forge"
+        assert GhostForgeModule.ENABLED is False
+        assert GhostForgeModule.DISABLED_REASON == "module disabled: implementation incomplete, see MOD-005"
         assert "T1649" in GhostForgeModule.MITRE_TECHNIQUES
         assert "T1558" in GhostForgeModule.MITRE_TECHNIQUES
 
-    def test_dry_run_execution(self):
+    def test_direct_run_raises_disabled_error(self):
+        from ares.core.errors import ModuleError
+        mod, _ = _make_module(GhostForgeModule)
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.run(
+                dc="10.10.10.1",
+                domain="CORP.LOCAL",
+                ca_server="ca.corp.local",
+                ca_name="CORP-CA",
+                impersonate_user="Administrator",
+                username="audit_operator",
+                password="SecretPassword123!",
+            ))
+        assert "module disabled: implementation incomplete, see MOD-005" in str(exc_info.value)
+
+    def test_execute_raises_disabled_error(self):
+        from ares.core.errors import ModuleError
         mod, _ = _make_module(GhostForgeModule)
         ctx = _mock_ctx(params={
             "dc": "10.10.10.1",
@@ -69,52 +87,34 @@ class TestGhostForgeModule:
             "username": "audit_operator",
             "password": "SecretPassword123!",
         })
-        ctx.dry_run = True
-        res = _run(mod.execute(ctx))
-        assert res.status == "dry_run"
-        assert res.module_id == "ad.ghost_forge"
-        assert res.raw.get("dc") == "10.10.10.1"
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.execute(ctx))
+        assert "module disabled: implementation incomplete, see MOD-005" in str(exc_info.value)
 
-    def test_live_execution_findings(self):
+    def test_validate_raises_disabled_error(self):
+        from ares.core.errors import ModuleValidationError
         mod, _ = _make_module(GhostForgeModule)
         ctx = _mock_ctx(params={
             "dc": "10.10.10.1",
             "domain": "CORP.LOCAL",
             "ca_server": "ca.corp.local",
             "ca_name": "CORP-CA",
-            "impersonate_user": "Administrator",
             "username": "audit_operator",
             "password": "SecretPassword123!",
-            "perform_pkinit": True,
         })
-        ctx.dry_run = False
-        res = _run(mod.execute(ctx))
-        assert res.status == "success"
-        assert len(res.findings) >= 1
-        assert res.findings[0].mitre_technique == "T1649"
-        assert res.raw.get("pkinit_success") is True
+        with pytest.raises(ModuleValidationError) as exc_info:
+            _run(mod.validate(ctx))
+        assert "module disabled: implementation incomplete, see MOD-005" in str(exc_info.value)
 
-    def test_direct_run_method(self):
+    def test_assess_feasibility_reports_disabled(self):
         mod, _ = _make_module(GhostForgeModule)
-        findings, raw = _run(mod.run(
-            dc="10.10.10.1",
-            domain="CORP.LOCAL",
-            ca_server="ca.corp.local",
-            ca_name="CORP-CA",
-            impersonate_user="Administrator",
-            username="audit_operator",
-            password="SecretPassword123!",
-            perform_pkinit=True,
-            dry_run=False,
-        ))
-        assert len(findings) == 1
-        assert findings[0].mitre_technique == "T1649"
-        assert raw.get("pkinit_success") is True
-        assert raw.get("dc") == "10.10.10.1"
-
+        ctx = _mock_ctx(params={"dc": "10.10.10.1"})
+        report = _run(mod.assess_feasibility(ctx))
+        assert report.feasible is False
+        assert any("MOD-005" in b for b in report.blockers)
 
     @pytest.mark.asyncio
-    async def test_engine_persists_loot_from_module_output(self, tmp_path):
+    async def test_engine_run_module_fails_with_disabled_error(self, tmp_path):
         from ares.core.campaign import Campaign, ScopeEntry
         from ares.core.engine import AresEngine
         from ares.db.database import AresDatabase
@@ -124,7 +124,7 @@ class TestGhostForgeModule:
         campaign = Campaign(name="Loot Test", client="Client", scope=[ScopeEntry(cidr="10.10.10.0/24")], operator="operator")
         await db.save_campaign(campaign)
 
-        from ares.core.execution_admission import _mint_test_dispatch_context, mark_terminal_committed
+        from ares.core.execution_admission import _mint_test_dispatch_context
 
         engine = AresEngine(db=db)
         mod, _ = _make_module(GhostForgeModule)
@@ -144,39 +144,22 @@ class TestGhostForgeModule:
             },
             dispatch_context=dispatch_ctx,
         )
-        assert str(result.status) in ("success", "done", "ModuleStatus.DONE")
-        mark_terminal_committed(dispatch_ctx)
-        await engine._finalize_committed_module_result(campaign, "ad.ghost_forge", result, dispatch_ctx)
+        assert str(result.status) in ("failed", "ModuleStatus.FAILED")
+        assert "module disabled: implementation incomplete, see MOD-005" in (result.error or "")
         loots = await db.get_loot(campaign.id)
-        assert len(loots) >= 1
-        assert any("TGT" in l["name"] for l in loots)
-        assert any("KQL" in l["name"] for l in loots)
-        assert any("Sigma" in l["name"] for l in loots)
+        assert len(loots) == 0
         await db.close()
 
-    def test_ghost_forge_esc13_and_strong_mapping(self):
-        mod, _ = _make_module(GhostForgeModule)
-        ctx = _mock_ctx(params={
-            "dc": "10.10.10.1",
-            "domain": "CORP.LOCAL",
-            "ca_server": "ca.corp.local",
-            "ca_name": "CORP-CA",
-            "username": "audit_operator",
-            "password": "SecretPassword123!",
-            "target_technique": "esc13",
-            "policy_oid": "1.3.6.1.4.1.311.99.1.13",
-            "enforcement_mode_check": True,
-            "generate_detection_rules": True,
-        })
-        ctx.dry_run = False
-        res = _run(mod.execute(ctx))
-        assert res.status == "success"
-        assert len(res.findings) >= 1
-        assert "ESC13" in res.findings[0].title
-        assert res.raw.get("technique_applied") == "esc13"
-        assert res.raw.get("kb5014754_compliant") is True
-        assert any(l["loot_type"] == "detection_rule_kql" for l in res.raw["loot"])
-        assert any(l["loot_type"] == "detection_rule_sigma" for l in res.raw["loot"])
+    def test_registry_excludes_ghost_forge_from_listings(self):
+        from ares.core.plugin.loader import PluginLoader
+        loader = PluginLoader()
+        loader._load_builtin()
+        assert "ad.ghost_forge" not in [m["id"] for m in loader.registry.list_metadata()]
+        assert "ad.ghost_forge" not in [cls.MODULE_ID for cls in loader.registry.all()]
+        assert "ad.ghost_forge" not in [cls.MODULE_ID for cls in loader.registry.by_category("ad")]
+        assert loader.registry.is_disabled("ad.ghost_forge") is True
+        assert loader.registry.get_disabled_reason("ad.ghost_forge") == "module disabled: implementation incomplete, see MOD-005"
+        assert "ad.ghost_forge" not in loader.registry
 
     def test_phantom_token_workload_identity_and_detection(self):
         mod, _ = _make_module(PhantomTokenModule)

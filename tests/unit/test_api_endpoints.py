@@ -1728,6 +1728,46 @@ class TestModuleSchemaEndpoint:
             assert field in module
         assert module["dry_run_supported"] is True
 
+    @pytest.mark.asyncio
+    async def test_disabled_ghost_forge_module_rejected_via_api(
+        self, aclient: Any
+    ) -> None:
+        from ares.api.server import app, get_engine
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.engine import AresEngine
+        c, db, _ = aclient
+        db.is_access_token_revoked.return_value = False
+        campaign = Campaign(name="Disabled Test", client="Client", scope=[ScopeEntry(cidr="10.0.0.0/24")])
+        db.get_campaign.return_value = campaign
+
+        real_engine = AresEngine()
+        real_engine.load_modules()
+        app.dependency_overrides[get_engine] = lambda: real_engine
+        try:
+            # 1. Verify ad.ghost_forge does NOT appear in GET /modules
+            res = await c.get("/modules", headers=_auth("admin", "team_lead"))
+            assert res.status_code == 200
+            module_ids = [m["id"] for m in res.json()]
+            assert "ad.ghost_forge" not in module_ids
+
+            # 2. Verify POST /modules/ad.ghost_forge/run is rejected with explicit 400 error
+            res_run = await c.post(
+                "/modules/ad.ghost_forge/run",
+                json={
+                    "campaign_id": campaign.id,
+                    "target": "10.0.0.1",
+                    "params": {"dc": "10.0.0.1", "username": "admin", "password": "Password123!"},
+                },
+                headers={
+                    **_auth("admin", "team_lead"),
+                    "X-Idempotency-Key": "00000000-0000-4000-8000-000000000001",
+                },
+            )
+            assert res_run.status_code == 400
+            assert "module disabled: implementation incomplete, see MOD-005" in res_run.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(get_engine, None)
+
     @pytest.mark.asyncio  # type: ignore[untyped-decorator]
     async def test_execution_chains_are_available_with_module_metadata(
         self, aclient: Any

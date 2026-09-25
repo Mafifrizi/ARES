@@ -132,6 +132,7 @@ def normalize_module_metadata(
     metadata.setdefault(
         "safe_error_categories", list(MODULE_SAFE_ERROR_CATEGORIES)
     )
+    metadata.setdefault("enabled", bool(getattr(cls, "ENABLED", True)))
     metadata["param_schema"] = schema
     return metadata
 
@@ -394,6 +395,8 @@ class BaseModule(abc.ABC, Generic[P, R]):
     MODULE_DESCRIPTION: str = ""
 
     # ── Optional metadata ──────────────────────────────────────────────────
+    ENABLED:            bool        = True
+    DISABLED_REASON:    str         = ""
     OPSEC_LEVEL:        OpsecLevel  = OpsecLevel.LOW
     REQUIRES:           list[str]   = []   # e.g. ["domain_creds", "ldap_access"]
     OUTPUTS:            list[str]   = []   # e.g. ["spn_list", "user_list"]

@@ -2479,6 +2479,12 @@ async def run_module(
     if not campaign:
         raise HTTPException(404, "Campaign not found")
 
+    if hasattr(engine, "registry"):
+        is_disabled = getattr(engine.registry, "is_disabled", None)
+        if callable(is_disabled) and is_disabled(module_id) is True:
+            reason = getattr(engine.registry, "get_disabled_reason", lambda _: None)(module_id) or "module disabled: implementation incomplete, see MOD-005"
+            raise HTTPException(status_code=400, detail=reason)
+
     raw_params = dict(body.params)
 
     # Validate params against Pydantic schema

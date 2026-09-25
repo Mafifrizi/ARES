@@ -106,13 +106,19 @@ class ModuleRegistry:
 
     def __init__(self) -> None:
         self._registry: dict[str, type[BaseModule]] = {}
+        self._disabled: dict[str, type[BaseModule]] = {}
         self._sources: dict[str, str] = (
             {}
         )  # module_id → source (builtin/entrypoint/external)
 
     def register(self, cls: type[BaseModule], source: str = "builtin") -> None:
-        mid = cls.MODULE_ID
+        mid = getattr(cls, "MODULE_ID", "")
         if not mid:
+            return
+        if getattr(cls, "ENABLED", True) is False:
+            self._disabled[mid] = cls
+            self._sources[mid] = source
+            logger.info("registry_disabled_module", mid=mid, source=source)
             return
         if mid in self._registry:
             existing_source = self._sources.get(mid, "unknown")
@@ -127,18 +133,45 @@ class ModuleRegistry:
         self._sources[mid] = source
         logger.debug("registry_registered_from", mid=mid, source=source)
 
+    def is_disabled(self, module_id: str) -> bool:
+        if module_id in self._disabled:
+            return True
+        cls = self._registry.get(module_id)
+        if cls is not None and getattr(cls, "ENABLED", True) is False:
+            return True
+        return False
+
+    def get_disabled_reason(self, module_id: str) -> str | None:
+        cls = self._disabled.get(module_id) or self._registry.get(module_id)
+        if cls is not None:
+            return getattr(cls, "DISABLED_REASON", "") or "module disabled"
+        return None
+
     def get(self, module_id: str) -> type[BaseModule] | None:
         return self._registry.get(module_id)
 
+    def get_disabled(self, module_id: str) -> type[BaseModule] | None:
+        return self._disabled.get(module_id)
+
     def __setitem__(self, module_id: str, cls: type[BaseModule]) -> None:
-        self._registry[module_id] = cls
+        if getattr(cls, "ENABLED", True) is False:
+            self._disabled[module_id] = cls
+        else:
+            self._registry[module_id] = cls
 
     def all(self) -> list[type[BaseModule]]:
-        return list(self._registry.values())
+        return [
+            cls for mid, cls in self._registry.items()
+            if getattr(cls, "ENABLED", True) is not False and mid not in self._disabled
+        ]
 
     def by_category(self, category: str) -> list[type[BaseModule]]:
         return [
-            cls for cls in self._registry.values() if cls.MODULE_CATEGORY == category
+            cls
+            for mid, cls in self._registry.items()
+            if cls.MODULE_CATEGORY == category
+            and getattr(cls, "ENABLED", True) is not False
+            and mid not in self._disabled
         ]
 
     def list_metadata(self) -> list[dict[str, Any]]:
@@ -151,6 +184,8 @@ class ModuleRegistry:
         """
         result = []
         for mid, cls in sorted(self._registry.items()):
+            if getattr(cls, "ENABLED", True) is False or mid in self._disabled:
+                continue
             try:
                 # BaseModule.metadata() returns the canonical dict including
                 # opsec_level, requires, outputs, mitre_list, min_noise_profile
@@ -179,7 +214,7 @@ class ModuleRegistry:
         return len(self._registry)
 
     def __contains__(self, module_id: str) -> bool:
-        return module_id in self._registry
+        return module_id in self._registry and not self.is_disabled(module_id)
 
 
 # ── Loader ────────────────────────────────────────────────────────────────────

@@ -99,7 +99,7 @@ MODULE_EXECUTION_CHAINS: Final[tuple[ExecutionChain, ...]] = (
             {
                 "order": 2,
                 "title": "Review access and identity exposure",
-                "module_ids": ["ad.enum_acl", "ad.adcs", "ad.ghost_forge", "ad.laps_enum"],
+                "module_ids": ["ad.enum_acl", "ad.adcs", "ad.laps_enum"],
                 "purpose": "Check delegated access, certificate services, and password-management exposure.",
                 "required_inputs": ["dc", "domain", "username", "password"],
                 "uses_previous_output": True,

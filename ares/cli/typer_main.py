@@ -557,6 +557,8 @@ def module_list(
 
     rows = []
     for mod_id, mod_cls in sorted(registry._registry.items()):
+        if getattr(mod_cls, "ENABLED", True) is False or registry.is_disabled(mod_id):
+            continue
         meta = mod_cls.metadata()
         if category and meta.get("category") != category:
             continue
