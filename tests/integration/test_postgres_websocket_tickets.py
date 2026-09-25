@@ -1672,13 +1672,17 @@ async def test_postgres_bearer_resolver_mutation_matrix_and_pool_recovery() -> N
                 "UPDATE users SET is_active=1 WHERE id=$1",
                 user_id,
             )
-        expired = await database.resolve_websocket_ticket_principal(
-            replace(
-                consumed,
-                bearer_expires_at=datetime.now(timezone.utc)
-                - timedelta(seconds=1),
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE refresh_token_families SET absolute_expires_at=now() - interval '1 hour' WHERE id=$1",
+                consumed.bearer_family_id,
             )
-        )
+        expired = await database.resolve_websocket_ticket_principal(consumed)
+        async with database._pool.acquire() as connection:
+            await connection.execute(
+                "UPDATE refresh_token_families SET absolute_expires_at=now() + interval '30 days' WHERE id=$1",
+                consumed.bearer_family_id,
+            )
         recovered = await database.resolve_websocket_ticket_principal(consumed)
         async with database._pool.acquire() as connection:
             reusable = await connection.fetchval("SELECT 1")
