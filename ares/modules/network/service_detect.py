@@ -95,6 +95,7 @@ def _fingerprint_os_from_banners(banners: list[str]) -> dict[str, Any] | None:
 async def _grab_banner(host: str, port: int, timeout: float = 4.0,
                        use_tls: bool = False) -> str:
     """Connect to port, optionally TLS-wrap, read banner bytes."""
+    writer = None
     try:
         if use_tls:
             ctx = ssl.create_default_context()
@@ -119,15 +120,17 @@ async def _grab_banner(host: str, port: int, timeout: float = 4.0,
             await writer.drain()
 
         data = await asyncio.wait_for(reader.read(2048), timeout=timeout)
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
         return data.decode("utf-8", errors="replace").strip()[:1000]
 
     except Exception:
         return ""
+    finally:
+        if writer:
+            writer.close()
+            try:
+                await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                pass  # Best effort cleanup
 
 
 @module_contract(
