@@ -235,6 +235,7 @@ class AzureADModule(BaseModule):
         audit("azure_ad_attack", actor="operator", technique="T1528",
               source="operator", target=f"tenant:{tenant_id[:8]}")
 
+        raw: dict[str, Any] = {"tenant_id": tenant_id}
         loop = asyncio.get_running_loop()
 
         # Acquire access token if not provided
@@ -280,15 +281,15 @@ class AzureADModule(BaseModule):
                 )
             await self.noise.jitter.sleep()
             raw["access_tokens"] = raw.get("access_token", "")  # OUTPUTS key
-        raw["azure_ad_findings"] = self._findings  # OUTPUTS key
-        return self._findings[:], raw
+            raw["azure_ad_findings"] = self._findings  # OUTPUTS key
+            return self._findings[:], raw
 
         # Enumeration with Graph API
         if not token:
-            return [], {
-                "error": "No access token available. Provide client_id+client_secret or access_token.",
-                "hint": "Or use technique=device_code to initiate device code flow.",
-            }
+            raw["error"] = "No access token available. Provide client_id+client_secret or access_token."
+            raw["hint"] = "Or use technique=device_code to initiate device code flow."
+            raw["azure_ad_findings"] = self._findings
+            return [], raw
 
         # Enumerate users, guests, service principals
         results = await loop.run_in_executor(
@@ -358,6 +359,7 @@ class AzureADModule(BaseModule):
             "high_priv_sps":      [s.get("displayName", "") for s in
                                    [s for s in sps if s.get("privileged")][:10]],
         }
+        raw["azure_ad_findings"] = self._findings
         await self.noise.jitter.sleep()
         return self._findings[:], raw
 
