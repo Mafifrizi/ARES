@@ -207,6 +207,10 @@ class ExecutionContext(Generic[P]):
         cred_type: str = "password",
         metadata: dict[str, Any] | None = None,
         io_verified: bool | None = None,
+        target: str = "",
+        privilege: str = "",
+        source: str = "",
+        **kwargs: Any,
     ) -> Any:
         """Store a discovered credential in the context vault if available (protected by Gate 6)."""
         has_io = (
@@ -237,10 +241,14 @@ class ExecutionContext(Generic[P]):
                     secret=secret,
                     domain=domain or self.domain,
                     cred_type=cred_type,
-                    host=self.target,
+                    host=target or self.target,
+                    target_host=target or self.target,
+                    privilege=privilege or "user",
+                    source_module=source or self.module_id,
                     metadata=metadata or {},
                     io_verified=has_io,
                     ctx=self,
+                    **kwargs,
                 )
             except Exception:
                 pass

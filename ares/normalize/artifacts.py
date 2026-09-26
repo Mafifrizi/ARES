@@ -242,6 +242,8 @@ class CredentialArtifact(NormalizedArtifact):
     target:      str = ""   # alias for source_host
     protocol:    str = ""   # ssh | smb | winrm | rdp etc
     privilege:   str = ""   # domain_admin | service_account | local_admin | user | unknown
+    has_password: bool = False
+    note:        str = ""
 
     def __post_init__(self) -> None:
         self.artifact_type = ArtifactType.CREDENTIAL
@@ -268,9 +270,9 @@ class CredentialArtifact(NormalizedArtifact):
             "username": self.username, "domain": self.domain,
             "cred_type": self.cred_type, "cracked": self.cracked,
             "source_host": self.source_host, "privilege": self.privilege,
+            "protocol": self.protocol, "has_password": self.has_password,
+            "note": self.note,
         }
-        if self.protocol:
-            d["protocol"] = self.protocol
         return d
 
 
@@ -796,13 +798,19 @@ class ArtifactNormalizer:
                 continue
             comp = e.get("computer") or e.get("computer_name") or e.get("host", "")
             pwd  = e.get("password", "")
+            has_pwd = bool(e.get("has_password", False) or pwd)
+            note = ""
+            if not pwd and e.get("has_password"):
+                note = "password stored in vault"
             artifact = CredentialArtifact(
                 username    = e.get("username", "Administrator"),
-                domain      = e.get("domain", ""),
+                domain      = e.get("domain", "") or comp,
                 cred_type   = "laps",
                 secret      = pwd,
                 source_host = comp,
                 privilege   = "local_admin",
+                has_password= has_pwd,
+                note        = note,
             )
             store.add(artifact)
             count += 1

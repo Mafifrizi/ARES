@@ -329,6 +329,67 @@ def test_laps_passwords_pipeline(normalizer: ArtifactNormalizer, store: Artifact
     assert creds[0].privilege == "local_admin"
 
 
+@pytest.mark.asyncio
+async def test_laps_opsec_direct_vault_pipeline_mod_055(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """
+    MOD-055: LAPS module writes passwords directly to vault (Gate 6 validated),
+    while raw output omits password for OPSEC and sets has_password=True.
+    Normalizer ingests has_password=True and creates CredentialArtifact with secret="" and note.
+    """
+    from unittest.mock import patch
+    from tests.unit.modules.test_modules import _make_module
+    from ares.modules.ad.laps_enum import LAPSEnumModule
+    from ares.credential.vault import CredentialVault
+    from ares.core.context import ExecutionContext
+
+    mod, _ = _make_module(LAPSEnumModule)
+    vault = CredentialVault(encryption_key=None)
+    ctx = ExecutionContext(
+        target="10.0.0.1",
+        domain="corp.local",
+        vault=vault,
+        network_io_occurred=True,
+    )
+
+    mock_entries = [
+        {"computer": "PC-FINANCE-01", "password": "RealSecretLapsPassword123!", "version": "v1", "expiry": ""},
+    ]
+
+    with patch.object(mod, "_query_laps_sync", return_value=mock_entries):
+        findings, raw = await mod.run(
+            dc="10.0.0.1",
+            domain="corp.local",
+            username="analyst",
+            password="fake_login_pwd",
+            vault=vault,
+            ctx=ctx,
+        )
+
+    # 1. raw output does NOT contain plaintext password (OPSEC safe)
+    assert raw["entries"][0].get("has_password") is True
+    assert "password" not in raw["entries"][0]
+    assert "password" not in raw["laps_passwords"][0]
+
+    # 2. Vault contains full password (Gate 6 passed valid CLEARTEXT)
+    stored_creds = [c for c in vault._store.values() if "PC-FINANCE-01" in getattr(c, "domain", "") or "PC-FINANCE-01" in getattr(c, "target_host", "")]
+    assert len(stored_creds) >= 1
+    cred_id = stored_creds[0].id
+    revealed_secret = vault.reveal(cred_id)
+    assert revealed_secret == "RealSecretLapsPassword123!"
+
+    # 3. Normalizer creates CredentialArtifact with has_password=True and note
+    added = normalizer.normalize("ad.laps_enum", ["laps_passwords"], raw, store)
+    assert added == 1
+    artifacts = store.credentials()
+    assert len(artifacts) == 1
+    assert artifacts[0].username == "Administrator"
+    assert artifacts[0].source_host == "PC-FINANCE-01"
+    assert artifacts[0].secret == ""
+    assert artifacts[0].has_password is True
+    assert artifacts[0].note == "password stored in vault"
+
+
+
 def test_kerberos_tickets_pipeline(normalizer: ArtifactNormalizer, store: ArtifactStore):
     """lateral.ntlm_relay / linux.ccache_hunt write tickets; normalizer must create CredentialArtifact."""
     raw = {

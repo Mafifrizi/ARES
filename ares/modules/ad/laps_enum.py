@@ -113,17 +113,19 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
             dc=ad["dc"], domain=ad["domain"],
             username=ad["username"], password=ad["password"],
             vault=getattr(ctx, "vault", None),
+            ctx=ctx,
         )
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
         evidence_chain: list[EvidenceRecord] = []
         for cred in raw.get("laps_passwords", []):
+            comp_name = cred.get("computer") or cred.get("computer_name") or "unknown"
             ev = EvidenceRecord(
-                artifact_id=f"laps-{cred.get('computer', 'unknown').lower()}",
+                artifact_id=f"laps-{comp_name.lower()}",
                 source_target=ad["dc"],
                 collected_by=self.MODULE_ID,
                 data={
-                    "computer": cred.get("computer"),
+                    "computer": comp_name,
                     "account": cred.get("account", "Administrator"),
                     "version": cred.get("version", "LAPS"),
                 },
@@ -193,7 +195,7 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
 
     @trace_module("ad.laps_enum")
     async def run(self, dc: str, domain: str, username: str, password: str,
-                  vault: "Any" = None, **kwargs: Any):
+                  vault: "Any" = None, ctx: "Any" = None, **kwargs: Any):
         dc       = sanitize_hostname(dc)
         username = sanitize_ldap(username)
         domain   = sanitize_ldap(domain)
@@ -215,29 +217,58 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
 
         logger.info("laps_enum_done", found=len(laps_entries))
 
+        raw_entries: list[dict[str, Any]] = []
         if laps_entries:
             # Store every LAPS password to vault so lateral modules can use them
             _vault = vault or getattr(getattr(self, "campaign", None), "_vault", None)
-            if _vault:
-                from ares.credential.vault import Credential, CredentialType, PrivilegeLevel
-                stored = 0
-                campaign_id = getattr(getattr(self, "campaign", None), "id", "")
-                for entry in laps_entries:
+            from ares.credential.vault import Credential, CredentialType, PrivilegeLevel
+            stored = 0
+            campaign_id = getattr(getattr(self, "campaign", None), "id", "")
+
+            for entry in laps_entries:
+                comp = entry.get("computer") or entry.get("computer_name") or ""
+                pwd = entry.get("password", "")
+
+                # 1. Direct write to context vault if ctx available (protected by Gate 6)
+                if ctx and hasattr(ctx, "record_credential"):
+                    try:
+                        res = ctx.record_credential(
+                            username=f"{comp}\\Administrator",
+                            secret=pwd,
+                            cred_type=CredentialType.CLEARTEXT,
+                            target=comp,
+                            privilege="local_admin",
+                            source="laps_enum",
+                        )
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception as exc:
+                        logger.debug("laps_ctx_record_failed", computer=comp, error=str(exc)[:60])
+
+                # 2. Direct write to campaign or passed vault (fallback / direct call)
+                if _vault:
                     try:
                         cred = Credential(
                             campaign_id    = campaign_id,
                             username       = "Administrator",
-                            domain         = entry["computer"],   # host-scoped
+                            domain         = comp,   # host-scoped
                             cred_type      = CredentialType.CLEARTEXT,
                             privilege      = PrivilegeLevel.LOCAL_ADMIN,
                             source_module  = self.MODULE_ID,
-                            target_host    = entry["computer"],
+                            target_host    = comp,
                         )
-                        _vault.store(cred, entry["password"])
+                        _vault.store(cred, pwd)
                         stored += 1
                     except Exception as exc:
                         logger.debug("laps_vault_store_failed",
-                                     computer=entry["computer"], error=str(exc)[:60])
+                                     computer=comp, error=str(exc)[:60])
+
+                # Tulis ke raw TANPA password (OPSEC)
+                raw_entry = {k: v for k, v in entry.items() if k != "password"}
+                raw_entry["has_password"] = True  # flag bahwa password ada di vault
+                raw_entries.append(raw_entry)
+
+            if stored:
                 logger.info("laps_stored_to_vault", count=stored)
 
             self.finding(
@@ -252,8 +283,8 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
                 mitre_tactic    = "Credential Access",
                 evidence = {
                     "host_count":  len(laps_entries),
-                    "computers":   [e["computer"] for e in laps_entries[:20]],
-                    "laps_version": list({e["version"] for e in laps_entries}),
+                    "computers":   [e.get("computer") or e.get("computer_name") for e in laps_entries[:20]],
+                    "laps_version": list({e.get("version", "v1") for e in laps_entries}),
                     "note": "Plaintext passwords in vault - not shown in findings",
                 },
                 remediation = (
@@ -265,14 +296,12 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
             )
 
         raw = {
-            "found":   len(laps_entries),
-            "entries": [{"computer": e["computer"], "expiry": e.get("expiry", ""),
-                          "version": e["version"]}
-                        for e in laps_entries],   # passwords omitted from raw
+            "found":   len(raw_entries),
+            "entries": raw_entries,   # passwords omitted from raw
         }
         await self.noise.jitter.sleep()
-        raw["laps_passwords"] = raw.get("entries", [])  # OUTPUTS key
-        raw["valid_credentials"] = raw.get("found", 0)  # OUTPUTS key
+        raw["laps_passwords"] = raw_entries  # OUTPUTS key
+        raw["valid_credentials"] = raw_entries  # OUTPUTS key
         return self._findings[:], raw
 
     def _query_laps_sync(self, dc: str, username: str, password: str,
