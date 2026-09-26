@@ -100,6 +100,37 @@ def _tsch_register_sync(target: str, username: str, password: str,
             pass
 
 
+def _tsch_delete_sync(target: str, username: str, password: str,
+                      domain: str, lmhash: str, nthash: str,
+                      task_name: str) -> None:
+    """Delete a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
+    from impacket.dcerpc.v5 import transport, tsch     # type: ignore[import]
+
+    string_binding = f"ncacn_np:{target}[\\pipe\\atsvc]"
+    rpctransport   = transport.DCERPCTransportFactory(string_binding)
+    rpctransport.set_credentials(username, password, domain, lmhash, nthash, None)
+    rpctransport.set_connect_timeout(15)
+
+    dce = rpctransport.get_dce_rpc()
+    dce.connect()
+    try:
+        dce.bind(tsch.MSRPC_UUID_TSCHS)
+        task_path = f"\\{task_name}"
+        del_fn = getattr(tsch, "hSchRpcDelete", None) or getattr(tsch, "hSchRpcDeleteTask", None)
+        if del_fn:
+            try:
+                resp = del_fn(dce, task_path, 0)
+            except TypeError:
+                resp = del_fn(dce, task_path)
+            if hasattr(resp, "checkError"):
+                resp.checkError()
+    finally:
+        try:
+            dce.disconnect()
+        except Exception:
+            pass
+
+
 @module_contract(
     permissions=[
         NetworkPermission(ports=[135, 139, 445], protocols=["tcp"]),
@@ -363,6 +394,7 @@ class ScheduledTaskPersistence(BaseModule):
                 "dry_run": True,
                 "persistence_established": True,
                 "task_name": task_name,
+                "created_artifacts": [f"scheduled_task:\\{task_name}"],
                 "method": "scheduled_task",
                 "mitre": "T1053.005",
             }
@@ -375,10 +407,19 @@ class ScheduledTaskPersistence(BaseModule):
         if not username:
             return [], {"error": "no_credential_username", "persistence_established": False}
 
+        raw: dict[str, Any] = {
+            "task_name": task_name,
+            "created_artifacts": [f"scheduled_task:\\{task_name}"],
+            "method": "scheduled_task",
+            "mitre": "T1053.005",
+            "persistence_established": False,
+        }
+
+        import asyncio as _asyncio
+        _loop = _asyncio.get_running_loop()
+
         try:
             await self.before_request(target, "default")
-            import asyncio as _asyncio
-            _loop = _asyncio.get_running_loop()
             await _loop.run_in_executor(
                 None,
                 lambda: _tsch_register_sync(
@@ -387,14 +428,45 @@ class ScheduledTaskPersistence(BaseModule):
                 ),
             )
             logger.info("scheduled_task_created", target=target, task=task_name)
-            return [finding], {
-                "persistence_established": True,
-                "task_name": task_name,
-                "method": "scheduled_task",
-                "mitre": "T1053.005",
-            }
+            raw["persistence_established"] = True
+            return [finding], raw
         except Exception as exc:
             raise self._classify_error(exc) from exc
+        finally:
+            try:
+                await _loop.run_in_executor(
+                    None,
+                    lambda: _tsch_delete_sync(
+                        target, username, password, domain,
+                        lmhash, nthash, task_name,
+                    ),
+                )
+                logger.info("scheduled_task_teardown_complete", target=target, task=task_name)
+            except Exception as _teardown_exc:
+                logger.warning(
+                    "scheduled_task_teardown_failed",
+                    target=target,
+                    task=task_name,
+                    error=str(_teardown_exc)[:100],
+                )
+
+    async def teardown(self, target: str = "", username: str = "", password: str = "",
+                       domain: str = "", lmhash: str = "", nthash: str = "",
+                       task_name: str = "AresUpdater") -> bool:
+        """Explicit teardown method to delete scheduled task via RPC."""
+        if not target or not task_name:
+            return False
+        import asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: _tsch_delete_sync(target, username, password, domain, lmhash, nthash, task_name),
+            )
+            return True
+        except Exception as exc:
+            logger.warning("scheduled_task_teardown_error", target=target, task=task_name, error=str(exc))
+            return False
 
 
 # ── Registry Run Key ─────────────────────────────────────────────────────────
