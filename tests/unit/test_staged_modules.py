@@ -18,39 +18,44 @@ from ares.modules.ad.ghost_forge import GhostForgeModule
 class TestPhantomTokenModule:
     def test_module_attributes(self):
         assert PhantomTokenModule.MODULE_ID == "cloud.phantom_token"
+        assert PhantomTokenModule.ENABLED is False
+        assert "MOD-049" in PhantomTokenModule.DISABLED_REASON
         assert "T1528" in PhantomTokenModule.MITRE_TECHNIQUES
         assert "T1606" in PhantomTokenModule.MITRE_TECHNIQUES
 
-    def test_dry_run_execution(self):
+    def test_direct_run_raises_disabled_error(self):
+        from ares.core.errors import ModuleError
+        mod, _ = _make_module(PhantomTokenModule)
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.run(
+                tenant_id="corp.onmicrosoft.com",
+                evaluate_cap_bypass=True,
+                dry_run=False,
+            ))
+        assert "MOD-049" in str(exc_info.value)
+
+    def test_execute_raises_disabled_error(self):
+        from ares.core.errors import ModuleError
         mod, _ = _make_module(PhantomTokenModule)
         ctx = _mock_ctx(params={"tenant_id": "corp.onmicrosoft.com"})
-        ctx.dry_run = True
-        res = _run(mod.execute(ctx))
-        assert res.status == "dry_run"
-        assert res.module_id == "cloud.phantom_token"
-        assert res.raw.get("tenant_id") == "corp.onmicrosoft.com"
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.execute(ctx))
+        assert "MOD-049" in str(exc_info.value)
 
-    def test_live_execution_findings(self):
+    def test_validate_raises_disabled_error(self):
+        from ares.core.errors import ModuleValidationError
         mod, _ = _make_module(PhantomTokenModule)
-        ctx = _mock_ctx(params={"tenant_id": "corp.onmicrosoft.com", "evaluate_cap_bypass": True})
-        ctx.dry_run = False
-        res = _run(mod.execute(ctx))
-        assert res.status == "success"
-        assert len(res.findings) >= 1
-        assert res.findings[0].mitre_technique == "T1528"
-        assert res.raw.get("prt_valid") is True
+        ctx = _mock_ctx(params={"tenant_id": "corp.onmicrosoft.com"})
+        with pytest.raises(ModuleValidationError) as exc_info:
+            _run(mod.validate(ctx))
+        assert "MOD-049" in str(exc_info.value)
 
-    def test_direct_run_method(self):
+    def test_assess_feasibility_reports_disabled(self):
         mod, _ = _make_module(PhantomTokenModule)
-        findings, raw = _run(mod.run(
-            tenant_id="corp.onmicrosoft.com",
-            evaluate_cap_bypass=True,
-            dry_run=False,
-        ))
-        assert len(findings) == 1
-        assert findings[0].mitre_technique == "T1528"
-        assert raw.get("prt_valid") is True
-        assert raw.get("tenant_id") == "corp.onmicrosoft.com"
+        ctx = _mock_ctx(params={"tenant_id": "corp.onmicrosoft.com"})
+        report = _run(mod.assess_feasibility(ctx))
+        assert report.feasible is False
+        assert any("MOD-049" in b for b in report.blockers)
 
 
 class TestGhostForgeModule:
@@ -162,6 +167,7 @@ class TestGhostForgeModule:
         assert "ad.ghost_forge" not in loader.registry
 
     def test_phantom_token_workload_identity_and_detection(self):
+        from ares.core.errors import ModuleError
         mod, _ = _make_module(PhantomTokenModule)
         ctx = _mock_ctx(params={
             "tenant_id": "corp.onmicrosoft.com",
@@ -171,14 +177,9 @@ class TestGhostForgeModule:
             "generate_detection_rules": True,
         })
         ctx.dry_run = False
-        res = _run(mod.execute(ctx))
-        assert res.status == "success"
-        assert len(res.findings) >= 1
-        assert "Workload Identity Federation" in res.findings[0].title
-        assert res.raw.get("assessment_mode_applied") == "workload_identity"
-        assert res.raw.get("dpop_status") == "enforced"
-        assert any(l["loot_type"] == "detection_rule_kql" for l in res.raw["loot"])
-        assert any(l["loot_type"] == "detection_rule_sigma" for l in res.raw["loot"])
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.execute(ctx))
+        assert "MOD-049" in str(exc_info.value)
 
     def test_kerberoast_closed_loop_telemetry(self, monkeypatch):
         from ares.modules.ad.kerberoast import KerberoastModule

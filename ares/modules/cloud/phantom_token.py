@@ -19,6 +19,7 @@ import hashlib
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
+from ares.core.errors import ModuleError, ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
@@ -64,115 +65,50 @@ class PhantomTokenModule(BaseModule[PhantomTokenParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1528", "T1606"]
     MODULE_TIMEOUT_SECONDS: int | None = 60
     PARAMS_MODEL       = PhantomTokenParams
+    ENABLED            = False
+    DISABLED_REASON    = (
+        "module disabled: PRT hijack not implemented, synthetic token injection risk (MOD-049)"
+    )
 
     async def assess_feasibility(self, ctx: Any) -> Any:
         from ares.modules.base import FeasibilityReport
-        blockers: list[str] = []
-        score = 1.0
-        risk = "low"
 
-        p = getattr(ctx, "params", {})
-        tenant = (p.get("tenant_id") if isinstance(p, dict) else getattr(p, "tenant_id", "")) or getattr(ctx, "target", "")
-        if not tenant:
-            blockers.append("No Azure AD / Entra ID tenant identifier specified")
-            score -= 0.5
-
-        mode = (p.get("assessment_mode") if isinstance(p, dict) else getattr(p, "assessment_mode", "auto")) or "auto"
-        issuer = (p.get("federation_issuer") if isinstance(p, dict) else getattr(p, "federation_issuer", None))
-        if mode == "workload_identity" and issuer and not issuer.startswith("https://"):
-            blockers.append("Federation issuer must be a valid HTTPS OIDC authority")
-            score -= 0.3
-
+        # MITIGATION (MOD-049): Module is temporarily disabled from execution pipeline.
         return FeasibilityReport(
-            feasible=len(blockers) == 0 and score >= 0.5,
-            score=max(0.0, min(1.0, score)),
-            risk_level=risk,
-            blockers=blockers,
+            feasible=False,
+            score=0.0,
+            risk_level="high_noise",
+            blockers=[self.DISABLED_REASON],
             recommended_alternatives=["cloud.azure_ad"],
             details={
-                "tenant_specified": bool(tenant),
-                "assessment_mode": mode,
-                "cae_ready": True,
-                "dpop_supported": getattr(p, "dpop_enforced", False),
+                "disabled": True,
+                "reason": self.DISABLED_REASON,
             },
         )
 
     async def validate(self, ctx: Any) -> None:
-        from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        p = getattr(ctx, "params", {})
-        tenant = (p.get("tenant_id") if isinstance(p, dict) else getattr(p, "tenant_id", None)) or getattr(ctx, "target", "")
-        if not tenant:
-            raise ModuleValidationError(
-                "cloud.phantom_token requires 'tenant_id' (Tenant GUID or onmicrosoft domain).",
-                module_id=self.MODULE_ID,
-                field="tenant_id",
-            )
-        await super().validate(ctx)
+        # MITIGATION (MOD-049): Fail fast with explicit error before parameter checks
+        raise ModuleValidationError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
 
     async def execute(self, ctx: ExecutionContext[PhantomTokenParams]) -> ModuleResult:
-        if isinstance(ctx.params, PhantomTokenParams):
-            p = ctx.params
-        elif isinstance(ctx.params, dict):
-            p = PhantomTokenParams.model_validate(ctx.params)
-        else:
-            p = PhantomTokenParams()
-
-        kwargs = p.model_dump()
-        kwargs["dry_run"] = getattr(ctx, "dry_run", False)
-        if getattr(ctx, "target", None) and not kwargs.get("tenant_id"):
-            kwargs["tenant_id"] = ctx.target
-
-        findings, raw = await self.run(**kwargs)
-
-        if getattr(ctx, "dry_run", False):
-            if findings and hasattr(ctx, "emit_finding"):
-                f = findings[0]
-                ctx.emit_finding(
-                    title=f.title,
-                    severity=f.severity,
-                    description=f.description,
-                    mitre_technique=f.mitre_technique,
-                )
-            return ModuleResult(
-                status="dry_run",
-                module_id=self.MODULE_ID,
-                raw=raw,
-            )
-
-        if findings and hasattr(ctx, "emit_finding"):
-            f = findings[0]
-            ctx.emit_finding(
-                title=f.title,
-                severity=f.severity,
-                description=f.description,
-                mitre_technique=f.mitre_technique,
-                mitre_tactic=f.mitre_tactic,
-                evidence=f.evidence,
-                remediation=f.remediation,
-            )
-
-        simulated_device_id = raw.get("device_id", "")
-        if hasattr(ctx, "record_credential"):
-            ctx.record_credential(
-                username=f"{p.tenant_id}_prt_session",
-                secret=f"PRT_ESTSAUTH_{simulated_device_id}",
-                domain=p.tenant_id,
-                cred_type="token",
-            )
-
-        return ModuleResult(
-            status="success",
-            findings=findings,
-            raw=raw,
+        # MITIGATION (MOD-049): Disabled from execution pipeline to prevent fictitious findings
+        # and vault contamination while final architectural decision is pending.
+        raise ModuleError(
+            self.DISABLED_REASON,
             module_id=self.MODULE_ID,
-            execution_id=getattr(ctx, "execution_id", ""),
         )
 
     @trace_module("cloud.phantom_token")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        # MITIGATION (MOD-049): Disabled from execution pipeline to prevent fictitious findings
+        # and vault contamination while final architectural decision is pending.
+        raise ModuleError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
         self._findings = []
         ctx = kwargs.get("ctx") or kwargs
         tenant_id = str(ctx.get("tenant_id") or ctx.get("target") or "")
