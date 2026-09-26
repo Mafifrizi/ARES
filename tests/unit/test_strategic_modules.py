@@ -402,6 +402,42 @@ class TestCloudFederationAbuse:
         result = _run(mod.execute(ctx))
         assert result.status == "dry_run"  # must not attempt network
 
+    def test_adfs_scope_check_before_request_called(self, monkeypatch):
+        """MOD-050: before_request must be called with extracted target before outbound ADFS HTTP."""
+        from unittest.mock import AsyncMock, MagicMock
+        from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
+        mod, _ = _make_module(CloudIdentityFederationModule)
+        mod.before_request = AsyncMock()
+
+        mock_client = MagicMock()
+        mock_client.__enter__.return_value = mock_client
+        mock_client.__exit__.return_value = False
+        mock_client.get.return_value = MagicMock(status_code=404, text="")
+        monkeypatch.setattr("httpx.Client", lambda *a, **kw: mock_client)
+
+        # Call with adfs_url
+        _run(mod._enumerate_adfs("https://adfs.corp.local/adfs", ""))
+        assert mod.before_request.called
+        call_target, call_proto = mod.before_request.call_args[0]
+        assert call_target == "adfs.corp.local"
+        assert call_proto == "http"
+
+    def test_adfs_scope_check_blocks_out_of_scope(self, monkeypatch):
+        """MOD-050: Out-of-scope ADFS target must raise ScopeViolationError and abort HTTP request."""
+        from unittest.mock import AsyncMock, MagicMock
+        from ares.core.errors import ScopeViolationError
+        from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
+        mod, _ = _make_module(CloudIdentityFederationModule)
+        mod.before_request = AsyncMock(side_effect=ScopeViolationError("Target out of scope"))
+
+        mock_client = MagicMock()
+        monkeypatch.setattr("httpx.Client", lambda *a, **kw: mock_client)
+
+        with pytest.raises(ScopeViolationError):
+            _run(mod._enumerate_adfs("https://evil.external.com/adfs", ""))
+
+        assert not mock_client.called
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ai.autonomous_planner

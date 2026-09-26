@@ -290,9 +290,13 @@ class CloudIdentityFederationModule(BaseModule):
 
         # ── Phase 3: ADFS Discovery and Golden SAML Path ─────────────────────
         if adfs_url or domain:
-            adfs_result = await loop.run_in_executor(
-                None, lambda: self._enumerate_adfs(adfs_url, domain)
-            )
+            res = self._enumerate_adfs(adfs_url, domain)
+            if asyncio.iscoroutine(res):
+                adfs_result = await res
+            elif callable(res):
+                adfs_result = await loop.run_in_executor(None, res)
+            else:
+                adfs_result = res
             results["adfs_federation"] = adfs_result
 
         # ── Phase 4: Token lifetime + B2B (when Graph token available) ─────────
@@ -502,7 +506,7 @@ class CloudIdentityFederationModule(BaseModule):
 
         return result
 
-    def _enumerate_adfs(self, adfs_url: str, domain: str) -> dict:
+    async def _enumerate_adfs(self, adfs_url: str, domain: str) -> dict:
         """Enumerate ADFS configuration and federation metadata."""
         result: dict[str, Any] = {"error": None, "adfs_url": adfs_url, "endpoints": [],
                                    "relying_parties": []}
@@ -511,6 +515,13 @@ class CloudIdentityFederationModule(BaseModule):
 
         if not adfs_url:
             return result
+
+        # Scope enforcement (MOD-050): Validate target before outbound HTTP request
+        from urllib.parse import urlparse
+        raw_url = adfs_url if "://" in adfs_url else f"https://{adfs_url}"
+        parsed = urlparse(raw_url)
+        target_host = parsed.hostname or adfs_url
+        await self.before_request(target_host, "http")
 
         try:
             import httpx
