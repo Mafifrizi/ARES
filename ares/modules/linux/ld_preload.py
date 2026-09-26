@@ -250,12 +250,13 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     ) -> tuple[list[Finding], dict[str, Any]]:
 
         is_remote = ssh_user is not None and host != "localhost"
+        conn: Any = None
 
         if is_remote:
             host = sanitize_hostname(host)
             await self.before_request(host, "ssh")
             logger.info("ld_preload_start", host=host, mode="remote", user=ssh_user)
-            run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
+            conn, run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
         elif host == "localhost":
             logger.info("ld_preload_start", host="localhost", mode="local")
             run_cmd = self._run_local
@@ -263,232 +264,249 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             logger.error("ld_preload_rejected_remote_without_credentials", host=host)
             return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
 
-        # Run checks in parallel
-        (
-            sudoers_out,
-            preload_file_out,
-            ld_conf_out,
-            suid_bins_out,
-        ) = await asyncio.gather(
-            run_cmd(_CMD_SUDOERS_LDPRELOAD),
-            run_cmd(_CMD_LD_PRELOAD_FILE),
-            run_cmd(_CMD_LD_CONF_PATHS),
-            run_cmd(_CMD_SUID_BINS),
-            return_exceptions=True,
-        )
+        try:
 
-        def _safe(v: Any) -> str:
-            return v if isinstance(v, str) else ""
-
-        sudoers_out      = _safe(sudoers_out)
-        preload_file_out = _safe(preload_file_out)
-        ld_conf_out      = _safe(ld_conf_out)
-        suid_bins_out    = _safe(suid_bins_out)
-
-        # ── Check 1: LD_PRELOAD in sudoers env_keep ────────────────────────
-        if sudoers_out and "ld_preload" in sudoers_out.lower():
-            self.finding(
-                title=f"LD_PRELOAD Preserved in Sudoers on {host}",
-                description=(
-                    f"The sudoers configuration on {host} preserves the LD_PRELOAD "
-                    "environment variable (env_keep += LD_PRELOAD). "
-                    "An attacker can compile a malicious shared library, set "
-                    "LD_PRELOAD to point to it, and run any command allowed by "
-                    "sudo - causing the library to execute as the sudo target user "
-                    "(often root) before the actual command runs."
-                ),
-                severity=Severity.CRITICAL,
-                mitre_technique="T1574.006",
-                mitre_tactic="Privilege Escalation",
-                evidence={
-                    "host":           host,
-                    "sudoers_output": sudoers_out[:300],
-                    "exploitation": (
-                        "1. Compile: gcc -shared -fPIC -o /tmp/evil.so evil.c. "
-                        "2. Set: export LD_PRELOAD=/tmp/evil.so. "
-                        "3. Run any allowed sudo command - evil.so executes as root."
-                    ),
-                },
-                remediation=(
-                    "Remove LD_PRELOAD from env_keep in /etc/sudoers. "
-                    "Add 'Defaults env_reset' and 'Defaults!env_reset env_keep=' "
-                    "to explicitly control preserved variables. "
-                    "Use 'visudo' to edit sudoers safely."
-                ),
-                host=host, confidence=1.0,
+            # Run checks in parallel
+            (
+                sudoers_out,
+                preload_file_out,
+                ld_conf_out,
+                suid_bins_out,
+            ) = await asyncio.gather(
+                run_cmd(_CMD_SUDOERS_LDPRELOAD),
+                run_cmd(_CMD_LD_PRELOAD_FILE),
+                run_cmd(_CMD_LD_CONF_PATHS),
+                run_cmd(_CMD_SUID_BINS),
+                return_exceptions=True,
             )
 
-        # ── Check 2: Writable /etc/ld.so.preload ──────────────────────────
-        if preload_file_out:
-            # File exists - check if writable by current user
-            writable_preload = await run_cmd(
-                "[ -w /etc/ld.so.preload ] && echo writable || echo readonly"
-            ) if not isinstance(preload_file_out, Exception) else ""
-            writable_preload = writable_preload if isinstance(writable_preload, str) else ""
+            def _safe(v: Any) -> str:
+                return v if isinstance(v, str) else ""
 
-            if "writable" in writable_preload:
+            sudoers_out      = _safe(sudoers_out)
+            preload_file_out = _safe(preload_file_out)
+            ld_conf_out      = _safe(ld_conf_out)
+            suid_bins_out    = _safe(suid_bins_out)
+
+            # ── Check 1: LD_PRELOAD in sudoers env_keep ────────────────────────
+            if sudoers_out and "ld_preload" in sudoers_out.lower():
                 self.finding(
-                    title=f"/etc/ld.so.preload is Writable on {host}",
+                    title=f"LD_PRELOAD Preserved in Sudoers on {host}",
                     description=(
-                        f"/etc/ld.so.preload exists and is writable on {host}. "
-                        "This file forces the dynamic linker to preload listed "
-                        "shared libraries for EVERY dynamically linked binary run "
-                        "by any user, including root. "
-                        "Writing a malicious .so path here achieves system-wide "
-                        "code execution as any user running any binary."
+                        f"The sudoers configuration on {host} preserves the LD_PRELOAD "
+                        "environment variable (env_keep += LD_PRELOAD). "
+                        "An attacker can compile a malicious shared library, set "
+                        "LD_PRELOAD to point to it, and run any command allowed by "
+                        "sudo - causing the library to execute as the sudo target user "
+                        "(often root) before the actual command runs."
                     ),
                     severity=Severity.CRITICAL,
                     mitre_technique="T1574.006",
                     mitre_tactic="Privilege Escalation",
                     evidence={
-                        "host":              host,
-                        "file":              "/etc/ld.so.preload",
-                        "current_contents":  preload_file_out[:200],
+                        "host":           host,
+                        "sudoers_output": sudoers_out[:300],
                         "exploitation": (
-                            "1. Compile malicious .so: gcc -shared -fPIC -o /tmp/evil.so evil.c. "
-                            "2. Add to preload: echo '/tmp/evil.so' >> /etc/ld.so.preload. "
-                            "3. Next time any privileged binary runs, evil.so executes first."
+                            "1. Compile: gcc -shared -fPIC -o /tmp/evil.so evil.c. "
+                            "2. Set: export LD_PRELOAD=/tmp/evil.so. "
+                            "3. Run any allowed sudo command - evil.so executes as root."
                         ),
                     },
                     remediation=(
-                        "Set correct permissions on /etc/ld.so.preload: "
-                        "chown root:root /etc/ld.so.preload && chmod 644 /etc/ld.so.preload. "
-                        "Verify contents are expected. "
-                        "Monitor this file with auditd: "
-                        "-w /etc/ld.so.preload -p wa -k ld_preload"
+                        "Remove LD_PRELOAD from env_keep in /etc/sudoers. "
+                        "Add 'Defaults env_reset' and 'Defaults!env_reset env_keep=' "
+                        "to explicitly control preserved variables. "
+                        "Use 'visudo' to edit sudoers safely."
                     ),
                     host=host, confidence=1.0,
                 )
 
-        # ── Check 3: Writable directories in ld.so.conf ───────────────────
-        if ld_conf_out:
-            lib_dirs: list[str] = []
-            for line in ld_conf_out.splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and line.startswith("/"):
-                    lib_dirs.append(line)
+            # ── Check 2: Writable /etc/ld.so.preload ──────────────────────────
+            if preload_file_out:
+                # File exists - check if writable by current user
+                writable_preload = await run_cmd(
+                    "[ -w /etc/ld.so.preload ] && echo writable || echo readonly"
+                ) if not isinstance(preload_file_out, Exception) else ""
+                writable_preload = writable_preload if isinstance(writable_preload, str) else ""
 
-            writable_lib_dirs: list[str] = []
-            for ldir in lib_dirs[:20]:   # check first 20
-                check = await run_cmd(
-                    f"[ -d {shlex.quote(ldir)} ] && [ -w {shlex.quote(ldir)} ] && echo writable"
+                if "writable" in writable_preload:
+                    self.finding(
+                        title=f"/etc/ld.so.preload is Writable on {host}",
+                        description=(
+                            f"/etc/ld.so.preload exists and is writable on {host}. "
+                            "This file forces the dynamic linker to preload listed "
+                            "shared libraries for EVERY dynamically linked binary run "
+                            "by any user, including root. "
+                            "Writing a malicious .so path here achieves system-wide "
+                            "code execution as any user running any binary."
+                        ),
+                        severity=Severity.CRITICAL,
+                        mitre_technique="T1574.006",
+                        mitre_tactic="Privilege Escalation",
+                        evidence={
+                            "host":              host,
+                            "file":              "/etc/ld.so.preload",
+                            "current_contents":  preload_file_out[:200],
+                            "exploitation": (
+                                "1. Compile malicious .so: gcc -shared -fPIC -o /tmp/evil.so evil.c. "
+                                "2. Add to preload: echo '/tmp/evil.so' >> /etc/ld.so.preload. "
+                                "3. Next time any privileged binary runs, evil.so executes first."
+                            ),
+                        },
+                        remediation=(
+                            "Set correct permissions on /etc/ld.so.preload: "
+                            "chown root:root /etc/ld.so.preload && chmod 644 /etc/ld.so.preload. "
+                            "Verify contents are expected. "
+                            "Monitor this file with auditd: "
+                            "-w /etc/ld.so.preload -p wa -k ld_preload"
+                        ),
+                        host=host, confidence=1.0,
+                    )
+
+            # ── Check 3: Writable directories in ld.so.conf ───────────────────
+            if ld_conf_out:
+                lib_dirs: list[str] = []
+                for line in ld_conf_out.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and line.startswith("/"):
+                        lib_dirs.append(line)
+
+                writable_lib_dirs: list[str] = []
+                for ldir in lib_dirs[:20]:   # check first 20
+                    check = await run_cmd(
+                        f"[ -d {shlex.quote(ldir)} ] && [ -w {shlex.quote(ldir)} ] && echo writable"
+                    )
+                    check = check if isinstance(check, str) else ""
+                    if "writable" in check:
+                        writable_lib_dirs.append(ldir)
+
+                if writable_lib_dirs:
+                    self.finding(
+                        title=(
+                            f"Writable Library Path in ld.so.conf on {host} "
+                            f"({len(writable_lib_dirs)} dir(s))"
+                        ),
+                        description=(
+                            f"The following directories are listed in /etc/ld.so.conf "
+                            f"and are writable by the current user on {host}: "
+                            f"{', '.join(writable_lib_dirs)}. "
+                            "Placing a malicious .so with the same name as a real library "
+                            "in these directories will cause it to be loaded instead of "
+                            "the real library for any dynamically linked binary."
+                        ),
+                        severity=Severity.HIGH,
+                        mitre_technique="T1574.006",
+                        mitre_tactic="Privilege Escalation",
+                        evidence={
+                            "host":              host,
+                            "writable_dirs":     writable_lib_dirs,
+                            "all_lib_dirs":      lib_dirs[:10],
+                        },
+                        remediation=(
+                            "Remove write permissions from library directories: "
+                            "chmod 755 <dir> && chown root:root <dir>. "
+                            "Run ldconfig after any legitimate library change. "
+                            "Use AppArmor or SELinux to restrict library loading."
+                        ),
+                        host=host, confidence=0.95,
+                    )
+
+            # ── Check 4: SUID binaries with writable RPATH ────────────────────
+            suid_bins = [
+                b.strip() for b in suid_bins_out.splitlines() if b.strip()
+            ]
+            writable_rpath_bins: list[dict[str, str]] = []
+
+            for binary in suid_bins[:_RPATH_CHECK_DEPTH]:
+                # Read RPATH/RUNPATH from the binary
+                rpath_out = await run_cmd(
+                    f"readelf -d {shlex.quote(binary)} 2>/dev/null | "
+                    "grep -E '(RPATH|RUNPATH)'"
                 )
-                check = check if isinstance(check, str) else ""
-                if "writable" in check:
-                    writable_lib_dirs.append(ldir)
+                rpath_out = rpath_out if isinstance(rpath_out, str) else ""
+                if not rpath_out:
+                    continue
 
-            if writable_lib_dirs:
+                # Extract paths from RPATH output
+                # Typical: 0x000000000000000f (RPATH) Library rpath: [/opt/lib:/usr/local/lib]
+                import re
+                match = re.search(r'\[(.+?)\]', rpath_out)
+                if not match:
+                    continue
+                rpath_dirs = [d.strip() for d in match.group(1).split(":") if d.strip()]
+
+                for rdir in rpath_dirs:
+                    writable = await run_cmd(
+                        f"[ -d {shlex.quote(rdir)} ] && [ -w {shlex.quote(rdir)} ] && echo writable"
+                    )
+                    writable = writable if isinstance(writable, str) else ""
+                    if "writable" in writable:
+                        writable_rpath_bins.append({
+                            "binary":       binary,
+                            "rpath":        match.group(1),
+                            "writable_dir": rdir,
+                        })
+
+            if writable_rpath_bins:
                 self.finding(
                     title=(
-                        f"Writable Library Path in ld.so.conf on {host} "
-                        f"({len(writable_lib_dirs)} dir(s))"
+                        f"SUID Binary with Writable RPATH on {host} "
+                        f"({len(writable_rpath_bins)} binary/binaries)"
                     ),
                     description=(
-                        f"The following directories are listed in /etc/ld.so.conf "
-                        f"and are writable by the current user on {host}: "
-                        f"{', '.join(writable_lib_dirs)}. "
-                        "Placing a malicious .so with the same name as a real library "
-                        "in these directories will cause it to be loaded instead of "
-                        "the real library for any dynamically linked binary."
+                        f"{len(writable_rpath_bins)} SUID binary/binaries on {host} "
+                        "have RPATH pointing to directories writable by the current user. "
+                        "By placing a malicious .so in the writable RPATH directory "
+                        "with the same name as a library the binary loads, "
+                        "the malicious library executes as the SUID binary owner (often root)."
                     ),
-                    severity=Severity.HIGH,
+                    severity=Severity.CRITICAL,
                     mitre_technique="T1574.006",
                     mitre_tactic="Privilege Escalation",
                     evidence={
-                        "host":              host,
-                        "writable_dirs":     writable_lib_dirs,
-                        "all_lib_dirs":      lib_dirs[:10],
+                        "host":    host,
+                        "vectors": writable_rpath_bins,
+                        "exploitation": (
+                            "1. Run ldd <suid_binary> to find loaded libraries. "
+                            "2. Compile a fake version of one library as a shared object. "
+                            "3. Place it in the writable RPATH dir with the exact library name. "
+                            "4. Execute the SUID binary - your .so runs as root."
+                        ),
                     },
                     remediation=(
-                        "Remove write permissions from library directories: "
-                        "chmod 755 <dir> && chown root:root <dir>. "
-                        "Run ldconfig after any legitimate library change. "
-                        "Use AppArmor or SELinux to restrict library loading."
+                        "Recompile the binary without a hardcoded RPATH, or ensure "
+                        "RPATH only points to root-owned directories. "
+                        "Use patchelf --remove-rpath to strip RPATH. "
+                        "Verify with: readelf -d <binary> | grep -E '(RPATH|RUNPATH)'"
                     ),
-                    host=host, confidence=0.95,
+                    host=host, confidence=0.9,
                 )
 
-        # ── Check 4: SUID binaries with writable RPATH ────────────────────
-        suid_bins = [
-            b.strip() for b in suid_bins_out.splitlines() if b.strip()
-        ]
-        writable_rpath_bins: list[dict[str, str]] = []
-
-        for binary in suid_bins[:_RPATH_CHECK_DEPTH]:
-            # Read RPATH/RUNPATH from the binary
-            rpath_out = await run_cmd(
-                f"readelf -d {shlex.quote(binary)} 2>/dev/null | "
-                "grep -E '(RPATH|RUNPATH)'"
-            )
-            rpath_out = rpath_out if isinstance(rpath_out, str) else ""
-            if not rpath_out:
-                continue
-
-            # Extract paths from RPATH output
-            # Typical: 0x000000000000000f (RPATH) Library rpath: [/opt/lib:/usr/local/lib]
-            import re
-            match = re.search(r'\[(.+?)\]', rpath_out)
-            if not match:
-                continue
-            rpath_dirs = [d.strip() for d in match.group(1).split(":") if d.strip()]
-
-            for rdir in rpath_dirs:
-                writable = await run_cmd(
-                    f"[ -d {shlex.quote(rdir)} ] && [ -w {shlex.quote(rdir)} ] && echo writable"
-                )
-                writable = writable if isinstance(writable, str) else ""
-                if "writable" in writable:
-                    writable_rpath_bins.append({
-                        "binary":       binary,
-                        "rpath":        match.group(1),
-                        "writable_dir": rdir,
-                    })
-
-        if writable_rpath_bins:
-            self.finding(
-                title=(
-                    f"SUID Binary with Writable RPATH on {host} "
-                    f"({len(writable_rpath_bins)} binary/binaries)"
-                ),
-                description=(
-                    f"{len(writable_rpath_bins)} SUID binary/binaries on {host} "
-                    "have RPATH pointing to directories writable by the current user. "
-                    "By placing a malicious .so in the writable RPATH directory "
-                    "with the same name as a library the binary loads, "
-                    "the malicious library executes as the SUID binary owner (often root)."
-                ),
-                severity=Severity.CRITICAL,
-                mitre_technique="T1574.006",
-                mitre_tactic="Privilege Escalation",
-                evidence={
-                    "host":    host,
-                    "vectors": writable_rpath_bins,
-                    "exploitation": (
-                        "1. Run ldd <suid_binary> to find loaded libraries. "
-                        "2. Compile a fake version of one library as a shared object. "
-                        "3. Place it in the writable RPATH dir with the exact library name. "
-                        "4. Execute the SUID binary - your .so runs as root."
-                    ),
-                },
-                remediation=(
-                    "Recompile the binary without a hardcoded RPATH, or ensure "
-                    "RPATH only points to root-owned directories. "
-                    "Use patchelf --remove-rpath to strip RPATH. "
-                    "Verify with: readelf -d <binary> | grep -E '(RPATH|RUNPATH)'"
-                ),
-                host=host, confidence=0.9,
-            )
-
-        raw = {
-            "host":                   host,
-            "sudoers_ldpreload":      sudoers_out,
-            "ld_so_preload":          preload_file_out,
-            "ld_conf_dirs":           ld_conf_out,
-            "suid_bins_checked":      len(suid_bins[:_RPATH_CHECK_DEPTH]),
-            "writable_rpath_vectors": writable_rpath_bins,
-        }
-        raw["privesc_vectors"] = self._findings  # OUTPUTS key
-        return self._findings[:], raw
+            raw = {
+                "host":                   host,
+                "sudoers_ldpreload":      sudoers_out,
+                "ld_so_preload":          preload_file_out,
+                "ld_conf_dirs":           ld_conf_out,
+                "suid_bins_checked":      len(suid_bins[:_RPATH_CHECK_DEPTH]),
+                "writable_rpath_vectors": writable_rpath_bins,
+            }
+            raw["privesc_vectors"] = self._findings  # OUTPUTS key
+            return self._findings[:], raw
+        finally:
+            if conn is not None:
+                try:
+                    close_fn = getattr(conn, "close", None)
+                    if callable(close_fn):
+                        res = close_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                    wait_fn = getattr(conn, "wait_closed", None)
+                    if callable(wait_fn):
+                        res = wait_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                except Exception:
+                    pass
 
     # ── SSH / local runner helpers - identical pattern to linux.privesc ────
 
@@ -529,7 +547,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             result = await conn.run(cmd, check=False)
             return (result.stdout or "").strip()
 
-        return ssh_run
+        return conn, ssh_run
 
     @staticmethod
     async def _run_local(cmd: str) -> str:

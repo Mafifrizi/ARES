@@ -232,46 +232,63 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
     ) -> tuple[list[Finding], dict[str, Any]]:
         self._target_host = host
         is_remote = ssh_user is not None and host != "localhost"
-        if is_remote:
-            host = sanitize_hostname(host)
-            await self.before_request(host, "ssh")
-            logger.info("linux_privesc_start", host=host, mode="remote", user=ssh_user)
-            run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
-        elif host == "localhost":
-            logger.info("linux_privesc_start", host="localhost", mode="local")
-            run_cmd = self._run_local
-        else:
-            logger.error("linux_privesc_rejected_remote_without_credentials", host=host)
-            return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
-
-        checks = [
-            ("suid", self._check_suid(run_cmd)),
-            ("sudo", self._check_sudo(run_cmd)),
-            ("cron", self._check_cron(run_cmd)),
-            ("capabilities", self._check_capabilities(run_cmd)),
-            ("writable_path", self._check_writable_path(run_cmd)),
-            ("world_writable", self._check_world_writable(run_cmd)),
-        ]
-        raw: dict[str, Any] = {"host": host, "remote": is_remote}
-        results = await asyncio.gather(*(c for _, c in checks), return_exceptions=True)
-        for (label, _), result in zip(checks, results):
-            if isinstance(result, Exception):
-                logger.warning("privesc_check_failed", check=label, error=str(result))
+        conn: Any = None
+        try:
+            if is_remote:
+                host = sanitize_hostname(host)
+                await self.before_request(host, "ssh")
+                logger.info("linux_privesc_start", host=host, mode="remote", user=ssh_user)
+                conn, run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
+            elif host == "localhost":
+                logger.info("linux_privesc_start", host="localhost", mode="local")
+                run_cmd = self._run_local
             else:
-                # Wrap target output in UntrustedTargetData taint barrier
-                if isinstance(result, list):
-                    raw[label] = [UntrustedTargetData(str(x), source=host).value for x in result]
-                else:
-                    raw[label] = result
+                logger.error("linux_privesc_rejected_remote_without_credentials", host=host)
+                return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
 
-        self._analyze(raw)
-        logger.info("linux_privesc_done", host=host, findings=len(self._findings))
-        raw["privesc_vectors"] = self._findings
-        return self._findings, raw
+            checks = [
+                ("suid", self._check_suid(run_cmd)),
+                ("sudo", self._check_sudo(run_cmd)),
+                ("cron", self._check_cron(run_cmd)),
+                ("capabilities", self._check_capabilities(run_cmd)),
+                ("writable_path", self._check_writable_path(run_cmd)),
+                ("world_writable", self._check_world_writable(run_cmd)),
+            ]
+            raw: dict[str, Any] = {"host": host, "remote": is_remote}
+            results = await asyncio.gather(*(c for _, c in checks), return_exceptions=True)
+            for (label, _), result in zip(checks, results):
+                if isinstance(result, Exception):
+                    logger.warning("privesc_check_failed", check=label, error=str(result))
+                else:
+                    # Wrap target output in UntrustedTargetData taint barrier
+                    if isinstance(result, list):
+                        raw[label] = [UntrustedTargetData(str(x), source=host).value for x in result]
+                    else:
+                        raw[label] = result
+
+            self._analyze(raw)
+            logger.info("linux_privesc_done", host=host, findings=len(self._findings))
+            raw["privesc_vectors"] = self._findings
+            return self._findings, raw
+        finally:
+            if conn is not None:
+                try:
+                    close_fn = getattr(conn, "close", None)
+                    if callable(close_fn):
+                        res = close_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                    wait_fn = getattr(conn, "wait_closed", None)
+                    if callable(wait_fn):
+                        res = wait_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                except Exception:
+                    pass
 
     async def _make_ssh_runner(
         self, host: str, user: str, key_path: str | None, password: str | None, port: int
-    ) -> Callable[[str], Awaitable[str]]:
+    ) -> tuple[Any, Callable[[str], Awaitable[str]]]:
         try:
             import asyncssh
         except ImportError:
@@ -296,7 +313,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
             output = (result.stdout or "").strip()
             return UntrustedTargetData(output, source=host).value
 
-        return ssh_run
+        return conn, ssh_run
 
     @staticmethod
     async def _run_local(cmd: str) -> str:

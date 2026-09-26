@@ -304,12 +304,13 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
     ) -> tuple[list[Finding], dict[str, Any]]:
 
         is_remote = ssh_user is not None and host != "localhost"
+        conn: Any = None
 
         if is_remote:
             host     = sanitize_hostname(host)
             await self.before_request(host, "ssh")
             logger.info("nfs_escape_start", host=host, mode="remote", user=ssh_user)
-            run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
+            conn, run_cmd = await self._make_ssh_runner(host, ssh_user, ssh_key, ssh_pass, ssh_port)
         elif host == "localhost":
             logger.info("nfs_escape_start", host="localhost", mode="local")
             run_cmd = self._run_local
@@ -317,128 +318,145 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             logger.error("nfs_escape_rejected_remote_without_credentials", host=host)
             return [], {"error": f"remote target '{host}' requires ssh_user; local fallback prohibited"}
 
-        # Gather NFS data in parallel
-        exports_raw, mounts_raw, showmount_raw, nfs_conf_raw = await asyncio.gather(
-            run_cmd("cat /etc/exports 2>/dev/null"),
-            run_cmd("cat /proc/mounts 2>/dev/null | grep nfs"),
-            run_cmd("showmount -e localhost 2>/dev/null"),
-            run_cmd("cat /etc/nfs.conf 2>/dev/null | head -30"),
-            return_exceptions=True,
-        )
+        try:
 
-        # Safely coerce exceptions to empty string
-        def _safe(v: Any) -> str:
-            return v if isinstance(v, str) else ""
+            # Gather NFS data in parallel
+            exports_raw, mounts_raw, showmount_raw, nfs_conf_raw = await asyncio.gather(
+                run_cmd("cat /etc/exports 2>/dev/null"),
+                run_cmd("cat /proc/mounts 2>/dev/null | grep nfs"),
+                run_cmd("showmount -e localhost 2>/dev/null"),
+                run_cmd("cat /etc/nfs.conf 2>/dev/null | head -30"),
+                return_exceptions=True,
+            )
 
-        exports_raw  = _safe(exports_raw)
-        mounts_raw   = _safe(mounts_raw)
-        showmount_raw = _safe(showmount_raw)
-        nfs_conf_raw = _safe(nfs_conf_raw)
+            # Safely coerce exceptions to empty string
+            def _safe(v: Any) -> str:
+                return v if isinstance(v, str) else ""
 
-        entries = _parse_exports(exports_raw)
+            exports_raw  = _safe(exports_raw)
+            mounts_raw   = _safe(mounts_raw)
+            showmount_raw = _safe(showmount_raw)
+            nfs_conf_raw = _safe(nfs_conf_raw)
 
-        # ── Analyse each export entry ──────────────────────────────────────
-        for entry in entries:
-            path    = entry["path"]
-            clients = entry["clients"]
+            entries = _parse_exports(exports_raw)
 
-            for client in clients:
-                opts           = [o.lower() for o in client.get("options", [])]
-                client_host    = client.get("host", "*")
-                is_writable    = "rw" in opts
-                no_root_squash = "no_root_squash" in opts
-                no_all_squash  = "no_all_squash" in opts
-                insecure       = "insecure" in opts
+            # ── Analyse each export entry ──────────────────────────────────────
+            for entry in entries:
+                path    = entry["path"]
+                clients = entry["clients"]
 
-                if no_root_squash:
-                    self.finding(
-                        title=f"NFS no_root_squash on {path} (host={client_host})",
-                        description=(
-                            f"NFS export {path!r} on {host} is configured with "
-                            f"no_root_squash for client {client_host!r}. "
-                            "Any client connecting as root retains root privileges "
-                            "on the share. "
-                            + (
-                                "The export is also writable (rw). "
-                                "An attacker with root on a client machine can mount "
-                                "this share and copy a SUID /bin/bash binary, then "
-                                "execute it from a low-priv shell on the NFS server "
-                                "to escalate to root."
-                                if is_writable else
-                                "The export is read-only - no_root_squash is less "
-                                "immediately exploitable but still a misconfiguration."
-                            )
-                        ),
-                        severity=Severity.CRITICAL if is_writable else Severity.HIGH,
-                        mitre_technique="T1548.001",
-                        mitre_tactic="Privilege Escalation",
-                        evidence={
-                            "host":           host,
-                            "export_path":    path,
-                            "client":         client_host,
-                            "options":        client.get("options", []),
-                            "writable":       is_writable,
-                            "exploitation":   (
-                                f"1. Mount {path} on attacker machine as root. "
-                                "2. Copy /bin/bash to the share and set SUID: "
-                                "cp /bin/bash /mnt/share/ && chmod +s /mnt/share/bash. "
-                                "3. On the NFS server (as low-priv user): "
-                                f"/mnt_nfs{path}/bash -p  (opens root shell)."
-                            ) if is_writable else "read-only export - limited impact",
-                        },
-                        remediation=(
-                            f"Remove no_root_squash from {path} export in /etc/exports. "
-                            "Use root_squash (default) to map remote root to nfsnobody. "
-                            "Restrict NFS exports to specific IP ranges, not wildcards. "
-                            "Run: exportfs -ra after editing /etc/exports."
-                        ),
-                        host=host, confidence=1.0,
-                    )
+                for client in clients:
+                    opts           = [o.lower() for o in client.get("options", [])]
+                    client_host    = client.get("host", "*")
+                    is_writable    = "rw" in opts
+                    no_root_squash = "no_root_squash" in opts
+                    no_all_squash  = "no_all_squash" in opts
+                    insecure       = "insecure" in opts
 
-                elif no_all_squash:
-                    self.finding(
-                        title=f"NFS no_all_squash on {path} (host={client_host})",
-                        description=(
-                            f"NFS export {path!r} on {host} has no_all_squash for "
-                            f"client {client_host!r}. "
-                            "UIDs from the client are passed through to the server - "
-                            "if the client has a UID matching a privileged user on "
-                            "the server, it gains their access."
-                        ),
-                        severity=Severity.HIGH if is_writable else Severity.MEDIUM,
-                        mitre_technique="T1548.001",
-                        mitre_tactic="Privilege Escalation",
-                        evidence={
-                            "host":        host,
-                            "export_path": path,
-                            "client":      client_host,
-                            "options":     client.get("options", []),
-                            "writable":    is_writable,
-                        },
-                        remediation=(
-                            "Add all_squash to the export options to map all remote "
-                            "UIDs to anonuid/anongid. "
-                            "Example: /share *(rw,sync,all_squash,anonuid=65534,anongid=65534)"
-                        ),
-                        host=host, confidence=0.9,
-                    )
+                    if no_root_squash:
+                        self.finding(
+                            title=f"NFS no_root_squash on {path} (host={client_host})",
+                            description=(
+                                f"NFS export {path!r} on {host} is configured with "
+                                f"no_root_squash for client {client_host!r}. "
+                                "Any client connecting as root retains root privileges "
+                                "on the share. "
+                                + (
+                                    "The export is also writable (rw). "
+                                    "An attacker with root on a client machine can mount "
+                                    "this share and copy a SUID /bin/bash binary, then "
+                                    "execute it from a low-priv shell on the NFS server "
+                                    "to escalate to root."
+                                    if is_writable else
+                                    "The export is read-only - no_root_squash is less "
+                                    "immediately exploitable but still a misconfiguration."
+                                )
+                            ),
+                            severity=Severity.CRITICAL if is_writable else Severity.HIGH,
+                            mitre_technique="T1548.001",
+                            mitre_tactic="Privilege Escalation",
+                            evidence={
+                                "host":           host,
+                                "export_path":    path,
+                                "client":         client_host,
+                                "options":        client.get("options", []),
+                                "writable":       is_writable,
+                                "exploitation":   (
+                                    f"1. Mount {path} on attacker machine as root. "
+                                    "2. Copy /bin/bash to the share and set SUID: "
+                                    "cp /bin/bash /mnt/share/ && chmod +s /mnt/share/bash. "
+                                    "3. On the NFS server (as low-priv user): "
+                                    f"/mnt_nfs{path}/bash -p  (opens root shell)."
+                                ) if is_writable else "read-only export - limited impact",
+                            },
+                            remediation=(
+                                f"Remove no_root_squash from {path} export in /etc/exports. "
+                                "Use root_squash (default) to map remote root to nfsnobody. "
+                                "Restrict NFS exports to specific IP ranges, not wildcards. "
+                                "Run: exportfs -ra after editing /etc/exports."
+                            ),
+                            host=host, confidence=1.0,
+                        )
 
-        # ── Finding: NFS server running but no dangerous exports ───────────
-        nfs_running = bool(exports_raw.strip()) or bool(mounts_raw.strip())
-        if nfs_running and not self._findings:
-            logger.info("nfs_escape_no_dangerous_exports", host=host,
-                        export_count=len(entries))
+                    elif no_all_squash:
+                        self.finding(
+                            title=f"NFS no_all_squash on {path} (host={client_host})",
+                            description=(
+                                f"NFS export {path!r} on {host} has no_all_squash for "
+                                f"client {client_host!r}. "
+                                "UIDs from the client are passed through to the server - "
+                                "if the client has a UID matching a privileged user on "
+                                "the server, it gains their access."
+                            ),
+                            severity=Severity.HIGH if is_writable else Severity.MEDIUM,
+                            mitre_technique="T1548.001",
+                            mitre_tactic="Privilege Escalation",
+                            evidence={
+                                "host":        host,
+                                "export_path": path,
+                                "client":      client_host,
+                                "options":     client.get("options", []),
+                                "writable":    is_writable,
+                            },
+                            remediation=(
+                                "Add all_squash to the export options to map all remote "
+                                "UIDs to anonuid/anongid. "
+                                "Example: /share *(rw,sync,all_squash,anonuid=65534,anongid=65534)"
+                            ),
+                            host=host, confidence=0.9,
+                        )
 
-        raw = {
-            "host":           host,
-            "exports_raw":    exports_raw,
-            "exports_parsed": entries,
-            "nfs_mounts":     mounts_raw,
-            "showmount":      showmount_raw,
-            "nfs_conf":       nfs_conf_raw,
-        }
-        raw["privesc_vectors"] = self._findings  # OUTPUTS key
-        return self._findings[:], raw
+            # ── Finding: NFS server running but no dangerous exports ───────────
+            nfs_running = bool(exports_raw.strip()) or bool(mounts_raw.strip())
+            if nfs_running and not self._findings:
+                logger.info("nfs_escape_no_dangerous_exports", host=host,
+                            export_count=len(entries))
+
+            raw = {
+                "host":           host,
+                "exports_raw":    exports_raw,
+                "exports_parsed": entries,
+                "nfs_mounts":     mounts_raw,
+                "showmount":      showmount_raw,
+                "nfs_conf":       nfs_conf_raw,
+            }
+            raw["privesc_vectors"] = self._findings  # OUTPUTS key
+            return self._findings[:], raw
+        finally:
+            if conn is not None:
+                try:
+                    close_fn = getattr(conn, "close", None)
+                    if callable(close_fn):
+                        res = close_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                    wait_fn = getattr(conn, "wait_closed", None)
+                    if callable(wait_fn):
+                        res = wait_fn()
+                        if asyncio.iscoroutine(res):
+                            await res
+                except Exception:
+                    pass
 
     # ── SSH / local runner helpers - identical pattern to linux.privesc ────
 
@@ -479,7 +497,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             result = await conn.run(cmd, check=False)
             return (result.stdout or "").strip()
 
-        return ssh_run
+        return conn, ssh_run
 
     @staticmethod
     async def _run_local(cmd: str) -> str:
