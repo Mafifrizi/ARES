@@ -13,19 +13,19 @@
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
 | **Total Temuan Teridentifikasi** | **74** | MOD-001 s/d MOD-074 (Batch 1 s/d Batch 12) |
-| **Sudah Diperbaiki (FIXED)** | **49** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3, dan 6 temuan Fase 4) |
+| **Sudah Diperbaiki (FIXED)** | **50** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3, dan Fase 4 COMPLETE - 7/7) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **21** | MOD-018 (menunggu konfirmasi engine), sisa Grup E, F |
+| **Masih Open (DEFERRED)** | **20** | Sisa Grup E (Technical Honesty) & Grup F (Cloud Scope) |
 
 ### Ringkasan Status per Kelompok
 ```
 Total Temuan: 74
-├── FIXED (49)       [66.2%] ═════════════════════════════════════════
+├── FIXED (50)       [67.6%] ══════════════════════════════════════════
 ├── DISABLED (4)     [ 5.4%] ═══
-└── DEFERRED (21)    [28.4%] ══════════════════
+└── DEFERRED (20)    [27.0%] ═════════════════
     ├── Grup A: Normalizer Handlers Missing (✅ SELESAI - commit 9f8b111)
     ├── Grup B: Hash Masking di Finding.evidence (✅ SELESAI - commit e94533b)
-    ├── Grup C: Teardown & Resource Cleanup (⚠️ PARTIAL 6/7 FIXED - MOD-018 pending konfirmasi arsitektur)
+    ├── Grup C: Teardown & Resource Cleanup (✅ SELESAI - 7/7 FIXED - commit facdb61)
     ├── Grup D: Scope Bypass Listener / Destination Parameter (✅ SELESAI - commit cc2e980)
     ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (15 temuan open, 3 fixed)
     └── Grup F: Architectural Decisions Needed (5 temuan / gates)
@@ -363,9 +363,9 @@ Untuk meminimalkan waktu regresi dan memaksimalkan stabilitas, eksekusi remedi s
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │  FASE 4: Grup C — Guaranteed Teardown (Rule 4 Compliance)              │
-│  [STATUS: ⚠️ PARTIAL (6/7 FIXED) - commit 28e983a]                     │
-│  - 6 modul persistence/lateral dilengkapi teardown & failure tests.    │
-│  - MOD-018 STOP menunggu konfirmasi mekanisme lifecycle engine.        │
+│  [STATUS: ✅ COMPLETED (7/7 FIXED) - commit facdb61]                    │
+│  - 7 modul persistence/lateral dilengkapi teardown & failure tests.    │
+│  - MOD-018: pivot subprocess teardown via engine finally (Opsi B).     │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
