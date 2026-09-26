@@ -203,7 +203,6 @@ class AWSEnumModule(BaseModule):
             ("iam",             partial(self._enum_iam, session)),
             ("s3",              partial(self._enum_s3, session, region)),
             ("security_groups", partial(self._enum_security_groups, session, region)),
-            ("imds",            self._check_imds),
         ]:
             try:
                 raw[label] = await loop.run_in_executor(None, fn)
@@ -299,18 +298,15 @@ class AWSEnumModule(BaseModule):
             r["error"] = str(e)[:100]
         return r
 
-    def _check_imds(self) -> dict:
-        import urllib.request, urllib.error
-        r: dict = {"imdsv1_available": False}
-        try:
-            req = urllib.request.Request("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                r["imdsv1_available"] = True; r["credential_roles"] = resp.read().decode().strip().splitlines()
-        except Exception: pass
-        return r
+    # REMOVED (MOD-064): IMDS probing belongs in post-exploitation modules
+    # executed ON TARGET via remote command runner, not from operator machine.
+    # Probing 169.254.169.254 from operator host leaks operator IAM credentials
+    # and generates false findings attributed to engagement target.
+    # def _check_imds(self) -> dict:
+    #     ...
 
     def _analyze(self, raw):
-        iam,s3,sgs,imds = raw.get("iam",{}),raw.get("s3",{}),raw.get("security_groups",{}),raw.get("imds",{})
+        iam,s3,sgs = raw.get("iam",{}),raw.get("s3",{}),raw.get("security_groups",{})
         if not iam.get("root_mfa_enabled"):
             self.finding(title="Root Account MFA Disabled",description="AWS root account lacks MFA. Unrestricted access risk.",
                 severity=Severity.CRITICAL,mitre_technique="T1078.004",mitre_tactic="Persistence",
@@ -336,12 +332,7 @@ class AWSEnumModule(BaseModule):
                 description=f"{len(open_sgs)} rules expose sensitive ports to 0.0.0.0/0.",
                 severity=Severity.HIGH,mitre_technique="T1046",mitre_tactic="Discovery",
                 evidence={"rules":open_sgs[:10]},remediation="Restrict ingress. Use VPN or SSM Session Manager.")
-        if imds.get("imdsv1_available"):
-            self.finding(title="IMDSv1 Available - SSRF → Credential Theft",
-                description="EC2 IMDSv1 accessible without token. SSRF can extract IAM credentials.",
-                severity=Severity.HIGH,mitre_technique="T1552.005",mitre_tactic="Credential Access",
-                evidence={"roles":imds.get("credential_roles",[])},
-                remediation="Require IMDSv2: aws ec2 modify-instance-metadata-options --http-tokens required.")
+        # REMOVED (MOD-064): Operator IMDS probe finding removed.
 
 # Backward-compat alias - was AWSModule before v3.0.1
 AWSModule = AWSEnumModule  # noqa

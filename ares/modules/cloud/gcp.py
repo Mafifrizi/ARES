@@ -232,14 +232,10 @@ class GCPModule(BaseModule):
             ("iam",              partial(self._check_iam_bindings,       credentials, project_id)),
             ("gcs",              partial(self._check_gcs_buckets,        credentials, project_id)),
             ("service_accounts", partial(self._check_sa_keys,            credentials, project_id)),
-            ("metadata",         self._check_metadata_server),
         ]:
             await self.noise.rate_limiter.acquire("cloud_api")
             try:
-                if label == "metadata":
-                    raw[label] = await loop.run_in_executor(None, fn)
-                else:
-                    raw[label] = await loop.run_in_executor(None, fn)
+                raw[label] = await loop.run_in_executor(None, fn)
             except Exception as exc:
                 logger.warning(f"gcp_{label}_failed", error=str(exc)[:150])
                 raw[label] = {"error": str(exc)[:200]}
@@ -585,64 +581,9 @@ class GCPModule(BaseModule):
             "total_accounts":    len(service_accounts),
         }
 
-    # ── GCE Metadata Server ───────────────────────────────────────────────────
-
-    def _check_metadata_server(self) -> dict[str, Any]:
-        """
-        Check if the GCE metadata server is reachable from this execution context.
-        Accessible metadata server = SSRF → credential theft risk.
-        Uses httpx (already in deps) instead of requests for consistency.
-        """
-        import httpx  # type: ignore[import]
-
-        metadata_url = "http://metadata.google.internal/computeMetadata/v1/instance/"
-        try:
-            with httpx.Client(follow_redirects=False, timeout=2) as client:
-                resp = client.get(
-                    metadata_url,
-                    headers={"Metadata-Flavor": "Google"},
-                )
-            if resp.status_code == 200:
-                # Try to list SA credentials exposed
-                try:
-                    with httpx.Client(follow_redirects=False, timeout=2) as client2:
-                        sa_resp = client2.get(
-                            "http://metadata.google.internal/computeMetadata/v1"
-                            "/instance/service-accounts/",
-                            headers={"Metadata-Flavor": "Google"},
-                        )
-                    sa_list = sa_resp.text.strip().splitlines() if sa_resp.is_success else []
-                except Exception:
-                    sa_list = []
-
-                self.finding(
-                    title="GCE Metadata Server Accessible - SSRF → Credential Theft",
-                    description=(
-                        "The GCE metadata server (169.254.169.254) is reachable from this context. "
-                        "SSRF vulnerabilities in any application running here can steal service "
-                        "account tokens and escalate to GCP project-level access. "
-                        f"Service accounts exposed: {', '.join(sa_list) or 'unknown'}."
-                    ),
-                    severity=Severity.HIGH,
-                    mitre_technique="T1552.005",
-                    mitre_tactic="Credential Access",
-                    evidence={
-                        "metadata_url": metadata_url,
-                        "service_accounts": sa_list,
-                        "status_code": resp.status_code,
-                    },
-                    remediation=(
-                        "Require IMDSv2-equivalent: enable metadata server with SA scopes only. "
-                        "Enforce Workload Identity instead of SA bound to VM. "
-                        "Limit SA permissions with minimal IAM roles. "
-                        "Enable VPC Service Controls to restrict metadata access. "
-                        "Use WAF / SSRF protection on all internet-facing applications."
-                    ),
-                )
-                return {"accessible": True, "service_accounts": sa_list}
-        except httpx.ConnectError:
-            # Expected - not running on GCE or metadata blocked
-            pass
-        except Exception as exc:
-            logger.debug("gcp_metadata_check_failed", error=str(exc)[:80])
-        return {"accessible": False}
+    # REMOVED (MOD-064): IMDS probing belongs in post-exploitation modules
+    # executed ON TARGET via remote command runner, not from operator machine.
+    # Probing metadata.google.internal from operator host leaks operator IAM credentials
+    # and generates false findings attributed to engagement target.
+    # def _check_metadata_server(self) -> dict[str, Any]:
+    #     ...
