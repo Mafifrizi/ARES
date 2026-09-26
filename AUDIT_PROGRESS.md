@@ -65,6 +65,11 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-055 | ad.laps_enum output type confusion on valid_credentials & secret evaporation in normalizer | FIXED | PASSED (Unit tests & pipeline separation) | `ares/core/context.py`, `ares/modules/ad/laps_enum.py`, `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Password LAPS ditulis langsung ke vault (Gate 6 validated). `raw["entries"]` dan `raw["laps_passwords"]` OPSEC-safe (`has_password: True`). |
 | MOD-056 | ad.enum_users unhandled output telemetry password_policy & dual-write omission | PARTIALLY FIXED | PASSED (Unit tests) | `ares/modules/ad/enum_users.py`, `NORMALIZER_CONTRACT_AUDIT.md`, `tests/unit/test_artifact_normalizer_pipeline.py` | Dual-write `users` key ke `raw`. Handler `password_policy` ditunda ke batch fix serentak. |
 | MOD-057 | ad.enum_acl & ad.laps_enum inconsistent LDAP bind authentication formatting (bypassing build_ad_bind_plan) | DEFERRED | Audit verified (`enum_acl.py:234`, `laps_enum.py:297`) | Menunggu remedi (Batch Fix Serentak) | Migrasi raw string binding ke `build_ad_bind_plan()` ditunda ke batch fix serentak. |
+| MOD-058 | network.dns_enum out-of-scope AXFR zone transfer probing on discovered nameservers | DEFERRED | Audit verified (`dns_enum.py:269-272`) | Menunggu remedi (Batch Fix Serentak - Grup D) | `_try_axfr` menghubungi nameserver eksternal hasil enumerasi NS tanpa validasi `before_request(ns_clean)`. |
+| MOD-059 | network.http_fingerprint unbounded HTTP redirect traversal on external hosts via follow_redirects=True | DEFERRED | Audit verified (`http_fingerprint.py:252-255`) | Menunggu remedi (Batch Fix Serentak - Grup D) | `httpx.AsyncClient` otomatis mengikuti redirect 301/302 ke host eksternal di luar scope campaign. |
+| MOD-060 | network.service_detect asyncio TCP writer handle leak on read timeout in _grab_banner | DEFERRED | Audit verified (`service_detect.py:108-129`) | Menunggu remedi (Batch Fix Serentak - Grup C) | `reader.read()` tidak dibungkus `try ... finally: writer.close()`, memicu socket leak saat timeout. |
+| MOD-061 | network.snmp_enum discovered SNMP community strings evaporation from vault & standard pipeline | DEFERRED | Audit verified (`snmp_enum.py:342, 406-413`) | Menunggu remedi (Batch Fix Serentak - Grup A/E) | Community strings valid tidak disimpan ke `AresVault` dan tidak diformat ke `valid_credentials` MOD-033. `raw["snmp_findings"]` menyimpan list objek `Finding` mentah. |
+| MOD-062 | network.* & recon.fingerprint 100% unhandled reconnaissance capabilities in ArtifactNormalizer | DEFERRED | Audit verified (`fingerprint.py:72`, `dns_enum.py:82`, `http_fingerprint.py:99`, `service_detect.py:159`, `snmp_enum.py:165`) | Menunggu remedi (Batch Fix Serentak - Grup A) | 9 capability recon tidak memiliki handler di `ArtifactNormalizer`. Data host, subdomain, service, dan web target gagal memperbarui `HostArtifact`. |
 
 ---
 
@@ -200,6 +205,36 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 - **Severity**: **MEDIUM**
 - **Status**: **DEFERRED (Masuk batch fix serentak)**
 - **Catatan**: Migrasi raw string binding ke `build_ad_bind_plan()` untuk menjamin kompatibilitas format UPN (`user@domain.local`) pada seluruh modul Active Directory.
+
+---
+
+## BATCH FIX SERENTAK DEFERRED NOTES (Batch 10)
+
+### [MOD-058] Out-of-Scope AXFR Zone Transfer Probing on Discovered Nameservers on `network.dns_enum`
+- **Severity**: **HIGH**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup D: Scope Bypass)**
+- **Catatan**: Loop AXFR zone transfer `_try_axfr(ns_clean)` menghubungi nameserver eksternal hasil enumerasi NS via TCP 53 tanpa memanggil `await self.before_request(ns_clean, "dns")`. Wajib difilter/diperiksa dengan scope check sebelum koneksi probe zone transfer.
+
+### [MOD-059] Unbounded HTTP Redirect Traversal on External Hosts via `follow_redirects=True` on `network.http_fingerprint`
+- **Severity**: **MEDIUM**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup D: Scope Bypass)**
+- **Catatan**: `httpx.AsyncClient` dengan `follow_redirects=True` berisiko mengejar redirect HTTP 301/302 ke domain/host eksternal tanpa validasi scope campaign. Perlu custom redirect hook atau `follow_redirects=False` dengan pengecekan `campaign.is_in_scope()` pada target redirect.
+
+### [MOD-060] Asyncio TCP Writer Handle Leak on Read Timeout in `_grab_banner` on `network.service_detect`
+- **Severity**: **MEDIUM**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup C: Teardown & Resource Cleanup)**
+- **Catatan**: Pemanggilan `await asyncio.wait_for(reader.read(2048), timeout=timeout)` tidak dibungkus dalam blok `try ... finally: writer.close()`. Perlu try/finally untuk mencegah kebocoran file descriptor socket TCP.
+
+### [MOD-061] Discovered SNMP Community Strings Evaporation from Vault & Standard Pipeline on `network.snmp_enum`
+- **Severity**: **HIGH**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup A & E)**
+- **Catatan**: Community string valid tidak disimpan ke `AresVault` dan tidak diformat ke kontrak `valid_credentials` (MOD-033). Output `raw["snmp_findings"]` juga berisi objek `Finding` unpickled.
+
+### [MOD-062] 100% Unhandled Reconnaissance Capabilities in `ArtifactNormalizer` on `network.*` & `recon.fingerprint`
+- **Severity**: **MEDIUM**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup A: Normalizer Handlers Missing)**
+- **Catatan**: Seluruh 9 capability recon (`fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`, `snmp_findings`, `system_info`) tidak memiliki handler di `ArtifactNormalizer`.
+
 
 
 

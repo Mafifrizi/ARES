@@ -8,26 +8,26 @@
 
 ---
 
-## 1. Status Ringkasan Temuan (Batch 1–9)
+## 1. Status Ringkasan Temuan (Batch 1–10)
 
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
-| **Total Temuan Teridentifikasi** | **57** | MOD-001 s/d MOD-057 |
+| **Total Temuan Teridentifikasi** | **62** | MOD-001 s/d MOD-062 |
 | **Sudah Diperbaiki (FIXED)** | **14** | Code fixes + regression tests lulus di main branch |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **39** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
+| **Masih Open (DEFERRED)** | **44** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
 
 ### Ringkasan Status per Kelompok
 ```
-Total Temuan: 57
-├── FIXED (14)       [24.6%] ══════════════
-├── DISABLED (4)     [ 7.0%] ═══
-└── DEFERRED (39)    [68.4%] ═══════════════════════════════════
-    ├── Grup A: Normalizer Handlers Missing (8 temuan / capability sets)
+Total Temuan: 62
+├── FIXED (14)       [22.6%] ══════════════
+├── DISABLED (4)     [ 6.5%] ═══
+└── DEFERRED (44)    [70.9%] ═══════════════════════════════════
+    ├── Grup A: Normalizer Handlers Missing (10 temuan / capability sets)
     ├── Grup B: Hash Masking di Finding.evidence (2 temuan)
-    ├── Grup C: Teardown Missing di Persistence/Lateral (6 temuan)
-    ├── Grup D: Scope Bypass Listener Parameter (9 temuan)
-    ├── Grup E: Fake/Stub Implementation Active (10 temuan)
+    ├── Grup C: Teardown & Resource Cleanup (7 temuan)
+    ├── Grup D: Scope Bypass Listener / Destination Parameter (11 temuan)
+    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (11 temuan)
     └── Grup F: Architectural Decisions Needed (4 temuan / gates)
 ```
 
@@ -76,6 +76,8 @@ Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** 
 | **MOD-051** | `cloud.identity_federation_abuse` | `federation_trusts`, `golden_saml_paths`, `oauth_tokens`, `pivot_paths` | `CloudResourceArtifact` & `CredentialArtifact` | Handler modular untuk token OAuth dan topologi trust federasi cloud. |
 | **MOD-052** | `cloud.aws_privesc` | `aws_privesc_paths`, `iam_privesc_paths` | `PermissionArtifact(privilege="privesc_vector")` | Handler `_normalize_iam_privesc` mengonversi daftar path eksploitasi IAM ke permission finding terstruktur. |
 | **MOD-056** | `ad.enum_users` | `password_policy` | `DomainPolicyArtifact` (atau `HostArtifact` metadata) | Buat handler `_normalize_password_policy` untuk mencatat panjang password, threshold lockout, dan durasi audit. |
+| **MOD-061** | `network.snmp_enum` | `snmp_findings`, `valid_credentials` (SNMP) | `CredentialArtifact(cred_type="snmp_community")` | Simpan community string ke vault dan tambahkan handler normalizer untuk SNMP community strings. |
+| **MOD-062** | `recon.fingerprint`, `network.*` | `fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services` | `HostArtifact` & `HostVulnArtifact` | Tambahkan handler normalizer recon untuk mengekstrak hostname, subdomain, web attack surface, dan banner service ke `HostArtifact`. |
 
 **Estimasi Pengerjaan**: 1 commit per sub-kategori capability (AD, Linux, Cloud). Semua perubahan terlokalisasi di `ares/normalize/artifacts.py` dan unit test di `tests/unit/test_artifact_normalizer_pipeline.py`.
 
@@ -113,6 +115,7 @@ Modul-modul ini melakukan perubahan status permanen pada sistem atau domain targ
 | **MOD-046** | `persistence.scheduled_task` | Scheduled Task RPC & Registry Run Key | Persistent autorun backdoor tertinggal di OS target klien. | Implementasi method `teardown()` menggunakan `hSchRpcDeleteTask` dan `hBaseRegDeleteValue`. Simpan identifier artefak ke `raw["created_artifacts"]`. |
 | **MOD-047** | `persistence.scheduled_task` | Unhandled DCE/RPC connection disconnect | Connection handle RPC leak saat registrasi gagal. | Bungkus eksekusi RPC dalam `try ... finally: dce.disconnect()`. |
 | **MOD-048** | `persistence.wmi_subscription` | WMI Event Filter, Consumer, & Binding | Broken cleanup tuple (`None` key), WMI autorun tertinggal. | Perbaiki tuple cleanup WMI, pastikan `__FilterToConsumerBinding` dihapus deterministik. |
+| **MOD-060** | `network.service_detect` | Unclosed asyncio TCP writer socket on read timeout | Socket descriptor handle leak saat banner read timeout. | Bungkus `reader.read()` dalam `try ... finally: writer.close(); await writer.wait_closed()`. |
 
 ---
 
@@ -131,6 +134,8 @@ Engine `_extract_all_targets` hanya mengekstrak parameter target primer (`target
 | **MOD-017** | `network.pivot` | `remote_host`, `reachable_subnets` | SSH (22) / TCP | Validasi seluruh subnet target terhadap scope campaign. |
 | **MOD-022** | `exfil.staged_collection` | Cloud egress endpoints | HTTP HEAD | Tolak request jika egress endpoint berada di luar scope campaign. |
 | **MOD-032** | `credential.reuse` | `login.microsoftonline.com` | HTTPS (443) | Cegah auto-probing endpoint publik jika target bertipe RFC1918 internal. |
+| **MOD-058** | `network.dns_enum` | `ns_host` / `ns_clean` (AXFR zone transfer) | TCP (53) | Tambah `await self.before_request(ns_clean, "dns")` sebelum query zone transfer AXFR. |
+| **MOD-059** | `network.http_fingerprint` | External redirect URLs via `follow_redirects=True` | HTTP / HTTPS | Custom redirect hook untuk memvalidasi `campaign.is_in_scope()` sebelum mengikuti redirect ke host luar. |
 
 **Fix Pattern**:
 ```python
@@ -158,6 +163,7 @@ Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, p
 | **MOD-043** | `linux.ccache_hunt` | Scan `/proc/keys` dan socket KCM menyuntikkan string kosong `""` ke `AresVault`. | Blokir penyimpanan vault jika byte tiket kosong (sejalan dengan Gate 6). |
 | **MOD-047** | `persistence.scheduled_task` | Inverted default `dry_run=True` pada `RegistryRunKeyPersistence`. | Set default `dry_run=False` (mengikuti setting context eksekusi). |
 | **MOD-057** | `ad.enum_acl`, `ad.laps_enum` | Raw string concatenation `user=f"{domain}\\{username}"` membypass `build_ad_bind_plan()`. | Migrasi ke `build_ad_bind_plan()` untuk standardisasi UPN/NTLM domain binding. |
+| **MOD-061** | `network.snmp_enum` | Menyimpan list `Finding` objek mentah di `raw["snmp_findings"]` dan tidak memformat ke kontrak standar `valid_credentials` (MOD-033). | Serialisasi findings ke dicts dan tuliskan community string yang valid ke vault / `valid_credentials`. |
 
 ---
 

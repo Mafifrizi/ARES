@@ -84,6 +84,8 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `valid_credentials` | `ad.laps_enum` | `laps_passwords` / `valid_credentials` | direct vault write + OPSEC raw (`has_password: True`) | ✅ **FIXED** (MOD-055) | Passwords stored directly to vault (Gate 6 validated); raw output OPSEC-safe with `has_password: True`. |
 | `user_list` / `users` | `ad.enum_users` | `users` OR `user_list` | `users`, `user_list` | ✅ **FIXED** (MOD-056 partial) | Dual-write `raw["users"]` and `raw["user_list"]` implemented. |
 | `password_policy` | `ad.enum_users` | — | `password_policy` | ❌ **MISMATCH, no handler, DEFERRED** | Unhandled output telemetry (`no handler`). Ditunda ke batch fix serentak. |
+| `snmp_findings` / `valid_credentials` | `network.snmp_enum` | — | `valid_communities`, `snmp_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-061) | Kredensial valid SNMP tidak disimpan ke vault dan tidak ada handler normalizer. |
+| Reconnaissance capabilities (`fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`) | `recon.fingerprint`, `network.dns_enum`, `network.http_fingerprint`, `network.service_detect` | — | Various raw dicts | ❌ **MISMATCH, no handler, DEFERRED** (MOD-062) | 100% output recon Batch 10 tidak memiliki handler di normalizer. Data host & network recon hilang dari `ArtifactStore`. |
 
 ---
 
