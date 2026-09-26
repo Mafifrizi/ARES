@@ -28,17 +28,17 @@ normalized = ArtifactNormalizer().normalize(
 
 | Kategori Status Kontrak | Jumlah Pasangan Modul-Capability | Persentase | Status Data |
 |---|:---:|:---:|---|
-| ✅ **MATCH (Selaras Penuh)** | 6 pasangan modul | 30.0% | Data mengalir sempurna ke `ArtifactStore` |
-| 🔧 **FIXED (Dual-Read Fallback Diterapkan)** | 14 pasangan modul | 70.0% | **Data dipulihkan via Dual-Read Fallback** |
+| ✅ **MATCH (Selaras Penuh)** | 6 pasangan modul | 15.0% | Data mengalir sempurna ke `ArtifactStore` |
+| 🔧 **FIXED (Dual-Read Fallback & Handler Lengkap)** | 34 pasangan modul | 85.0% | **Data dipulihkan via Dual-Read Fallback & Handler Lengkap Grup A** |
 | ⚠️ **ORPHANED HANDLER** | 0 handler | 0.0% | Semua handler memiliki minimal 1 modul deklarator |
-| 🆕 **HANDLER BARU DITAMBAHKAN** | 15 capability | - | `lsa_secrets`, `cached_credentials`, `valid_credentials`, `cleartext_credentials`, `cracked_credentials`, `laps_passwords`, `kerberos_tickets`, `open_ports`, `converted_ticket`, `samba_secrets`, `keytab_keys`, `iam_privesc`, `dns_records`, `service_versions`, `web_fingerprint` |
-| 🚫 **UNHANDLED OUTPUTS** | **71 capability** | - | Output modul diabaikan sepenuhnya oleh normalizer (berkurang dari 78 pasca 7 Group A handlers) |
+| 🆕 **HANDLER SELESAI (FASE 1)** | 35+ capability | - | Seluruh capability Grup A diimplementasikan dan diuji via `test_artifact_normalizer_pipeline.py` |
+| 🚫 **UNHANDLED OUTPUTS (Grup A)** | **0 capability** | - | Seluruh capability target Grup A telah memiliki handler aktif |
 
 ---
 
 ## 2. Tabel Lengkap Pemetaan Kontrak Normalizer
 
-Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares/normalize/artifacts.py:457-468` terhadap modul-modul yang mendeklarasikannya di `OUTPUTS`:
+Tabel di bawah ini memetakan seluruh 9 capability awal plus puluhan handler baru di `ares/normalize/artifacts.py` terhadap modul-modul yang mendeklarasikannya di `OUTPUTS`:
 
 | Capability | Modul Penghasil | Key yang DIBACA Normalizer | Key yang DITULIS Modul (`raw`) | Status | Dampak Sistemik & Downstream Failure |
 |---|---|---|---|:---:|---|
@@ -52,7 +52,7 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `spn_list` | `ad.enum_spn` | `spns` OR `spn_list` (Dual-Read) | `spn_list` | ✅ **FIXED** (Dual-Read Fallback) | SPN data mengalir ke `UserArtifact` via fallback. |
 | `acl_findings` | `ad.enum_acl` | `misconfigs` (list of dict) | `misconfigs`, `acl_findings` | ✅ **MATCH** | Data mengalir benar ke `PermissionArtifact`. Modul menuliskan kedua key. |
 | `aws_findings` | `cloud.aws` | `region`, `s3` (`public_buckets`) | `region`, `s3`, `aws_findings` | ✅ **MATCH** | S3 bucket publik berhasil dikonversi menjadi `CloudResourceArtifact`. |
-| `aws_findings` | `cloud.aws_privesc` | `region`, `s3` (`public_buckets`) | `privesc_paths`, `aws_findings` | ❌ **MISMATCH** | Modul privilege escalation AWS tidak menghasilkan `s3`, sehingga normalizer mengembalikan 0 artifact. Jalur eskalasi IAM hilang dari store. |
+| `aws_findings` | `cloud.aws_privesc` | `region`, `s3` (`public_buckets`) | `privesc_paths`, `aws_findings` | ✅ **FIXED** (Fase 1) | Handler `_normalize_aws` dan `_normalize_iam_privesc` memulihkan temuan bucket dan jalur IAM ke `CloudResourceArtifact`. |
 | `privesc_vectors` | `linux.ld_preload` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
 | `privesc_vectors` | `linux.nfs_escape` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
 | `privesc_vectors` | `linux.service_hijack` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
@@ -65,40 +65,40 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | **`lsa_secrets`** | **`windows.lsa_secrets`** | **`lsa_secrets`** | **`lsa_secrets`** | ✅ **FIXED** (Handler Baru, MOD-028) | Handler `_normalize_lsa_secrets` menghasilkan `CredentialArtifact(cred_type="lsa_secret")`. Data loss 100% teratasi. |
 | **`cached_credentials`** | **`windows.lsa_secrets`** | **`cached_credentials`** | **`cached_credentials`** | ✅ **FIXED** (Handler Baru, MOD-028) | Handler `_normalize_cached_domain_credentials` menghasilkan `CredentialArtifact(cred_type="cached_domain")`. |
 | **`valid_credentials`** | **`credential.pass_spray`, `ssh_spray`, `pass_the_hash`, `reuse`** | **`valid_credentials`** | **`valid_credentials`** | ✅ **FIXED** (Handler Baru, MOD-033) | Handler `_normalize_valid_credentials` menghasilkan `CredentialArtifact`. Tipe data distandardisasi ke `list[dict]`. |
-| `converted_ticket` | `credential.ticket_converter` | — | `converted_ticket_b64` | ❌ **MISMATCH** (MOD-036) | Output key mismatch (`converted_ticket` vs `converted_ticket_b64`). Tidak ada handler. Tiket konversi hilang dari pipeline. |
-| `container_escape_vectors` | `linux.container` | — | `container_escape_vectors` | ❌ **MISMATCH** (MOD-040) | Tidak ada handler normalizer (`no handler`). Data vektor container escape hilang dari `ArtifactStore`. |
-| `k8s_rbac_findings` | `linux.container` | — | `k8s_rbac_findings` | ❌ **MISMATCH** (MOD-040) | Tidak ada handler normalizer (`no handler`). Data temuan K8s RBAC hilang dari `ArtifactStore`. |
-| `machine_account_hash` | `linux.samba_secrets` | — | `machine_account_hash` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Machine account NTLM hash tidak terserap ke `ArtifactStore`. |
-| `samba_secrets` | `linux.samba_secrets` | — | `samba_secrets` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Samba secrets tidak terserap ke `ArtifactStore`. |
-| `machine_credentials` | `linux.keytab_abuse` | — | `entries` | ❌ **MISMATCH** (MOD-044) | Output key mismatch (`machine_credentials` vs `entries`). Tidak ada handler normalizer. Data kunci mesin hilang dari `ArtifactStore`. |
-| `kerberos_keys` | `linux.keytab_abuse` | — | `silver_tickets` | ❌ **MISMATCH** (MOD-044) | Output key mismatch (`kerberos_keys` vs `silver_tickets`). Tidak ada handler normalizer. Data kunci Kerberos hilang dari `ArtifactStore`. |
-| `cached_hashes` | `linux.sssd_harvest` | — | `cached_hashes`, `hashes` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `cached_hashes` (`no handler`). Telah didual-write ke `hashes` dan menunggu handler normalizer serentak. |
-| `domain_users` | `linux.sssd_harvest` | — | `domain_users`, `users` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `domain_users` (`no handler`). Telah didual-write ke `users` dan menunggu handler normalizer serentak. |
-| `federation_trusts` | `cloud.identity_federation_abuse` | — | `federation_trusts` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Data trust federasi hilang dari `ArtifactStore`. |
-| `golden_saml_paths` | `cloud.identity_federation_abuse` | — | `golden_saml_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Data rute Golden SAML hilang dari `ArtifactStore`. |
-| `oauth_tokens` | `cloud.identity_federation_abuse` | — | `oauth_tokens` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Token OAuth2 hilang dari `ArtifactStore`. |
-| `pivot_paths` | `cloud.identity_federation_abuse` | — | `pivot_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Analisis jalur pivot lintas-cloud hilang dari `ArtifactStore`. |
-| `aws_privesc_paths` | `cloud.aws_privesc` | — | `aws_privesc_paths` | ❌ **MISMATCH** (MOD-052) | Tidak ada handler normalizer (`no handler`). Jalur eskalasi hak akses IAM hilang dari `ArtifactStore`. |
-| `iam_privesc_paths` | `cloud.aws_privesc` | — | `iam_privesc_paths` | ⚠️ **NEW KEY** (aws_privesc, handler pending) | Key baru pasca-fix MOD-052 untuk memisahkan output privesc IAM dari `aws_findings` milik `cloud.aws`. Handler normalizer pending. |
+| `converted_ticket` | `credential.ticket_converter` | `converted_ticket` OR `converted_ticket_b64` | `converted_ticket_b64` | ✅ **FIXED** (MOD-036 / Fase 1) | Handler `_normalize_converted_ticket` memetakan tiket base64/file path ke `CredentialArtifact(cred_type="kerberos_ticket")`. |
+| `container_escape_vectors` | `linux.container` | `container_escape_vectors` | `container_escape_vectors` | ✅ **FIXED** (MOD-040 / Fase 1) | Handler `_normalize_container_vectors` memetakan temuan container breakout ke `PermissionArtifact`. |
+| `k8s_rbac_findings` | `linux.container` | `k8s_rbac_findings` | `k8s_rbac_findings` | ✅ **FIXED** (MOD-040 / Fase 1) | Handler `_normalize_k8s_rbac` memetakan privilege cluster K8s ke `PermissionArtifact`. |
+| `machine_account_hash` | `linux.samba_secrets` | `machine_account_hash` | `machine_account_hash` | ✅ **FIXED** (MOD-041 / Fase 1) | Handler `_normalize_samba_secrets` memetakan NTLM machine hash ke `HashArtifact(hash_type="ntlm")`. |
+| `samba_secrets` | `linux.samba_secrets` | `samba_secrets` | `samba_secrets` | ✅ **FIXED** (MOD-041 / Fase 1) | Handler `_normalize_samba_secrets` memetakan rahasia domain Samba ke `CredentialArtifact`. |
+| `machine_credentials` | `linux.keytab_abuse` | `machine_credentials` OR `entries` | `entries` | ✅ **FIXED** (MOD-044 / Fase 1) | Handler `_normalize_keytab_keys` memetakan entry keytab ke `CredentialArtifact`. |
+| `kerberos_keys` | `linux.keytab_abuse` | `kerberos_keys` OR `silver_tickets` | `silver_tickets` | ✅ **FIXED** (MOD-044 / Fase 1) | Handler `_normalize_keytab_keys` memetakan tiket/kunci Kerberos ke `CredentialArtifact`. |
+| `cached_hashes` | `linux.sssd_harvest` | `cached_hashes`, `hashes` | `cached_hashes`, `hashes` | ✅ **FIXED** (MOD-045 / Fase 1) | Handler `_normalize_cached_hashes` dan `_normalize_ntlm_hashes` memetakan hash SSSD ke `HashArtifact`. |
+| `domain_users` | `linux.sssd_harvest` | `domain_users`, `users` | `domain_users`, `users` | ✅ **FIXED** (MOD-045 / Fase 1) | Handler `_normalize_domain_users` dan `_normalize_users` memetakan user domain SSSD ke `UserArtifact`. |
+| `federation_trusts` | `cloud.identity_federation_abuse` | `federation_trusts` | `federation_trusts` | ✅ **FIXED** (MOD-051 / Fase 1) | Handler `_normalize_federation_trusts` memetakan trust IdP ke `CloudResourceArtifact`. |
+| `golden_saml_paths` | `cloud.identity_federation_abuse` | `golden_saml_paths` | `golden_saml_paths` | ✅ **FIXED** (MOD-051 / Fase 1) | Handler `_normalize_golden_saml` memetakan rute Golden SAML ke `PermissionArtifact`. |
+| `oauth_tokens` | `cloud.identity_federation_abuse` | `oauth_tokens` | `oauth_tokens` | ✅ **FIXED** (MOD-051 / Fase 1) | Handler `_normalize_tokens` memetakan token OAuth2 ke `CredentialArtifact(cred_type="oauth_token")`. |
+| `pivot_paths` | `cloud.identity_federation_abuse` | `pivot_paths` | `pivot_paths` | ✅ **FIXED** (MOD-051 / Fase 1) | Handler `_normalize_pivot_paths` memetakan jalur pivot multi-cloud ke `PermissionArtifact`. |
+| `aws_privesc_paths` | `cloud.aws_privesc` | `aws_privesc_paths` | `aws_privesc_paths` | ✅ **FIXED** (MOD-052 / Fase 1) | Handler `_normalize_iam_privesc` memetakan jalur privesc IAM ke `PermissionArtifact`. |
+| `iam_privesc_paths` | `cloud.aws_privesc` | `iam_privesc_paths` | `iam_privesc_paths` | ✅ **FIXED** (MOD-052 / Fase 1) | Handler `_normalize_iam_privesc` memetakan rute privesc IAM terisolasi ke `PermissionArtifact`. |
 | `spn_list` (inner keys) | `ad.enum_spn` | `s["spns"]` OR `s["spn_list"]` | `spns`, `spn_list` | ✅ **FIXED** (MOD-054) | Inner object key synchronized (`spn_list` & `spns`), `UserArtifact.spns` populated properly. |
 | `valid_credentials` | `ad.laps_enum` | `laps_passwords` / `valid_credentials` | direct vault write + OPSEC raw (`has_password: True`) | ✅ **FIXED** (MOD-055) | Passwords stored directly to vault (Gate 6 validated); raw output OPSEC-safe with `has_password: True`. |
 | `user_list` / `users` | `ad.enum_users` | `users` OR `user_list` | `users`, `user_list` | ✅ **FIXED** (MOD-056 partial) | Dual-write `raw["users"]` and `raw["user_list"]` implemented. |
-| `password_policy` | `ad.enum_users` | — | `password_policy` | ❌ **MISMATCH, no handler, DEFERRED** | Unhandled output telemetry (`no handler`). Ditunda ke batch fix serentak. |
-| `snmp_findings` / `valid_credentials` | `network.snmp_enum` | `valid_credentials` | `valid_credentials`, `snmp_findings` | ✅ **FIXED** (MOD-061, commit `5635362`) | Direct vault write Gate 6 + `valid_credentials` contract standar `list[dict]`. |
-| Reconnaissance capabilities (`dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`) | `recon.fingerprint`, `network.dns_enum`, `network.http_fingerprint`, `network.service_detect` | `dns_records`, `subdomains`, `service_versions`, `web_fingerprint`, dll. | Various raw dicts | ✅ **PARTIALLY FIXED** (7 Handlers in commit `5635362`) | 7 handler normalizer recon ditambahkan ke `ArtifactNormalizer`. Sisa recon capability ditunda ke batch fix serentak. |
-| `azure_findings` | `cloud.azure` | — | `azure_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `azure_findings` tidak memiliki handler di `ArtifactNormalizer`. Data storage accounts, RBAC, dan NSG hilang 100% dari `ArtifactStore`. |
-| `azure_ad_findings` | `cloud.azure_ad` | — | `azure_ad_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `azure_ad_findings` tidak memiliki handler di `ArtifactNormalizer`. Data user dan guest Entra ID serta privileged service principals hilang dari `ArtifactStore`. |
-| `access_tokens` | `cloud.azure_ad` | — | `access_tokens` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `access_tokens` (captured device code / client credential tokens) tidak memiliki handler di `ArtifactNormalizer`. |
-| `gcp_findings` | `cloud.gcp` | — | `gcp_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-068) | Output capability `gcp_findings` tidak memiliki handler di `ArtifactNormalizer`. Data public GCS buckets, IAM project roles, dan SA keys hilang dari `ArtifactStore`. |
-| `cleartext_credentials` | `windows.registry_enum` | — | `cleartext_credentials` (Finding objects) | ❌ **MISMATCH, no handler, DEFERRED** (MOD-070) | Domain object Finding di-assign langsung ke raw key; tidak ada handler di `ArtifactNormalizer`. Data kredensial registry hilang dari `ArtifactStore`. |
-| `credential_hints` | `windows.registry_enum` | — | `credential_hints` (Finding objects) | ❌ **MISMATCH, no handler, DEFERRED** (MOD-070) | Domain object Finding di-assign langsung ke raw key; tidak ada handler di `ArtifactNormalizer`. |
-| `scheduled_tasks` | `windows.scheduled_tasks_enum` | — | `scheduled_tasks` (Finding objects) | ❌ **MISMATCH, no handler, DEFERRED** (MOD-070) | Domain object Finding di-assign langsung ke raw key; tidak ada handler di `ArtifactNormalizer`. Data task berisiko tinggi hilang dari `ArtifactStore`. |
-| `privesc_vectors` (finding objects) | `windows.scheduled_tasks_enum`, `linux.kernel_suggester` | — | `privesc_vectors` (Finding objects) | ❌ **MISMATCH, no handler, DEFERRED** (MOD-070) | List Finding objek mentah di-assign ke `privesc_vectors`; normalizer yang ada hanya membaca string host/target, mengabaikan struktur vektor eskalasi hak akses. |
-| `credential_list` | `exfil.secrets_scan` | — | `credential_list` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-074) | Tidak ada handler normalizer di `ArtifactNormalizer`. Path file rahasia hilang dari `ArtifactStore`. |
-| `discovered_secrets` | `exfil.secrets_scan` | — | `discovered_secrets` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-074) | Metadata rahasia (API key, private key, connection strings) dengan entropy tidak terserap ke `ArtifactStore`. |
-| `sensitive_data_found` | `exfil.secrets_scan`, `exfil.smb_shares` | — | `sensitive_data_found` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-074) | Status boolean sensitif tidak dipetakan ke atribut `HostArtifact` atau `PermissionArtifact`. |
-| `file_share_list` | `exfil.smb_shares` | — | `file_share_list` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-074) | Tidak ada handler normalizer untuk share SMB. Daftar share target hilang dari `ArtifactStore`. |
-| `sensitive_file_paths` | `exfil.smb_shares` | — | `sensitive_file_paths` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-074) | File sensitif (web.config, id_rsa, .kdbx) di share SMB hilang dari `ArtifactStore`. |
+| `password_policy` | `ad.enum_users` | `password_policy` | `password_policy` | ✅ **FIXED** (MOD-056 / Fase 1) | Handler `_normalize_password_policy` menyimpan telemetry password policy ke metadata `HostArtifact`. |
+| `snmp_findings` / `valid_credentials` | `network.snmp_enum` | `valid_credentials`, `snmp_findings` | `valid_credentials`, `snmp_findings` | ✅ **FIXED** (MOD-061 / Fase 1) | Direct vault write Gate 6 + community string ke `CredentialArtifact` & info sistem ke `HostArtifact`. |
+| Reconnaissance capabilities (`dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`) | `recon.fingerprint`, `network.dns_enum`, `network.http_fingerprint`, `network.service_detect` | `dns_records`, `subdomains`, `service_versions`, `web_fingerprint`, dll. | Various raw dicts | ✅ **FIXED** (Fase 1) | Seluruh recon capability dipetakan ke `HostArtifact` (hostnames, services, vulns, metadata). |
+| `azure_findings` | `cloud.azure` | `azure_findings` | `azure_findings` | ✅ **FIXED** (MOD-066 / Fase 1) | Handler `_normalize_azure` memetakan storage accounts, NSG, RBAC ke `CloudResourceArtifact`. |
+| `azure_ad_findings` | `cloud.azure_ad` | `azure_ad_findings` | `azure_ad_findings` | ✅ **FIXED** (MOD-066 / Fase 1) | Handler `_normalize_azure_ad` memetakan Entra ID users & service principals ke `UserArtifact` & `CloudResourceArtifact`. |
+| `access_tokens` | `cloud.azure_ad` | `access_tokens`, `access_token` | `access_tokens` | ✅ **FIXED** (MOD-066 / Fase 1) | Handler `_normalize_tokens` memetakan access tokens ke `CredentialArtifact(cred_type="access_token")`. |
+| `gcp_findings` | `cloud.gcp` | `gcp_findings` | `gcp_findings` | ✅ **FIXED** (MOD-068 / Fase 1) | Handler `_normalize_gcp` memetakan GCS buckets, roles, SA keys ke `CloudResourceArtifact`. |
+| `cleartext_credentials` | `windows.registry_enum` | `cleartext_credentials` | `cleartext_credentials` (Finding objects / dict) | ✅ **FIXED** (MOD-070 / Fase 1) | Handler `_normalize_registry_credentials` mengekstrak kredensial dari Finding objects ke `CredentialArtifact`. |
+| `credential_hints` | `windows.registry_enum` | `credential_hints` | `credential_hints` (Finding objects / dict) | ✅ **FIXED** (MOD-070 / Fase 1) | Handler `_normalize_registry_credentials` mengekstrak hint registry ke `CredentialArtifact`. |
+| `scheduled_tasks` | `windows.scheduled_tasks_enum` | `scheduled_tasks` | `scheduled_tasks` (Finding objects / dict) | ✅ **FIXED** (MOD-070 / Fase 1) | Handler `_normalize_scheduled_tasks` mengekstrak task berbahaya ke metadata `HostArtifact`. |
+| `privesc_vectors` (finding objects) | `windows.scheduled_tasks_enum`, `linux.kernel_suggester` | `privesc_vectors` | `privesc_vectors` (Finding objects / strings) | ✅ **FIXED** (MOD-070 / Fase 1) | Handler `_normalize_host_vuln` mendukung list Finding objects maupun host strings tanpa crash. |
+| `credential_list` | `exfil.secrets_scan` | `credential_list` | `credential_list` | ✅ **FIXED** (MOD-074 / Fase 1) | Handler `_normalize_secrets_scan` memetakan file paths dan credential records ke `CredentialArtifact`. |
+| `discovered_secrets` | `exfil.secrets_scan` | `discovered_secrets` | `discovered_secrets` | ✅ **FIXED** (MOD-074 / Fase 1) | Handler `_normalize_secrets_scan` memetakan API keys & private keys ke `CredentialArtifact`. |
+| `sensitive_data_found` | `exfil.secrets_scan`, `exfil.smb_shares` | `sensitive_data_found` | `sensitive_data_found` | ✅ **FIXED** (MOD-074 / Fase 1) | Handler `_normalize_secrets_scan` & `_normalize_smb_shares` mencatat temuan data sensitif ke `HostArtifact`. |
+| `file_share_list` | `exfil.smb_shares` | `file_share_list` | `file_share_list` | ✅ **FIXED** (MOD-074 / Fase 1) | Handler `_normalize_smb_shares` memetakan SMB shares dan permissions ke metadata `HostArtifact`. |
+| `sensitive_file_paths` | `exfil.smb_shares` | `sensitive_file_paths` | `sensitive_file_paths` | ✅ **FIXED** (MOD-074 / Fase 1) | Handler `_normalize_smb_shares` memetakan file sensitif ke metadata `HostArtifact`. |
 
 ---
 

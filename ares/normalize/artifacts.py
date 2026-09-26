@@ -79,6 +79,7 @@ class NormalizedArtifact:
     campaign_id:   str = ""
     tags:          list[str] = field(default_factory=list)
     raw:           dict[str, Any] = field(default_factory=dict)
+    metadata:      dict[str, Any] = field(default_factory=dict)
     _uid:          str | None = field(default=None, repr=False)
 
     @property
@@ -100,6 +101,7 @@ class NormalizedArtifact:
             "source_module": self.source_module,
             "campaign_id":  self.campaign_id,
             "tags":         self.tags,
+            "metadata":     self.metadata,
         }
         d.update(self._to_dict_fields())
         return d
@@ -129,6 +131,9 @@ class HostArtifact(NormalizedArtifact):
     is_dc:       bool = False
     domain_controller: bool = False   # alias for is_dc
     open_ports:  list[int] = field(default_factory=list)
+    services:    list[str] = field(default_factory=list)
+    vulns:       list[dict[str, Any]] = field(default_factory=list)
+    hostnames:   list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.artifact_type = ArtifactType.HOST
@@ -151,6 +156,7 @@ class HostArtifact(NormalizedArtifact):
             "ip_address": self.ip_address, "hostname": self.hostname,
             "fqdn": self.fqdn, "os": self.os, "os_version": self.os_version,
             "domain": self.domain, "is_dc": self.is_dc, "open_ports": self.open_ports,
+            "services": self.services, "vulns": self.vulns, "hostnames": self.hostnames,
         }
 
 
@@ -487,12 +493,14 @@ class ArtifactNormalizer:
         handlers: dict[str, Any] = {
             "user_list":              self._normalize_users,
             "users":                  self._normalize_users,
+            "domain_users":           self._normalize_users,
             "computer_list":          self._normalize_computers,
             "computers":              self._normalize_computers,
             "kerberos_hashes":        self._normalize_kerberos_hashes,
             "asrep_hashes":           self._normalize_asrep_hashes,
             "ntlm_hashes":            self._normalize_ntlm_hashes,
             "hashes":                 self._normalize_ntlm_hashes,
+            "cached_hashes":          self._normalize_ntlm_hashes,
             "spn_list":               self._normalize_spns,
             "spns":                   self._normalize_spns,
             "acl_findings":           self._normalize_permissions,
@@ -537,6 +545,34 @@ class ArtifactNormalizer:
             "vulnerable_services":    self._normalize_service_versions,
             "web_fingerprint":        self._normalize_web_fingerprint,
             "admin_interfaces":       self._normalize_web_fingerprint,
+            # Azure & Azure AD (MOD-066)
+            "azure_findings":         self._normalize_azure,
+            "azure_ad_findings":      self._normalize_azure_ad,
+            "access_tokens":          self._normalize_tokens,
+            "access_token":           self._normalize_tokens,
+            "oauth_tokens":           self._normalize_tokens,
+            # GCP (MOD-068)
+            "gcp_findings":           self._normalize_gcp,
+            # Linux Containers & K8s (MOD-040)
+            "container_escape_vectors": self._normalize_container_vectors,
+            "k8s_rbac_findings":      self._normalize_k8s_rbac,
+            # Identity Federation (MOD-051)
+            "federation_trusts":      self._normalize_federation_trusts,
+            "golden_saml_paths":      self._normalize_golden_saml,
+            "pivot_paths":            self._normalize_pivot_paths,
+            # SNMP & Network Discovery (MOD-061 / Recon)
+            "snmp_findings":          self._normalize_snmp_findings,
+            "system_info":            self._normalize_system_info,
+            "password_policy":        self._normalize_password_policy,
+            # Windows Scheduled Tasks & Registry (MOD-070)
+            "scheduled_tasks":        self._normalize_scheduled_tasks,
+            "credential_hints":       self._normalize_registry_credentials,
+            # Secrets Scanner & SMB Shares (MOD-074)
+            "credential_list":        self._normalize_secrets_scan,
+            "discovered_secrets":     self._normalize_secrets_scan,
+            "sensitive_data_found":   self._normalize_secrets_scan,
+            "file_share_list":        self._normalize_smb_shares,
+            "sensitive_file_paths":   self._normalize_smb_shares,
         }
         handler = handlers.get(capability)
         if handler:
@@ -760,30 +796,77 @@ class ArtifactNormalizer:
 
     def _normalize_host_vuln(self, raw: dict, store: ArtifactStore) -> int:
         host = raw.get("target") or raw.get("host", "")
-        if host and host != "localhost":
-            artifact = HostArtifact(
-                ip_address = host,
-                hostname   = host,
-            )
-            store.add(artifact)
+        if not host or host == "localhost":
+            return 0
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == host or h.hostname == host:
+                existing = h
+                break
+        vulns = raw.get("privesc_vectors", [])
+        parsed_vulns = []
+        if isinstance(vulns, list):
+            for v in vulns:
+                if isinstance(v, dict):
+                    parsed_vulns.append(v)
+                elif hasattr(v, "evidence") and isinstance(v.evidence, dict):
+                    parsed_vulns.append(v.evidence)
+                elif isinstance(v, str) and v:
+                    parsed_vulns.append({"vector": v})
+        if existing:
+            if parsed_vulns:
+                existing.vulns.extend(parsed_vulns)
             return 1
-        return 0
+        artifact = HostArtifact(
+            ip_address = host,
+            hostname   = host,
+            vulns      = parsed_vulns,
+        )
+        store.add(artifact)
+        return 1
 
     # ── P0 Handlers ────────────────────────────────────────────────────────────
 
     def _normalize_cleartext_credentials(self, raw: dict, store: ArtifactStore) -> int:
         creds = raw.get("cleartext_credentials") or raw.get("credentials", [])
+        if isinstance(creds, (dict, str)):
+            creds = [creds]
+        elif not isinstance(creds, list):
+            return 0
         count = 0
+        default_target = raw.get("target") or raw.get("host", "")
         for c in creds:
-            if not isinstance(c, dict):
+            if hasattr(c, "evidence") and isinstance(c.evidence, dict):
+                ev = c.evidence
+                username = ev.get("user") or ev.get("username", "")
+                secret = ev.get("password") or ev.get("secret", "")
+                domain = ev.get("domain", "")
+                source_host = ev.get("host") or default_target
+                privilege = "unknown"
+            elif isinstance(c, dict):
+                username = c.get("username") or c.get("user") or c.get("account", "")
+                domain = c.get("domain", "")
+                secret = c.get("password") or c.get("secret") or c.get("plaintext", "")
+                source_host = c.get("host") or c.get("target") or c.get("computer") or default_target
+                privilege = c.get("privilege", "unknown")
+            elif isinstance(c, str):
+                username = "unknown"
+                domain = ""
+                secret = c
+                source_host = default_target
+                privilege = "unknown"
+            else:
+                logger.warning("cleartext_credentials_invalid_entry", type=type(c).__name__)
+                continue
+            if not username and not secret:
                 continue
             artifact = CredentialArtifact(
-                username    = c.get("username", ""),
-                domain      = c.get("domain", ""),
+                username    = username,
+                domain      = domain,
                 cred_type   = "cleartext",
-                secret      = c.get("password") or c.get("secret") or c.get("plaintext", ""),
-                source_host = c.get("host") or c.get("target") or c.get("computer", ""),
-                privilege   = c.get("privilege", "unknown"),
+                secret      = secret,
+                source_host = source_host,
+                privilege   = privilege,
             )
             store.add(artifact)
             count += 1
@@ -1236,11 +1319,25 @@ class ArtifactNormalizer:
             return 0
         service_versions = raw.get("service_versions", {})
         ports: list[int] = []
+        services: list[str] = []
         if isinstance(service_versions, dict):
-            for p_str in service_versions:
+            for p_str, info in service_versions.items():
                 if str(p_str).isdigit():
                     ports.append(int(p_str))
+                if isinstance(info, dict) and info.get("service"):
+                    services.append(f"{p_str}:{info['service']}")
+                elif isinstance(info, str) and info:
+                    services.append(f"{p_str}:{info}")
         ports = sorted(list(set(ports)))
+        vuln_svcs = raw.get("vulnerable_services", [])
+        parsed_vulns = []
+        if isinstance(vuln_svcs, list):
+            for vs in vuln_svcs:
+                if isinstance(vs, dict):
+                    parsed_vulns.append(vs)
+                elif hasattr(vs, "evidence") and isinstance(vs.evidence, dict):
+                    parsed_vulns.append(vs.evidence)
+
         existing = None
         for h in store.hosts():
             if h.ip_address == target or h.hostname == target:
@@ -1249,6 +1346,10 @@ class ArtifactNormalizer:
         if existing:
             if ports:
                 existing.open_ports = sorted(list(set(existing.open_ports + ports)))
+            if services:
+                existing.services = sorted(list(set(existing.services + services)))
+            if parsed_vulns:
+                existing.vulns.extend(parsed_vulns)
             if raw.get("os") and not existing.os:
                 existing.os = raw.get("os", "")
             return 1
@@ -1257,6 +1358,8 @@ class ArtifactNormalizer:
             hostname=target,
             os=raw.get("os", "") or raw.get("detected_os", ""),
             open_ports=ports,
+            services=services,
+            vulns=parsed_vulns,
             source_module=capability,
         )
         store.add(artifact)
@@ -1271,6 +1374,7 @@ class ArtifactNormalizer:
             return 0
         web_fp = raw.get("web_fingerprint", {})
         server = web_fp.get("server", "") if isinstance(web_fp, dict) else ""
+        admin_interfaces = raw.get("admin_interfaces", [])
         existing = None
         for h in store.hosts():
             if h.ip_address == target or h.hostname == target:
@@ -1279,14 +1383,777 @@ class ArtifactNormalizer:
         if existing:
             if server and not existing.os:
                 existing.os = server
+            if admin_interfaces:
+                existing.metadata["admin_interfaces"] = admin_interfaces
             return 1
         artifact = HostArtifact(
             ip_address=target,
             hostname=target,
             os=server,
+            metadata={"admin_interfaces": admin_interfaces} if admin_interfaces else {},
             source_module=capability,
         )
         store.add(artifact)
         return 1
+
+    def _normalize_azure(
+        self, raw: dict, store: ArtifactStore, capability: str = "azure_findings"
+    ) -> int:
+        """Normalize Azure recon and attack output into CloudResourceArtifact, PermissionArtifact, UserArtifact."""
+        count = 0
+        subscription_id = raw.get("subscription_id", "")
+        # 1. Storage
+        storage = raw.get("storage", {})
+        if isinstance(storage, dict):
+            for c in storage.get("public_containers", []):
+                if isinstance(c, dict):
+                    sa = c.get("storage_account", "")
+                    c_name = c.get("container", "")
+                    rg = c.get("resource_group", "")
+                    artifact = CloudResourceArtifact(
+                        provider="azure",
+                        resource_type="storage_container",
+                        resource_id=f"{sa}/{c_name}",
+                        region=rg,
+                        is_public=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        # 2. RBAC
+        rbac = raw.get("rbac", {})
+        if isinstance(rbac, dict):
+            for o in rbac.get("owner_assignments", []):
+                if isinstance(o, dict):
+                    p_id = o.get("principal_id", "")
+                    scope = o.get("scope", "") or f"/subscriptions/{subscription_id}"
+                    if p_id:
+                        artifact = PermissionArtifact(
+                            principal=p_id,
+                            target=scope,
+                            right="Owner",
+                            domain=subscription_id,
+                            is_dangerous=True,
+                            source_module=capability,
+                        )
+                        store.add(artifact)
+                        count += 1
+            for c in rbac.get("contributor_assignments", []):
+                if isinstance(c, dict):
+                    p_id = c.get("principal_id", "")
+                    scope = c.get("scope", "") or f"/subscriptions/{subscription_id}"
+                    if p_id:
+                        artifact = PermissionArtifact(
+                            principal=p_id,
+                            target=scope,
+                            right="Contributor",
+                            domain=subscription_id,
+                            is_dangerous=True,
+                            source_module=capability,
+                        )
+                        store.add(artifact)
+                        count += 1
+            for admin in rbac.get("classic_admins", []):
+                if isinstance(admin, str) and admin:
+                    artifact = PermissionArtifact(
+                        principal=admin,
+                        target=f"/subscriptions/{subscription_id}",
+                        right="ClassicCoAdministrator",
+                        domain=subscription_id,
+                        is_dangerous=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        # 3. NSG
+        nsg = raw.get("nsg", {})
+        if isinstance(nsg, dict):
+            for rule in nsg.get("open_rules", []):
+                if isinstance(rule, dict):
+                    nsg_name = rule.get("nsg", "")
+                    r_name = rule.get("rule_name", "")
+                    rg = rule.get("resource_group", "")
+                    artifact = CloudResourceArtifact(
+                        provider="azure",
+                        resource_type="network_security_group",
+                        resource_id=f"{nsg_name}/{r_name}" if r_name else nsg_name,
+                        region=rg,
+                        is_public=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        # 4. AAD users
+        aad = raw.get("aad_users", {})
+        if isinstance(aad, dict):
+            for u in aad.get("admin_users", []):
+                if isinstance(u, str) and u:
+                    artifact = UserArtifact(
+                        username=u,
+                        domain="azure_ad",
+                        is_admin=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        return count
+
+    def _normalize_azure_ad(
+        self, raw: dict, store: ArtifactStore, capability: str = "azure_ad_findings"
+    ) -> int:
+        """Normalize Azure AD findings into UserArtifact and PermissionArtifact."""
+        count = 0
+        tenant_id = raw.get("tenant_id", "azure_ad")
+        # 1. Privileged users
+        for u in raw.get("privileged_users", []):
+            if isinstance(u, str) and u:
+                artifact = UserArtifact(
+                    username=u,
+                    domain=tenant_id,
+                    is_admin=True,
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+        # 2. Guests
+        for g in raw.get("guests", []):
+            g_name = g.get("userPrincipalName", "") if isinstance(g, dict) else (g if isinstance(g, str) else "")
+            if g_name:
+                artifact = UserArtifact(
+                    username=g_name,
+                    domain=tenant_id,
+                    is_admin=False,
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+        # 3. High privilege service principals
+        for sp in raw.get("high_priv_sps", []):
+            if isinstance(sp, str) and sp:
+                artifact = PermissionArtifact(
+                    principal=sp,
+                    target=tenant_id,
+                    right="PrivilegedAppRole",
+                    domain=tenant_id,
+                    is_dangerous=True,
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+        # 4. Service principals list
+        for sp in raw.get("service_principals", []):
+            if isinstance(sp, dict) and sp.get("privileged"):
+                sp_name = sp.get("displayName") or sp.get("appId", "")
+                if sp_name:
+                    artifact = PermissionArtifact(
+                        principal=sp_name,
+                        target=tenant_id,
+                        right="PrivilegedServicePrincipal",
+                        domain=tenant_id,
+                        is_dangerous=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        return count
+
+    def _normalize_tokens(
+        self, raw: dict, store: ArtifactStore, capability: str = "access_tokens"
+    ) -> int:
+        """Normalize access tokens and OAuth tokens into CredentialArtifact(cred_type='oauth_token')."""
+        count = 0
+        tokens = raw.get("access_tokens") or raw.get("oauth_tokens") or raw.get("access_token") or raw.get("tokens")
+        if not tokens:
+            return 0
+        if isinstance(tokens, (str, dict)):
+            tokens = [tokens]
+        elif not isinstance(tokens, list):
+            return 0
+        tenant = raw.get("tenant_id") or raw.get("domain") or "cloud"
+        for t in tokens:
+            if isinstance(t, str):
+                t_str = t.strip()
+                if not t_str:
+                    continue
+                artifact = CredentialArtifact(
+                    username="oauth_bearer",
+                    domain=tenant,
+                    cred_type="oauth_token",
+                    secret=t_str,
+                    source_host=tenant,
+                    privilege="token",
+                    source_module=capability,
+                )
+                store.add_credential(artifact)
+                count += 1
+            elif isinstance(t, dict):
+                tok_val = t.get("access_token") or t.get("token") or t.get("secret", "")
+                if not tok_val:
+                    continue
+                username = t.get("user") or t.get("username") or t.get("client_id") or "oauth_bearer"
+                scope = t.get("scope") or t.get("resource", "")
+                artifact = CredentialArtifact(
+                    username=username,
+                    domain=tenant,
+                    cred_type="oauth_token",
+                    secret=tok_val,
+                    source_host=tenant,
+                    privilege="token",
+                    note=f"scope={scope}" if scope else "",
+                    source_module=capability,
+                )
+                store.add_credential(artifact)
+                count += 1
+            else:
+                logger.warning("access_token_invalid_entry", type=type(t).__name__)
+        return count
+
+    def _normalize_gcp(
+        self, raw: dict, store: ArtifactStore, capability: str = "gcp_findings"
+    ) -> int:
+        """Normalize GCP reconnaissance findings into CloudResourceArtifact and PermissionArtifact."""
+        count = 0
+        project_id = raw.get("project_id", "gcp")
+        # 1. GCS public buckets
+        gcs = raw.get("gcs", {})
+        if isinstance(gcs, dict):
+            for b in gcs.get("public_buckets", []):
+                if isinstance(b, dict):
+                    b_name = b.get("bucket", "")
+                    if b_name:
+                        artifact = CloudResourceArtifact(
+                            provider="gcp",
+                            resource_type="gcs_bucket",
+                            resource_id=b_name,
+                            region=project_id,
+                            is_public=True,
+                            source_module=capability,
+                        )
+                        store.add(artifact)
+                        count += 1
+        # 2. IAM bindings
+        iam = raw.get("iam", {})
+        if isinstance(iam, dict):
+            for pb in iam.get("public_bindings", []):
+                if isinstance(pb, str) and " → " in pb:
+                    member, role = pb.split(" → ", 1)
+                    artifact = PermissionArtifact(
+                        principal=member.strip(),
+                        target=project_id,
+                        right=role.strip(),
+                        domain="gcp",
+                        is_dangerous=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+            for ob in iam.get("owner_bindings", []):
+                if isinstance(ob, str) and ob:
+                    artifact = PermissionArtifact(
+                        principal=ob,
+                        target=project_id,
+                        right="roles/owner",
+                        domain="gcp",
+                        is_dangerous=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        # 3. Service account keys
+        sa = raw.get("service_accounts", {})
+        if isinstance(sa, dict):
+            for mk in sa.get("many_keys", []):
+                if isinstance(mk, dict):
+                    email = mk.get("service_account", "")
+                    key_count = mk.get("active_key_count", 0)
+                    if email:
+                        artifact = CredentialArtifact(
+                            username=email,
+                            domain="gcp",
+                            cred_type="service_account_key",
+                            source_host=project_id,
+                            privilege="service_account",
+                            note=f"active_keys={key_count}",
+                            source_module=capability,
+                        )
+                        store.add_credential(artifact)
+                        count += 1
+        return count
+
+    def _normalize_container_vectors(
+        self, raw: dict, store: ArtifactStore, capability: str = "container_escape_vectors"
+    ) -> int:
+        """Normalize container escape vectors into HostArtifact vulns and metadata."""
+        target = raw.get("target") or raw.get("host") or "container-host"
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == target or h.hostname == target:
+                existing = h
+                break
+        host = existing or HostArtifact(
+            ip_address=target,
+            hostname=target,
+            source_module=capability,
+        )
+        count = 0
+        # Check docker socket
+        ds = raw.get("docker_socket", {})
+        if isinstance(ds, dict) and ds.get("writable"):
+            vuln_entry = {"type": "container_escape", "vector": "docker_socket_writable", "severity": "CRITICAL"}
+            host.vulns.append(vuln_entry)
+            host.metadata.setdefault("container_escape_vectors", []).append(vuln_entry)
+            count += 1
+        # Check privileged
+        priv = raw.get("privileged", {})
+        if isinstance(priv, dict) and priv.get("privileged"):
+            vuln_entry = {"type": "container_escape", "vector": "privileged_container", "severity": "CRITICAL"}
+            host.vulns.append(vuln_entry)
+            host.metadata.setdefault("container_escape_vectors", []).append(vuln_entry)
+            count += 1
+        # Check host mounts
+        hm = raw.get("host_mounts", {})
+        if isinstance(hm, dict) and hm.get("high"):
+            vuln_entry = {"type": "container_escape", "vector": "host_mounts_high_risk", "mounts": hm["high"], "severity": "CRITICAL"}
+            host.vulns.append(vuln_entry)
+            host.metadata.setdefault("container_escape_vectors", []).append(vuln_entry)
+            count += 1
+        # If raw["container_escape_vectors"] has items
+        vectors = raw.get("container_escape_vectors", [])
+        if isinstance(vectors, list):
+            for v in vectors:
+                if isinstance(v, dict):
+                    host.vulns.append(v)
+                    count += 1
+                elif hasattr(v, "evidence") and isinstance(v.evidence, dict):
+                    host.vulns.append(v.evidence)
+                    count += 1
+        if count and not existing:
+            store.add(host)
+        return max(count, 1 if count else 0)
+
+    def _normalize_k8s_rbac(
+        self, raw: dict, store: ArtifactStore, capability: str = "k8s_rbac_findings"
+    ) -> int:
+        """Normalize Kubernetes RBAC findings into PermissionArtifact."""
+        findings = raw.get("k8s_rbac_findings") or raw.get("k8s_findings", [])
+        if not isinstance(findings, list):
+            return 0
+        count = 0
+        for f in findings:
+            if not isinstance(f, dict):
+                if hasattr(f, "evidence") and isinstance(f.evidence, dict):
+                    f = f.evidence
+                else:
+                    continue
+            principal = f.get("service_account") or f.get("principal") or "system:serviceaccount"
+            target = f.get("resource") or f.get("target") or "k8s_cluster"
+            verb = f.get("verb") or f.get("right") or "cluster-admin"
+            artifact = PermissionArtifact(
+                principal=principal,
+                target=target,
+                right=verb,
+                domain="k8s",
+                is_dangerous=True,
+                source_module=capability,
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_federation_trusts(
+        self, raw: dict, store: ArtifactStore, capability: str = "federation_trusts"
+    ) -> int:
+        """Normalize identity federation trusts into CloudResourceArtifact."""
+        trusts = raw.get("federation_trusts", [])
+        if isinstance(trusts, (str, dict)):
+            trusts = [trusts]
+        elif not isinstance(trusts, list):
+            return 0
+        count = 0
+        for t in trusts:
+            if isinstance(t, str):
+                t_str = t.strip()
+                if not t_str:
+                    continue
+                if "Azure" in t_str:
+                    provider = "azure"
+                    res_type = "federation_trust"
+                    res_id = t_str.split(":", 1)[1].strip() if ":" in t_str else t_str
+                elif "AWS" in t_str:
+                    provider = "aws"
+                    res_type = "saml_provider"
+                    res_id = t_str.split(":", 1)[1].strip() if ":" in t_str else t_str
+                elif "ADFS" in t_str:
+                    provider = "adfs"
+                    res_type = "relying_party"
+                    res_id = t_str.split(":", 1)[1].strip() if ":" in t_str else t_str
+                else:
+                    provider = "cloud"
+                    res_type = "federation_trust"
+                    res_id = t_str
+                artifact = CloudResourceArtifact(
+                    provider=provider,
+                    resource_type=res_type,
+                    resource_id=res_id,
+                    is_public=False,
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+            elif isinstance(t, dict):
+                artifact = CloudResourceArtifact(
+                    provider=t.get("provider", "cloud"),
+                    resource_type=t.get("resource_type", "federation_trust"),
+                    resource_id=t.get("resource_id") or t.get("name", "trust"),
+                    is_public=t.get("is_public", False),
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+            else:
+                logger.warning("federation_trust_invalid_entry", type=type(t).__name__)
+        return count
+
+    def _normalize_golden_saml(
+        self, raw: dict, store: ArtifactStore, capability: str = "golden_saml_paths"
+    ) -> int:
+        """Normalize Golden SAML paths into PermissionArtifact."""
+        paths = raw.get("golden_saml_paths", [])
+        if isinstance(paths, dict):
+            paths = [paths]
+        elif not isinstance(paths, list):
+            return 0
+        count = 0
+        for p in paths:
+            if not isinstance(p, dict):
+                continue
+            rps = p.get("relying_parties", [])
+            for rp in (rps if isinstance(rps, list) else [str(rps)]):
+                if rp:
+                    artifact = PermissionArtifact(
+                        principal="adfs_token_signing_key",
+                        target=rp,
+                        right="GoldenSAML_AssertionForgery",
+                        domain="federation",
+                        is_dangerous=True,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+            if not rps:
+                artifact = PermissionArtifact(
+                    principal="adfs_token_signing_key",
+                    target=p.get("attack", "Golden SAML"),
+                    right="GoldenSAML",
+                    domain="federation",
+                    is_dangerous=True,
+                    source_module=capability,
+                )
+                store.add(artifact)
+                count += 1
+        return count
+
+    def _normalize_pivot_paths(
+        self, raw: dict, store: ArtifactStore, capability: str = "pivot_paths"
+    ) -> int:
+        """Normalize cross-cloud pivot paths into PermissionArtifact."""
+        paths = raw.get("pivot_paths", [])
+        if not isinstance(paths, list):
+            return 0
+        count = 0
+        for p in paths:
+            if not isinstance(p, dict):
+                continue
+            path_name = p.get("path") or p.get("name", "cross_cloud_pivot")
+            tech = p.get("technique", "T1606.002")
+            artifact = PermissionArtifact(
+                principal="federated_identity",
+                target=path_name,
+                right=tech,
+                domain="multi_cloud",
+                is_dangerous=True,
+                source_module=capability,
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_snmp_findings(
+        self, raw: dict, store: ArtifactStore, capability: str = "snmp_findings"
+    ) -> int:
+        """Normalize SNMP enumeration findings into CredentialArtifact and HostArtifact."""
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        # Community strings
+        valid_comms = raw.get("valid_communities", [])
+        if isinstance(valid_comms, list):
+            for vc in valid_comms:
+                comm = vc.get("community", "") if isinstance(vc, dict) else (vc if isinstance(vc, str) else "")
+                if comm:
+                    artifact = CredentialArtifact(
+                        username="snmp",
+                        secret=comm,
+                        cred_type="snmp_community",
+                        source_host=target,
+                        privilege="local_admin" if comm.lower() in ("private", "write") else "user",
+                        source_module=capability,
+                    )
+                    store.add_credential(artifact)
+                    count += 1
+        # System info
+        sys_info = raw.get("system_info", {})
+        if isinstance(sys_info, dict) and target:
+            sys_descr = sys_info.get("sysDescr", "")
+            sys_name = sys_info.get("sysName", "")
+            existing = None
+            for h in store.hosts():
+                if h.ip_address == target or h.hostname == target:
+                    existing = h
+                    break
+            if existing:
+                if sys_descr and not existing.os:
+                    existing.os = sys_descr
+                if sys_name and not existing.hostname:
+                    existing.hostname = sys_name
+                existing.metadata["snmp_system_info"] = sys_info
+            else:
+                h = HostArtifact(
+                    ip_address=target,
+                    hostname=sys_name or target,
+                    os=sys_descr,
+                    metadata={"snmp_system_info": sys_info},
+                    source_module=capability,
+                )
+                store.add(h)
+            count += 1
+        return count
+
+    def _normalize_system_info(
+        self, raw: dict, store: ArtifactStore, capability: str = "system_info"
+    ) -> int:
+        """Normalize generic system_info dict into HostArtifact."""
+        target = raw.get("target") or raw.get("host", "")
+        sys_info = raw.get("system_info", {})
+        if not target and isinstance(sys_info, dict):
+            target = sys_info.get("sysName") or sys_info.get("hostname", "")
+        if not target:
+            return 0
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == target or h.hostname == target:
+                existing = h
+                break
+        if existing:
+            if isinstance(sys_info, dict):
+                existing.metadata["system_info"] = sys_info
+                if sys_info.get("sysDescr") and not existing.os:
+                    existing.os = sys_info["sysDescr"]
+            return 1
+        h = HostArtifact(
+            ip_address=target,
+            hostname=target,
+            os=sys_info.get("sysDescr", "") if isinstance(sys_info, dict) else "",
+            metadata={"system_info": sys_info} if isinstance(sys_info, dict) else {},
+            source_module=capability,
+        )
+        store.add(h)
+        return 1
+
+    def _normalize_password_policy(
+        self, raw: dict, store: ArtifactStore, capability: str = "password_policy"
+    ) -> int:
+        """Normalize AD/cloud password policy into DomainArtifact metadata."""
+        policy = raw.get("password_policy", {})
+        if not isinstance(policy, dict) or not policy:
+            return 0
+        domain = raw.get("domain", "") or raw.get("dc", "") or "default"
+        existing_domain = None
+        for d in store.get(ArtifactType.DOMAIN):
+            if isinstance(d, DomainArtifact) and d.domain_name.lower() == domain.lower():
+                existing_domain = d
+                break
+        if existing_domain:
+            existing_domain.metadata["password_policy"] = policy
+            return 1
+        d_artifact = DomainArtifact(
+            domain_name=domain,
+            metadata={"password_policy": policy},
+            source_module=capability,
+        )
+        store.add(d_artifact)
+        return 1
+
+    def _normalize_scheduled_tasks(
+        self, raw: dict, store: ArtifactStore, capability: str = "scheduled_tasks"
+    ) -> int:
+        """Normalize scheduled tasks into PermissionArtifact and HostArtifact metadata."""
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        seen_tasks: set[str] = set()
+        for key in ("writable_path_tasks", "high_priv_tasks", "all_tasks"):
+            tasks = raw.get(key, [])
+            if isinstance(tasks, list):
+                for t in tasks:
+                    if isinstance(t, dict):
+                        task_name = t.get("task") or t.get("name", "")
+                        if task_name and task_name not in seen_tasks:
+                            seen_tasks.add(task_name)
+                            run_as = t.get("run_as", "SYSTEM")
+                            artifact = PermissionArtifact(
+                                principal=run_as,
+                                target=task_name,
+                                right="ExecuteScheduledTask",
+                                domain=target,
+                                is_dangerous=bool(t.get("writable_indicator") or key == "writable_path_tasks"),
+                                source_module=capability,
+                            )
+                            store.add(artifact)
+                            count += 1
+        if target:
+            for h in store.hosts():
+                if h.ip_address == target or h.hostname == target:
+                    h.metadata["scheduled_tasks_count"] = raw.get("total_tasks", count)
+                    break
+        return count
+
+    def _normalize_registry_credentials(
+        self, raw: dict, store: ArtifactStore, capability: str = "credential_hints"
+    ) -> int:
+        """Normalize registry credential hits (AutoLogon, VNC, PuTTY) into CredentialArtifact."""
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        # 1. Credential hits (AutoLogon, VNC, etc.)
+        hits = raw.get("credential_hits", [])
+        if isinstance(hits, list):
+            for h in hits:
+                if not isinstance(h, dict):
+                    continue
+                vals = h.get("values", {})
+                if not isinstance(vals, dict):
+                    continue
+                path = h.get("path", "")
+                if "Winlogon" in path:
+                    user = vals.get("DefaultUserName", "")
+                    pwd = vals.get("DefaultPassword", "")
+                    dom = vals.get("DefaultDomainName", "") or target
+                    if pwd and isinstance(pwd, str):
+                        artifact = CredentialArtifact(
+                            username=user.strip("\x00"),
+                            domain=dom.strip("\x00"),
+                            cred_type="cleartext",
+                            secret=pwd.strip("\x00"),
+                            source_host=target,
+                            privilege="local_admin",
+                            note="registry_autologon",
+                            source_module=capability,
+                        )
+                        store.add_credential(artifact)
+                        count += 1
+                elif "VNC" in path:
+                    pwd = vals.get("Password", "")
+                    if pwd:
+                        artifact = CredentialArtifact(
+                            username="vnc",
+                            domain=target,
+                            cred_type="vnc_password",
+                            secret=str(pwd),
+                            source_host=target,
+                            privilege="user",
+                            note=f"registry_{path}",
+                            source_module=capability,
+                        )
+                        store.add_credential(artifact)
+                        count += 1
+        # 2. PuTTY sessions
+        putty = raw.get("putty_sessions", [])
+        if isinstance(putty, list):
+            for s in putty:
+                if isinstance(s, dict):
+                    u = s.get("user_name", "")
+                    h_name = s.get("host_name", "")
+                    s_name = s.get("session_name", "")
+                    if u or h_name:
+                        artifact = CredentialArtifact(
+                            username=u or "unknown",
+                            domain=h_name,
+                            cred_type="putty_session",
+                            source_host=target,
+                            note=f"session={s_name} remote={h_name}",
+                            source_module=capability,
+                        )
+                        store.add_credential(artifact)
+                        count += 1
+        return count
+
+    def _normalize_secrets_scan(
+        self, raw: dict, store: ArtifactStore, capability: str = "discovered_secrets"
+    ) -> int:
+        """Normalize secrets scanner findings into CredentialArtifact."""
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        secrets = raw.get("discovered_secrets") or []
+        if isinstance(secrets, list):
+            for s in secrets:
+                if not isinstance(s, dict):
+                    continue
+                sec_val = s.get("secret_value") or s.get("extracted_secret") or ""
+                pattern = s.get("pattern", "secret")
+                fpath = s.get("file", "")
+                line = s.get("line", 0)
+                if sec_val:
+                    artifact = CredentialArtifact(
+                        username=pattern,
+                        secret=sec_val,
+                        cred_type=pattern,
+                        source_host=target,
+                        privilege="unknown",
+                        note=f"{fpath}:{line}",
+                        source_module=capability,
+                    )
+                    store.add_credential(artifact)
+                    count += 1
+        cred_list = raw.get("credential_list", [])
+        if target and (cred_list or raw.get("sensitive_data_found")):
+            for h in store.hosts():
+                if h.ip_address == target or h.hostname == target:
+                    if cred_list:
+                        h.metadata["secret_files"] = cred_list
+                    if raw.get("sensitive_data_found"):
+                        h.metadata["sensitive_data_found"] = True
+                    break
+        return count
+
+    def _normalize_smb_shares(
+        self, raw: dict, store: ArtifactStore, capability: str = "file_share_list"
+    ) -> int:
+        """Normalize SMB shares and sensitive file paths into HostArtifact metadata."""
+        target = raw.get("target") or raw.get("host", "")
+        if not target:
+            return 0
+        share_list = raw.get("file_share_list", [])
+        file_paths = raw.get("sensitive_file_paths", [])
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == target or h.hostname == target:
+                existing = h
+                break
+        if existing:
+            if share_list:
+                existing.metadata["file_shares"] = share_list
+            if file_paths:
+                existing.metadata["sensitive_files"] = file_paths
+            return 1
+        h = HostArtifact(
+            ip_address=target,
+            hostname=target,
+            metadata={
+                "file_shares": share_list,
+                "sensitive_files": file_paths,
+            },
+            source_module=capability,
+        )
+        store.add(h)
+        return 1
+
 
 

@@ -13,9 +13,12 @@ from ares.normalize.artifacts import (
     ArtifactNormalizer,
     ArtifactStore,
     ArtifactType,
+    CloudResourceArtifact,
     CredentialArtifact,
+    DomainArtifact,
     HashArtifact,
     HostArtifact,
+    PermissionArtifact,
     UserArtifact,
 )
 
@@ -933,6 +936,368 @@ def test_service_versions_and_web_fingerprint_pipeline_mod_062(
     # Existing host updated, no duplicate created
     assert len(store.hosts()) == 1
     assert store.hosts()[0].os == "Ubuntu Linux"
+
+
+def test_azure_findings_pipeline_mod_066(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-066: Azure storage, RBAC, and NSG findings normalized to CloudResourceArtifact and PermissionArtifact."""
+    raw = {
+        "subscription_id": "sub-1234-abcd",
+        "storage": {
+            "public_containers": [
+                {
+                    "storage_account": "corpbackup",
+                    "container": "db-dumps",
+                    "access_level": "container",
+                    "resource_group": "rg-core",
+                }
+            ]
+        },
+        "rbac": {
+            "owner_assignments": [
+                {"principal_id": "user-guid-001", "role_definition": "8e3af657", "scope": "/subscriptions/sub-1234-abcd"}
+            ],
+            "contributor_assignments": [
+                {"principal_id": "spn-guid-002", "role_definition": "b24988ac", "scope": "/subscriptions/sub-1234-abcd"}
+            ],
+            "classic_admins": ["legacy_admin@corp.com"],
+        },
+        "nsg": {
+            "open_rules": [
+                {"nsg": "nsg-prod", "rule_name": "Allow-SSH-Internet", "resource_group": "rg-core"}
+            ]
+        },
+        "aad_users": {
+            "admin_users": ["globaladmin@corp.onmicrosoft.com"]
+        }
+    }
+    added = normalizer.normalize("cloud.azure", ["azure_findings"], raw, store)
+    assert added >= 5
+
+    # Cloud resources: storage container + NSG
+    cloud_res = [a for a in store.get(ArtifactType.CLOUD_RESOURCE)]
+    res_ids = {c.resource_id for c in cloud_res}
+    assert "corpbackup/db-dumps" in res_ids
+    assert "nsg-prod/Allow-SSH-Internet" in res_ids
+
+    # Permissions: owner, contributor, classic admin
+    perms = store.permissions()
+    principals = {p.principal for p in perms}
+    assert "user-guid-001" in principals
+    assert "spn-guid-002" in principals
+    assert "legacy_admin@corp.com" in principals
+
+    # Users
+    users = store.users()
+    assert any(u.username == "globaladmin@corp.onmicrosoft.com" for u in users)
+
+
+def test_azure_ad_findings_and_access_tokens_pipeline_mod_066(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-066: Azure AD users, SPNs, and access tokens normalized into artifacts."""
+    raw = {
+        "tenant_id": "tenant-azure-ad-01",
+        "privileged_users": ["entra_admin@tenant.com"],
+        "guests": [{"userPrincipalName": "external_vendor@contractor.com"}],
+        "high_priv_sps": ["CI/CD Pipeline App"],
+        "access_tokens": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_access_token_payload",
+    }
+    added = normalizer.normalize("cloud.azure_ad", ["azure_ad_findings", "access_tokens"], raw, store)
+    assert added >= 4
+
+    users = {u.username: u for u in store.users()}
+    assert "entra_admin@tenant.com" in users
+    assert users["entra_admin@tenant.com"].is_admin is True
+    assert "external_vendor@contractor.com" in users
+    assert users["external_vendor@contractor.com"].is_admin is False
+
+    perms = store.permissions()
+    assert any(p.principal == "CI/CD Pipeline App" for p in perms)
+
+    creds = store.credentials()
+    oauth_creds = [c for c in creds if c.cred_type == "oauth_token"]
+    assert len(oauth_creds) == 1
+    assert "dummy_access_token_payload" in oauth_creds[0].secret
+
+
+def test_gcp_findings_pipeline_mod_068(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-068: GCP public buckets, IAM bindings, and SA keys normalized into artifacts."""
+    raw = {
+        "project_id": "ares-gcp-sec-lab",
+        "gcs": {
+            "public_buckets": [
+                {"bucket": "ares-public-assets", "member": "allUsers", "role": "roles/storage.objectViewer"}
+            ]
+        },
+        "iam": {
+            "public_bindings": ["allUsers → roles/viewer"],
+            "owner_bindings": ["corp-exec@domain.com"],
+        },
+        "service_accounts": {
+            "many_keys": [
+                {"service_account": "deploy-sa@ares-gcp-sec-lab.iam.gserviceaccount.com", "active_key_count": 3}
+            ]
+        }
+    }
+    added = normalizer.normalize("cloud.gcp", ["gcp_findings"], raw, store)
+    assert added >= 4
+
+    cloud_res = [c for c in store.get(ArtifactType.CLOUD_RESOURCE) if c.provider == "gcp"]
+    assert len(cloud_res) == 1
+    assert cloud_res[0].resource_id == "ares-public-assets"
+    assert cloud_res[0].is_public is True
+
+    perms = store.permissions()
+    principals = {p.principal for p in perms}
+    assert "allUsers" in principals
+    assert "corp-exec@domain.com" in principals
+
+    creds = store.credentials()
+    sa_creds = [c for c in creds if c.cred_type == "service_account_key"]
+    assert len(sa_creds) == 1
+    assert sa_creds[0].username == "deploy-sa@ares-gcp-sec-lab.iam.gserviceaccount.com"
+
+
+def test_container_escape_and_k8s_rbac_pipeline_mod_040(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-040: Container escape vectors and K8s RBAC findings normalized into HostArtifact and PermissionArtifact."""
+    raw = {
+        "target": "k8s-worker-01",
+        "docker_socket": {"exists": True, "writable": True},
+        "privileged": {"privileged": True, "CapEff": "0000003fffffffff"},
+        "host_mounts": {"high": ["/etc", "/var/lib/docker"]},
+        "k8s_rbac_findings": [
+            {
+                "service_account": "system:serviceaccount:default:tiller",
+                "resource": "cluster",
+                "verb": "cluster-admin",
+            }
+        ],
+    }
+    added = normalizer.normalize("linux.container", ["container_escape_vectors", "k8s_rbac_findings"], raw, store)
+    assert added >= 2
+
+    hosts = store.hosts()
+    assert len(hosts) == 1
+    assert hosts[0].ip_address == "k8s-worker-01"
+    assert len(hosts[0].vulns) >= 3
+    assert any(v.get("vector") == "docker_socket_writable" for v in hosts[0].vulns)
+
+    perms = store.permissions()
+    assert len(perms) == 1
+    assert perms[0].principal == "system:serviceaccount:default:tiller"
+    assert perms[0].right == "cluster-admin"
+
+
+def test_identity_federation_pipeline_mod_051(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-051: Federation trusts, Golden SAML paths, and pivot paths normalized into artifacts."""
+    raw = {
+        "tenant_id": "tenant-fed-01",
+        "federation_trusts": [
+            "Azure federated domain: corp.com",
+            "AWS SAML provider: arn:aws:iam::123456789012:saml-provider/ADFS",
+            "ADFS relying party: urn:federation:MicrosoftOnline",
+        ],
+        "golden_saml_paths": [
+            {
+                "attack": "Golden SAML",
+                "technique": "T1606.002",
+                "relying_parties": ["urn:federation:MicrosoftOnline", "urn:amazon:webservices"],
+            }
+        ],
+        "pivot_paths": [
+            {
+                "path": "Azure AD → AWS via SAML Federation",
+                "technique": "T1606.002",
+                "viable": True,
+            }
+        ],
+        "oauth_tokens": [
+            {"access_token": "token_forged_saml_b64", "user": "admin@corp.com"}
+        ],
+    }
+    added = normalizer.normalize(
+        "cloud.identity_federation_abuse",
+        ["federation_trusts", "golden_saml_paths", "pivot_paths", "oauth_tokens"],
+        raw,
+        store,
+    )
+    assert added >= 7
+
+    cloud_res = [c for c in store.get(ArtifactType.CLOUD_RESOURCE)]
+    assert any(c.provider == "azure" and c.resource_id == "corp.com" for c in cloud_res)
+    assert any(c.provider == "aws" for c in cloud_res)
+
+    perms = store.permissions()
+    saml_perms = [p for p in perms if "GoldenSAML" in p.right]
+    assert len(saml_perms) == 2
+
+    creds = store.credentials()
+    assert any(c.secret == "token_forged_saml_b64" for c in creds)
+
+
+def test_snmp_findings_and_system_info_pipeline(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """network.snmp_enum findings and system_info populate CredentialArtifact and HostArtifact."""
+    raw = {
+        "target": "192.168.1.100",
+        "port": 161,
+        "valid_communities": [
+            {"community": "public", "system_info": {"sysDescr": "Linux Ubuntu 22.04"}},
+            {"community": "private", "system_info": {"sysDescr": "Linux Ubuntu 22.04"}},
+        ],
+        "system_info": {
+            "sysDescr": "Linux RouterOS 7.2",
+            "sysName": "edge-gw01",
+            "sysLocation": "Datacenter Rack 4",
+        }
+    }
+    added = normalizer.normalize("network.snmp_enum", ["snmp_findings", "system_info"], raw, store)
+    assert added >= 3
+
+    creds = store.credentials()
+    communities = {c.secret for c in creds if c.cred_type == "snmp_community"}
+    assert "public" in communities
+    assert "private" in communities
+
+    hosts = store.hosts()
+    assert len(hosts) == 1
+    assert hosts[0].ip_address == "192.168.1.100"
+    assert hosts[0].hostname == "edge-gw01"
+    assert "snmp_system_info" in hosts[0].metadata
+
+
+def test_password_policy_pipeline_mod_056(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """ad.enum_users password_policy is stored in DomainArtifact metadata."""
+    raw = {
+        "domain": "corp.local",
+        "password_policy": {
+            "minPwdLength": 8,
+            "pwdHistoryLength": 24,
+            "lockoutThreshold": 0,
+        }
+    }
+    added = normalizer.normalize("ad.enum_users", ["password_policy"], raw, store)
+    assert added == 1
+
+    domains = [d for d in store.get(ArtifactType.DOMAIN) if isinstance(d, DomainArtifact)]
+    assert len(domains) == 1
+    assert domains[0].domain_name == "corp.local"
+    assert domains[0].metadata["password_policy"]["minPwdLength"] == 8
+    assert domains[0].metadata["password_policy"]["lockoutThreshold"] == 0
+
+
+def test_scheduled_tasks_and_registry_credentials_pipeline_mod_070(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-070: Scheduled tasks and registry credential hits normalized into typed artifacts."""
+    raw_tasks = {
+        "target": "win-srv-01",
+        "writable_path_tasks": [
+            {
+                "task": "DailyBackupJob",
+                "run_as": "NT AUTHORITY\\SYSTEM",
+                "action": "C:\\Temp\\backup.bat",
+                "writable_indicator": "C:\\Temp\\",
+            }
+        ],
+        "high_priv_tasks": [
+            {"task": "MaintenanceTask", "run_as": "BUILTIN\\Administrators"}
+        ],
+        "total_tasks": 2,
+    }
+    added_tasks = normalizer.normalize("windows.scheduled_tasks_enum", ["scheduled_tasks"], raw_tasks, store)
+    assert added_tasks >= 2
+
+    perms = store.permissions()
+    task_perms = [p for p in perms if p.right == "ExecuteScheduledTask"]
+    assert len(task_perms) >= 2
+    assert any(p.target == "DailyBackupJob" and p.is_dangerous is True for p in task_perms)
+
+    raw_reg = {
+        "target": "win-srv-01",
+        "credential_hits": [
+            {
+                "path": "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
+                "values": {
+                    "AutoAdminLogon": "1",
+                    "DefaultUserName": "kiosk_user",
+                    "DefaultPassword": "SuperSecretAutoPassword123!",
+                    "DefaultDomainName": "CORP",
+                },
+            },
+            {
+                "path": "SOFTWARE\\RealVNC\\vncserver",
+                "values": {"Password": "VncPasswordSecret"},
+            }
+        ],
+        "putty_sessions": [
+            {"session_name": "prod-bastion", "host_name": "10.10.10.5", "user_name": "opsadmin"}
+        ]
+    }
+    added_reg = normalizer.normalize("windows.registry_enum", ["credential_hints"], raw_reg, store)
+    assert added_reg >= 3
+
+    creds = store.credentials()
+    assert any(c.username == "kiosk_user" and c.secret == "SuperSecretAutoPassword123!" for c in creds)
+    assert any(c.username == "vnc" and c.secret == "VncPasswordSecret" for c in creds)
+    assert any(c.username == "opsadmin" and c.cred_type == "putty_session" for c in creds)
+
+
+def test_secrets_scan_and_smb_shares_pipeline_mod_074(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-074: Discovered secrets and sensitive SMB share files normalized into artifacts."""
+    raw_secrets = {
+        "target": "appserver01",
+        "discovered_secrets": [
+            {
+                "file": "C:\\inetpub\\wwwroot\\web.config",
+                "line": 42,
+                "pattern": "connection_string",
+                "extracted_secret": "Server=db01;Password=SecretDBPass!",
+                "secret_value": "SecretDBPass!",
+            },
+            {
+                "file": "/home/deploy/.aws/credentials",
+                "line": 3,
+                "pattern": "aws_access_key",
+                "extracted_secret": "AKIAIOSFODNN7EXAMPLE",
+                "secret_value": "AKIAIOSFODNN7EXAMPLE",
+            }
+        ],
+        "credential_list": ["C:\\inetpub\\wwwroot\\web.config", "/home/deploy/.aws/credentials"],
+        "sensitive_data_found": True,
+    }
+    added_sec = normalizer.normalize("exfil.secrets_scan", ["discovered_secrets", "credential_list"], raw_secrets, store)
+    assert added_sec >= 2
+
+    creds = store.credentials()
+    assert any(c.cred_type == "connection_string" and c.secret == "SecretDBPass!" for c in creds)
+    assert any(c.cred_type == "aws_access_key" and c.secret == "AKIAIOSFODNN7EXAMPLE" for c in creds)
+
+    raw_shares = {
+        "target": "fileserver02",
+        "file_share_list": ["backups", "finance", "C$"],
+        "sensitive_file_paths": [
+            "\\\\fileserver02\\backups\\sam.save",
+            "\\\\fileserver02\\finance\\budget_2026.xlsx",
+        ],
+        "sensitive_data_found": True,
+    }
+    added_shares = normalizer.normalize("exfil.smb_shares", ["file_share_list", "sensitive_file_paths"], raw_shares, store)
+    assert added_shares >= 1
+
+    hosts = {h.ip_address: h for h in store.hosts()}
+    assert "fileserver02" in hosts
+    assert "backups" in hosts["fileserver02"].metadata["file_shares"]
+    assert "\\\\fileserver02\\backups\\sam.save" in hosts["fileserver02"].metadata["sensitive_files"]
 
 
 
