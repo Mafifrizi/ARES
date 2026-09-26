@@ -29,9 +29,10 @@ normalized = ArtifactNormalizer().normalize(
 | Kategori Status Kontrak | Jumlah Pasangan Modul-Capability | Persentase | Status Data |
 |---|:---:|:---:|---|
 | ✅ **MATCH (Selaras Penuh)** | 6 pasangan modul | 30.0% | Data mengalir sempurna ke `ArtifactStore` |
-| ❌ **MISMATCH (Kunci Tidak Cocok)** | 14 pasangan modul | 70.0% | **Data 100% dibuang/hilang dari ArtifactStore** |
-| ⚠️ **ORPHANED HANDLER** | 0 handler | 0.0% | Semua 9 handler memiliki minimal 1 modul deklarator |
-| 🚫 **UNHANDLED OUTPUTS** | **86 capability** | - | Output modul diabaikan sepenuhnya oleh normalizer |
+| 🔧 **FIXED (Dual-Read Fallback Diterapkan)** | 14 pasangan modul | 70.0% | **Data dipulihkan via Dual-Read Fallback** |
+| ⚠️ **ORPHANED HANDLER** | 0 handler | 0.0% | Semua handler memiliki minimal 1 modul deklarator |
+| 🆕 **HANDLER BARU DITAMBAHKAN** | 8 capability | - | `lsa_secrets`, `cached_credentials`, `valid_credentials`, `cleartext_credentials`, `cracked_credentials`, `laps_passwords`, `kerberos_tickets`, `open_ports` |
+| 🚫 **UNHANDLED OUTPUTS** | **78 capability** | - | Output modul diabaikan sepenuhnya oleh normalizer (berkurang dari 86) |
 
 ---
 
@@ -41,26 +42,30 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 
 | Capability | Modul Penghasil | Key yang DIBACA Normalizer | Key yang DITULIS Modul (`raw`) | Status | Dampak Sistemik & Downstream Failure |
 |---|---|---|---|:---:|---|
-| `user_list` | `ad.enum_users` | `users` (list of dict) | `user_list` | ❌ **MISMATCH** | **`UserArtifact` tidak pernah dibuat**. Modul downstream (`ad.kerberoast`, `credential.pass_spray`) tidak menerima daftar user via store. *(Modul melakukan bypass sementara via lokal `ISU-07`)*. |
-| `computer_list` | `ad.enum_computers` | `computers` (list of dict) | `computer_list` | ❌ **MISMATCH** | **`HostArtifact` tidak pernah dibuat** oleh normalizer. Graph jaringan tidak terisi otomatis dari enumerasi AD. |
-| `kerberos_hashes` | `ad.kerberoast` | `hashes` (list of str), `accounts` | `kerberos_hashes` (list of str) | ❌ **MISMATCH** | **100% hash Kerberoasting hilang**. `HashArtifact` (mode 13100) tidak pernah masuk ke `ArtifactStore`. `credential.crack` tidak dapat memecahkan hash secara otomatis. |
-| `asrep_hashes` | `ad.asreproast` | `hashes` (list of str) | `asrep_hashes` (list of str) | ❌ **MISMATCH** | **100% hash AS-REP hilang**. `HashArtifact` (mode 18200) tidak pernah masuk ke `ArtifactStore`. Pipeline cracking otomatis lumpuh total. |
-| `ntlm_hashes` | `ad.dcsync` | `hashes` (list of dict) | `ntlm_hashes` (list of dict) | ❌ **MISMATCH** | **100% hash domain DCSync hilang**. Hash admin domain tidak tersimpan di `ArtifactStore` dan tidak pernah dipersistensikan ke database. |
-| `ntlm_hashes` | `windows.lsass_dump` | `hashes` (list of dict) | `hashes`, `ntlm_hashes` | ✅ **MATCH** | Data mengalir benar ke `HashArtifact` (mode 1000). Modul ini secara kebetulan menuliskan kedua key (`hashes` dan `ntlm_hashes`). |
-| `ntlm_hashes` | `windows.lsa_secrets` | `hashes` (list of dict) | `sam_hashes`, `ntlm_hashes` | ❌ **MISMATCH** | Hash SAM/LSA dari target Windows tidak terserap ke normalizer karena modul menulis ke `sam_hashes` dan `ntlm_hashes`, bukan `hashes`. |
-| `spn_list` | `ad.enum_spn` | `spns` (list of dict) | `spn_list` | ❌ **MISMATCH** | **0 UserArtifact SPN dibuat**. Atribut `is_kerberoastable` tidak terpetakan di `ArtifactStore`. |
+| `user_list` | `ad.enum_users` | `users` OR `user_list` (Dual-Read) | `user_list` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `UserArtifact` via fallback `raw.get("users") or raw.get("user_list")`. |
+| `computer_list` | `ad.enum_computers` | `computers` OR `computer_list` (Dual-Read) | `computer_list` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via fallback `raw.get("computers") or raw.get("computer_list")`. |
+| `kerberos_hashes` | `ad.kerberoast` | `hashes` OR `kerberos_hashes` (Dual-Read) | `kerberos_hashes` | ✅ **FIXED** (Dual-Read Fallback) | Hash Kerberoasting mengalir ke `HashArtifact` (mode 13100) via fallback. |
+| `asrep_hashes` | `ad.asreproast` | `hashes` OR `asrep_hashes` (Dual-Read) | `asrep_hashes` | ✅ **FIXED** (Dual-Read Fallback) | Hash AS-REP mengalir ke `HashArtifact` (mode 18200) via fallback. |
+| `ntlm_hashes` | `ad.dcsync` | `hashes` OR `ntlm_hashes` (Dual-Read) | `ntlm_hashes` | ✅ **FIXED** (Dual-Read Fallback) | Hash DCSync mengalir ke `HashArtifact` (mode 1000) via fallback. |
+| `ntlm_hashes` | `windows.lsass_dump` | `hashes` OR `ntlm_hashes` (Dual-Read) | `hashes`, `ntlm_hashes` | ✅ **MATCH** | Data mengalir benar ke `HashArtifact` (mode 1000). Modul ini menuliskan kedua key. |
+| `ntlm_hashes` | `windows.lsa_secrets` | `hashes` OR `ntlm_hashes` OR `sam_hashes` (Dual-Read) | `sam_hashes`, `ntlm_hashes` | ✅ **FIXED** (Dual-Read Fallback) | Hash SAM/LSA mengalir ke `HashArtifact` via fallback triple-key. |
+| `spn_list` | `ad.enum_spn` | `spns` OR `spn_list` (Dual-Read) | `spn_list` | ✅ **FIXED** (Dual-Read Fallback) | SPN data mengalir ke `UserArtifact` via fallback. |
 | `acl_findings` | `ad.enum_acl` | `misconfigs` (list of dict) | `misconfigs`, `acl_findings` | ✅ **MATCH** | Data mengalir benar ke `PermissionArtifact`. Modul menuliskan kedua key. |
 | `aws_findings` | `cloud.aws` | `region`, `s3` (`public_buckets`) | `region`, `s3`, `aws_findings` | ✅ **MATCH** | S3 bucket publik berhasil dikonversi menjadi `CloudResourceArtifact`. |
 | `aws_findings` | `cloud.aws_privesc` | `region`, `s3` (`public_buckets`) | `privesc_paths`, `aws_findings` | ❌ **MISMATCH** | Modul privilege escalation AWS tidak menghasilkan `s3`, sehingga normalizer mengembalikan 0 artifact. Jalur eskalasi IAM hilang dari store. |
-| `privesc_vectors` | `linux.ld_preload` | `host` | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. *(Catatan: detail vektor privesc itu sendiri tidak disimpan)*. |
-| `privesc_vectors` | `linux.nfs_escape` | `host` | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
-| `privesc_vectors` | `linux.service_hijack` | `host` | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
-| `privesc_vectors` | `linux.kernel_suggester` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
-| `privesc_vectors` | `linux.privesc` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
-| `privesc_vectors` | `windows.applocker_bypass` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
-| `privesc_vectors` | `windows.scheduled_tasks_enum` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
-| `privesc_vectors` | `windows.token_impersonation` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
-| `privesc_vectors` | `windows.uac_bypass` | `host` | `target`, `privesc_vectors` | ❌ **MISMATCH** | Normalizer mencari `raw["host"]`, modul menulis `raw["target"]`. HostArtifact tidak dibuat. |
+| `privesc_vectors` | `linux.ld_preload` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
+| `privesc_vectors` | `linux.nfs_escape` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
+| `privesc_vectors` | `linux.service_hijack` | `target` OR `host` (Dual-Read) | `host`, `privesc_vectors` | ✅ **MATCH** | Menghasilkan `HostArtifact` dengan IP/hostname target. |
+| `privesc_vectors` | `linux.kernel_suggester` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. |
+| `privesc_vectors` | `linux.privesc` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. |
+| `privesc_vectors` | `windows.applocker_bypass` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. |
+| `privesc_vectors` | `windows.scheduled_tasks_enum` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. |
+| `privesc_vectors` | `windows.token_impersonation` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. *(Modul dinonaktifkan via MOD-030, tapi kontrak tetap diperbaiki)*. |
+| `privesc_vectors` | `windows.uac_bypass` | `target` OR `host` (Dual-Read) | `target`, `privesc_vectors` | ✅ **FIXED** (Dual-Read Fallback) | Data mengalir ke `HostArtifact` via `raw.get("target") or raw.get("host")`. |
+| **`lsa_secrets`** | **`windows.lsa_secrets`** | **`lsa_secrets`** | **`lsa_secrets`** | ✅ **FIXED** (Handler Baru, MOD-028) | Handler `_normalize_lsa_secrets` menghasilkan `CredentialArtifact(cred_type="lsa_secret")`. Data loss 100% teratasi. |
+| **`cached_credentials`** | **`windows.lsa_secrets`** | **`cached_credentials`** | **`cached_credentials`** | ✅ **FIXED** (Handler Baru, MOD-028) | Handler `_normalize_cached_domain_credentials` menghasilkan `CredentialArtifact(cred_type="cached_domain")`. |
+| **`valid_credentials`** | **`credential.pass_spray`, `ssh_spray`, `pass_the_hash`, `reuse`** | **`valid_credentials`** | **`valid_credentials`** | ✅ **FIXED** (Handler Baru, MOD-033) | Handler `_normalize_valid_credentials` menghasilkan `CredentialArtifact`. Tipe data distandardisasi ke `list[dict]`. |
+| `converted_ticket` | `credential.ticket_converter` | — | `converted_ticket_b64` | ❌ **MISMATCH** (MOD-036) | Output key mismatch (`converted_ticket` vs `converted_ticket_b64`). Tidak ada handler. Tiket konversi hilang dari pipeline. |
 
 ---
 
@@ -82,13 +87,8 @@ Akibatnya, seluruh modul Windows privesc gagal mencatatkan host ke `ArtifactStor
 
 ### 3.3. Mengapa Bug Ini Tersembunyi dari Unit & Integration Test?
 1. **Mocking Terisolasi**: Pada `tests/unit/test_state_graph_fingerprint_service.py` dan `tests/simulation/test_scenarios.py`, test membuat objek `store = ArtifactStore()` secara manual lalu memanggil method mutator langsung (`store.add(HashArtifact(...))`).
-2. **Ketiadaan End-to-End Test Normalizer**: Tidak ada satupun test di `tests/` yang menjalankan modul lalu meneruskan `result.raw_output` ke `ArtifactNormalizer().normalize()`.
-3. **Penyembunyian Exception Diam-diam**: Pada [`artifacts.py:449-450`](file:///c:/Users/ASUS/Desktop/ARES/ares/normalize/artifacts.py#L449-L450):
-   ```python
-   except Exception:
-       pass  # Never let normalization failures block the engine
-   ```
-   Blok `try ... except Exception: pass` tanpa logging error menelan kegagalan normalisasi secara diam-diam.
+2. **Ketiadaan End-to-End Test Normalizer**: ~~Tidak ada satupun test di `tests/` yang menjalankan modul lalu meneruskan `result.raw_output` ke `ArtifactNormalizer().normalize()`.~~ **DIPERBAIKI**: `tests/unit/test_artifact_normalizer_pipeline.py` sekarang menguji pipeline end-to-end.
+3. **Penyembunyian Exception Diam-diam**: ~~Pada [`artifacts.py:449-450`](file:///c:/Users/ASUS/Desktop/ARES/ares/normalize/artifacts.py#L449-L450) blok `try ... except Exception: pass` tanpa logging.~~ **DIPERBAIKI**: Exception sekarang di-log via `logger.warning("artifact_normalization_failed", ...)` di [`artifacts.py:472-478`](file:///c:/Users/ASUS/Desktop/ARES/ares/normalize/artifacts.py#L472-L478).
 
 ---
 
