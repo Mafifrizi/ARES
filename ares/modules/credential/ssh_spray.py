@@ -179,6 +179,9 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
                     logger.info("ssh_spray_max_attempts_reached", limit=max_attempts)
                     break
 
+                # Scope enforcement + rate limiting + jitter per attempt (MOD-031)
+                await self.before_request(target, "ssh")
+
                 attempts += 1
                 success = False
 

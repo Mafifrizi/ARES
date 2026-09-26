@@ -179,3 +179,52 @@ class TestSSHSprayModule:
             assert raw["valid_credentials"][0]["password"] == "admin123"
             assert len(findings) == 1
             assert findings[0].host == "192.168.56.105"
+
+    @pytest.mark.asyncio
+    async def test_ssh_spray_enforces_scope_and_rate_limiter_via_before_request(self):
+        """MOD-031: Verify before_request(target, 'ssh') is called before connections."""
+        mod, _ = _make_module()
+        call_order = []
+
+        async def fake_before_request(target, action="default"):
+            call_order.append(("before_request", target, action))
+
+        mod.before_request = AsyncMock(side_effect=fake_before_request)
+
+        fake_client = MagicMock()
+        def fake_connect(*args, **kwargs):
+            call_order.append(("connect", args, kwargs))
+        fake_client.connect = fake_connect
+        fake_client.close = MagicMock()
+        fake_paramiko = MagicMock()
+        fake_paramiko.SSHClient.return_value = fake_client
+
+        with patch.dict("sys.modules", {"asyncssh": None, "paramiko": fake_paramiko}):
+            await mod.run(
+                target="192.168.56.105",
+                port=22,
+                users=["kali"],
+                passwords=["kali"],
+                delay_s=0.0,
+                max_attempts=1,
+            )
+
+        assert len(call_order) == 2
+        assert call_order[0] == ("before_request", "192.168.56.105", "ssh")
+        assert call_order[1][0] == "connect"
+
+    @pytest.mark.asyncio
+    async def test_ssh_spray_fails_closed_when_out_of_scope(self):
+        """MOD-031: Out-of-scope targets are blocked by ScopeGuard."""
+        from ares.core.noise import ScopeViolationError
+        mod, _ = _make_module()
+
+        with pytest.raises(ScopeViolationError):
+            await mod.run(
+                target="10.99.99.99",  # not in 192.168.0.0/16
+                port=22,
+                users=["admin"],
+                passwords=["admin"],
+                delay_s=0.0,
+            )
+
