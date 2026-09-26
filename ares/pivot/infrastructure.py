@@ -422,8 +422,17 @@ class PivotManager:
         if proc is not None:
             try:
                 proc.terminate()
-                proc.wait(timeout=3)
-            except (OSError, AttributeError):
+                try:
+                    proc.wait(timeout=3)
+                except Exception:
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except (ProcessLookupError, OSError):
+                        pass
+            except (ProcessLookupError, OSError, AttributeError):
+                pass
+            except Exception:
                 pass
 
         del self._tunnels[tunnel_id]
@@ -440,8 +449,11 @@ class PivotManager:
         tunnel_ids = list(self._tunnels.keys())
         count = 0
         for tid in tunnel_ids:
-            if self.teardown(tid):
-                count += 1
+            try:
+                if self.teardown(tid):
+                    count += 1
+            except Exception as e:
+                logger.warning("tunnel_cleanup_error", tunnel_id=tid, error=str(e))
         logger.info("pivot_teardown_all", count=count)
         return count
 

@@ -22,6 +22,8 @@ OPSEC: LOW - SSH dynamic port forward uses encrypted SSH protocol.
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
@@ -357,13 +359,34 @@ class PivotModule(BaseModule):
         pm = _PIVOT_MANAGERS.get(campaign_id)
         if not pm:
             return
-        for tunnel in pm.all_tunnels():
+        if hasattr(pm, "teardown_all"):
+            try:
+                res = pm.teardown_all()
+                if inspect.iscoroutine(res):
+                    await res
+            except Exception as e:
+                logger.warning("pivot_teardown_manager_error", campaign_id=campaign_id, error=str(e))
+        for tunnel in list(pm.all_tunnels() if hasattr(pm, "all_tunnels") else []):
             try:
                 # Close SSH connection handle
                 if tunnel._conn:
                     tunnel._conn.close()
                 elif tunnel._proc:
-                    tunnel._proc.terminate()
+                    proc = tunnel._proc
+                    try:
+                        proc.terminate()
+                        try:
+                            if inspect.iscoroutinefunction(getattr(proc, "wait", None)):
+                                await asyncio.wait_for(proc.wait(), timeout=5)
+                            else:
+                                await asyncio.to_thread(lambda: proc.wait(timeout=5))
+                        except Exception:
+                            try:
+                                proc.kill()
+                            except (ProcessLookupError, OSError):
+                                pass
+                    except (ProcessLookupError, OSError, AttributeError):
+                        pass
             except Exception:
                 pass
         _PIVOT_MANAGERS.pop(campaign_id, None)

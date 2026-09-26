@@ -6,6 +6,7 @@ Full async orchestration with parallel module execution.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 import time
 import urllib.parse
@@ -880,91 +881,117 @@ class AresEngine:
         total_mods = len(plan.all_module_ids())
         logger.info("engine_plan_start_stages_modules", total_mods=total_mods)
 
-        for stage in plan.stages:
-            name = stage["name"]
-            module_ids = stage["modules"]
-            sp = stage.get("params", {})
-
-            logger.info("engine_stage_modules_parallel", name=name)
-
-            coros = [
-                self._guarded_run(
-                    module_id=mid,
-                    campaign=campaign,
-                    params={**gp, **sp.get(mid, {})},
-                    skip_validation=skip_validation,
-                    timeout_seconds=timeout_per_module,
-                    stage_name=name,
-                    on_progress=on_progress,
-                    actor_role=actor_role,
-                    dispatch_context=next(child_iterator),
-                )
-                for mid in module_ids
-            ]
-
-            raw_results = await asyncio.gather(*coros, return_exceptions=True)
-            stage_results: list[EngineModuleResult] = []
-            for mid, res in zip(module_ids, raw_results):
-                if isinstance(res, Exception):
-                    logger.error(
-                        "engine_raised_unhandled_exception", mid=mid, res=res, exc_info=res
-                    )
-                    stage_results.append(
-                        EngineModuleResult(
-                            module_id=mid,
-                            status=ModuleStatus.FAILED,
-                            error=f"Unhandled: {res!s}"[:200],
-                        )
-                    )
-                else:
-                    stage_results.append(res)
-            for mid, res in zip(module_ids, stage_results):
-                results[mid] = res
-
-        confirmed_total = sum(len(r.confirmed_findings) for r in results.values())
-        logger.info("engine_plan_complete_confirmed_findings", confirmed_total=confirmed_total)
-
-        # Teardown: close any active pivot tunnels established during this plan
-        if "network.pivot" in results and results["network.pivot"].status == ModuleStatus.DONE:
-            try:
-                from ares.modules.network.pivot import _PIVOT_MANAGERS
-
-                campaign_id = campaign.id
-                if campaign_id in _PIVOT_MANAGERS:
-                    pm = _PIVOT_MANAGERS[campaign_id]
-                    for tunnel in pm.all_tunnels():
-                        try:
-                            if tunnel._conn:
-                                tunnel._conn.close()
-                            elif tunnel._proc:
-                                tunnel._proc.terminate()
-                                try:
-                                    tunnel._proc.wait(timeout=5)
-                                except Exception:
-                                    tunnel._proc.kill()  # force kill if terminate hangs
-                        except Exception:
-                            pass
-                    _PIVOT_MANAGERS.pop(campaign_id, None)
-                    logger.info("engine_pivot_teardown", campaign_id=campaign_id[:8])
-            except Exception as teardown_exc:
-                logger.warning("engine_pivot_teardown_failed", error=str(teardown_exc)[:80])
-
-        # ALWAYS clean up credential artifacts - regardless of which modules ran.
-        # This runs unconditionally to prevent accumulation in 24/7 operation.
+        _pivot_cleanup_needed = "network.pivot" in plan.all_module_ids()
         try:
-            from ares.core.security import cleanup_credential_artifacts
+            for stage in plan.stages:
+                name = stage["name"]
+                module_ids = stage["modules"]
+                sp = stage.get("params", {})
 
-            cleaned = cleanup_credential_artifacts(campaign.id)
-            # Also clean global-scope artifacts (created outside campaign context)
-            cleaned += cleanup_credential_artifacts()
-            if cleaned:
-                logger.info(
-                    "engine_credential_artifacts_cleaned",
-                    count=cleaned,
-                    campaign_id=campaign.id[:8],
-                )
-        except Exception:
-            pass
+                logger.info("engine_stage_modules_parallel", name=name)
+
+                coros = [
+                    self._guarded_run(
+                        module_id=mid,
+                        campaign=campaign,
+                        params={**gp, **sp.get(mid, {})},
+                        skip_validation=skip_validation,
+                        timeout_seconds=timeout_per_module,
+                        stage_name=name,
+                        on_progress=on_progress,
+                        actor_role=actor_role,
+                        dispatch_context=next(child_iterator),
+                    )
+                    for mid in module_ids
+                ]
+
+                raw_results = await asyncio.gather(*coros, return_exceptions=True)
+                stage_results: list[EngineModuleResult] = []
+                for mid, res in zip(module_ids, raw_results):
+                    if isinstance(res, Exception):
+                        logger.error(
+                            "engine_raised_unhandled_exception", mid=mid, res=res, exc_info=res
+                        )
+                        stage_results.append(
+                            EngineModuleResult(
+                                module_id=mid,
+                                status=ModuleStatus.FAILED,
+                                error=f"Unhandled: {res!s}"[:200],
+                            )
+                        )
+                    else:
+                        stage_results.append(res)
+                for mid, res in zip(module_ids, stage_results):
+                    results[mid] = res
+
+            confirmed_total = sum(len(r.confirmed_findings) for r in results.values())
+            logger.info("engine_plan_complete_confirmed_findings", confirmed_total=confirmed_total)
+        finally:
+            # Teardown: close any active pivot tunnels established during this plan
+            # Guaranteed execution via finally block (MOD-018) regardless of plan outcome.
+            if (
+                "network.pivot" in results
+                or _pivot_cleanup_needed
+                or campaign.id in getattr(__import__("ares.modules.network.pivot", fromlist=["_PIVOT_MANAGERS"]), "_PIVOT_MANAGERS", {})
+            ):
+                try:
+                    from ares.modules.network.pivot import _PIVOT_MANAGERS
+
+                    campaign_id = campaign.id
+                    manager = _PIVOT_MANAGERS.get(campaign_id)
+                    if manager:
+                        if hasattr(manager, "teardown_all"):
+                            try:
+                                res = manager.teardown_all()
+                                if inspect.iscoroutine(res):
+                                    await asyncio.wait_for(res, timeout=10.0)
+                            except asyncio.TimeoutError:
+                                logger.warning("pivot_teardown_timeout", campaign_id=campaign_id[:8])
+                            except Exception as e:
+                                logger.warning("pivot_teardown_error", campaign_id=campaign_id[:8], error=str(e))
+                        for tunnel in list(manager.all_tunnels() if hasattr(manager, "all_tunnels") else []):
+                            try:
+                                if tunnel._conn:
+                                    tunnel._conn.close()
+                                elif tunnel._proc:
+                                    proc = tunnel._proc
+                                    try:
+                                        proc.terminate()
+                                        try:
+                                            if inspect.iscoroutinefunction(getattr(proc, "wait", None)):
+                                                await asyncio.wait_for(proc.wait(), timeout=5)
+                                            else:
+                                                await asyncio.to_thread(lambda: proc.wait(timeout=5))
+                                        except Exception:
+                                            try:
+                                                proc.kill()
+                                            except (ProcessLookupError, OSError):
+                                                pass
+                                    except (ProcessLookupError, OSError, AttributeError):
+                                        pass
+                            except Exception:
+                                pass
+                        _PIVOT_MANAGERS.pop(campaign_id, None)
+                        logger.info("engine_pivot_teardown", campaign_id=campaign_id[:8])
+                except Exception as teardown_exc:
+                    logger.warning("engine_pivot_teardown_failed", error=str(teardown_exc)[:80])
+
+            # ALWAYS clean up credential artifacts - regardless of which modules ran.
+            # This runs unconditionally in finally to prevent accumulation in 24/7 operation.
+            try:
+                from ares.core.security import cleanup_credential_artifacts
+
+                cleaned = cleanup_credential_artifacts(campaign.id)
+                # Also clean global-scope artifacts (created outside campaign context)
+                cleaned += cleanup_credential_artifacts()
+                if cleaned:
+                    logger.info(
+                        "engine_credential_artifacts_cleaned",
+                        count=cleaned,
+                        campaign_id=campaign.id[:8],
+                    )
+            except Exception:
+                pass
 
         return results
 
