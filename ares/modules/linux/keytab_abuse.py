@@ -273,6 +273,8 @@ class KeytabAbuseModule(BaseModule[KeytabAbuseParams, ModuleResult]):
             "entries_count": len(entries),
             "stored_in_vault": stored_vault_count,
             "entries": entries,
+            "machine_credentials": entries,
+            "kerberos_keys": entries,
             "silver_tickets": silver_ticket_configs,
             "kql": kql_query,
             "sigma": sigma_rule,
