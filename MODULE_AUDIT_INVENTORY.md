@@ -339,9 +339,17 @@ Seluruh modul **TIER 1 (Critical)** dan **TIER 2 (High)** telah dikelompokkan ke
   - [`ares/modules/linux/nfs_escape.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/linux/nfs_escape.py) — *NFS no_root_squash Detection (`linux.nfs_escape`)* (497 baris)
   - [`ares/modules/linux/samba_secrets.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/linux/samba_secrets.py) — *Samba & Winbind Secrets Extractor (`linux.samba_secrets`)* (298 baris)
 
-### Batch 7: Linux Kerberos Identity Harvest & Target Persistence (TIER 1 - CRITICAL)
+### Batch 7: Linux Kerberos Identity Harvest & Target Persistence (TIER 1 - CRITICAL) - [STATUS: AUDITED]
 - **Deskripsi**: Modul perburuan kredensial domain pada host Linux (ccache, keytab, database SSSD) dan modul pemasang persistensi target (Scheduled Task, WMI Event Subscription).
 - **Fokus Risiko Audit**: Pembacaan cache kredensial root/daemon Linux, modifikasi konfigurasi autorun target (penulisan scheduled tasks dan event consumers), fail-safe cleanup.
+- **Status Audit**: **SELESAI (AUDITED)**
+- **Hasil Temuan**: **6 Temuan Terkonfirmasi** (1 Critical, 5 High, 0 Medium)
+  - `MOD-043` (High): Phantom Ticket Extraction & Empty Vault Secret Injection on Keyring/KCM di `linux.ccache_hunt`. Scanning `/proc/keys` dan KCM memalsukan ticket dict (`"keydata": ""`, `is_tgt=True`), menerbitkan CRITICAL finding tanpa material tiket nyata, dan menginjeksi kredensial kosong ke `AresVault` (`_vault.store(cred, "")`).
+  - `MOD-044` (High): Unhandled Outputs `machine_credentials` & `kerberos_keys` (100% Normalizer Data Loss) dan Key Mismatch di `linux.keytab_abuse`. `ArtifactNormalizer` tidak memiliki handler untuk kedua capability tersebut; modul mengembalikan keys `raw["entries"]` dan `raw["silver_tickets"]` alih-alih keys yang dideklarasikan.
+  - `MOD-045` (High): Semantic Type Inversion / Vault Poisoning (Linux Hash Disimpan Sebagai CLEARTEXT) & 100% Normalizer Data Loss di `linux.sssd_harvest`. Hash Linux `$6$...` (SHA-512 crypt) disimpan ke `AresVault` dengan tipe `CredentialType.CLEARTEXT` alih-alih `CredentialType.HASH`, menyebabkan downstream spray modul gagal otentikasi. Semua output (`credentials`, `cached_hashes`, `domain_users`) juga unhandled/mismatched di normalizer.
+  - `MOD-046` (Critical): Zero Teardown on Remote Scheduled Task & Registry Run Key Persistence di `persistence.scheduled_task`. Modul mendaftarkan Windows Scheduled Task dan autorun Registry Run keys pada target remote tanpa method `teardown()` atau fail-safe cleanup di `finally`, meninggalkan backdoor persistensi permanen di host target (melanggar Rule 4).
+  - `MOD-047` (High): Inverted `dry_run=True` Default & Unhandled RPC Disconnect in `_rrp_set_run_key` di `persistence.scheduled_task`. Parameter `dry_run` di `RegistryRunKeyPersistence.run()` secara default bernilai `True`, menghasilkan false success finding tanpa eksekusi jika tidak dioverride. Helper RPC tidak membungkus handle `OpenClassesRoot`/`OpenSubKey` dalam `try/finally`, membocorkan handle dan transport saat error.
+  - `MOD-048` (High): Broken `__FilterToConsumerBinding` Cleanup & False Persistence Established Flag di `persistence.wmi_subscription`. Method `cleanup()` mendefinisikan tuple `("__FilterToConsumerBinding", None)`, sehingga pengecekan `if name_key:` bernilai False dan binding filter-consumer tidak pernah dihapus. Field `raw["persistence_established"]` juga bernilai string nama subscription bahkan saat instalasi gagal (`success=False`).
 - **Jumlah File**: 5 file
 - **Daftar File**:
   - [`ares/modules/linux/ccache_hunt.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/linux/ccache_hunt.py) — *Linux Kerberos Ticket Hunter (`linux.ccache_hunt`)* (387 baris)
