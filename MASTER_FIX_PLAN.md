@@ -13,19 +13,19 @@
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
 | **Total Temuan Teridentifikasi** | **74** | MOD-001 s/d MOD-074 (Batch 1 s/d Batch 12) |
-| **Sudah Diperbaiki (FIXED)** | **43** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3) |
+| **Sudah Diperbaiki (FIXED)** | **49** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3, dan 6 temuan Fase 4) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **27** | Sisa Grup C, E, F untuk eksekusi remedi bertahap |
+| **Masih Open (DEFERRED)** | **21** | MOD-018 (menunggu konfirmasi engine), sisa Grup E, F |
 
 ### Ringkasan Status per Kelompok
 ```
 Total Temuan: 74
-├── FIXED (43)       [58.1%] ═══════════════════════════════════
+├── FIXED (49)       [66.2%] ═════════════════════════════════════════
 ├── DISABLED (4)     [ 5.4%] ═══
-└── DEFERRED (27)    [36.5%] ═══════════════════════
+└── DEFERRED (21)    [28.4%] ══════════════════
     ├── Grup A: Normalizer Handlers Missing (✅ SELESAI - commit 9f8b111)
     ├── Grup B: Hash Masking di Finding.evidence (✅ SELESAI - commit e94533b)
-    ├── Grup C: Teardown & Resource Cleanup (7 temuan open)
+    ├── Grup C: Teardown & Resource Cleanup (⚠️ PARTIAL 6/7 FIXED - MOD-018 pending konfirmasi arsitektur)
     ├── Grup D: Scope Bypass Listener / Destination Parameter (✅ SELESAI - commit cc2e980)
     ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (15 temuan open, 3 fixed)
     └── Grup F: Architectural Decisions Needed (5 temuan / gates)
@@ -60,6 +60,12 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 | **FASE 2 (Grup B)** | `ares/core/security.py`, modules | Redaction masking `mask_secret_hash()` for password hashes in `Finding.evidence` & `EvidenceRecord.data` (MOD-027, MOD-042, systematic grep) | `e94533b` |
 | **FASE 3 (Grup D)** | `ares/modules/*` (10 modules) | Strict Layer 1 & 2 scope enforcement on secondary target destinations (`before_request` & `is_in_scope`) (MOD-004, MOD-009, MOD-010, MOD-011, MOD-014, MOD-015, MOD-017, MOD-032, MOD-058, MOD-059) | `cc2e980` |
 | **CHAINS FIX** | `ares/core/execution_chains.py` | Remove disabled modules from execution chains for 100% catalog parity | `ae44730` |
+| **MOD-060 (Grup C)** | `ares/modules/network/service_detect.py` | Asyncio TCP writer socket cleanup via `try/finally` on banner timeout | `4147e9f` |
+| **MOD-025 (Grup C)** | `ares/modules/windows/lsass_dump.py` | Local dump unlinking via `finally` and remote PID artifact cleanup | `9ccdbde` |
+| **MOD-048 (Grup C)** | `ares/modules/persistence/wmi_subscription.py` | Fix broken cleanup tuple for `__FilterToConsumerBinding` and `dcom` init | `e76f041` |
+| **MOD-047 (Grup C)** | `ares/modules/persistence/scheduled_task.py` | Default `dry_run=False` in `RegistryRunKeyPersistence` and RRP RPC handle cleanup | `e9c7cdd` |
+| **MOD-046 (Grup C)** | `ares/modules/persistence/scheduled_task.py` | `created_artifacts` tracking, RPC task deletion via `finally` & `teardown()` method | `327458b` |
+| **MOD-012 (Grup C)** | `ares/modules/lateral/ntlm_relay.py` | RBCD machine account deletion via `conn.delete()` and initial DACL restoration | `28e983a` |
 
 *Catatan: Modul yang dinonaktifkan demi keamanan operator (`ad.ghost_forge` [MOD-005], `windows.dpapi` [MOD-029], `windows.token_impersonation` [MOD-030], `cloud.phantom_token` [MOD-049]) dilindungi fail-fast guard dan tidak diizinkan masuk active catalog.*
 
@@ -114,19 +120,19 @@ def mask_secret_hash(val: str) -> str:
 
 ---
 
-### Grup C: Teardown Missing di Persistence & Lateral Modules
+### Grup C: Teardown Missing di Persistence & Lateral Modules — ⚠️ PARTIAL (6/7 FIXED, MOD-018 Menunggu Konfirmasi Arsitektur)
 
-Modul-modul ini melakukan perubahan status permanen pada sistem atau domain target klien tanpa menyediakan mekanisme rollback / cleanup otomatis. Melanggar **Rule 4 ARES (Guaranteed Teardown & Zero Collateral)**.
+Modul-modul ini melakukan perubahan status permanen pada sistem atau domain target klien tanpa menyediakan mekanisme rollback / cleanup otomatis. Melanggar **Rule 4 ARES (Guaranteed Teardown & Zero Collateral)**. 6 dari 7 temuan telah diselesaikan dan diverifikasi dengan failure-injection tests.
 
-| ID | Modul | Modifikasi Target Klien | Resiko Bahaya (Engagement Risk) | Pola Teardown yang Diperlukan |
+| ID | Modul | Modifikasi Target Klien | Resiko Bahaya (Engagement Risk) | Status & Bukti Commit |
 |---|---|---|---|---|
-| **MOD-012** | `lateral.ntlm_relay` | Membuat akun mesin `ARESXXXXXX$` & inject RBCD DACL | Backdoor permanen tertinggal di AD domain klien. | Simpan DACL awal $\rightarrow$ bungkus S4U di `try/finally` $\rightarrow$ `conn.delete(machine_dn)` dan pulihkan atribut `msDS-AllowedToActOnBehalfOfOtherIdentity`. |
-| **MOD-018** | `network.pivot` | Background SSH forwarding processes | Background SSH tunnel yatim di memory operator/target. | Register cleanup handler di `teardown()` dan `atexit` engine lifecycle. |
-| **MOD-025** | `windows.lsass_dump` | SMB transfer temp files & `ARESPID*.txt` | File artefak forensik tertinggal di `%TEMP%` atau share C$. | SMB delete file di blok `finally` saat transfer selesai atau gagal. |
-| **MOD-046** | `persistence.scheduled_task` | Scheduled Task RPC & Registry Run Key | Persistent autorun backdoor tertinggal di OS target klien. | Implementasi method `teardown()` menggunakan `hSchRpcDeleteTask` dan `hBaseRegDeleteValue`. Simpan identifier artefak ke `raw["created_artifacts"]`. |
-| **MOD-047** | `persistence.scheduled_task` | Unhandled DCE/RPC connection disconnect | Connection handle RPC leak saat registrasi gagal. | Bungkus eksekusi RPC dalam `try ... finally: dce.disconnect()`. |
-| **MOD-048** | `persistence.wmi_subscription` | WMI Event Filter, Consumer, & Binding | Broken cleanup tuple (`None` key), WMI autorun tertinggal. | Perbaiki tuple cleanup WMI, pastikan `__FilterToConsumerBinding` dihapus deterministik. |
-| **MOD-060** | `network.service_detect` | Unclosed asyncio TCP writer socket on read timeout | Socket descriptor handle leak saat banner read timeout. | Bungkus `reader.read()` dalam `try ... finally: writer.close(); await writer.wait_closed()`. |
+| **MOD-012** | `lateral.ntlm_relay` | Membuat akun mesin `ARESXXXXXX$` & inject RBCD DACL | Backdoor permanen tertinggal di AD domain klien. | ✅ **FIXED** (commit `28e983a`). Simpan DACL awal $\rightarrow$ bungkus S4U di `try/finally` $\rightarrow$ `conn.delete(machine_dn)` dan pulihkan atribut `msDS-AllowedToActOnBehalfOfOtherIdentity`. 2/2 tests passing. |
+| **MOD-018** | `network.pivot` | Background SSH forwarding processes | Background SSH tunnel yatim di memory operator/target. | ⏳ **PENDING CONFIRMATION**. `PivotModule.teardown()` tidak pernah dipanggil karena belum ada general engine teardown lifecycle. STOP menunggu konfirmasi. |
+| **MOD-025** | `windows.lsass_dump` | SMB transfer temp files & `ARESPID*.txt` | File artefak forensik tertinggal di `%TEMP%` atau share C$. | ✅ **FIXED** (commit `9ccdbde`). Secure unlinking file dump lokal di blok `finally` (termasuk crash) dan fallback remote `del` command untuk file `ARESPID*.txt`. 3/3 tests passing. |
+| **MOD-046** | `persistence.scheduled_task` | Scheduled Task RPC & Registry Run Key | Persistent autorun backdoor tertinggal di OS target klien. | ✅ **FIXED** (commit `327458b`). `created_artifacts` disimpan sebelum task dibuat; RPC task delete di blok `finally` dan implementasi `teardown()` method. 3/3 tests passing. |
+| **MOD-047** | `persistence.scheduled_task` | Unhandled DCE/RPC connection disconnect | Connection handle RPC leak saat registrasi gagal. | ✅ **FIXED** (commit `e9c7cdd`). Default `dry_run=False` pada `RegistryRunKeyPersistence`, bungkus `hRootKey`/`hRunKey` dan `dce.disconnect()` dalam `try/finally`. 2/2 tests passing. |
+| **MOD-048** | `persistence.wmi_subscription` | WMI Event Filter, Consumer, & Binding | Broken cleanup tuple (`None` key), WMI autorun tertinggal. | ✅ **FIXED** (commit `e76f041`). Perbaiki penghapusan `__FilterToConsumerBinding` di `cleanup()`, inisialisasi `dcom = None`, dan `persistence_established` string kosong saat gagal. 2/2 tests passing. |
+| **MOD-060** | `network.service_detect` | Unclosed asyncio TCP writer socket on read timeout | Socket descriptor handle leak saat banner read timeout. | ✅ **FIXED** (commit `4147e9f`). Bungkus `reader.read()` dalam `try ... finally: writer.close(); await writer.wait_closed()`. 2/2 tests passing. |
 
 ---
 
@@ -357,9 +363,9 @@ Untuk meminimalkan waktu regresi dan memaksimalkan stabilitas, eksekusi remedi s
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │  FASE 4: Grup C — Guaranteed Teardown (Rule 4 Compliance)              │
-│  - Implementasi blok finally dan method teardown() di 7 modul lateral/  │
-│    persistence (termasuk CRITICAL MOD-012 RBCD dan MOD-046 tasks).    │
-│  - Validasi via failure injection tests.                               │
+│  [STATUS: ⚠️ PARTIAL (6/7 FIXED) - commit 28e983a]                     │
+│  - 6 modul persistence/lateral dilengkapi teardown & failure tests.    │
+│  - MOD-018 STOP menunggu konfirmasi mekanisme lifecycle engine.        │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
