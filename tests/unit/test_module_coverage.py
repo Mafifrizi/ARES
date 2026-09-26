@@ -438,10 +438,11 @@ class TestWindowsScheduledTasksEnum:
 
 class TestWindowsTokenImpersonation:
     def test_dry_run(self):
+        from ares.core.errors import ModuleError
         from ares.modules.windows.token_impersonation import TokenImpersonationModule
         mod, _ = _make_module(TokenImpersonationModule)
-        result = _run(mod.execute(_dry_run_ctx()))
-        assert result.status == "dry_run"
+        with pytest.raises(ModuleError, match="module disabled"):
+            _run(mod.execute(_dry_run_ctx()))
 
     def test_module_id(self):
         from ares.modules.windows.token_impersonation import TokenImpersonationModule

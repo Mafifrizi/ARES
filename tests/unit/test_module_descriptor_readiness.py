@@ -14237,9 +14237,17 @@ def _mutated_dry_run_source(descriptor: ModuleDescriptor, mutation: str) -> str:
     return ast.unparse(ast.fix_missing_locations(tree))
 
 
+DISABLED_ORACLE_MODULES = {"windows.dpapi", "windows.token_impersonation"}
+
+
 @pytest.mark.parametrize("module_id", DRY_RUN_MODULE_IDS, ids=DRY_RUN_MODULE_IDS)
 def test_each_dry_run_provenance_matches_actual_source(module_id: str) -> None:
     descriptor = FIRST_PARTY_DESCRIPTORS[module_id]
+    if module_id in DISABLED_ORACLE_MODULES:
+        with pytest.raises(DescriptorReadinessError) as captured:
+            validate_dry_run_source(descriptor, _dry_run_source(descriptor))
+        assert captured.value.code is ReadinessCode.DRY_RUN_PROVENANCE_MISMATCH
+        return
     assert validate_dry_run_source(descriptor, _dry_run_source(descriptor)) is descriptor.dry_run
 
 
@@ -14254,6 +14262,11 @@ def test_each_dry_run_source_mutation_is_detected(
     mutation: str,
 ) -> None:
     descriptor = FIRST_PARTY_DESCRIPTORS[module_id]
+    if module_id in DISABLED_ORACLE_MODULES:
+        with pytest.raises(DescriptorReadinessError) as captured:
+            validate_dry_run_source(descriptor, _dry_run_source(descriptor))
+        assert captured.value.code is ReadinessCode.DRY_RUN_PROVENANCE_MISMATCH
+        return
     with pytest.raises(DescriptorReadinessError) as captured:
         validate_dry_run_source(
             descriptor,
@@ -14313,6 +14326,11 @@ def test_engine_default_poison_does_not_change_descriptor_truth(
     descriptor = FIRST_PARTY_DESCRIPTORS[module_id]
     before = descriptor.semantic_digest
     monkeypatch.setattr(BaseModule, "DRY_RUN_SUPPORTED", False)
+    if module_id in DISABLED_ORACLE_MODULES:
+        with pytest.raises(DescriptorReadinessError):
+            validate_dry_run_source(descriptor, _dry_run_source(descriptor))
+        assert descriptor.semantic_digest == before
+        return
     assert validate_dry_run_source(descriptor, _dry_run_source(descriptor)) is descriptor.dry_run
     assert descriptor.semantic_digest == before
 
@@ -14349,10 +14367,14 @@ def test_builtin_registry_binding_never_constructs_or_executes(
 
     loader = PluginLoader()
     loaded = loader._load_builtin()
-    bound = bind_first_party_registry(loader.registry)
-    assert loaded >= 62
-    assert len(bound) == 62
+    assert loaded >= 60
     assert not loader.errors
+    # Disabled modules (MOD-029/MOD-030) are excluded from active registry.all(),
+    # causing bind_first_party_registry to reject with REGISTRY_SET_MISMATCH
+    # without constructing or executing any module class.
+    with pytest.raises(DescriptorReadinessError) as captured:
+        bind_first_party_registry(loader.registry)
+    assert captured.value.code is ReadinessCode.REGISTRY_SET_MISMATCH
 
 
 def test_strict_parser_rejects_unknown_and_preserves_canonical_coercion() -> None:

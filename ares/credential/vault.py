@@ -522,7 +522,7 @@ class CredentialVault:
             "credential_stored",
             actor="vault",
             cred_type=cred.cred_type.value,
-            privilege=cred.privilege.value,
+            privilege=cred.privilege.value if hasattr(cred.privilege, "value") else str(cred.privilege),
             fqdn=cred.fqdn,
             score=cred.score,
             campaign=cred.campaign_id,
@@ -612,13 +612,34 @@ class CredentialVault:
         if isinstance(cred, Credential):
             return self.store(cred, sec, io_verified=io_verified)
 
+        raw_priv = kwargs.get("privilege", PrivilegeLevel.LOCAL_USER)
+        if isinstance(raw_priv, str):
+            priv_map = {
+                "unknown": PrivilegeLevel.UNKNOWN,
+                "local_user": PrivilegeLevel.LOCAL_USER,
+                "user": PrivilegeLevel.LOCAL_USER,
+                "local_admin": PrivilegeLevel.LOCAL_ADMIN,
+                "admin": PrivilegeLevel.LOCAL_ADMIN,
+                "domain_user": PrivilegeLevel.DOMAIN_USER,
+                "service_account": PrivilegeLevel.SERVICE_ACCOUNT,
+                "service": PrivilegeLevel.SERVICE_ACCOUNT,
+                "domain_admin": PrivilegeLevel.DOMAIN_ADMIN,
+                "enterprise_admin": PrivilegeLevel.ENTERPRISE_ADMIN,
+                "system": PrivilegeLevel.SYSTEM,
+            }
+            priv = priv_map.get(raw_priv.lower(), PrivilegeLevel.LOCAL_USER)
+        elif isinstance(raw_priv, PrivilegeLevel):
+            priv = raw_priv
+        else:
+            priv = PrivilegeLevel.LOCAL_USER
+
         c = Credential(
             campaign_id=str(kwargs.get("campaign_id", getattr(self, "campaign_id", ""))),
             username=u_name,
             domain=str(kwargs.get("domain", "")),
             target_host=str(kwargs.get("host") or kwargs.get("target_host", "")),
             cred_type=c_type,
-            privilege=kwargs.get("privilege", PrivilegeLevel.LOCAL_USER),
+            privilege=priv,
             source_module=str(kwargs.get("source_module", "")),
             source_host=str(kwargs.get("source_host", "")),
             tags=list(kwargs.get("tags") or []),

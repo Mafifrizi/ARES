@@ -433,6 +433,12 @@ def test_execute_adapter_deduplicates_explicit_ctx_params(
 
     monkeypatch.setattr(mod, "run", fake_run)
 
+    if getattr(cls, "ENABLED", True) is False:
+        from ares.core.errors import ModuleError
+        with pytest.raises(ModuleError, match="module disabled"):
+            _run(mod.execute(_ctx(params)))
+        return
+
     result = _run(mod.execute(_ctx(params)))
 
     assert result.module_id == mod.MODULE_ID
