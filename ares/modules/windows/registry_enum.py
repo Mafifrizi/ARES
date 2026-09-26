@@ -238,6 +238,27 @@ class RegistryEnumModule(BaseModule):
                 f"{self.MODULE_ID} requires 'target' - IP or hostname.",
                 module_id=self.MODULE_ID, field="target",
             )
+        username = (
+            ctx.params.get("username", "")
+            if isinstance(ctx.params, dict)
+            else getattr(ctx.params, "username", "")
+        )
+        if not username and hasattr(ctx, "best_credential"):
+            cred = ctx.best_credential()
+            if cred and cred.username:
+                username = cred.username
+                if isinstance(ctx.params, dict):
+                    ctx.params["username"] = username
+                elif hasattr(ctx.params, "username"):
+                    try:
+                        ctx.params.username = username
+                    except Exception:
+                        pass
+        if not username:
+            raise ModuleValidationError(
+                f"{self.MODULE_ID} requires 'username' - credential username for authentication.",
+                module_id=self.MODULE_ID, field="username",
+            )
         await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
@@ -360,6 +381,11 @@ class RegistryEnumModule(BaseModule):
         dry_run  = kwargs.get("dry_run", False)
 
         if not target or not username:
+            logger.warning(
+                "registry_enum_missing_params",
+                target=target,
+                has_username=bool(username),
+            )
             return [], {"error": "target and username required"}
         if dry_run:
             return [], {"dry_run": True}
@@ -374,6 +400,7 @@ class RegistryEnumModule(BaseModule):
                 hBaseRegCloseKey, DCERPCException,
             )
         except ImportError:
+            logger.warning("registry_enum_impacket_missing", target=target)
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
         logger.info("registry_enum_start", target=target, username=username)
@@ -516,6 +543,7 @@ class RegistryEnumModule(BaseModule):
                     errs.append(f"PuTTY sessions: {e!s:.80}")
 
             except Exception as e:
+                logger.warning("registry_enum_connection_error", target=target, error=str(e))
                 errs.append(str(e)[:200])
             finally:
                 if dce:
