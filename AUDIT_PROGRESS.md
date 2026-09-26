@@ -61,10 +61,10 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-051 | cloud.identity_federation_abuse unhandled outputs federation_trusts, golden_saml_paths, oauth_tokens, pivot_paths (100% data loss) | DEFERRED | Audit verified (`identity_federation.py:77, 356-358`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Data pemetaan trust federasi dan Golden SAML hilang permanen dari `ArtifactStore`. |
 | MOD-052 | cloud.aws_privesc type confusion mismatch: aws_findings with list[Finding] overwrites S3 normalizer | FIXED | PASSED (Unit tests & pipeline separation) | `ares/modules/cloud/aws_privesc.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Key output diubah dari `raw["aws_findings"]` menjadi `raw["iam_privesc_paths"]` dan deklarasi diperbarui ke `OUTPUTS = ["aws_privesc_paths", "iam_privesc_paths"]`. Output tidak lagi menimpa dictionary S3 `cloud.aws` dan mencegah kontaminasi type confusion. |
 | MOD-053 | cloud.aws_privesc & cloud.identity_federation_abuse unvalidated AWS account/tenant scope & generic host attribution | DEFERRED | Audit verified (`aws_privesc.py:331`, `identity_federation.py:1046, 1074`) | Menunggu keputusan arsitektur (Architectural Gap) | ScopeGuard saat ini hanya memvalidasi IP/CIDR/DNS, tidak mengenali cloud identifiers (tenant_id, aws_account_id, subscription_id). Butuh perancangan CloudScopeGuard / ScopeGuard extension. |
-| MOD-054 | ad.enum_spn internal key mismatch (spn_list vs spns) causing 100% SPN list evaporation | TERBUKTI (HIGH) | Audit verified (`enum_spn.py:343, 131, 237`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Method `_fetch_spns_sync` mengisi key `spn_list`, namun `execute()`, `run()`, dan `ArtifactNormalizer._normalize_spns` membaca key `spns`. SPN Kerberoasting candidate strings menguap menjadi list kosong `[]` di `UserArtifact.spns`, `EvidenceRecord`, dan `ArtifactIntelEngine`. |
-| MOD-055 | ad.laps_enum output type confusion on valid_credentials (int vs list) & secret evaporation in normalizer | TERBUKTI (HIGH) | Audit verified (`laps_enum.py:274-275`, `artifacts.py:796, 1002`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Modul menulis integer count (`found`) ke `raw["valid_credentials"]` yang ditolak normalizer MOD-033 (`list[dict]`). Password LAPS dihilangkan dari `raw["entries"]` demi OPSEC, menyebabkan `_normalize_laps_passwords` menghasilkan `CredentialArtifact` dengan `secret=""`. |
-| MOD-056 | ad.enum_users unhandled output telemetry password_policy & dual-write omission | TERBUKTI (MEDIUM) | Audit verified (`enum_users.py:227`, `artifacts.py:529`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Data kebijakan password domain (`minPwdLength`, `lockoutThreshold`) tidak memiliki handler di `ArtifactNormalizer`. Modul juga belum melakukan dual-write key standar `users` ke `raw`. |
-| MOD-057 | ad.enum_acl & ad.laps_enum inconsistent LDAP bind authentication formatting (bypassing build_ad_bind_plan) | TERBUKTI (MEDIUM) | Audit verified (`enum_acl.py:234`, `laps_enum.py:297`) | Menunggu remedi (Batch Fix Serentak) | Modul menggunakan konkatenasi string mentah `user=f"{domain.upper()}\\{username}"` tanpa melewati fungsi normalisasi `build_ad_bind_plan()`, berisiko memicu bind failure saat format UPN atau domain alternatif digunakan. |
+| MOD-054 | ad.enum_spn internal key mismatch (spn_list vs spns) causing 100% SPN list evaporation | FIXED | PASSED (Unit tests & normalizer pipeline) | `ares/modules/ad/enum_spn.py`, `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Internal key disinkronkan ke `spns` & alias `spn_list`. Normalizer dual-read fallback. |
+| MOD-055 | ad.laps_enum output type confusion on valid_credentials & secret evaporation in normalizer | FIXED | PASSED (Unit tests & pipeline separation) | `ares/core/context.py`, `ares/modules/ad/laps_enum.py`, `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Password LAPS ditulis langsung ke vault (Gate 6 validated). `raw["entries"]` dan `raw["laps_passwords"]` OPSEC-safe (`has_password: True`). |
+| MOD-056 | ad.enum_users unhandled output telemetry password_policy & dual-write omission | PARTIALLY FIXED | PASSED (Unit tests) | `ares/modules/ad/enum_users.py`, `NORMALIZER_CONTRACT_AUDIT.md`, `tests/unit/test_artifact_normalizer_pipeline.py` | Dual-write `users` key ke `raw`. Handler `password_policy` ditunda ke batch fix serentak. |
+| MOD-057 | ad.enum_acl & ad.laps_enum inconsistent LDAP bind authentication formatting (bypassing build_ad_bind_plan) | DEFERRED | Audit verified (`enum_acl.py:234`, `laps_enum.py:297`) | Menunggu remedi (Batch Fix Serentak) | Migrasi raw string binding ke `build_ad_bind_plan()` ditunda ke batch fix serentak. |
 
 ---
 
@@ -183,23 +183,24 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 
 ### [MOD-054] Internal Key Mismatch (`spn_list` vs `spns`) on `ad.enum_spn`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
-- **Catatan**: Seluruh daftar string SPN Kerberoasting menguap menjadi list kosong karena perbedaan nama key internal. Akan difix serentak bersama normalizer alignment.
+- **Status**: **FIXED** (commit `f0825df`)
+- **Catatan**: Internal key disinkronkan: `_fetch_spns_sync` menulis `spns` dan alias `spn_list`. `ArtifactNormalizer._normalize_spns` dual-read fallback. `UserArtifact.spns` terisi penuh.
 
-### [MOD-055] Output Type Confusion on `raw["valid_credentials"]` & Secret Evaporation on `ad.laps_enum`
+### [MOD-055] LAPS Password Pipeline vs OPSEC on `ad.laps_enum`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
-- **Catatan**: Type mismatch (int vs list[dict]) pada `valid_credentials` dan empty secret pada normalizer LAPS. Password tersimpan di vault riil via `_vault.store()`, namun pipeline telemetry terputus.
+- **Status**: **FIXED** (commit `4bbf61d`)
+- **Catatan**: Password LAPS ditulis langsung ke vault (`_vault.store()` / `ctx.record_credential()` dengan validasi Gate 6). `raw["entries"]` dan `raw["laps_passwords"]` aman secara OPSEC tanpa password (`has_password: True`). `CredentialArtifact` dibuat dengan note "password stored in vault".
 
-### [MOD-056] Unhandled Output Telemetry `password_policy` on `ad.enum_users`
+### [MOD-056] Internal Key Mismatch & Unhandled Telemetry on `ad.enum_users`
 - **Severity**: **MEDIUM**
-- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
-- **Catatan**: Parameter lockout dan panjang password tidak diserap ke `ArtifactStore`. Akan ditambahkan handler khusus policy/domain artifact.
+- **Status**: **PARTIALLY FIXED (users dual-write: FIXED; password_policy: DEFERRED)** (commit `bc8c830`)
+- **Catatan**: Dual-write `raw["users"] = users` dan `raw["user_list"] = users` telah diimplementasikan. Normalizer `_normalize_users` membaca key kanonikal. Handler `password_policy` ditunda ke batch fix serentak.
 
 ### [MOD-057] Inconsistent LDAP Bind Authentication Formatting on `ad.enum_acl` & `ad.laps_enum`
 - **Severity**: **MEDIUM**
 - **Status**: **DEFERRED (Masuk batch fix serentak)**
 - **Catatan**: Migrasi raw string binding ke `build_ad_bind_plan()` untuk menjamin kompatibilitas format UPN (`user@domain.local`) pada seluruh modul Active Directory.
+
 
 
 
