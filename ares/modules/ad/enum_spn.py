@@ -62,12 +62,12 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
 
     OPSEC: LOW
     MITRE: "T1558.003","T1087.002"
-    OUTPUTS:  "spn_list"
+    OUTPUTS:  "spns", "spn_list"
     """
     MODULE_ID="ad.enum_spn"; MODULE_NAME="AD SPN Enumeration"; MODULE_CATEGORY="ad"
     MODULE_DESCRIPTION="Find SPN accounts (Kerberoasting candidates)"
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
-    OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["spn_list"]
+    OPSEC_LEVEL=OpsecLevel.LOW; REQUIRES=[]; OUTPUTS=["spns", "spn_list"]
     MITRE_TECHNIQUES=["T1558.003","T1087.002"]
     PARAMS_MODEL       = DomainAuthParams
 
@@ -121,14 +121,14 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
         evidence_chain: list[EvidenceRecord] = []
-        for spn in raw.get("spn_list", []):
+        for spn in (raw.get("spns") or raw.get("spn_list", [])):
             ev = EvidenceRecord(
-                artifact_id=f"spn-{spn.get('samAccountName', 'unknown').lower()}",
+                artifact_id=f"spn-{(spn.get('samAccountName') or spn.get('name') or 'unknown').lower()}",
                 source_target=dc,
                 collected_by=self.MODULE_ID,
                 data={
-                    "samAccountName": spn.get("samAccountName"),
-                    "spns": spn.get("spns"),
+                    "samAccountName": spn.get("samAccountName") or spn.get("name"),
+                    "spns": spn.get("spns") or spn.get("spn_list"),
                     "memberOf": spn.get("memberOf"),
                 },
                 tags=["ad", "spn", "kerberoasting", "enumeration"],
@@ -219,6 +219,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
             raise NetworkError(f"LDAP SPN failed: {exc}") from exc
         category, message = classify_enum_spn_outcome(len(spns))
         raw = {
+            "spns": spns,
             "spn_list": spns,
             "outcome_category": category,
             "outcome_message": message,
@@ -231,10 +232,10 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
                 store = ArtifactStore()
             for spn_entry in spns:
                 artifact = UserArtifact(
-                    username=spn_entry.get("samAccountName", ""),
+                    username=spn_entry.get("samAccountName") or spn_entry.get("name", ""),
                     domain=domain,
                     enabled=True,
-                    spns=spn_entry.get("spns", []),
+                    spns=spn_entry.get("spns") or spn_entry.get("spn_list", []),
                     is_service=True,
                 )
                 store.add(artifact)
@@ -338,13 +339,16 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
                         is_admin = any(
                             "Domain Admins" in g or "Enterprise Admins" in g for g in groups
                         )
+                        spn_values = [str(s) for s in (e.servicePrincipalName.values or [])]
                         spns.append({
-                            "name":          str(e.sAMAccountName),
-                            "spn_list":          [str(s) for s in (e.servicePrincipalName.values or [])],
-                            "is_admin":      is_admin,
-                            "uses_rc4":      (enc_raw == 0) or bool(enc_raw & 0x4),
+                            "name":           str(e.sAMAccountName),
+                            "samAccountName": str(e.sAMAccountName),
+                            "spns":           spn_values,
+                            "spn_list":       spn_values,
+                            "is_admin":       is_admin,
+                            "uses_rc4":       (enc_raw == 0) or bool(enc_raw & 0x4),
                             "days_since_pwd": _days_since_ts(e.pwdLastSet.value),
-                            "enabled":       not bool(uac & 0x0002),
+                            "enabled":        not bool(uac & 0x0002),
                         })
                     except Exception:
                         pass   # skip malformed entry
@@ -362,7 +366,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
                 pass
 
     def _analyze(self, raw):
-        spns = raw.get("spn_list",[])
+        spns = raw.get("spns") or raw.get("spn_list", [])
         if not spns: return
         rc4      = [s for s in spns if s.get("uses_rc4")]
         privd    = [s for s in spns if s.get("is_admin")]

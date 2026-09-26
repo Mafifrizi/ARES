@@ -141,6 +141,60 @@ def test_enum_spn_pipeline_recovers_spns(normalizer: ArtifactNormalizer, store: 
     assert users[0].is_kerberoastable is True
 
 
+def test_enum_spn_internal_key_sync_mod_054(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-054: ad.enum_spn writes spns & spn_list with non-empty SPNs inside entries."""
+    from ares.modules.ad.enum_spn import ADEnumSPNModule
+
+    assert "spns" in ADEnumSPNModule.OUTPUTS
+    assert "spn_list" in ADEnumSPNModule.OUTPUTS
+
+    # Format produced by _fetch_spns_sync after fix:
+    spn_entries = [
+        {
+            "name": "svc_sql",
+            "samAccountName": "svc_sql",
+            "spns": ["MSSQLSvc/sql01.corp.local:1433"],
+            "spn_list": ["MSSQLSvc/sql01.corp.local:1433"],
+            "is_admin": True,
+            "uses_rc4": True,
+            "days_since_pwd": 45,
+            "enabled": True,
+        }
+    ]
+    raw = {
+        "spns": spn_entries,
+        "spn_list": spn_entries,
+        "outcome_category": "confirmed_findings",
+        "outcome_message": "Found 1 service principal candidate(s).",
+    }
+
+    added = normalizer.normalize("ad.enum_spn", ["spns"], raw, store)
+    assert added == 1
+    users = store.users()
+    assert len(users) == 1
+    assert users[0].username == "svc_sql"
+    assert users[0].spns == ["MSSQLSvc/sql01.corp.local:1433"]
+    assert users[0].is_kerberoastable is True
+
+    # Test backward-compat fallback when inner dict only has spn_list:
+    store2 = ArtifactStore()
+    raw_compat = {
+        "spn_list": [
+            {
+                "name": "svc_iis",
+                "spn_list": ["HTTP/iis.corp.local"],
+                "enabled": True,
+            }
+        ]
+    }
+    added2 = normalizer.normalize("ad.enum_spn", ["spn_list"], raw_compat, store2)
+    assert added2 == 1
+    users2 = store2.users()
+    assert len(users2) == 1
+    assert users2[0].username == "svc_iis"
+    assert users2[0].spns == ["HTTP/iis.corp.local"]
+
+
 def test_host_vuln_pipeline_recovers_target(normalizer: ArtifactNormalizer, store: ArtifactStore):
     """linux.privesc writes raw['target']; normalizer must ingest via fallback."""
     raw = {

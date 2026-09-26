@@ -671,7 +671,9 @@ class ArtifactNormalizer:
         for s in spns:
             if not isinstance(s, dict):
                 continue
-            spn_entries = s.get("spns", s.get("spn", []))
+            spn_entries = s.get("spns") or s.get("spn_list") or s.get("spn", [])
+            if isinstance(spn_entries, str):
+                spn_entries = [spn_entries]
             artifact = UserArtifact(
                 username        = s.get("samAccountName", s.get("name", s.get("username", ""))),
                 domain          = s.get("domain", ""),
