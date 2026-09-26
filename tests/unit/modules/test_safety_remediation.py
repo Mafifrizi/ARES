@@ -137,8 +137,26 @@ def test_golden_ticket_does_not_mutate_process_cwd():
     mod.before_request = AsyncMock()
     mod.noise.jitter.sleep = AsyncMock()
 
+    mock_ticketer_cls = MagicMock()
+    mock_instance = MagicMock()
+    mock_ticketer_cls.return_value = mock_instance
+
+    def fake_run():
+        opts = mock_ticketer_cls.call_args[1]["options"]
+        with open(opts.filename, "wb") as f:
+            f.write(b"ccache_data")
+
+    mock_instance.run = fake_run
+
     cwd_before = os.getcwd()
-    with patch("os.chdir") as mock_chdir:
+    with patch("os.chdir") as mock_chdir, patch.dict(
+        "sys.modules",
+        {
+            "impacket": MagicMock(),
+            "impacket.examples": MagicMock(),
+            "impacket.examples.ticketer": MagicMock(TICKETER=mock_ticketer_cls),
+        },
+    ):
         # Run golden ticket forge
         asyncio.run(mod.run(
             domain="corp.local",
