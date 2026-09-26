@@ -337,3 +337,97 @@ def test_acl_findings_permissions_pipeline(normalizer: ArtifactNormalizer, store
     assert perms[0].is_dangerous is True
     assert perms[0].right == "GenericAll"
 
+
+def test_lsa_secrets_pipeline_recovers_credentials(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """windows.lsa_secrets writes raw['lsa_secrets']; normalizer must ingest into CredentialArtifact(cred_type='lsa_secret')."""
+    raw = {
+        "target": "10.0.0.15",
+        "domain": "CORP.LOCAL",
+        "sam_hashes": ["Administrator:500:aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0:::"],
+        "lsa_secrets": [
+            "$MACHINE.ACC: plain_password_hex_31323334",
+            "_SC_MSSQLSERVER: ComplexServicePassword!2024",
+            "DPAPI_SYSTEM: 01000000d08c9ddf0115d1118c7a00c04fc297eb01000000",
+        ],
+        "cached_credentials": [],
+        "errors": [],
+    }
+    added = normalizer.normalize("windows.lsa_secrets", ["lsa_secrets"], raw, store)
+    assert added == 3
+    creds = store.credentials()
+    assert len(creds) == 3
+
+    assert creds[0].username == "$MACHINE.ACC"
+    assert creds[0].cred_type == "lsa_secret"
+    assert creds[0].secret == "plain_password_hex_31323334"
+    assert creds[0].source_host == "10.0.0.15"
+    assert creds[0].cracked is False
+
+    assert creds[1].username == "_SC_MSSQLSERVER"
+    assert creds[1].secret == "ComplexServicePassword!2024"
+    assert creds[1].privilege == "service_account"
+
+    assert creds[2].username == "DPAPI_SYSTEM"
+    assert creds[2].cred_type == "lsa_secret"
+
+
+def test_cached_domain_credentials_pipeline_recovers_credentials(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """windows.lsa_secrets writes raw['cached_credentials']; normalizer must ingest into CredentialArtifact(cred_type='cached_domain', cracked=False)."""
+    raw = {
+        "target": "10.0.0.15",
+        "domain": "CORP.LOCAL",
+        "sam_hashes": [],
+        "lsa_secrets": [],
+        "cached_credentials": [
+            "CORP.LOCAL\\jdoe:$DCC2$10240#jdoe#5f4dcc3b5aa765d61d8327deb882cf99",
+            "$DCC2$10240#admin_ops#8b1a9953c4611296a827abf8c47804d7",
+        ],
+        "errors": [],
+    }
+    added = normalizer.normalize("windows.lsa_secrets", ["cached_credentials"], raw, store)
+    assert added == 2
+    creds = store.credentials()
+    assert len(creds) == 2
+
+    assert creds[0].username == "jdoe"
+    assert creds[0].domain == "CORP.LOCAL"
+    assert creds[0].cred_type == "cached_domain"
+    assert creds[0].cracked is False
+    assert creds[0].secret == "$DCC2$10240#jdoe#5f4dcc3b5aa765d61d8327deb882cf99"
+    assert creds[0].source_host == "10.0.0.15"
+
+    assert creds[1].username == "admin_ops"
+    assert creds[1].cred_type == "cached_domain"
+    assert creds[1].cracked is False
+
+
+def test_lsa_secrets_and_cached_creds_dict_structure(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """Test structured dictionary input for lsa_secrets and cached_creds fallback."""
+    raw = {
+        "target": "10.0.0.20",
+        "lsa_secrets": [
+            {"username": "svc_backup", "domain": "CORP", "secret": "BackupPass123!", "privilege": "service_account"}
+        ],
+        "cached_creds": [
+            {"username": "d_admin", "domain": "CORP", "hash": "dcc2_hash_value", "privilege": "domain_admin"}
+        ],
+    }
+    added_lsa = normalizer.normalize("windows.lsa_secrets", ["lsa_secrets"], raw, store)
+    assert added_lsa == 1
+
+    added_cached = normalizer.normalize("windows.lsa_secrets", ["cached_credentials"], raw, store)
+    assert added_cached == 1
+
+    creds = store.credentials()
+    assert len(creds) == 2
+
+    lsa_cred = next(c for c in creds if c.cred_type == "lsa_secret")
+    assert lsa_cred.username == "svc_backup"
+    assert lsa_cred.secret == "BackupPass123!"
+
+    cached_cred = next(c for c in creds if c.cred_type == "cached_domain")
+    assert cached_cred.username == "d_admin"
+    assert cached_cred.secret == "dcc2_hash_value"
+    assert cached_cred.cracked is False
+
+

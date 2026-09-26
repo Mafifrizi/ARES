@@ -492,6 +492,11 @@ class ArtifactNormalizer:
             "golden_ticket":          self._normalize_kerberos_tickets,
             "open_ports":             self._normalize_open_ports,
             "service_map":            self._normalize_open_ports,
+            # LSA Secrets & Cached Domain Credentials (MOD-028)
+            "lsa_secrets":            self._normalize_lsa_secrets,
+            "windows.lsa_secrets":    self._normalize_lsa_secrets,
+            "cached_credentials":     self._normalize_cached_domain_credentials,
+            "cached_domain_credentials": self._normalize_cached_domain_credentials,
         }
         handler = handlers.get(capability)
         if handler:
@@ -864,3 +869,104 @@ class ArtifactNormalizer:
         )
         store.add(artifact)
         return 1
+
+    def _normalize_lsa_secrets(self, raw: dict, store: ArtifactStore) -> int:
+        """
+        Normalize LSA secrets (service accounts, machine account passwords, DPAPI keys)
+        into CredentialArtifact(cred_type="lsa_secret").
+        """
+        secrets = raw.get("lsa_secrets") or []
+        if isinstance(secrets, (str, dict)):
+            secrets = [secrets]
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        domain_default = raw.get("domain", "")
+        for s in secrets:
+            if isinstance(s, dict):
+                username = s.get("username") or s.get("name") or s.get("secret_name", "")
+                domain = s.get("domain") or domain_default
+                secret_val = s.get("secret") or s.get("value") or s.get("password", "")
+                source_host = s.get("host") or s.get("target") or target
+                privilege = s.get("privilege") or ("service_account" if ("$MACHINE.ACC" in username or "_SC_" in username) else "unknown")
+            elif isinstance(s, str):
+                s_str = s.strip()
+                if ":" in s_str:
+                    name_part, val_part = s_str.split(":", 1)
+                    username = name_part.strip()
+                    secret_val = val_part.strip()
+                else:
+                    username = ""
+                    secret_val = s_str
+                domain = domain_default
+                source_host = target
+                privilege = "service_account" if ("$MACHINE.ACC" in username or "_SC_" in username or "DPAPI" in username) else "unknown"
+            else:
+                continue
+
+            artifact = CredentialArtifact(
+                username=username,
+                domain=domain,
+                cred_type="lsa_secret",
+                secret=secret_val,
+                cracked=False,
+                source_host=source_host,
+                privilege=privilege,
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_cached_domain_credentials(self, raw: dict, store: ArtifactStore) -> int:
+        """
+        Normalize DCC2 / MSCACHE2 cached domain hashes into CredentialArtifact(cred_type="cached_domain", cracked=False).
+        """
+        cached = raw.get("cached_credentials") or raw.get("cached_creds", [])
+        if isinstance(cached, (str, dict)):
+            cached = [cached]
+        count = 0
+        target = raw.get("target") or raw.get("host", "")
+        domain_default = raw.get("domain", "")
+        for c in cached:
+            if isinstance(c, dict):
+                username = c.get("username", "")
+                domain = c.get("domain") or domain_default
+                hash_val = c.get("hash") or c.get("secret", "")
+                source_host = c.get("host") or c.get("target") or target
+                privilege = c.get("privilege", "user")
+            elif isinstance(c, str):
+                c_str = c.strip()
+                if ":" in c_str:
+                    user_part, hash_part = c_str.split(":", 1)
+                    if "\\" in user_part:
+                        domain, username = user_part.split("\\", 1)
+                    else:
+                        domain = domain_default
+                        username = user_part
+                    hash_val = hash_part.strip()
+                elif "#" in c_str and ("$DCC2$" in c_str or "$MSCACHE2$" in c_str):
+                    parts = c_str.split("#")
+                    username = parts[1] if len(parts) > 1 else ""
+                    domain = domain_default
+                    hash_val = c_str
+                else:
+                    username = ""
+                    domain = domain_default
+                    hash_val = c_str
+                source_host = target
+                privilege = "user"
+            else:
+                continue
+
+            artifact = CredentialArtifact(
+                username=username,
+                domain=domain,
+                cred_type="cached_domain",
+                secret=hash_val,
+                cracked=False,
+                source_host=source_host,
+                privilege=privilege,
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
