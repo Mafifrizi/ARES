@@ -280,6 +280,7 @@ class WMISubscriptionModule(BaseModule):
         loop    = asyncio.get_running_loop()
 
         def _install() -> tuple[bool, str]:
+            dcom = None
             try:
                 dcom = DCOMConnection(target, username=username, password=password,
                                       domain=domain, oxidResolver=True)
@@ -350,7 +351,7 @@ class WMISubscriptionModule(BaseModule):
 
         raw = {"target": target, "subscription_name": sub_name,
                "success": success, "error": error, "command": command}
-        raw["persistence_established"] = raw.get("subscription_name", "")  # OUTPUTS key
+        raw["persistence_established"] = sub_name if success else ""  # OUTPUTS key
         return self._findings[:], raw
 
     async def cleanup(self, target: str, username: str, password: str,
@@ -381,15 +382,18 @@ class WMISubscriptionModule(BaseModule):
 
                 removed = []
                 # Delete in reverse order: binding → consumer → filter
-                for cls, name_key in [
-                    ("__FilterToConsumerBinding",  None),
-                    ("CommandLineEventConsumer",   f"{subscription_name}Consumer"),
-                    ("__EventFilter",              f"{subscription_name}Filter"),
+                binding_path = (
+                    f'__FilterToConsumerBinding.Filter="__EventFilter.Name=\\"{subscription_name}Filter\\"",'
+                    f'Consumer="CommandLineEventConsumer.Name=\\"{subscription_name}Consumer\\""'
+                )
+                for cls, obj_path, label in [
+                    ("__FilterToConsumerBinding",  binding_path, f"{subscription_name}Binding"),
+                    ("CommandLineEventConsumer",   f'CommandLineEventConsumer.Name="{subscription_name}Consumer"', f"{subscription_name}Consumer"),
+                    ("__EventFilter",              f'__EventFilter.Name="{subscription_name}Filter"', f"{subscription_name}Filter"),
                 ]:
                     try:
-                        if name_key:
-                            iWbemServices.DeleteInstance(f'{cls}.Name="{name_key}"')
-                            removed.append(f"{cls}/{name_key}")
+                        iWbemServices.DeleteInstance(obj_path)
+                        removed.append(f"{cls}/{label}")
                     except Exception:
                         pass   # already gone or never created
                 return True, f"Removed: {removed}"
