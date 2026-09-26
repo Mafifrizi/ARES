@@ -239,14 +239,24 @@ class CredentialArtifact(NormalizedArtifact):
     cracked:     bool = False
     source_host: str = ""
     host:        str = ""   # alias for source_host
+    target:      str = ""   # alias for source_host
+    protocol:    str = ""   # ssh | smb | winrm | rdp etc
     privilege:   str = ""   # domain_admin | service_account | local_admin | user | unknown
 
     def __post_init__(self) -> None:
         self.artifact_type = ArtifactType.CREDENTIAL
+        if self.target and not self.source_host:
+            self.source_host = self.target
+        elif self.source_host and not self.target:
+            self.target = self.source_host
         if self.host and not self.source_host:
             self.source_host = self.host
         elif self.source_host and not self.host:
             self.host = self.source_host
+        if self.target and not self.host:
+            self.host = self.target
+        elif self.host and not self.target:
+            self.target = self.host
         if self.secret and not self.secret_hash:
             self.secret_hash = hashlib.sha256(self.secret.encode("utf-8", errors="ignore")).hexdigest()
 
@@ -254,11 +264,14 @@ class CredentialArtifact(NormalizedArtifact):
         return f"{self.domain}\\{self.username}:{self.cred_type}:{self.source_host}:{self.secret_hash[:8]}"
 
     def _to_dict_fields(self) -> dict[str, Any]:
-        return {
+        d = {
             "username": self.username, "domain": self.domain,
             "cred_type": self.cred_type, "cracked": self.cracked,
             "source_host": self.source_host, "privilege": self.privilege,
         }
+        if self.protocol:
+            d["protocol"] = self.protocol
+        return d
 
 
 @dataclass
@@ -364,6 +377,10 @@ class ArtifactStore:
             return self._store[artifact.uid]  # dedup
         self._store[artifact.uid] = artifact
         return artifact
+
+    def add_credential(self, artifact: CredentialArtifact) -> CredentialArtifact:
+        """Add or merge a CredentialArtifact. Returns canonical artifact."""
+        return self.add(artifact)  # type: ignore[return-value]
 
     def add_many(self, artifacts: list[NormalizedArtifact]) -> None:
         for a in artifacts:
@@ -497,10 +514,15 @@ class ArtifactNormalizer:
             "windows.lsa_secrets":    self._normalize_lsa_secrets,
             "cached_credentials":     self._normalize_cached_domain_credentials,
             "cached_domain_credentials": self._normalize_cached_domain_credentials,
+            # Valid Credentials (MOD-033)
+            "valid_credentials":      self._normalize_valid_credentials,
         }
         handler = handlers.get(capability)
         if handler:
-            return handler(raw, store)
+            try:
+                return handler(raw, store, capability)
+            except TypeError:
+                return handler(raw, store)
         return 0
 
     def _normalize_users(self, raw: dict, store: ArtifactStore) -> int:
@@ -967,6 +989,41 @@ class ArtifactNormalizer:
                 privilege=privilege,
             )
             store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_valid_credentials(
+        self, raw: dict, store: ArtifactStore, capability: str = "valid_credentials"
+    ) -> int:
+        """
+        Normalize standardized valid_credentials output (MOD-033).
+        Contract: list[dict] with username, password, target, port, method, protocol, privilege, domain.
+        """
+        entries = raw.get("valid_credentials", [])
+        if not isinstance(entries, list):
+            return 0
+        count = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                logger.warning(
+                    "valid_credentials_invalid_entry",
+                    type=type(entry).__name__,
+                )
+                continue
+            artifact = CredentialArtifact(
+                username=entry.get("username", ""),
+                secret=entry.get("password", ""),
+                target=entry.get("target", ""),
+                source_host=entry.get("target", ""),
+                host=entry.get("target", ""),
+                protocol=entry.get("protocol", ""),
+                cred_type=entry.get("method", "password"),
+                privilege=entry.get("privilege", "unknown"),
+                domain=entry.get("domain") or "",
+                cracked=False,
+                source_module=capability,
+            )
+            store.add_credential(artifact)
             count += 1
         return count
 

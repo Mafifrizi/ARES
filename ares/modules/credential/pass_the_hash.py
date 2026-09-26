@@ -354,6 +354,19 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
             "target": target, "username": f"{domain}\\{username}",
             "success": success, "output": output, "privilege": privilege,
         }
-        raw["valid_credentials"] = self._findings  # OUTPUTS key
+        valid_creds = []
+        if success:
+            priv_str = "admin" if privilege == "local_admin" else (privilege or "unknown")
+            valid_creds.append({
+                "username": username,
+                "password": nt_hash,
+                "target": target,
+                "port": 445,
+                "method": "hash",
+                "protocol": "smb",
+                "privilege": priv_str,
+                "domain": domain or None,
+            })
+        raw["valid_credentials"] = valid_creds  # OUTPUTS key
         raw["owned_hosts"] = [{"host": raw.get("target", "")}] if self._findings else []  # OUTPUTS key
         return self._findings[:], raw

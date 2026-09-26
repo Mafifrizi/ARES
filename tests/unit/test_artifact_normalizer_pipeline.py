@@ -431,3 +431,84 @@ def test_lsa_secrets_and_cached_creds_dict_structure(normalizer: ArtifactNormali
     assert cached_cred.cracked is False
 
 
+def test_valid_credentials_pipeline_normalizes_to_artifact_store(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-033: valid_credentials standard contract normalizes into CredentialArtifact."""
+    raw = {
+        "valid_credentials": [
+            {
+                "username": "admin",
+                "password": "SecretPassword123!",
+                "target": "10.0.0.50",
+                "port": 22,
+                "method": "password",
+                "protocol": "ssh",
+                "privilege": "admin",
+                "domain": None,
+            },
+            {
+                "username": "svc_sql",
+                "password": "0123456789abcdef0123456789abcdef",
+                "target": "10.0.0.51",
+                "port": 445,
+                "method": "hash",
+                "protocol": "smb",
+                "privilege": "user",
+                "domain": "CORP",
+            },
+        ]
+    }
+    added = normalizer.normalize("credential.ssh_spray", ["valid_credentials"], raw, store)
+    assert added == 2
+    creds = store.credentials()
+    assert len(creds) == 2
+
+    c1 = next(c for c in creds if c.username == "admin")
+    assert c1.secret == "SecretPassword123!"
+    assert c1.source_host == "10.0.0.50"
+    assert c1.target == "10.0.0.50"
+    assert c1.protocol == "ssh"
+    assert c1.cred_type == "password"
+    assert c1.privilege == "admin"
+    assert c1.cracked is False
+
+    c2 = next(c for c in creds if c.username == "svc_sql")
+    assert c2.secret == "0123456789abcdef0123456789abcdef"
+    assert c2.source_host == "10.0.0.51"
+    assert c2.protocol == "smb"
+    assert c2.cred_type == "hash"
+    assert c2.privilege == "user"
+    assert c2.domain == "CORP"
+    assert c2.cracked is False
+
+
+def test_valid_credentials_skips_invalid_non_dict_entries(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-033: Non-dict entries in valid_credentials are safely skipped."""
+    raw = {
+        "valid_credentials": [
+            "invalid_string_id",
+            12345,
+            {
+                "username": "valid_user",
+                "password": "valid_password",
+                "target": "10.0.0.60",
+                "port": 445,
+                "method": "password",
+                "protocol": "smb",
+                "privilege": "user",
+                "domain": "CORP",
+            },
+        ]
+    }
+    added = normalizer.normalize("credential.reuse", ["valid_credentials"], raw, store)
+    assert added == 1
+    creds = store.credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "valid_user"
+    assert creds[0].secret == "valid_password"
+
+
+

@@ -167,7 +167,7 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
                 data={
                     "username": cred.get("username"),
                     "domain": cred.get("domain"),
-                    "service": cred.get("service"),
+                    "service": cred.get("protocol") or cred.get("service"),
                 },
                 tags=["credential", "reuse", "spray"],
             )
@@ -283,15 +283,44 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
             engine = ReuseEngine(vault=vault)
             await self.before_request(target, "default")
             results = await engine.spray(target_hosts=[target])
-            valid: list[str] = []
+            valid: list[dict[str, Any]] = []
 
             for attempt in results:
                 if attempt.success:
-                    valid.append(attempt.cred_id)
+                    cred_id = getattr(attempt, "credential_id", getattr(attempt, "cred_id", ""))
+                    cred_obj = vault.get(cred_id) if (vault and cred_id) else None
+                    secret = ""
+                    if vault and cred_id:
+                        try:
+                            secret = vault.reveal(cred_id)
+                        except Exception:
+                            secret = ""
+                    proto_name = str(getattr(attempt.protocol, "value", attempt.protocol)).lower()
+                    proto_ports = {"smb": 445, "winrm": 5985, "ssh": 22, "ldap": 389, "rdp": 3389, "ftp": 21}
+                    port = proto_ports.get(proto_name, 0)
+                    method = "hash" if (cred_obj and cred_obj.is_hash) else "password"
+                    priv_raw = attempt.privilege or (str(cred_obj.privilege.value) if cred_obj and hasattr(cred_obj.privilege, "value") else "unknown")
+                    if priv_raw in ("local_admin", "admin", "domain_admin"):
+                        priv_str = "admin"
+                    elif priv_raw in ("domain_user", "local_user", "user"):
+                        priv_str = "user"
+                    else:
+                        priv_str = priv_raw or "unknown"
+
+                    valid.append({
+                        "username": attempt.username,
+                        "password": secret,
+                        "target": attempt.target_host or target,
+                        "port": port,
+                        "method": method,
+                        "protocol": proto_name,
+                        "privilege": priv_str,
+                        "domain": attempt.domain or None,
+                    })
                     self.finding(
                         title       = f"Valid credential reused on {target}",
                         description = (
-                            f"Credential {attempt.cred_id[:8]}… authenticated via "
+                            f"Credential {cred_id[:8]}… authenticated via "
                             f"{attempt.protocol} on {target}"
                         ),
                         severity    = Severity.CRITICAL,

@@ -778,8 +778,16 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
             "protocol": protocol,
             "attempts": attempts,
             "valid_credentials": [
-                {"username": c["username"], "domain": c["domain"],
-                 "target": c["target"], "password": "***REDACTED***"}
+                {
+                    "username": c["username"],
+                    "password": c["password"],
+                    "target": c["target"],
+                    "port": ldap_port if protocol == "ldap" else 445,
+                    "method": "password",
+                    "protocol": protocol,
+                    "privilege": "user",
+                    "domain": c.get("domain") or domain or None,
+                }
                 for c in valid_creds
             ],
             "locked_accounts": locked_accounts,

@@ -143,7 +143,7 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
         target_users = users or ["root", "admin", "kali", "ubuntu", "kraii"]
         target_passwords = passwords or ["Password123!", "admin", "root", "toor"]
 
-        valid_credentials: list[dict[str, str]] = []
+        valid_credentials: list[dict[str, Any]] = []
         tested_pairs: list[dict[str, Any]] = []
         loot: list[dict[str, Any]] = []
         attempts = 0
@@ -239,7 +239,11 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
                         "username": username,
                         "password": password,
                         "target": target,
-                        "port": str(port),
+                        "port": int(port),
+                        "method": "password",
+                        "protocol": "ssh",
+                        "privilege": "admin" if username in ("root", "admin", "system") else "user",
+                        "domain": None,
                     })
                     # Emit finding immediately for discovered credential
                     self.finding(
