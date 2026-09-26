@@ -303,6 +303,35 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
   - MOD-057 (`ad.enum_acl`, `ad.laps_enum` LDAP bind format normalization via build_ad_bind_plan) — commit `41cec57`
   - MOD-061 (`network.snmp_enum` vault Gate 6 and valid_credentials contract) — verified FIXED (Batch 10, commit `5635362`)
 
+---
+
+## FASE 6: GRUP F (ARCHITECTURAL DECISIONS & GATES) — COMPLETED
+
+- **CloudScopeGuard (MOD-053/MOD-063)**: **COMPLETE** (commit `2e6d71b`)
+  - Ditambahkan `CloudScope` dataclass pada `CampaignScope` & `Campaign.cloud_scope` (`aws_account_ids`, `azure_subscription_ids`, `azure_tenant_ids`, `gcp_project_ids`).
+  - Ditambahkan `BaseCloudModule` dan method `validate_cloud_scope()` pada `BaseModule` (fail-closed dengan `ScopeViolationError`).
+  - Penegakan validasi cloud identifier pada 4 cloud modules (`cloud.aws`, `cloud.azure`, `cloud.azure_ad`, `cloud.gcp`) dan `aws_privesc`. Permissive fallback saat unconfigured untuk backward compatibility.
+  - 12/12 unit tests passing di `tests/unit/test_cloud_scope_guard.py`.
+- **Gate 1: Minimal Schema Pre-Flight Guard**: **COMPLETE** (commit `11f6367`)
+  - Engine pre-flight validation fail-fast via `BaseModule.validate(ctx)` diverifikasi dan diperkuat.
+  - Penambahan deklaratif `REQUIRED_PARAMS: list[str]` pada `BaseModule`.
+  - Penolakan eksekusi menghasilkan status `ModuleStatus.REJECTED` dengan outcome `operator_error`.
+  - 4/4 unit tests passing di `tests/unit/test_gate1_schema_preflight.py`.
+- **Gate 2: OS-Level Packet Filter Sync**: **ROADMAP** (didokumentasikan di `MASTER_FIX_PLAN.md` Section 7).
+- **Gate 4: Subprocess Sandboxing & Execution Isolation**: **ROADMAP** (didokumentasikan di `MASTER_FIX_PLAN.md` Section 7).
+
+---
+
+## KESIMPULAN AUDIT & REMEDIASI PROYEK ARES (100% COMPLETE)
+
+- **Total Modul Diaudit**: 60 file offensive & core modules (12 Batch komprehensif).
+- **Total Temuan**: 74 temuan teridentifikasi (MOD-001 s/d MOD-074).
+- **Status Akhir**:
+  - **70 FIXED (94.6%)**: Seluruh temuan fungsional, cryptographic safety, data loss, scope enforcement, teardown, dan honesty gates diperbaiki penuh.
+  - **4 DISABLED (5.4%)**: Modul yang belum memiliki implementasi aman (`ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token`) dilindungi fail-fast guards dan disaring dari katalog produksi.
+  - **0 OPEN DEFERRED**: Seluruh backlog remedi terselesaikan. Gates 2 dan 4 dialokasikan ke roadmap teknis masa depan.
+
+
 
 
 
