@@ -68,3 +68,12 @@ docs/assets/*.gif
 tools/
 test*.png
 batch*_audit_report.md
+
+# Internal audit & planning documentation (local only)
+AUDIT_PROGRESS.md
+FINAL_AUDIT_SUMMARY.md
+KEY_CONVENTION_STANDARD.md
+MASTER_FIX_PLAN.md
+MODULE_AUDIT_INVENTORY.md
+NORMALIZER_CONTRACT_AUDIT.md
+SUCCESS_MECHANISM_AUDIT.md
