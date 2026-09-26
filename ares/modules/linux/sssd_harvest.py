@@ -34,6 +34,22 @@ from ares.sdk import (
 logger = get_logger("ares.modules.linux.sssd_harvest")
 
 
+def _infer_credential_type(secret: str) -> Any:
+    from ares.credential.vault import CredentialType
+
+    if secret.startswith(("$6$", "$y$", "$5$", "$2b$", "$1$")):
+        return CredentialType.HASH
+    if secret.startswith(("aes256-cts", "rc4-hmac", "des-")):
+        return getattr(CredentialType, "KERBEROS", CredentialType.KRB5_TGS)
+    # Default to NTLM for 32-char hex string
+    if len(secret) == 32 and all(c in "0123456789abcdefABCDEF" for c in secret):
+        return CredentialType.NTLM
+    # Default to HASH for hex/encoded string longer than 32 chars
+    if len(secret) > 32 and all(c in "0123456789abcdefABCDEF" for c in secret):
+        return CredentialType.HASH
+    return CredentialType.CLEARTEXT
+
+
 @module_contract(
     permissions=[
         FilesystemPermission(read_only=True),
@@ -170,7 +186,7 @@ class SssdHarvestModule(BaseModule[SssdHarvestParams, ModuleResult]):
                             campaign_id=campaign_id,
                             username=acc.get("username", "unknown"),
                             domain=acc.get("domain", target),
-                            cred_type=CredentialType.NTLM if not h.startswith("$6$") else CredentialType.CLEARTEXT,
+                            cred_type=_infer_credential_type(h),
                             privilege=(
                                 PrivilegeLevel.DOMAIN_ADMIN
                                 if acc.get("is_domain_admin")
@@ -258,11 +274,40 @@ class SssdHarvestModule(BaseModule[SssdHarvestParams, ModuleResult]):
             "  - attack.t1003.008\n"
         )
 
+        users_list = [
+            {
+                "username": acc.get("username", ""),
+                "domain": acc.get("domain", target),
+                "is_admin": acc.get("is_domain_admin", False),
+            }
+            for acc in extracted_accounts
+        ]
+        all_hashes = [h for acc in extracted_accounts for h in acc.get("hashes", [])]
+        hash_entries = [
+            {
+                "username": acc.get("username", ""),
+                "domain": acc.get("domain", target),
+                "hash": h,
+                "secret": h,
+                "host": target,
+                "privilege": "domain_admin" if acc.get("is_domain_admin") else "domain_user",
+            }
+            for acc in extracted_accounts
+            for h in acc.get("hashes", [])
+        ]
+
         await self.noise.jitter.sleep()
         return self._findings[:], {
             "target": target,
             "accounts_count": len(extracted_accounts),
             "stored_in_vault": stored_vault_count,
+            # Dual-write: standard keys per KEY_CONVENTION_STANDARD.md
+            "users": users_list,
+            "domain_users": users_list,
+            "hashes": all_hashes,
+            "cached_hashes": hash_entries,
+            "credentials": hash_entries,
+            # Backward compatibility alias
             "accounts": extracted_accounts,
             "kql": kql_query,
             "sigma": sigma_rule,

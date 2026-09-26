@@ -290,6 +290,86 @@ class TestSssdHarvestModule:
             assert f0.severity.value == "critical"
             assert "domain_admin" in f0.title
             assert mock_vault.store.called
+            call_args = mock_vault.store.call_args_list[0]
+            cred_arg, hash_arg = call_args[0]
+            from ares.credential.vault import CredentialType
+            assert cred_arg.cred_type == CredentialType.HASH
+
+    @pytest.mark.asyncio
+    async def test_sssd_harvest_mod045_semantic_type_integrity(self):
+        """MOD-045: Verify hashes ($6$) are stored as CredentialType.HASH, not CLEARTEXT,
+        and standard output keys are dual-written for ArtifactNormalizer pipeline."""
+        from ares.credential.vault import CredentialVault, CredentialType
+        from ares.normalize.artifacts import ArtifactNormalizer, ArtifactStore
+
+        vault = CredentialVault(encryption_key=None)
+        module, _ = _make_module(SssdHarvestModule)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ldb_path = os.path.join(tmpdir, "cache_corp.local.ldb")
+            records = [
+                (
+                    b"name=da_user,cn=users,dc=corp,dc=local",
+                    (
+                        b"name: da_user\n"
+                        b"cachedPassword: $6$rounds=5000$salt$hash512\n"
+                        b"memberOf: cn=Domain Admins,cn=users,dc=corp,dc=local\n"
+                    ),
+                ),
+                (
+                    b"name=regular_user,cn=users,dc=corp,dc=local",
+                    (
+                        b"name: regular_user\n"
+                        b"cachedPassword: $y$j9T$salt$yescryptHash\n"
+                    ),
+                ),
+            ]
+            with open(ldb_path, "wb") as f:
+                f.write(_synthesize_tdb(records))
+
+            ctx = _make_test_ctx(params={"db_path": tmpdir}, vault=vault)
+            res = await module.execute(ctx)
+
+            assert res.status == "success"
+            assert res.raw["stored_in_vault"] == 2
+
+            # 1. Verify credentials stored with CredentialType.HASH, not CLEARTEXT
+            stored_creds = list(vault._store.values())
+            assert len(stored_creds) == 2
+            for c in stored_creds:
+                assert c.cred_type == CredentialType.HASH, f"Expected HASH, got {c.cred_type}"
+                assert c.is_hash is True
+
+            # 2. Downstream safety: uncracked hashes are NOT returned for reuse/spray
+            reuse_creds = vault.credentials_for_reuse(min_score=0.5)
+            assert len(reuse_creds) == 0
+
+            # When cracked, it becomes CLEARTEXT and available for reuse
+            da_cred = next(c for c in stored_creds if c.username == "da_user")
+            vault.mark_cracked(da_cred.id, "CrackedPassword123!")
+            assert da_cred.cred_type == CredentialType.CLEARTEXT
+            reuse_after_crack = vault.credentials_for_reuse(min_score=0.5)
+            assert len(reuse_after_crack) == 1
+            assert reuse_after_crack[0].username == "da_user"
+
+            # 3. Output key dual-write: standard keys present alongside backward-compat alias
+            assert "users" in res.raw
+            assert "hashes" in res.raw
+            assert "domain_users" in res.raw
+            assert "cached_hashes" in res.raw
+            assert "credentials" in res.raw
+            assert "accounts" in res.raw
+
+            # 4. End-to-end normalizer pipeline
+            store = ArtifactStore()
+            normalizer = ArtifactNormalizer()
+            count = normalizer.normalize(
+                module_id=module.MODULE_ID,
+                outputs=module.OUTPUTS,
+                raw=res.raw,
+                store=store,
+            )
+            assert count >= 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

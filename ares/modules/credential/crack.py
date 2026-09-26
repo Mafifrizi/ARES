@@ -271,6 +271,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
                 CredentialType.KRB5_TGS:   ("krb5tgs",   13100),
                 CredentialType.KRB5_ASREP: ("krb5asrep", 18200),
                 CredentialType.NTLM:       ("ntlm",      1000),
+                CredentialType.HASH:       ("sha512crypt", 1800),
             }
             return mapping.get(cred_type, ("ntlm", 1000))
 

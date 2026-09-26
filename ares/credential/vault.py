@@ -53,9 +53,11 @@ def _env_bytes(name: str, default: bytes) -> bytes:
 class CredentialType(str, Enum):
     CLEARTEXT    = "cleartext"       # username:password
     NTLM         = "ntlm"            # NT:LM hash pair
+    HASH         = "hash"            # Generic/Linux/crypt hash ($6$, $y$, $5$, etc.)
     KRB5_TGS     = "krb5_tgs"        # Kerberoast hash (hashcat 13100/19700)
     KRB5_ASREP   = "krb5_asrep"      # ASREPRoast hash (hashcat 18200)
     KRB5_TGT     = "krb5_tgt"        # full TGT (pass-the-ticket)
+    KERBEROS     = "krb5_tgs"        # Kerberos alias
     SSH_KEY      = "ssh_key"         # private key
     API_KEY      = "api_key"         # cloud / service API key
     JWT          = "jwt"             # JSON Web Token
@@ -120,6 +122,7 @@ class Credential:
     def is_hash(self) -> bool:
         return self.cred_type in (
             CredentialType.NTLM,
+            CredentialType.HASH,
             CredentialType.KRB5_TGS,
             CredentialType.KRB5_ASREP,
         )
@@ -166,6 +169,7 @@ class CredentialScorer:
     TYPE_SCORES: dict[CredentialType, float] = {
         CredentialType.CLEARTEXT:   2.0,
         CredentialType.NTLM:        1.5,
+        CredentialType.HASH:        1.0,
         CredentialType.KRB5_TGT:    2.5,
         CredentialType.KRB5_TGS:    0.5,   # uncracked; +1.5 if cracked
         CredentialType.KRB5_ASREP:  0.5,   # uncracked; +1.5 if cracked
@@ -449,7 +453,7 @@ class CredentialVault:
             "cleartext": CredentialType.CLEARTEXT,
             "password": CredentialType.CLEARTEXT,
             "ntlm": CredentialType.NTLM,
-            "hash": CredentialType.NTLM,
+            "hash": CredentialType.HASH,
             "token": CredentialType.JWT,
             "jwt": CredentialType.JWT,
             "api_key": CredentialType.API_KEY,
