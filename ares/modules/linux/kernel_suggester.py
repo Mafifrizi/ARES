@@ -28,18 +28,117 @@ from ares.sdk import (
 
 logger = get_logger("ares.modules.linux.kernel_suggester")
 
-# kernel_version_regex → (CVE, description, severity, affected_range)
-# Ranges are illustrative - real check via uname -r parsing
-_KERNEL_CVES: list[tuple[str, str, str, str, str]] = [
-    (r"[345]\.[0-9]+",       "CVE-2021-4034", "Polkit pkexec LPE (PwnKit)", "CRITICAL", "< 0.120-3"),
-    (r"[345]\.[0-9]+",       "CVE-2021-3156", "Sudo heap-overflow LPE (Baron Samedit)", "CRITICAL", "< 1.9.5p2"),
-    (r"5\.[0-9]+\.[0-9]+",   "CVE-2022-0847", "Dirty Pipe - arbitrary write via pipe", "HIGH", "5.8–5.16.11"),
-    (r"[34]\.[0-9]+\.[0-9]+","CVE-2016-5195", "Dirty COW - race condition write", "HIGH", "< 4.8.3"),
-    (r"5\.[0-9]+\.[0-9]+",   "CVE-2021-33909", "seq_file LPE (size_t-to-int overflow)", "HIGH", "< 5.13.4"),
-    (r"[345]\.[0-9]+",       "CVE-2019-13272", "ptrace PTRACE_TRACEME LPE", "HIGH", "< 5.1.17"),
-    (r"[345]\.[0-9]+",       "CVE-2017-16995", "eBPF verifier integer overflow LPE", "HIGH", "3.18–4.14"),
-    (r"[345]\.[0-9]+",       "CVE-2017-7308",  "af_packet ring buffer LPE", "HIGH", "< 4.10.6"),
+# Genuine Linux Kernel CVEs - matched against kernel version from uname -r
+_KERNEL_CVES: list[dict[str, Any]] = [
+    {
+        "cve": "CVE-2022-0847",
+        "description": "Dirty Pipe - arbitrary write via pipe",
+        "severity": "HIGH",
+        "affected_range": "5.8.0 to 5.16.11",
+        "min_version": (5, 8, 0),
+        "max_version": (5, 16, 11),
+    },
+    {
+        "cve": "CVE-2016-5195",
+        "description": "Dirty COW - race condition write",
+        "severity": "HIGH",
+        "affected_range": "2.6.22 to 4.8.3",
+        "min_version": (2, 6, 22),
+        "max_version": (4, 8, 3),
+    },
+    {
+        "cve": "CVE-2021-33909",
+        "description": "seq_file LPE (size_t-to-int overflow)",
+        "severity": "HIGH",
+        "affected_range": "3.16.0 to 5.13.4",
+        "min_version": (3, 16, 0),
+        "max_version": (5, 13, 4),
+    },
+    {
+        "cve": "CVE-2019-13272",
+        "description": "ptrace PTRACE_TRACEME LPE",
+        "severity": "HIGH",
+        "affected_range": "4.10.0 to 5.1.17",
+        "min_version": (4, 10, 0),
+        "max_version": (5, 1, 17),
+    },
+    {
+        "cve": "CVE-2017-16995",
+        "description": "eBPF verifier integer overflow LPE",
+        "severity": "HIGH",
+        "affected_range": "3.18.0 to 4.14.0",
+        "min_version": (3, 18, 0),
+        "max_version": (4, 14, 0),
+    },
+    {
+        "cve": "CVE-2017-7308",
+        "description": "af_packet ring buffer LPE",
+        "severity": "HIGH",
+        "affected_range": "3.2.0 to 4.10.6",
+        "min_version": (3, 2, 0),
+        "max_version": (4, 10, 6),
+    },
 ]
+
+# Userspace Utility CVEs - NEVER matched against kernel version!
+# Requires standalone binary version query (sudo -V, pkexec --version)
+_USERSPACE_CVES: list[dict[str, Any]] = [
+    {
+        "cve": "CVE-2021-4034",
+        "description": "Polkit pkexec LPE (PwnKit)",
+        "binary": "pkexec",
+        "version_key": "pkexec_version",
+        "severity": "CRITICAL",
+        "affected_range": "< 0.120-3 (or unpatched pkexec < 120)",
+    },
+    {
+        "cve": "CVE-2021-3156",
+        "description": "Sudo heap-overflow LPE (Baron Samedit)",
+        "binary": "sudo",
+        "version_key": "sudo_version",
+        "severity": "CRITICAL",
+        "affected_range": "1.8.2–1.8.31p2, 1.9.0–1.9.5p2",
+    },
+]
+
+
+def _parse_version_tuple(ver_str: str) -> tuple[int, ...] | None:
+    """Extract integer version components from a version string (e.g. '5.15.0-42' -> (5, 15, 0, 42))."""
+    if not ver_str:
+        return None
+    match = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?(?:[p\-](\d+))?", ver_str)
+    if not match:
+        return None
+    return tuple(int(g) for g in match.groups() if g is not None)
+
+
+def _is_sudo_vulnerable(ver_str: str) -> bool:
+    """Check if Sudo version is vulnerable to Baron Samedit (CVE-2021-3156: 1.8.2 <= ver <= 1.9.5p2)."""
+    parsed = _parse_version_tuple(ver_str)
+    if not parsed or len(parsed) < 2:
+        return False
+    major, minor = parsed[0], parsed[1]
+    patch = parsed[2] if len(parsed) > 2 else 0
+    p_level = parsed[3] if len(parsed) > 3 else 0
+
+    if major == 1 and minor == 8 and patch >= 2:
+        return True
+    if major == 1 and minor == 9:
+        if patch < 5:
+            return True
+        if patch == 5 and p_level <= 2:
+            return True
+    return False
+
+
+def _is_pkexec_vulnerable(ver_str: str) -> bool:
+    """Check if Polkit pkexec version is vulnerable to PwnKit (CVE-2021-4034: < 0.120 or < 120)."""
+    parsed = _parse_version_tuple(ver_str)
+    if not parsed:
+        return False
+    if parsed[0] == 0:
+        return len(parsed) > 1 and parsed[1] < 120
+    return parsed[0] < 120
 
 
 @module_contract(
@@ -255,6 +354,8 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
                 ("uname -a", "uname_full"),
                 ("cat /etc/os-release 2>/dev/null | head -5", "os_release"),
                 ("id", "current_user"),
+                ("sudo -V 2>/dev/null | head -1", "sudo_version"),
+                ("pkexec --version 2>/dev/null | head -1", "pkexec_version"),
             ]:
                 try:
                     _, stdout, _ = client.exec_command(cmd, timeout=5)
@@ -264,44 +365,136 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
             client.close()
             return results
 
-        try:
-            info = await loop.run_in_executor(None, _get_info)
-        except Exception as e:
-            return [], {"error": str(e)[:200]}
+        info: dict[str, str] = dict(kwargs.get("info") or {})
+        if not info:
+            try:
+                info = await loop.run_in_executor(None, _get_info)
+            except Exception as e:
+                return [], {"error": str(e)[:200]}
+
+        if "kernel" in kwargs:
+            info["kernel"] = kwargs["kernel"]
+        if "sudo_version" in kwargs:
+            info["sudo_version"] = kwargs["sudo_version"]
+        if "pkexec_version" in kwargs:
+            info["pkexec_version"] = kwargs["pkexec_version"]
 
         kernel_ver = info.get("kernel", "")
-        suggestions: list[dict[str, str]] = []
+        suggestions: list[dict[str, Any]] = []
 
-        for pattern, cve, description, severity_str, affected in _KERNEL_CVES:
-            if re.search(pattern, kernel_ver):
+        # 1. Genuine Kernel CVE Evaluation
+        parsed_kver = _parse_version_tuple(kernel_ver)
+        if parsed_kver:
+            for cve_def in _KERNEL_CVES:
+                cve = cve_def["cve"]
+                description = cve_def["description"]
+                affected = cve_def["affected_range"]
+                min_v = cve_def["min_version"]
+                max_v = cve_def["max_version"]
+
+                matched = False
+                is_exact = False
+
+                if len(parsed_kver) >= 3:
+                    k3 = parsed_kver[:3]
+                    if min_v <= k3 <= max_v:
+                        matched = True
+                        is_exact = True
+                elif len(parsed_kver) == 2:
+                    k2 = parsed_kver[:2]
+                    if min_v[:2] <= k2 <= max_v[:2]:
+                        matched = True
+                        is_exact = False
+
+                if matched:
+                    if is_exact:
+                        severity_str = cve_def["severity"]
+                        confidence = 0.8
+                        desc_suffix = "Verify patch level before attempting exploitation."
+                    else:
+                        severity_str = "MEDIUM"
+                        confidence = 0.5  # unverified patch level (< 0.7)
+                        desc_suffix = "patch version unknown, manual verification required."
+
+                    sev = {"CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH,
+                           "MEDIUM": Severity.MEDIUM}.get(severity_str, Severity.MEDIUM)
+
+                    suggestions.append({
+                        "cve": cve, "description": description,
+                        "severity": severity_str, "affected_range": affected,
+                        "type": "kernel", "confidence": confidence,
+                    })
+                    self.finding(
+                        title=f"Potential Kernel LPE: {cve} - {description}",
+                        description=(
+                            f"Kernel {kernel_ver} on {target} may be vulnerable to {cve} "
+                            f"({description}). Affected range: {affected}. {desc_suffix}"
+                        ),
+                        severity=sev,
+                        mitre_technique="T1068",
+                        mitre_tactic="Privilege Escalation",
+                        evidence={"kernel": kernel_ver, "cve": cve,
+                                   "host": target, "current_user": info.get("current_user", "")},
+                        remediation=(
+                            f"Apply kernel security patches. Upgrade to a version not affected "
+                            f"by {cve}. Enable automatic security updates."
+                        ),
+                        host=target, confidence=confidence,
+                    )
+
+        # 2. Userspace Tool CVE Evaluation (sudo, pkexec) - NEVER matched against kernel version!
+        for u_cve in _USERSPACE_CVES:
+            cve = u_cve["cve"]
+            description = u_cve["description"]
+            binary = u_cve["binary"]
+            v_key = u_cve["version_key"]
+            affected = u_cve["affected_range"]
+            raw_ver = info.get(v_key, "").strip()
+
+            if not raw_ver:
+                continue
+
+            vulnerable = False
+            if binary == "sudo":
+                vulnerable = _is_sudo_vulnerable(raw_ver)
+            elif binary == "pkexec":
+                vulnerable = _is_pkexec_vulnerable(raw_ver)
+
+            if vulnerable:
+                severity_str = u_cve["severity"]
+                sev = Severity.CRITICAL if severity_str == "CRITICAL" else Severity.HIGH
+                confidence = 0.85
                 suggestions.append({
                     "cve": cve, "description": description,
                     "severity": severity_str, "affected_range": affected,
+                    "type": "userspace", "binary": binary, "version": raw_ver,
+                    "confidence": confidence,
                 })
-                sev = {"CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH,
-                       "MEDIUM": Severity.MEDIUM}.get(severity_str, Severity.INFO)
                 self.finding(
-                    title=f"Potential Kernel LPE: {cve} - {description}",
+                    title=f"Potential Userspace LPE: {cve} - {description}",
                     description=(
-                        f"Kernel {kernel_ver} on {target} may be vulnerable to {cve} "
-                        f"({description}). Affected range: {affected}. "
-                        "Verify patch level before attempting exploitation."
+                        f"Binary '{binary}' version '{raw_ver}' on {target} is vulnerable to {cve} "
+                        f"({description}). Affected range: {affected}."
                     ),
                     severity=sev,
                     mitre_technique="T1068",
                     mitre_tactic="Privilege Escalation",
-                    evidence={"kernel": kernel_ver, "cve": cve,
-                               "host": target, "current_user": info.get("current_user", "")},
+                    evidence={
+                        "binary": binary, "version": raw_ver, "cve": cve,
+                        "host": target, "current_user": info.get("current_user", "")
+                    },
                     remediation=(
-                        f"Apply kernel security patches. Upgrade to a version not affected "
-                        f"by {cve}. Enable automatic security updates."
+                        f"Upgrade {binary} package immediately to a patched release. "
+                        f"Refer to advisory for {cve}."
                     ),
-                    host=target, confidence=0.7,
+                    host=target, confidence=confidence,
                 )
 
         raw = {"target": target, "kernel": kernel_ver,
                "os_info": info.get("os_release", ""),
                "current_user": info.get("current_user", ""),
+               "sudo_version": info.get("sudo_version", ""),
+               "pkexec_version": info.get("pkexec_version", ""),
                "suggestions": suggestions}
         raw["privesc_vectors"] = self._findings  # OUTPUTS key
         return self._findings[:], raw
