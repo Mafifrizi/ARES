@@ -68,8 +68,14 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-058 | network.dns_enum out-of-scope AXFR zone transfer probing on discovered nameservers | DEFERRED | Audit verified (`dns_enum.py:269-272`) | Menunggu remedi (Batch Fix Serentak - Grup D) | `_try_axfr` menghubungi nameserver eksternal hasil enumerasi NS tanpa validasi `before_request(ns_clean)`. |
 | MOD-059 | network.http_fingerprint unbounded HTTP redirect traversal on external hosts via follow_redirects=True | DEFERRED | Audit verified (`http_fingerprint.py:252-255`) | Menunggu remedi (Batch Fix Serentak - Grup D) | `httpx.AsyncClient` otomatis mengikuti redirect 301/302 ke host eksternal di luar scope campaign. |
 | MOD-060 | network.service_detect asyncio TCP writer handle leak on read timeout in _grab_banner | DEFERRED | Audit verified (`service_detect.py:108-129`) | Menunggu remedi (Batch Fix Serentak - Grup C) | `reader.read()` tidak dibungkus `try ... finally: writer.close()`, memicu socket leak saat timeout. |
-| MOD-061 | network.snmp_enum discovered SNMP community strings evaporation from vault & standard pipeline | DEFERRED | Audit verified (`snmp_enum.py:342, 406-413`) | Menunggu remedi (Batch Fix Serentak - Grup A/E) | Community strings valid tidak disimpan ke `AresVault` dan tidak diformat ke `valid_credentials` MOD-033. `raw["snmp_findings"]` menyimpan list objek `Finding` mentah. |
+| MOD-061 | network.snmp_enum discovered SNMP community strings evaporation from vault & standard pipeline | FIXED | PASSED (Unit tests & vault integration) | `ares/modules/network/snmp_enum.py` | Direct vault writing added for valid community strings (CredentialType.CLEARTEXT, Gate 6 compliant), valid_credentials standardized to list[dict], raw snmp_findings serialized to dicts (commit `5635362`). |
 | MOD-062 | network.* & recon.fingerprint 100% unhandled reconnaissance capabilities in ArtifactNormalizer | DEFERRED | Audit verified (`fingerprint.py:72`, `dns_enum.py:82`, `http_fingerprint.py:99`, `service_detect.py:159`, `snmp_enum.py:165`) | Menunggu remedi (Batch Fix Serentak - Grup A) | 9 capability recon tidak memiliki handler di `ArtifactNormalizer`. Data host, subdomain, service, dan web target gagal memperbarui `HostArtifact`. |
+| MOD-063 | cloud.* unscoped cloud account/tenant execution via ambient credentials | DEFERRED | Audit verified (`aws.py:190`, `azure.py:211`, `azure_ad.py:231`, `gcp.py:134`) | Menunggu remedi (Batch Fix Serentak - Grup D) | Target cloud account/subscription/project ID tidak divalidasi terhadap scope campaign. Ambient credentials dapat mengeksekusi di luar otorisasi. |
+| MOD-064 | cloud.aws & cloud.gcp operator workstation link-local metadata SSRF probe | FIXED | PASSED (Unit tests) | `ares/modules/cloud/aws.py`, `ares/modules/cloud/gcp.py` | Probing metadata link-local dari workstation operator (169.254.169.254 & metadata.google.internal) dihapus dari modul discovery remote (commit `d86750b`). |
+| MOD-065 | cloud.* missing pre-flight SDK dependency validation in validate() | DEFERRED | Audit verified (`aws.py:91`, `azure.py:100`, `azure_ad.py:90`, `gcp.py:91`) | Menunggu remedi (Batch Fix Serentak - Grup E) | validate() tidak memverifikasi import SDK cloud (boto3, azure-identity, azure-mgmt, msal, google-auth), gagal di runtime saat dependensi belum terpasang. |
+| MOD-066 | cloud.azure & cloud.azure_ad 100% normalizer data loss on azure_findings, azure_ad_findings, access_tokens | DEFERRED | Audit verified (`azure.py:238`, `azure_ad.py:282-283`) | Menunggu remedi (Batch Fix Serentak - Grup A) | Tidak ada handler normalizer untuk azure_findings, azure_ad_findings, atau access_tokens. Seluruh hasil enumerasi Azure dan Entra ID hilang dari ArtifactStore. |
+| MOD-067 | cloud.azure_ad indentation defect causing UnboundLocalError & 100% unreachable Graph API dead code | FIXED | PASSED (Unit tests) | `ares/modules/cloud/azure_ad.py` | Indentasi blok return device_code diperbaiki, inisialisasi raw di awal run(), Graph API enumeration restored (commit `bd2c9b4`). |
+| MOD-068 | cloud.gcp 100% normalizer data loss on gcp_findings in ArtifactNormalizer | DEFERRED | Audit verified (`gcp.py:87`, `134`) | Menunggu remedi (Batch Fix Serentak - Grup A) | Output gcp_findings tidak memiliki handler di ArtifactNormalizer. Seluruh temuan GCS buckets publik, IAM project bindings, dan SA keys menguap dari ArtifactStore. |
 
 ---
 
@@ -227,13 +233,48 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 
 ### [MOD-061] Discovered SNMP Community Strings Evaporation from Vault & Standard Pipeline on `network.snmp_enum`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak - Grup A & E)**
-- **Catatan**: Community string valid tidak disimpan ke `AresVault` dan tidak diformat ke kontrak `valid_credentials` (MOD-033). Output `raw["snmp_findings"]` juga berisi objek `Finding` unpickled.
+- **Status**: **FIXED** (commit `5635362`)
+- **Catatan**: Community string valid sekarang ditulis langsung ke `AresVault` (`_vault.store(cred, community)` dengan `CredentialType.CLEARTEXT` dan verifikasi Gate 6). Output `raw["valid_credentials"]` distandardisasi ke `list[dict]` (MOD-033), dan objek `Finding` di `raw["snmp_findings"]` diserialisasi ke plain dicts.
 
 ### [MOD-062] 100% Unhandled Reconnaissance Capabilities in `ArtifactNormalizer` on `network.*` & `recon.fingerprint`
 - **Severity**: **MEDIUM**
+- **Status**: **PARTIALLY FIXED / DEFERRED (7 Handlers implemented in commit `5635362`)**
+- **Catatan**: 7 handler normalizer P0/P1 ditambahkan di `ares/normalize/artifacts.py` (`dns_records`, `subdomains`, `service_versions`, `vulnerable_services`, `web_fingerprint`, `admin_interfaces`, dll.). Sisa capability recon ditunda ke batch fix serentak.
+
+---
+
+## BATCH FIX SERENTAK DEFERRED NOTES (Batch 11)
+
+### [MOD-063] Unscoped Cloud Account/Tenant Execution via Ambient Credentials on `cloud.*`
+- **Severity**: **HIGH**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup D: Scope Bypass)**
+- **Catatan**: Seluruh 4 modul cloud (`cloud.aws`, `cloud.azure`, `cloud.azure_ad`, `cloud.gcp`) tidak memvalidasi cloud target identifier (`Account` dari STS caller identity, `subscription_id`, `tenant_id`, `project_id`) terhadap batasan `campaign.scope`. Ambient developer credentials (`~/.aws/credentials`, `az login`, `GOOGLE_APPLICATION_CREDENTIALS`) dapat mengeksekusi scanning di luar otorisasi engagement.
+
+### [MOD-064] Operator Workstation Link-Local Metadata SSRF Probe & Token Leak on `cloud.aws` & `cloud.gcp`
+- **Severity**: **HIGH**
+- **Status**: **FIXED** (commit `d86750b`)
+- **Catatan**: Probing metadata link-local dari workstation operator (`http://169.254.169.254` dan `http://metadata.google.internal`) telah dihapus sepenuhnya dari `cloud.aws` dan `cloud.gcp`. Tidak ada lagi risiko kebocoran IAM credentials operator atau false finding atribusi target.
+
+### [MOD-065] Missing Pre-Flight SDK Dependency Validation in `validate()` on `cloud.*`
+- **Severity**: **MEDIUM**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup E: Robustness & Pre-flight)**
+- **Catatan**: `validate()` tidak memeriksa kelengkapan modul eksternal (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`), sehingga modul lulus scheduling tapi crash unhandled di runtime saat library belum terpasang. Estimasi fix: S (4 file, pola identik).
+
+### [MOD-066] 100% Normalizer Data Loss on `azure_findings`, `azure_ad_findings`, `access_tokens` on `cloud.azure` & `cloud.azure_ad`
+- **Severity**: **HIGH**
 - **Status**: **DEFERRED (Masuk batch fix serentak - Grup A: Normalizer Handlers Missing)**
-- **Catatan**: Seluruh 9 capability recon (`fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`, `snmp_findings`, `system_info`) tidak memiliki handler di `ArtifactNormalizer`.
+- **Catatan**: `OUTPUTS = ["azure_findings"]` dan `OUTPUTS = ["azure_ad_findings", "access_tokens"]` tidak memiliki handler di `ArtifactNormalizer`. Seluruh telemetry storage container, RBAC assignments, NSG rules, guest users, dan OAuth access tokens hilang 100% dari `ArtifactStore`.
+
+### [MOD-067] Indentation Defect Causing `UnboundLocalError` & 100% Unreachable Graph API Dead Code on `cloud.azure_ad`
+- **Severity**: **CRITICAL**
+- **Status**: **FIXED** (commit `bd2c9b4`)
+- **Catatan**: Indentasi blok return device_code telah diperbaiki di dalam `if technique == "device_code":`, variabel `raw` diinisialisasi di awal method `run()`, dan jalur eksekusi Graph API enumeration (`_enumerate_tenant`) untuk users, guests, dan privileged service principals telah dipulihkan sepenuhnya. Output `raw["azure_ad_findings"]` dijamin selalu ada.
+
+### [MOD-068] 100% Normalizer Data Loss on `gcp_findings` in `ArtifactNormalizer` on `cloud.gcp`
+- **Severity**: **HIGH**
+- **Status**: **DEFERRED (Masuk batch fix serentak - Grup A: Normalizer Handlers Missing)**
+- **Catatan**: `OUTPUTS = ["gcp_findings"]` tidak terdaftar di `ArtifactNormalizer.handlers`. Seluruh temuan enumerasi GCS public buckets, project IAM owner roles, dan service account keys menguap dari `ArtifactStore`.
+
 
 
 

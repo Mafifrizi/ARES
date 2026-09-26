@@ -1,34 +1,34 @@
-# ARES Master Remediation Plan: Consolidated Deferred Findings (Batch 1–9)
+# ARES Master Remediation Plan: Consolidated Deferred Findings (Batch 1–11)
 
 > **Dokumen**: `MASTER_FIX_PLAN.md`  
 > **Status**: Living Execution Blueprint  
 > **Tanggal Konsolidasi**: 26 September 2026  
-> **Cakupan Audit**: Batch 1 sampai Batch 9 (45 modul offensive/core)  
+> **Cakupan Audit**: Batch 1 sampai Batch 11 (49 modul offensive/core)  
 > **Aturan Eksekusi**: Rule 1 (Zero Over-claiming), Rule 3 (Fix at Root & Grep Before Complete), Rule 4 (Zero Collateral & Guaranteed Teardown)
 
 ---
 
-## 1. Status Ringkasan Temuan (Batch 1–10)
+## 1. Status Ringkasan Temuan (Batch 1–11)
 
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
-| **Total Temuan Teridentifikasi** | **62** | MOD-001 s/d MOD-062 |
-| **Sudah Diperbaiki (FIXED)** | **14** | Code fixes + regression tests lulus di main branch |
+| **Total Temuan Teridentifikasi** | **68** | MOD-001 s/d MOD-068 |
+| **Sudah Diperbaiki (FIXED)** | **17** | Code fixes + regression tests lulus di main branch (termasuk MOD-061, MOD-064, MOD-067) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **44** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
+| **Masih Open (DEFERRED)** | **47** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
 
 ### Ringkasan Status per Kelompok
 ```
-Total Temuan: 62
-├── FIXED (14)       [22.6%] ══════════════
-├── DISABLED (4)     [ 6.5%] ═══
-└── DEFERRED (44)    [70.9%] ═══════════════════════════════════
-    ├── Grup A: Normalizer Handlers Missing (10 temuan / capability sets)
+Total Temuan: 68
+├── FIXED (17)       [25.0%] ════════════════
+├── DISABLED (4)     [ 5.9%] ═══
+└── DEFERRED (47)    [69.1%] ══════════════════════════════════
+    ├── Grup A: Normalizer Handlers Missing (11 temuan / capability sets)
     ├── Grup B: Hash Masking di Finding.evidence (2 temuan)
     ├── Grup C: Teardown & Resource Cleanup (7 temuan)
     ├── Grup D: Scope Bypass Listener / Destination Parameter (11 temuan)
     ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (11 temuan)
-    └── Grup F: Architectural Decisions Needed (4 temuan / gates)
+    └── Grup F: Architectural Decisions Needed (5 temuan / gates)
 ```
 
 ---
@@ -53,6 +53,9 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 | **MOD-054** | `ad.enum_spn` | Internal key mismatch sync (`spn_list` $\leftrightarrow$ `spns`) | `f0825df` |
 | **MOD-055** | `ad.laps_enum` | Direct vault write + OPSEC-safe raw output (`has_password: True`) | `4bbf61d` |
 | **MOD-056 (P)** | `ad.enum_users` | Dual-write standard `users` key (`user_list` & `users`) | `bc8c830` |
+| **MOD-061** | `network.snmp_enum` | Direct vault write (Gate 6) + standard `valid_credentials` contract | `5635362` |
+| **MOD-064** | `cloud.aws`, `cloud.gcp` | Removal of operator-host link-local metadata probe (`169.254.169.254` / `metadata.google.internal`) | `d86750b` |
+| **MOD-067** | `cloud.azure_ad` | Indentation defect fix: resolved UnboundLocalError & restored Microsoft Graph API enumeration | `bd2c9b4` |
 
 *Catatan: Modul yang dinonaktifkan demi keamanan operator (`ad.ghost_forge` [MOD-005], `windows.dpapi` [MOD-029], `windows.token_impersonation` [MOD-030], `cloud.phantom_token` [MOD-049]) dilindungi fail-fast guard dan tidak diizinkan masuk active catalog.*
 
@@ -66,18 +69,22 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 
 Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** di mana modul offensive berhasil mengambil telemetry bernilai tinggi, namun `ArtifactNormalizer.normalize()` mengabaikannya karena belum memiliki handler routing.
 
+*(Catatan: 7 handler normalizer untuk MOD-036, MOD-041, MOD-044, MOD-052, dan MOD-062 telah diimplementasikan pada commit `5635362` di `ares/normalize/artifacts.py`)*
+
 | ID | Modul | Capability / Output Key | Tipe Artifact yang Dibutuhkan | Rencana Solusi di `artifacts.py` |
 |---|---|---|---|---|
 | **MOD-016** | `ad.sccm` | `cleartext_credentials` (DPAPI NAA blobs) | `CredentialArtifact(cred_type="dpapi_blob")` | Tambah handler `_normalize_sccm_credentials` atau perbaiki extractor agar tidak melabeli ciphertext sebagai cleartext. |
-| **MOD-036** | `credential.ticket_converter` | `converted_ticket` / `converted_ticket_b64` | `CredentialArtifact(cred_type="kerberos_ticket")` | Mapping capability `converted_ticket` $\rightarrow$ `_normalize_kerberos_tickets` dengan decoder base64 otomatis. |
+| **MOD-036** | `credential.ticket_converter` | `converted_ticket` / `converted_ticket_b64` | `CredentialArtifact(cred_type="kerberos_ticket")` | *(Handler normalizer diimplementasikan di `5635362`)*. Routing `_normalize_converted_ticket`. |
 | **MOD-040** | `linux.container` | `container_escape_vectors`, `k8s_rbac_findings` | `HostVulnArtifact` & `PermissionArtifact` | Buat handler `_normalize_container_vectors` & `_normalize_k8s_rbac`. |
-| **MOD-041** | `linux.samba_secrets` | `machine_account_hash`, `samba_secrets` | `HashArtifact(hash_type="ntlm")`, `CredentialArtifact` | Routing ke `_normalize_ntlm_hashes` dan handler baru `_normalize_samba_secrets`. |
-| **MOD-044** | `linux.keytab_abuse` | `machine_credentials`, `kerberos_keys` | `CredentialArtifact(cred_type="keytab_key")` | Handler `_normalize_keytab_keys` memparsing entri keytab (KVNO, encryption type, key bytes). |
+| **MOD-041** | `linux.samba_secrets` | `machine_account_hash`, `samba_secrets` | `HashArtifact(hash_type="ntlm")`, `CredentialArtifact` | *(Handler normalizer diimplementasikan di `5635362`)*. Routing `_normalize_samba_secrets`. |
+| **MOD-044** | `linux.keytab_abuse` | `machine_credentials`, `kerberos_keys` | `CredentialArtifact(cred_type="keytab_key")` | *(Handler normalizer diimplementasikan di `5635362`)*. Routing `_normalize_keytab_keys`. |
 | **MOD-051** | `cloud.identity_federation_abuse` | `federation_trusts`, `golden_saml_paths`, `oauth_tokens`, `pivot_paths` | `CloudResourceArtifact` & `CredentialArtifact` | Handler modular untuk token OAuth dan topologi trust federasi cloud. |
-| **MOD-052** | `cloud.aws_privesc` | `aws_privesc_paths`, `iam_privesc_paths` | `PermissionArtifact(privilege="privesc_vector")` | Handler `_normalize_iam_privesc` mengonversi daftar path eksploitasi IAM ke permission finding terstruktur. |
+| **MOD-052** | `cloud.aws_privesc` | `aws_privesc_paths`, `iam_privesc_paths` | `PermissionArtifact(privilege="privesc_vector")` | *(Handler normalizer diimplementasikan di `5635362`)*. Routing `_normalize_iam_privesc`. |
 | **MOD-056** | `ad.enum_users` | `password_policy` | `DomainPolicyArtifact` (atau `HostArtifact` metadata) | Buat handler `_normalize_password_policy` untuk mencatat panjang password, threshold lockout, dan durasi audit. |
-| **MOD-061** | `network.snmp_enum` | `snmp_findings`, `valid_credentials` (SNMP) | `CredentialArtifact(cred_type="snmp_community")` | Simpan community string ke vault dan tambahkan handler normalizer untuk SNMP community strings. |
-| **MOD-062** | `recon.fingerprint`, `network.*` | `fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services` | `HostArtifact` & `HostVulnArtifact` | Tambahkan handler normalizer recon untuk mengekstrak hostname, subdomain, web attack surface, dan banner service ke `HostArtifact`. |
+| **MOD-061** | `network.snmp_enum` | `snmp_findings`, `valid_credentials` (SNMP) | `CredentialArtifact(cred_type="snmp_community")` | **FIXED** (commit `5635362`). Vault write Gate 6 + standard `valid_credentials` contract. |
+| **MOD-062** | `recon.fingerprint`, `network.*` | `fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services` | `HostArtifact` & `HostVulnArtifact` | *(7 Handler normalizer diimplementasikan di `5635362`)* (`dns_records`, `subdomains`, `service_versions`, `vulnerable_services`, `web_fingerprint`, `admin_interfaces`). Sisa recon capability ditunda ke batch fix serentak. |
+| **MOD-066** | `cloud.azure`, `cloud.azure_ad` | `azure_findings`, `azure_ad_findings`, `access_tokens` | `CloudResourceArtifact` & `CredentialArtifact` | Tambah handler `_normalize_azure` & `_normalize_azure_ad` untuk mengekstrak storage accounts, RBAC bindings, NSG rules, guest users, dan token akses. |
+| **MOD-068** | `cloud.gcp` | `gcp_findings` | `CloudResourceArtifact` & `PermissionArtifact` | Tambah handler `_normalize_gcp` untuk mengekstrak GCS public buckets, project IAM bindings, dan service account keys. |
 
 **Estimasi Pengerjaan**: 1 commit per sub-kategori capability (AD, Linux, Cloud). Semua perubahan terlokalisasi di `ares/normalize/artifacts.py` dan unit test di `tests/unit/test_artifact_normalizer_pipeline.py`.
 
@@ -136,6 +143,7 @@ Engine `_extract_all_targets` hanya mengekstrak parameter target primer (`target
 | **MOD-032** | `credential.reuse` | `login.microsoftonline.com` | HTTPS (443) | Cegah auto-probing endpoint publik jika target bertipe RFC1918 internal. |
 | **MOD-058** | `network.dns_enum` | `ns_host` / `ns_clean` (AXFR zone transfer) | TCP (53) | Tambah `await self.before_request(ns_clean, "dns")` sebelum query zone transfer AXFR. |
 | **MOD-059** | `network.http_fingerprint` | External redirect URLs via `follow_redirects=True` | HTTP / HTTPS | Custom redirect hook untuk memvalidasi `campaign.is_in_scope()` sebelum mengikuti redirect ke host luar. |
+| **MOD-064** | `cloud.aws`, `cloud.gcp` | `http://169.254.169.254`, `http://metadata.google.internal` | HTTP (80) | **FIXED** (commit `d86750b`). Probing metadata lokal workstation operator telah dihapus dari `cloud.aws` dan `cloud.gcp`. |
 
 **Fix Pattern**:
 ```python
@@ -146,7 +154,7 @@ if listener_ip:
 
 ---
 
-### Grup E: Fake/Stub Implementation (Masih Aktif)
+### Grup E: Fake/Stub Implementation & Pipeline Disconnect (Masih Aktif)
 
 Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, parsing hardcoded kosong, atau heuristik lemah yang memicu false positive. Melanggar **Rule 1 ARES (Anti-Hype Policy & Zero Over-claiming)**.
 
@@ -163,7 +171,9 @@ Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, p
 | **MOD-043** | `linux.ccache_hunt` | Scan `/proc/keys` dan socket KCM menyuntikkan string kosong `""` ke `AresVault`. | Blokir penyimpanan vault jika byte tiket kosong (sejalan dengan Gate 6). |
 | **MOD-047** | `persistence.scheduled_task` | Inverted default `dry_run=True` pada `RegistryRunKeyPersistence`. | Set default `dry_run=False` (mengikuti setting context eksekusi). |
 | **MOD-057** | `ad.enum_acl`, `ad.laps_enum` | Raw string concatenation `user=f"{domain}\\{username}"` membypass `build_ad_bind_plan()`. | Migrasi ke `build_ad_bind_plan()` untuk standardisasi UPN/NTLM domain binding. |
-| **MOD-061** | `network.snmp_enum` | Menyimpan list `Finding` objek mentah di `raw["snmp_findings"]` dan tidak memformat ke kontrak standar `valid_credentials` (MOD-033). | Serialisasi findings ke dicts dan tuliskan community string yang valid ke vault / `valid_credentials`. |
+| **MOD-061** | `network.snmp_enum` | Menyimpan list `Finding` objek mentah di `raw["snmp_findings"]` dan tidak memformat ke kontrak standar `valid_credentials` (MOD-033). | **FIXED** (commit `5635362`). Serialisasi findings ke dicts dan tuliskan community string yang valid ke vault / `valid_credentials`. |
+| **MOD-065** | `cloud.*` | `validate()` tidak memverifikasi import SDK cloud (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`). | Tambahkan import pre-flight check dengan `find_spec()` dan raise `ModuleValidationError` informatif (Estimasi Fix: S - 4 file, pola identik). |
+| **MOD-067** | `cloud.azure_ad` | Indentasi return statement salah pada `run()`, memicu `UnboundLocalError` pada default `technique="enumerate"` dan memutus 100% eksekusi Microsoft Graph API (dead code). | **FIXED** (commit `bd2c9b4`). Indentasi return blok `device_code` diperbaiki, inisialisasi `raw` di awal method, enumerasi Graph API dipulihkan. |
 
 ---
 
@@ -171,12 +181,12 @@ Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, p
 
 Temuan arsitektural yang membutuhkan keputusan desain dan persetujuan lead engineer sebelum dieksekusi:
 
-1. **MOD-053: Cloud Scope Gap (Architectural Gap)**
-   - **Masalah**: `ScopeGuard` hanya mengevaluasi IP/CIDR/DNS. Modul cloud (`aws_privesc`, `identity_federation_abuse`) menggunakan identifier cloud seperti `aws_account_id`, `tenant_id`, `subscription_id`, `arn:aws:iam::*`.
+1. **MOD-053 & MOD-063: Cloud Scope Gap (Architectural Gap)**
+   - **Masalah**: `ScopeGuard` hanya mengevaluasi IP/CIDR/DNS. Modul cloud (`aws_privesc`, `identity_federation_abuse`, `cloud.aws`, `cloud.azure`, `cloud.azure_ad`, `cloud.gcp`) menggunakan identifier cloud seperti `aws_account_id` (STS), `tenant_id`, `subscription_id`, `project_id`, `arn:aws:iam::*` yang saat ini lolos tanpa validasi scope campaign.
    - **Opsi Solusi**:
-     - *Opsi 1*: Tambahkan dataclass `CloudScope` ke dalam `Campaign` (`allowed_aws_accounts`, `allowed_azure_tenants`).
+     - *Opsi 1*: Tambahkan dataclass `CloudScope` ke dalam `Campaign` (`allowed_aws_accounts`, `allowed_azure_tenants`, `allowed_gcp_projects`).
      - *Opsi 2*: Buat `CloudScopeGuard` terpisah yang diinjeksi via `ExecutionContext`.
-   - **Rekomendasi**: Opsi 1 (ekstensi deklaratif pada `CampaignScope`).
+   - **Rekomendasi**: Opsi 1 (ekstensi deklaratif pada `CampaignScope`) + helper `validate_cloud_scope`.
 
 2. **Gate 1: Parameter & Boundary Integrity Guard**
    - Penegakan validasi schema Pydantic sebelum modul diizinkan memasuki tahap scheduling.

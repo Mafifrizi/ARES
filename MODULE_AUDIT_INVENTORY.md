@@ -409,9 +409,17 @@ Seluruh modul **TIER 1 (Critical)** dan **TIER 2 (High)** telah dikelompokkan ke
   - [`ares/modules/network/service_detect.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/network/service_detect.py) — *Service Detection (`network.service_detect`)* (399 baris)
   - [`ares/modules/network/snmp_enum.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/network/snmp_enum.py) — *SNMP Enumeration (`network.snmp_enum`)* (415 baris)
 
-### Batch 11: Cloud Asset & Infrastructure Discovery (TIER 2 - HIGH)
+### Batch 11: Cloud Asset & Infrastructure Discovery (TIER 2 - HIGH) - [STATUS: AUDITED]
 - **Deskripsi**: Modul enumerasi read-only aset infrastruktur cloud publik (AWS EC2/S3/IAM, Azure VMs/Subscriptions, Entra ID / Azure AD, GCP Projects & Compute).
-- **Fokus Risiko Audit**: Penanganan rate limiting / throttling API cloud, parsing response JSON API tak terduga, isolasi credential cloud antar target tenant.
+- **Fokus Risiko Audit**: Penanganan rate limiting / throttling API cloud, parsing response JSON API tak terduga, isolasi credential cloud antar target tenant, validasi SDK dependency, proteksi SSRF link-local metadata operator.
+- **Status Audit**: **SELESAI (AUDITED)**
+- **Hasil Temuan**: **6 Temuan Terkonfirmasi** (1 Critical, 4 High, 1 Medium)
+  - `MOD-063` (High): Unscoped Cloud Account/Tenant Execution via Ambient Credentials pada `cloud.aws`, `cloud.azure`, `cloud.azure_ad`, `cloud.gcp` (ketiadaan validasi target cloud ID terhadap `campaign.scope`).
+  - `MOD-064` (High): Operator Workstation Link-Local Metadata SSRF Probe & Token Leak pada `cloud.aws` (`169.254.169.254`) dan `cloud.gcp` (`metadata.google.internal`).
+  - `MOD-065` (Medium): Missing Pre-Flight SDK Dependency Validation in `validate()` pada seluruh 4 modul cloud (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`).
+  - `MOD-066` (High): 100% Normalizer Data Loss on `azure_findings`, `azure_ad_findings`, dan `access_tokens` pada `cloud.azure` dan `cloud.azure_ad`.
+  - `MOD-067` (Critical): Indentation Defect Causing `UnboundLocalError` & 100% Unreachable Graph API Dead Code pada `cloud.azure_ad` (`technique="enumerate"` crash dan blok Graph API terpotong).
+  - `MOD-068` (High): 100% Normalizer Data Loss on `gcp_findings` in `ArtifactNormalizer` pada `cloud.gcp`.
 - **Jumlah File**: 4 file
 - **Daftar File**:
   - [`ares/modules/cloud/aws.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/aws.py) — *AWS Recon & Attack (`cloud.aws`)* (347 baris)

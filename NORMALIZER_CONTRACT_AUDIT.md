@@ -31,8 +31,8 @@ normalized = ArtifactNormalizer().normalize(
 | ✅ **MATCH (Selaras Penuh)** | 6 pasangan modul | 30.0% | Data mengalir sempurna ke `ArtifactStore` |
 | 🔧 **FIXED (Dual-Read Fallback Diterapkan)** | 14 pasangan modul | 70.0% | **Data dipulihkan via Dual-Read Fallback** |
 | ⚠️ **ORPHANED HANDLER** | 0 handler | 0.0% | Semua handler memiliki minimal 1 modul deklarator |
-| 🆕 **HANDLER BARU DITAMBAHKAN** | 8 capability | - | `lsa_secrets`, `cached_credentials`, `valid_credentials`, `cleartext_credentials`, `cracked_credentials`, `laps_passwords`, `kerberos_tickets`, `open_ports` |
-| 🚫 **UNHANDLED OUTPUTS** | **78 capability** | - | Output modul diabaikan sepenuhnya oleh normalizer (berkurang dari 86) |
+| 🆕 **HANDLER BARU DITAMBAHKAN** | 15 capability | - | `lsa_secrets`, `cached_credentials`, `valid_credentials`, `cleartext_credentials`, `cracked_credentials`, `laps_passwords`, `kerberos_tickets`, `open_ports`, `converted_ticket`, `samba_secrets`, `keytab_keys`, `iam_privesc`, `dns_records`, `service_versions`, `web_fingerprint` |
+| 🚫 **UNHANDLED OUTPUTS** | **71 capability** | - | Output modul diabaikan sepenuhnya oleh normalizer (berkurang dari 78 pasca 7 Group A handlers) |
 
 ---
 
@@ -84,8 +84,12 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `valid_credentials` | `ad.laps_enum` | `laps_passwords` / `valid_credentials` | direct vault write + OPSEC raw (`has_password: True`) | ✅ **FIXED** (MOD-055) | Passwords stored directly to vault (Gate 6 validated); raw output OPSEC-safe with `has_password: True`. |
 | `user_list` / `users` | `ad.enum_users` | `users` OR `user_list` | `users`, `user_list` | ✅ **FIXED** (MOD-056 partial) | Dual-write `raw["users"]` and `raw["user_list"]` implemented. |
 | `password_policy` | `ad.enum_users` | — | `password_policy` | ❌ **MISMATCH, no handler, DEFERRED** | Unhandled output telemetry (`no handler`). Ditunda ke batch fix serentak. |
-| `snmp_findings` / `valid_credentials` | `network.snmp_enum` | — | `valid_communities`, `snmp_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-061) | Kredensial valid SNMP tidak disimpan ke vault dan tidak ada handler normalizer. |
-| Reconnaissance capabilities (`fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`) | `recon.fingerprint`, `network.dns_enum`, `network.http_fingerprint`, `network.service_detect` | — | Various raw dicts | ❌ **MISMATCH, no handler, DEFERRED** (MOD-062) | 100% output recon Batch 10 tidak memiliki handler di normalizer. Data host & network recon hilang dari `ArtifactStore`. |
+| `snmp_findings` / `valid_credentials` | `network.snmp_enum` | `valid_credentials` | `valid_credentials`, `snmp_findings` | ✅ **FIXED** (MOD-061, commit `5635362`) | Direct vault write Gate 6 + `valid_credentials` contract standar `list[dict]`. |
+| Reconnaissance capabilities (`dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services`) | `recon.fingerprint`, `network.dns_enum`, `network.http_fingerprint`, `network.service_detect` | `dns_records`, `subdomains`, `service_versions`, `web_fingerprint`, dll. | Various raw dicts | ✅ **PARTIALLY FIXED** (7 Handlers in commit `5635362`) | 7 handler normalizer recon ditambahkan ke `ArtifactNormalizer`. Sisa recon capability ditunda ke batch fix serentak. |
+| `azure_findings` | `cloud.azure` | — | `azure_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `azure_findings` tidak memiliki handler di `ArtifactNormalizer`. Data storage accounts, RBAC, dan NSG hilang 100% dari `ArtifactStore`. |
+| `azure_ad_findings` | `cloud.azure_ad` | — | `azure_ad_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `azure_ad_findings` tidak memiliki handler di `ArtifactNormalizer`. Data user dan guest Entra ID serta privileged service principals hilang dari `ArtifactStore`. |
+| `access_tokens` | `cloud.azure_ad` | — | `access_tokens` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-066) | Output capability `access_tokens` (captured device code / client credential tokens) tidak memiliki handler di `ArtifactNormalizer`. |
+| `gcp_findings` | `cloud.gcp` | — | `gcp_findings` | ❌ **MISMATCH, no handler, DEFERRED** (MOD-068) | Output capability `gcp_findings` tidak memiliki handler di `ArtifactNormalizer`. Data public GCS buckets, IAM project roles, dan SA keys hilang dari `ArtifactStore`. |
 
 ---
 
