@@ -325,7 +325,7 @@ class PermissionArtifact(NormalizedArtifact):
 
     def __post_init__(self) -> None:
         self.artifact_type = ArtifactType.PERMISSION
-        self.is_dangerous = self.right in self.DANGEROUS_RIGHTS
+        self.is_dangerous = self.is_dangerous or (self.right in self.DANGEROUS_RIGHTS)
 
     def _dedup_key(self) -> str:
         return f"{self.principal}→{self.right}→{self.target}"
@@ -518,6 +518,25 @@ class ArtifactNormalizer:
             "cached_domain_credentials": self._normalize_cached_domain_credentials,
             # Valid Credentials (MOD-033)
             "valid_credentials":      self._normalize_valid_credentials,
+            # Kerberos Ticket Conversion (MOD-036)
+            "converted_ticket":       self._normalize_converted_ticket,
+            "converted_ticket_b64":   self._normalize_converted_ticket,
+            # Samba Secrets & Machine Hashes (MOD-041)
+            "samba_secrets":          self._normalize_samba_secrets,
+            "machine_account_hash":   self._normalize_samba_secrets,
+            # Linux Keytab Credentials (MOD-044)
+            "kerberos_keys":          self._normalize_keytab_keys,
+            "machine_credentials":    self._normalize_keytab_keys,
+            # AWS IAM Privesc Paths (MOD-052)
+            "iam_privesc_paths":      self._normalize_iam_privesc,
+            "aws_privesc_paths":      self._normalize_iam_privesc,
+            # Reconnaissance & Service Fingerprinting (MOD-062)
+            "dns_records":            self._normalize_dns_records,
+            "subdomains":             self._normalize_dns_records,
+            "service_versions":       self._normalize_service_versions,
+            "vulnerable_services":    self._normalize_service_versions,
+            "web_fingerprint":        self._normalize_web_fingerprint,
+            "admin_interfaces":       self._normalize_web_fingerprint,
         }
         handler = handlers.get(capability)
         if handler:
@@ -1036,4 +1055,238 @@ class ArtifactNormalizer:
             store.add_credential(artifact)
             count += 1
         return count
+
+    # ── Group A Handlers (MOD-036, MOD-041, MOD-044, MOD-052, MOD-062) ─────────
+
+    def _normalize_converted_ticket(
+        self, raw: dict, store: ArtifactStore, capability: str = "converted_ticket"
+    ) -> int:
+        """MOD-036: Normalize converted Kerberos ticket (kirbi <-> ccache)."""
+        ticket_b64 = raw.get("converted_ticket_b64") or raw.get("converted_ticket")
+        if not ticket_b64 or not isinstance(ticket_b64, str):
+            return 0
+        meta = raw.get("metadata", {})
+        is_tgt = meta.get("is_tgt", False)
+        target = raw.get("target", "")
+        artifact = CredentialArtifact(
+            username=meta.get("client") or "converted-user",
+            domain=target or meta.get("server") or "",
+            cred_type="tgt" if is_tgt else "tgs",
+            secret=ticket_b64,
+            source_host=target,
+            privilege="domain_admin" if is_tgt else "domain_user",
+            source_module=capability,
+        )
+        store.add_credential(artifact)
+        return 1
+
+    def _normalize_samba_secrets(
+        self, raw: dict, store: ArtifactStore, capability: str = "samba_secrets"
+    ) -> int:
+        """MOD-041: Normalize Samba secrets.tdb machine account hashes and secrets."""
+        secrets = raw.get("samba_secrets") or raw.get("secrets") or raw.get("machine_account_hash")
+        if not secrets:
+            return 0
+        if isinstance(secrets, dict):
+            secrets = [secrets]
+        elif not isinstance(secrets, list):
+            return 0
+        count = 0
+        target = raw.get("target", "")
+        for sec in secrets:
+            if not isinstance(sec, dict):
+                continue
+            username = sec.get("account_name", f"{target}$")
+            domain = sec.get("domain", target)
+            ntlm = sec.get("ntlm_hash")
+            if ntlm:
+                h_artifact = HashArtifact(
+                    username=username,
+                    domain=domain,
+                    hash_type="ntlm",
+                    hash_value=ntlm,
+                    source_module=capability,
+                )
+                store.add(h_artifact)
+                count += 1
+            plain = sec.get("plaintext") or sec.get("password")
+            if plain:
+                c_artifact = CredentialArtifact(
+                    username=username,
+                    domain=domain,
+                    cred_type="cleartext",
+                    secret=plain,
+                    source_host=target,
+                    privilege="service_account",
+                    source_module=capability,
+                )
+                store.add_credential(c_artifact)
+                count += 1
+        return count
+
+    def _normalize_keytab_keys(
+        self, raw: dict, store: ArtifactStore, capability: str = "kerberos_keys"
+    ) -> int:
+        """MOD-044: Normalize Kerberos keytab extracted entries."""
+        entries = raw.get("kerberos_keys") or raw.get("machine_credentials") or raw.get("entries")
+        if not entries:
+            return 0
+        if isinstance(entries, dict):
+            entries = [entries]
+        elif not isinstance(entries, list):
+            return 0
+        count = 0
+        target = raw.get("target", "")
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            key_hex = e.get("key_hex", "")
+            principal = e.get("principal", f"{target}$")
+            realm = e.get("realm", target)
+            artifact = CredentialArtifact(
+                username=principal,
+                domain=realm,
+                cred_type="keytab_key",
+                secret=key_hex,
+                source_host=target,
+                privilege="service_account",
+                note=f"enctype={e.get('enctype', '')}, kvno={e.get('kvno', '')}",
+                source_module=capability,
+            )
+            store.add_credential(artifact)
+            count += 1
+        return count
+
+    def _normalize_iam_privesc(
+        self, raw: dict, store: ArtifactStore, capability: str = "iam_privesc_paths"
+    ) -> int:
+        """MOD-052: Normalize AWS IAM privilege escalation paths into PermissionArtifact."""
+        paths = raw.get("iam_privesc_paths") or raw.get("aws_privesc_paths", [])
+        if not isinstance(paths, list):
+            return 0
+        count = 0
+        target = raw.get("target", "") or raw.get("account_id", "")
+        for p in paths:
+            if not isinstance(p, dict):
+                continue
+            artifact = PermissionArtifact(
+                principal=p.get("principal") or p.get("user") or p.get("role") or "current_user",
+                target=p.get("target") or p.get("resource") or target or "aws_account",
+                right=p.get("action") or p.get("privilege") or p.get("technique") or "iam_privesc",
+                domain=raw.get("account_id") or raw.get("region") or "aws",
+                is_dangerous=True,
+                source_module=capability,
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_dns_records(
+        self, raw: dict, store: ArtifactStore, capability: str = "dns_records"
+    ) -> int:
+        """MOD-062: Normalize DNS reconnaissance records and discovered subdomains."""
+        count = 0
+        domain = raw.get("domain", "")
+        subdomains = raw.get("subdomains", [])
+        if isinstance(subdomains, list):
+            for sub in subdomains:
+                if isinstance(sub, dict):
+                    fqdn = sub.get("fqdn") or sub.get("subdomain", "")
+                    ips = sub.get("ips", [])
+                    ip = ips[0] if ips and isinstance(ips, list) else ""
+                elif isinstance(sub, str):
+                    fqdn = sub
+                    ip = ""
+                else:
+                    continue
+                if fqdn:
+                    artifact = HostArtifact(
+                        ip_address=ip or fqdn,
+                        hostname=fqdn,
+                        fqdn=fqdn,
+                        domain=domain,
+                        source_module=capability,
+                    )
+                    store.add(artifact)
+                    count += 1
+        dns_records = raw.get("dns_records", {})
+        if isinstance(dns_records, dict):
+            for rtype in ("A", "AAAA"):
+                ips = dns_records.get(rtype, [])
+                if isinstance(ips, list):
+                    for ip in ips:
+                        if isinstance(ip, str) and ip:
+                            artifact = HostArtifact(
+                                ip_address=ip,
+                                hostname=domain,
+                                fqdn=domain,
+                                domain=domain,
+                                source_module=capability,
+                            )
+                            store.add(artifact)
+                            count += 1
+        return count
+
+    def _normalize_service_versions(
+        self, raw: dict, store: ArtifactStore, capability: str = "service_versions"
+    ) -> int:
+        """MOD-062: Normalize service detect version banners into HostArtifact."""
+        target = raw.get("target") or raw.get("host", "")
+        if not target:
+            return 0
+        service_versions = raw.get("service_versions", {})
+        ports: list[int] = []
+        if isinstance(service_versions, dict):
+            for p_str in service_versions:
+                if str(p_str).isdigit():
+                    ports.append(int(p_str))
+        ports = sorted(list(set(ports)))
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == target or h.hostname == target:
+                existing = h
+                break
+        if existing:
+            if ports:
+                existing.open_ports = sorted(list(set(existing.open_ports + ports)))
+            if raw.get("os") and not existing.os:
+                existing.os = raw.get("os", "")
+            return 1
+        artifact = HostArtifact(
+            ip_address=target,
+            hostname=target,
+            os=raw.get("os", "") or raw.get("detected_os", ""),
+            open_ports=ports,
+            source_module=capability,
+        )
+        store.add(artifact)
+        return 1
+
+    def _normalize_web_fingerprint(
+        self, raw: dict, store: ArtifactStore, capability: str = "web_fingerprint"
+    ) -> int:
+        """MOD-062: Normalize web server fingerprint and technologies into HostArtifact."""
+        target = raw.get("target") or raw.get("host", "")
+        if not target:
+            return 0
+        web_fp = raw.get("web_fingerprint", {})
+        server = web_fp.get("server", "") if isinstance(web_fp, dict) else ""
+        existing = None
+        for h in store.hosts():
+            if h.ip_address == target or h.hostname == target:
+                existing = h
+                break
+        if existing:
+            if server and not existing.os:
+                existing.os = server
+            return 1
+        artifact = HostArtifact(
+            ip_address=target,
+            hostname=target,
+            os=server,
+            source_module=capability,
+        )
+        store.add(artifact)
+        return 1
+
 

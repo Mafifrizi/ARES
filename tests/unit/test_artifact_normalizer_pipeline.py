@@ -714,4 +714,226 @@ def test_valid_credentials_skips_invalid_non_dict_entries(
     assert creds[0].secret == "valid_password"
 
 
+@pytest.mark.asyncio
+async def test_snmp_enum_vault_and_valid_credentials_mod_061(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """
+    MOD-061: snmp_enum writes valid community strings to AresVault (Gate 6 compliant),
+    produces standardized valid_credentials output, and serializes snmp_findings.
+    """
+    from unittest.mock import patch
+    from tests.unit.modules.test_modules import _make_module
+    from ares.modules.network.snmp_enum import SnmpEnumModule
+    from ares.credential.vault import CredentialVault
+    from ares.core.context import ExecutionContext
+
+    mod, _ = _make_module(SnmpEnumModule)
+    vault = CredentialVault(encryption_key=None)
+    ctx = ExecutionContext(
+        target="10.0.0.100",
+        vault=vault,
+        network_io_occurred=True,
+    )
+
+    fake_sys_info = {
+        "sysDescr": "Linux router 5.15.0",
+        "sysName": "edge-router-01",
+    }
+
+    # Mock low-level sync SNMP calls so no real network traffic occurs
+    with patch("ares.modules.network.snmp_enum._snmp_get_sync", return_value=fake_sys_info), \
+         patch("ares.modules.network.snmp_enum._snmp_walk_sync", return_value=[]):
+        findings, raw = await mod.run(
+            target="10.0.0.100",
+            port=161,
+            communities=["public"],
+            walk=False,
+            vault=vault,
+            ctx=ctx,
+        )
+
+    # 1. Community string stored directly into vault (Gate 6 passed)
+    stored_creds = list(vault._store.values())
+    assert len(stored_creds) == 1
+    revealed = vault.reveal(stored_creds[0].id)
+    assert revealed == "public"
+
+    # 2. raw output has standardized valid_credentials contract
+    assert "valid_credentials" in raw
+    assert len(raw["valid_credentials"]) == 1
+    assert raw["valid_credentials"][0]["username"] == "snmp"
+    assert raw["valid_credentials"][0]["password"] == "public"
+    assert raw["valid_credentials"][0]["method"] == "snmp_community"
+    assert raw["valid_credentials"][0]["protocol"] == "snmp"
+
+    # 3. snmp_findings is serialized (list of dicts, not raw Finding objects)
+    assert isinstance(raw["snmp_findings"], list)
+    assert len(raw["snmp_findings"]) >= 1
+    assert isinstance(raw["snmp_findings"][0], dict)
+
+    # 4. Normalizer pipeline creates CredentialArtifact with cred_type="snmp_community"
+    added = normalizer.normalize("network.snmp_enum", ["valid_credentials"], raw, store)
+    assert added == 1
+    creds = store.credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "snmp"
+    assert creds[0].secret == "public"
+    assert creds[0].cred_type == "snmp_community"
+    assert creds[0].protocol == "snmp"
+    assert creds[0].target == "10.0.0.100"
+
+
+def test_converted_ticket_pipeline_mod_036(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-036: Converted ticket base64 is ingested into CredentialArtifact."""
+    raw = {
+        "target": "corp.local",
+        "converted_ticket_b64": "Y2NhY2hlLXRlc3QtZGF0YQ==",
+        "metadata": {
+            "client": "admin@CORP.LOCAL",
+            "server": "krbtgt/CORP.LOCAL",
+            "is_tgt": True,
+        },
+    }
+    added = normalizer.normalize("credential.ticket_converter", ["converted_ticket"], raw, store)
+    assert added == 1
+    creds = store.credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "admin@CORP.LOCAL"
+    assert creds[0].domain == "corp.local"
+    assert creds[0].cred_type == "tgt"
+    assert creds[0].privilege == "domain_admin"
+    assert creds[0].secret == "Y2NhY2hlLXRlc3QtZGF0YQ=="
+
+
+def test_samba_secrets_pipeline_mod_041(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-041: Samba secrets are converted to HashArtifact and CredentialArtifact."""
+    raw = {
+        "target": "fileserver01",
+        "samba_secrets": [
+            {
+                "account_name": "FILESERVER01$",
+                "domain": "CORP",
+                "ntlm_hash": "aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0",
+                "plaintext": "SecretMachinePass123!",
+            }
+        ],
+    }
+    added = normalizer.normalize("linux.samba_secrets", ["samba_secrets"], raw, store)
+    assert added == 2
+    hashes = store.hashes()
+    assert len(hashes) == 1
+    assert hashes[0].username == "FILESERVER01$"
+    assert hashes[0].hash_type == "ntlm"
+    assert "31d6cfe0d16ae931b73c59d7e0c089c0" in hashes[0].hash_value
+
+    creds = store.credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "FILESERVER01$"
+    assert creds[0].secret == "SecretMachinePass123!"
+
+
+def test_keytab_keys_pipeline_mod_044(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-044: Kerberos keytab keys are converted to CredentialArtifact with enctype note."""
+    raw = {
+        "target": "linux01",
+        "kerberos_keys": [
+            {
+                "principal": "host/linux01.corp.local@CORP.LOCAL",
+                "realm": "CORP.LOCAL",
+                "key_hex": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "enctype": 18,
+                "kvno": 2,
+            }
+        ],
+    }
+    added = normalizer.normalize("linux.keytab_abuse", ["kerberos_keys"], raw, store)
+    assert added == 1
+    creds = store.credentials()
+    assert len(creds) == 1
+    assert creds[0].username == "host/linux01.corp.local@CORP.LOCAL"
+    assert creds[0].cred_type == "keytab_key"
+    assert creds[0].secret.startswith("12345678")
+    assert "enctype=18" in creds[0].note
+
+
+def test_iam_privesc_pipeline_mod_052(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-052: AWS IAM privilege escalation paths normalized to PermissionArtifact."""
+    raw = {
+        "account_id": "123456789012",
+        "iam_privesc_paths": [
+            {
+                "principal": "arn:aws:iam::123456789012:user/dev",
+                "action": "iam:PassRole",
+                "target": "arn:aws:iam::123456789012:role/AdminRole",
+                "technique": "T1548",
+            }
+        ],
+    }
+    added = normalizer.normalize("cloud.aws_privesc", ["iam_privesc_paths"], raw, store)
+    assert added == 1
+    perms = store.permissions()
+    assert len(perms) == 1
+    assert perms[0].principal == "arn:aws:iam::123456789012:user/dev"
+    assert perms[0].target == "arn:aws:iam::123456789012:role/AdminRole"
+    assert perms[0].right == "iam:PassRole"
+    assert perms[0].is_dangerous is True
+
+
+def test_dns_records_and_subdomains_pipeline_mod_062(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-062: DNS subdomains and A-records normalized to HostArtifact."""
+    raw = {
+        "domain": "target.corp",
+        "subdomains": [
+            {"fqdn": "vpn.target.corp", "ips": ["10.10.1.5"]},
+            "mail.target.corp",
+        ],
+        "dns_records": {
+            "A": ["10.10.1.1", "10.10.1.2"],
+        },
+    }
+    added = normalizer.normalize("network.dns_enum", ["subdomains", "dns_records"], raw, store)
+    assert added >= 4
+    hosts = store.hosts()
+    hostnames = {h.hostname for h in hosts}
+    assert "vpn.target.corp" in hostnames
+    assert "mail.target.corp" in hostnames
+    assert "target.corp" in hostnames
+
+
+def test_service_versions_and_web_fingerprint_pipeline_mod_062(
+    normalizer: ArtifactNormalizer, store: ArtifactStore
+):
+    """MOD-062: Service versions and web fingerprint update HostArtifact."""
+    raw_service = {
+        "target": "10.10.1.50",
+        "service_versions": {
+            "80": {"service": "http", "version": "nginx 1.18"},
+            "443": {"service": "https", "version": "nginx 1.18"},
+        },
+        "os": "Ubuntu Linux",
+    }
+    added_svc = normalizer.normalize("network.service_detect", ["service_versions"], raw_service, store)
+    assert added_svc == 1
+
+    hosts = store.hosts()
+    assert len(hosts) == 1
+    assert hosts[0].ip_address == "10.10.1.50"
+    assert hosts[0].open_ports == [80, 443]
+    assert hosts[0].os == "Ubuntu Linux"
+
+    raw_web = {
+        "target": "10.10.1.50",
+        "web_fingerprint": {"server": "nginx/1.18.0 (Ubuntu)"},
+    }
+    added_web = normalizer.normalize("network.http_fingerprint", ["web_fingerprint"], raw_web, store)
+    assert added_web == 1
+    # Existing host updated, no duplicate created
+    assert len(store.hosts()) == 1
+    assert store.hosts()[0].os == "Ubuntu Linux"
+
+
+
 

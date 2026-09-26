@@ -162,7 +162,7 @@ class SnmpEnumModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
     REQUIRES           = []
-    OUTPUTS            = ["snmp_findings", "system_info"]
+    OUTPUTS            = ["snmp_findings", "system_info", "valid_credentials"]
     MITRE_TECHNIQUES   = ["T1046", "T1590"]
     PARAMS_MODEL       = SNMPEnumParams
 
@@ -208,7 +208,7 @@ class SnmpEnumModule(BaseModule):
             communities = params.get("communities")
             extra_params = {k: v for k, v in params.items() if k not in ("target", "port", "snmp_port", "communities")}
 
-        kwargs: dict[str, Any] = {"target": target, "port": port, **extra_params}
+        kwargs: dict[str, Any] = {"target": target, "port": port, "ctx": ctx, "vault": getattr(ctx, "vault", None), **extra_params}
         if communities is not None:
             kwargs["communities"] = communities
 
@@ -287,6 +287,9 @@ class SnmpEnumModule(BaseModule):
         dry_run     = kwargs.get("dry_run", False)
         communities = kwargs.get("communities") or _COMMUNITY_STRINGS
         do_walk     = kwargs.get("walk", True)    # Walk tables for deeper enum
+        vault       = kwargs.get("vault")
+        ctx         = kwargs.get("ctx")
+        _vault      = vault or getattr(getattr(self, "campaign", None), "_vault", None) or (getattr(ctx, "vault", None) if ctx else None)
 
         if not target:
             return [], {"error": "no_target"}
@@ -344,6 +347,22 @@ class SnmpEnumModule(BaseModule):
             logger.info("snmp_valid_community",
                         target=target, community=community,
                         sys_name=result.get("sysName", "?"))
+
+            # Store to AresVault if available (Gate 6 compliant)
+            if _vault:
+                from ares.credential.vault import Credential, CredentialType, PrivilegeLevel
+                try:
+                    cred = Credential(
+                        username="snmp",
+                        domain=target,
+                        cred_type=CredentialType.CLEARTEXT,
+                        privilege=PrivilegeLevel.LOCAL_ADMIN if community.lower() in ("private", "write") else PrivilegeLevel.LOCAL_USER,
+                        source_module=self.MODULE_ID,
+                        target_host=target,
+                    )
+                    _vault.store(cred, community)
+                except Exception as exc:
+                    logger.debug("snmp_vault_store_failed", target=target, community=community, error=str(exc)[:60])
 
             # Emit finding
             is_default = community.lower() in ("public", "private")
@@ -403,12 +422,30 @@ class SnmpEnumModule(BaseModule):
                 confidence=0.95,
             )
 
+        valid_creds = [
+            {
+                "username": "snmp",
+                "password": e["community"],
+                "target": target,
+                "port": port,
+                "method": "snmp_community",
+                "protocol": "snmp",
+                "privilege": "local_admin" if e["community"].lower() in ("private", "write") else "user",
+                "domain": target,
+            }
+            for e in valid_communities
+        ]
+
         raw = {
             "target":             target,
             "port":               port,
             "valid_communities":  valid_communities,
             "system_info":        system_info,
             "communities_tested": len(communities),
+            "valid_credentials":  valid_creds,
         }
-        raw["snmp_findings"] = self._findings  # OUTPUTS key
+        raw["snmp_findings"] = [
+            f.model_dump() if hasattr(f, "model_dump") else (f.dict() if hasattr(f, "dict") else vars(f))
+            for f in self._findings
+        ]
         return self._findings[:], raw
