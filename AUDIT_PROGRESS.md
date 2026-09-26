@@ -20,20 +20,20 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-010 | ad.sccm scope bypass on DCOM & PXE port probe | FIXED | PASSED (10/10 scope tests) | `ares/modules/ad/sccm.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Penegakan `before_request` pada `sccm_host`, `naa_target`, dan distribution points di `_check_pxe` dengan graceful error handling (commit `cc2e980`). |
 | MOD-011 | lateral.ntlm_relay mass out-of-scope port probe | FIXED | PASSED (10/10 scope tests) | `ares/modules/lateral/ntlm_relay.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Filter targets via `campaign.is_in_scope(host)` dan `before_request(host, "smb")` di loop `_check_relay_targets` mencegah port scanning liar (commit `cc2e980`). |
 | MOD-012 | lateral.ntlm_relay persistent machine account & DACL without teardown | FIXED | PASSED (2/2 teardown tests) | `ares/modules/lateral/ntlm_relay.py`, `tests/unit/modules/test_ntlm_relay_teardown.py` | Initial DACL saved before modification; machine account deleted via `conn.delete()` and DACL restored in `finally` block (commit `28e983a`). |
-| MOD-013 | lateral.ntlm_relay fictitious S4U impersonation claim | TERBUKTI (HIGH) | Audit verified (`ntlm_relay.py:944-965`) | Menunggu remedi | Mengklaim S4U impersonasi Administrator, padahal hanya meminta TGS biasa untuk akun mesin dan menyimpan tiket mesin sebagai `administrator@target.ccache` (melanggar Rule 1). |
+| MOD-013 | lateral.ntlm_relay fictitious S4U impersonation claim | FIXED | PASSED (3/3 unit tests + regression) | `ares/modules/lateral/ntlm_relay.py`, `tests/unit/modules/test_ntlm_relay_s4u_mod013.py` | Real S4U2Self (PA-FOR-USER) + S4U2Proxy (CIFS SPN) 2-step delegation abuse implemented via impacket; verified ccache exists on disk before publishing finding; calibrated confidence (commit `0bf293c`). |
 | MOD-014 | lateral.mssql scope bypass on UNC coercion listener & linked server | FIXED | PASSED (10/10 scope tests) | `ares/modules/lateral/mssql.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Penegakan `before_request` pada listener `unc_coerce` dan `linked_server` pada dynamic query (commit `cc2e980`). |
 | MOD-015 | lateral.smb_relay omission scope check on primary loop | FIXED | PASSED (10/10 scope tests) | `ares/modules/lateral/smb_relay.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Penegakan scope check `is_in_scope` dan `before_request(t, "smb")` sebelum SMB negotiate (commit `cc2e980`). |
 | MOD-016 | ad.sccm cleartext credential evaporation & DPAPI misleading | TERBUKTI (HIGH) | Audit verified (`sccm.py:300, 521`) | Menunggu remedi | NAA DPAPI encrypted blob dilaporkan sebagai `cleartext_credentials`, tidak ada normalizer handler, dan tidak disimpan ke vault. |
 | MOD-017 | network.pivot scope bypass on remote_host & subnets | FIXED | PASSED (10/10 scope tests) | `ares/modules/network/pivot.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Validasi `reachable_subnets` terhadap `campaign.is_in_scope()` sebelum konfigurasi SOCKS5 tunnel (commit `cc2e980`). |
 | MOD-018 | network.pivot teardown omission on background SSH processes | FIXED | PASSED (5/5 teardown tests) | `ares/core/engine.py`, `ares/modules/network/pivot.py`, `ares/pivot/infrastructure.py`, `tests/unit/modules/test_pivot_teardown.py` | Teardown SSH subprocess dan koneksi pivot dijamin via blok `finally` di `AresEngine.run_plan()` (Opsi B), fallback force kill pada process hang, dan exception-safe cleanup (commit `facdb61`). |
-| MOD-019 | network.pivot fictitious implementation & phantom active status | TERBUKTI (HIGH) | Audit verified (`infrastructure.py:260-265, 368-370`) | Menunggu remedi | Jika backend asyncssh/ssh tidak ada, tunnel ditandai ACTIVE dan finding palsu diterbitkan (melanggar Rule 1). |
-| MOD-020 | lateral.ssh_pivot fictitious SOCKS5 proxy implementation | TERBUKTI (HIGH) | Audit verified (`modules.py:1332-1356`) | Menunggu remedi | `establish_socks5` mengembalikan dict proxy padahal `move()` mengabaikan port dan menutup koneksi (melanggar Rule 1). |
+| MOD-019 | network.pivot fictitious implementation & phantom active status | FIXED | PASSED (3/3 unit tests + 54 executor tests) | `ares/pivot/infrastructure.py`, `ares/modules/network/pivot.py`, `tests/unit/pivot/test_pivot_no_backend_mod019.py` | No-backend scenario raises ModuleExecutionError instead of setting TunnelState.ACTIVE and publishing phantom finding (commit `811cca7`). |
+| MOD-020 | lateral.ssh_pivot fictitious SOCKS5 proxy implementation | FIXED | PASSED (4/4 unit tests) | `ares/modules/lateral/modules.py`, `tests/unit/modules/test_ssh_pivot_socks5_mod020.py` | Real SOCKS5 dynamic port forwarding via asyncssh (conn.forward_socks), registered with PivotManager, raises ModuleExecutionError if asyncssh missing (commit `255d1f5`). |
 | MOD-021 | lateral.rdp false-positive execution claim on open port | TERBUKTI (CRITICAL) | Audit verified (`modules.py:1448-1517`) | Menunggu remedi | Port 3389 terbuka memicu status success dan finding CRITICAL lateral movement berhasil tanpa otentikasi (melanggar Rule 1). |
 | MOD-022 | exfil.staged_collection workstation egress disruption & false target attribution | TERBUKTI (HIGH) | Audit verified (`staged_collection.py:44-89, 356-378`) | Menunggu remedi | Mengirim HTTP HEAD dari workstation operator ke cloud publik tanpa scope guard dan mengatribusikannya ke target host. |
 | MOD-023 | exfil.staged_collection phantom staging pipeline & 100% data loss | TERBUKTI (MEDIUM) | Audit verified (`staged_collection.py:388-389`) | Menunggu remedi | Parameter `destination` wajib tapi tidak pernah dipakai; `files_staged` tidak pernah diisi sehingga output file kosong. |
 | MOD-024 | network.port_scan CIDR parsing incompatibility & socket failure | TERBUKTI (MEDIUM) | Audit verified (`port_scan.py:324, 271`) | Menunggu remedi | Mengklaim mendukung CIDR namun passing CIDR langsung ke `asyncio.open_connection` memicu `getaddrinfo` error. |
 | MOD-025 | windows.lsass_dump teardown omission on transfer exception & orphaned files | FIXED | PASSED (3/3 teardown tests) | `ares/modules/windows/lsass_dump.py`, `tests/unit/modules/test_lsass_dump_teardown.py` | Local dump secure unlinking di blok `finally` (termasuk saat crash) dan fallback remote `del` command untuk file `ARESPID*.txt` (commit `9ccdbde`). |
-| MOD-026 | windows.lsass_dump phantom capability claim & incomplete ticket extraction | TERBUKTI (MEDIUM) | Audit verified (`lsass_dump.py:77, 463, 782-805`) | Menunggu remedi | Mengklaim capability `kerberos_tickets` namun parser pypykatz hanya membaca NTLM dan hardcode tickets kosong `[]` (melanggar Rule 1). |
+| MOD-026 | windows.lsass_dump phantom capability claim & incomplete ticket extraction | FIXED | PASSED (3/3 unit tests) | `ares/modules/windows/lsass_dump.py`, `tests/unit/modules/test_lsass_dump_kerberos_mod026.py` | Real extraction of Kerberos creds (ticket path, kirbi hash, SPN, tickets) from pypykatz logon sessions into raw["kerberos_tickets"] (commit `b1303c3`). |
 | MOD-027 | windows.lsa_secrets plaintext unredacted NTLM & DCC2 hashes in evidence | FIXED | PASSED (4/4 hash masking tests) | `ares/modules/windows/lsa_secrets.py`, `ares/core/security.py`, `tests/unit/test_hash_masking_grup_b.py` | Penerapan `mask_secret_hash()` pada `sam_hashes` dan `cached_creds` di `Finding.evidence` mencegah kebocoran hash di log audit (commit `e94533b`). |
 | MOD-028 | windows.lsa_secrets LSA secrets & cached creds pipeline evaporation (100% data loss) | FIXED | PASSED (20/20 pipeline tests) | `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Menambahkan handler `_normalize_lsa_secrets` (CredentialArtifact `lsa_secret`) dan `_normalize_cached_domain_credentials` (CredentialArtifact `cached_domain`, `cracked=False`) di `ArtifactNormalizer`. Routing untuk capability `lsa_secrets`, `windows.lsa_secrets`, `cached_credentials`, `cached_domain_credentials`. Data loss teratasi. |
 | MOD-029 | windows.dpapi fictitious cleartext decryption & false CRITICAL finding | MITIGATED (disabled) - implementasi real pending | PASSED (Unit repro + staged & feasibility tests) | `ares/modules/windows/dpapi.py`, `tests/unit/test_disabled_modules_batch4.py`, `tests/unit/test_roadmap_modules.py`, `tests/unit/test_staged_modules.py`, `tests/unit/test_defense_feasibility_matrix.py` | Dinonaktifkan dari pipeline produksi (`ENABLED = False`, `DISABLED_REASON`). Guard eksplisit pada `run()`, `execute()`, `validate()`, dan `assess_feasibility()` mencegah kontaminasi vault dan false CRITICAL findings. |
@@ -46,12 +46,12 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-036 | credential.ticket_converter output key mismatch & pipeline evaporation | TERBUKTI (MEDIUM) | Audit verified (`ticket_converter.py:66, 274`) | Menunggu remedi | Deklarasi output `converted_ticket` sedangkan output `run()` menghasilkan `converted_ticket_b64`. Tidak ada handler di `ArtifactNormalizer`, data tiket konversi hilang dari pipeline. |
 | MOD-037 | SSH connection leak — asyncssh conn never closed across 4 Linux modules | FIXED | PASSED (12/12 asyncssh teardown tests + safety suite) | `ares/modules/linux/privesc.py`, `ares/modules/linux/service_hijack.py`, `ares/modules/linux/ld_preload.py`, `ares/modules/linux/nfs_escape.py`, `tests/unit/modules/test_mod037_ssh_teardown.py` | Koneksi asyncssh dibungkus try/finally dan ditutup via `conn.close()` / `wait_closed()` di seluruh 4 modul Linux (`linux.privesc`, `linux.service_hijack`, `linux.ld_preload`, `linux.nfs_escape`). |
 | MOD-038 | linux.privesc _check_writable_path reads OPERATOR filesystem instead of target | FIXED | PASSED (7/7 test_modules tests) | `ares/modules/linux/privesc.py`, `tests/unit/modules/test_modules.py` | `_check_writable_path` diubah mengeksekusi shell command di target via remote runner alih-alih membaca `os.environ`/`os.access` operator. Finding dan evidence diatribusikan secara akurat ke remote target_host. |
-| MOD-039 | linux.container weak heuristic for host network namespace detection | TERBUKTI (MEDIUM) | Audit verified (`container.py:332`) | Menunggu remedi | Heuristik `len(lines) > 50` pada `/proc/net/tcp` untuk mendeteksi `--net=host` sangat lemah. Container dengan koneksi banyak (scanning, proxying) memicu false-positive HIGH finding (melanggar Rule 1, pola MOD-021). |
+| MOD-039 | linux.container weak heuristic for host network namespace detection | FIXED | PASSED (3/3 unit tests) | `ares/modules/linux/container.py`, `tests/unit/modules/test_container_host_network_mod039.py` | Replaced naive socket count (>50) with /proc/1/ns/net vs /proc/self/ns/net inode check and host interface prefix detection with calibrated confidence (commit `3344c99`). |
 | MOD-040 | linux.container unhandled outputs container_escape_vectors & k8s_rbac_findings | FIXED | PASSED (42/42 pipeline tests) | `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Handler `_normalize_container_vectors` dan `_normalize_k8s_rbac` di `ArtifactNormalizer` Grup A (commit `9f8b111`). |
 | MOD-041 | linux.samba_secrets unhandled outputs machine_account_hash & samba_secrets | FIXED | PASSED (42/42 pipeline tests) | `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Handler `_normalize_samba_secrets` di `ArtifactNormalizer` Grup A (commit `9f8b111`). |
 | MOD-042 | linux.samba_secrets plaintext NTLM hash in Finding.evidence & EvidenceRecord | FIXED | PASSED (4/4 hash masking tests) | `ares/modules/linux/samba_secrets.py`, `ares/core/security.py`, `tests/unit/test_hash_masking_grup_b.py` | Penerapan `mask_secret_hash()` pada `ntlm_hash` di `Finding.evidence` dan `EvidenceRecord.data` (commit `e94533b`). |
-| MOD-043 | linux.ccache_hunt phantom ticket extraction & empty vault secret injection on Keyring/KCM | TERBUKTI (HIGH) | Audit verified (`ccache_hunt.py:320-366, 167-189`) | Menunggu remedi | Pemindaian `/proc/keys` dan socket KCM tidak mengambil byte tiket nyata, namun modul menerbitkan finding CRITICAL/HIGH dan menyimpan string kosong `""` ke `AresVault` sebagai tiket Kerberos (melanggar Rule 1 dan Rule 4). |
-| MOD-044 | linux.keytab_abuse unhandled outputs machine_credentials & kerberos_keys (100% data loss) | FIXED | PASSED (42/42 pipeline tests) | `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Handler `_normalize_keytab_keys` di `ArtifactNormalizer` Grup A (commit `9f8b111`). |
+| MOD-043 | linux.ccache_hunt phantom ticket extraction & empty vault secret injection on Keyring/KCM | FIXED | PASSED (3/3 unit tests) | `ares/modules/linux/ccache_hunt.py`, `tests/unit/modules/test_ccache_hunt_keyring_mod043.py` | Real /proc/keys reading via remote runner, keyctl print payload extraction, PermissionError handled with low confidence (0.35) without is_tgt claim, zero empty secret vault injection (commit `87aaac1`). |
+| MOD-044 | linux.keytab_abuse unhandled outputs machine_credentials & kerberos_keys (100% data loss) | FIXED | PASSED (42/42 pipeline tests) | `ares/modules/linux/keytab_abuse.py`, `ares/normalize/artifacts.py`, `tests/unit/modules/test_keytab_abuse_outputs_mod044.py` | Synchronized raw output keys (machine_credentials, kerberos_keys) with module OUTPUTS declaration and end-to-end normalizer pipeline test (commit `580c0aa`). |
 | MOD-045 | linux.sssd_harvest SHA-512 crypt hashes inverted to CLEARTEXT & 100% normalizer data loss | FIXED | PASSED (19/19 tradecraft tests) | `ares/modules/linux/sssd_harvest.py`, `ares/credential/vault.py`, `ares/modules/credential/crack.py`, `tests/unit/modules/test_linux_ad_tradecraft.py` | Menambahkan HASH dan KERBEROS ke CredentialType enum. Mengimplementasikan _infer_credential_type di sssd_harvest untuk mengklasifikasikan hash Linux ($6$, $y$, $5$, $2b$, $1$) ke CredentialType.HASH dan dual-write standard output keys (users, domain_users, hashes, cached_hashes, credentials, accounts). |
 | MOD-046 | persistence.scheduled_task zero teardown on remote scheduled task & registry run key | FIXED | PASSED (3/3 teardown tests) | `ares/modules/persistence/scheduled_task.py`, `tests/unit/modules/test_scheduled_task_teardown.py` | `created_artifacts` disimpan sebelum pembuatan task; penghapusan task via RPC di blok `finally` (termasuk kegagalan midway) serta method `teardown()` eksplisit (commit `327458b`). |
 | MOD-047 | persistence.scheduled_task inverted dry_run=True default & unhandled RPC disconnect | FIXED | PASSED (2/2 tests) | `ares/modules/persistence/scheduled_task.py`, `tests/unit/modules/test_scheduled_task_mod047.py` | Default `dry_run=False` pada `RegistryRunKeyPersistence`, bungkus `hRootKey`/`hRunKey` dan `dce.disconnect()` dalam `try/finally` di `_rrp_set_run_key` (commit `e9c7cdd`). |
@@ -64,7 +64,7 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-054 | ad.enum_spn internal key mismatch (spn_list vs spns) causing 100% SPN list evaporation | FIXED | PASSED (Unit tests & normalizer pipeline) | `ares/modules/ad/enum_spn.py`, `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Internal key disinkronkan ke `spns` & alias `spn_list`. Normalizer dual-read fallback. |
 | MOD-055 | ad.laps_enum output type confusion on valid_credentials & secret evaporation in normalizer | FIXED | PASSED (Unit tests & pipeline separation) | `ares/core/context.py`, `ares/modules/ad/laps_enum.py`, `ares/normalize/artifacts.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Password LAPS ditulis langsung ke vault (Gate 6 validated). `raw["entries"]` dan `raw["laps_passwords"]` OPSEC-safe (`has_password: True`). |
 | MOD-056 | ad.enum_users unhandled output telemetry password_policy & dual-write omission | PARTIALLY FIXED | PASSED (Unit tests) | `ares/modules/ad/enum_users.py`, `NORMALIZER_CONTRACT_AUDIT.md`, `tests/unit/test_artifact_normalizer_pipeline.py` | Dual-write `users` key ke `raw`. Handler `password_policy` ditunda ke batch fix serentak. |
-| MOD-057 | ad.enum_acl & ad.laps_enum inconsistent LDAP bind authentication formatting (bypassing build_ad_bind_plan) | DEFERRED | Audit verified (`enum_acl.py:234`, `laps_enum.py:297`) | Menunggu remedi (Batch Fix Serentak) | Migrasi raw string binding ke `build_ad_bind_plan()` ditunda ke batch fix serentak. |
+| MOD-057 | ad.enum_acl & ad.laps_enum inconsistent LDAP bind authentication formatting (bypassing build_ad_bind_plan) | FIXED | PASSED (3/3 unit tests) | `ares/modules/ad/enum_acl.py`, `ares/modules/ad/laps_enum.py`, `tests/unit/modules/test_ad_bind_plan_mod057.py` | Replaced raw string concatenation (user=f"{domain}\\{username}") with build_ad_bind_plan() to normalize UPN, NetBIOS, and plain username formats across AD LDAP modules (commit `41cec57`). |
 | MOD-058 | network.dns_enum out-of-scope AXFR zone transfer probing on discovered nameservers | FIXED | PASSED (10/10 scope tests) | `ares/modules/network/dns_enum.py`, `tests/unit/test_scope_enforcement_grup_d.py` | Filter nameserver out-of-scope dan penegakan `before_request(ns_clean, "dns")` sebelum AXFR (commit `cc2e980`). |
 | MOD-059 | network.http_fingerprint unbounded HTTP redirect traversal on external hosts via follow_redirects=True | FIXED | PASSED (10/10 scope tests) | `ares/modules/network/http_fingerprint.py`, `tests/unit/test_scope_enforcement_grup_d.py` | `follow_redirects=False` + validasi `campaign.is_in_scope(redirect_host)` sebelum request berikutnya (commit `cc2e980`). |
 | MOD-060 | network.service_detect asyncio TCP writer handle leak on read timeout in _grab_banner | FIXED | PASSED (2/2 teardown tests) | `ares/modules/network/service_detect.py`, `tests/unit/modules/test_service_detect_teardown.py` | Pembungkusan reader.read() dalam blok `try ... finally: writer.close()` dan `await writer.wait_closed()` (commit `64e3be5`). |
@@ -157,23 +157,23 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 
 ### [MOD-043] Phantom Ticket Extraction & Empty Vault Secret Injection on `linux.ccache_hunt`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak)**
-- **Catatan**: Scanning `/proc/keys` dan socket KCM menghasilkan finding dan menyimpan empty string `""` ke `AresVault`. Akan difix serentak pasca-audit.
+- **Status**: **FIXED** (commit `87aaac1` - Fase 5B)
+- **Catatan**: Scanning `/proc/keys` dan `keyctl print` membaca payload riil via remote runner; penanganan PermissionError tanpa klaim `is_tgt=True` (calibrated confidence 0.35); nol suntikan string kosong ke `AresVault`.
 
 ### [MOD-044] Unhandled Outputs `machine_credentials` & `kerberos_keys` on `linux.keytab_abuse`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
-- **Catatan**: Terdaftar di `NORMALIZER_CONTRACT_AUDIT.md`. Modul menghasilkan `raw["entries"]` dan `raw["silver_tickets"]`. Handler normalizer pending.
+- **Status**: **FIXED** (commit `580c0aa` - Fase 5B)
+- **Catatan**: Handler `_normalize_keytab_keys` di `ArtifactNormalizer` dan sinkronisasi raw output keys `machine_credentials` dan `kerberos_keys` dengan deklarasi `OUTPUTS`.
 
 ### [MOD-047] Inverted `dry_run=True` Default & Unhandled RPC Disconnect on `persistence.scheduled_task`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak)**
-- **Catatan**: Default `dry_run=True` pada `RegistryRunKeyPersistence` dan unhandled `dce.disconnect()` pada `_rrp_set_run_key`. Akan difix serentak bersama teardown MOD-046.
+- **Status**: **FIXED** (commit `e9c7cdd` - Fase 4)
+- **Catatan**: Default `dry_run=False` pada `RegistryRunKeyPersistence` dan unhandled `dce.disconnect()` pada `_rrp_set_run_key` dibungkus dalam `try/finally`.
 
 ### [MOD-048] Broken `__FilterToConsumerBinding` Cleanup & Truthy `persistence_established` on `persistence.wmi_subscription`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak)**
-- **Catatan**: Tuple cleanup `("__FilterToConsumerBinding", None)` menyebabkan binding tidak terhapus, dan `raw["persistence_established"]` truthy pada status kegagalan. Akan difix serentak bersama MOD-046.
+- **Status**: **FIXED** (commit `e76f041` - Fase 4)
+- **Catatan**: Tuple cleanup `("__FilterToConsumerBinding", name)` memastikan binding dihapus, inisialisasi `dcom = None`, dan `persistence_established` string kosong saat instalasi gagal.
 
 ---
 
@@ -181,8 +181,8 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 
 ### [MOD-051] Unhandled Outputs `federation_trusts`, `golden_saml_paths`, `oauth_tokens`, `pivot_paths` on `cloud.identity_federation_abuse`
 - **Severity**: **HIGH**
-- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
-- **Catatan**: Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Terdaftar di `NORMALIZER_CONTRACT_AUDIT.md`. Akan difix serentak bersama capability normalizer pending lainnya.
+- **Status**: **FIXED** (commit `9f8b111` - Fase 1)
+- **Catatan**: Handler `_normalize_federation_trusts` dan `_normalize_golden_saml` telah diimplementasikan di `ArtifactNormalizer`.
 
 ### [MOD-053] Cloud Scope Gap (ARCHITECTURAL GAP)
 - **Severity**: **MEDIUM**
@@ -214,9 +214,9 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 - **Catatan**: Dual-write `raw["users"] = users` dan `raw["user_list"] = users` telah diimplementasikan. Normalizer `_normalize_users` membaca key kanonikal. Handler `password_policy` ditunda ke batch fix serentak.
 
 ### [MOD-057] Inconsistent LDAP Bind Authentication Formatting on `ad.enum_acl` & `ad.laps_enum`
-- **Severity**: **MEDIUM**
-- **Status**: **DEFERRED (Masuk batch fix serentak)**
-- **Catatan**: Migrasi raw string binding ke `build_ad_bind_plan()` untuk menjamin kompatibilitas format UPN (`user@domain.local`) pada seluruh modul Active Directory.
+- **Severity**: **HIGH**
+- **Status**: **FIXED** (commit `41cec57` - Fase 5B)
+- **Catatan**: Migrasi raw string binding ke `build_ad_bind_plan()` untuk menjamin kompatibilitas format UPN (`user@domain.local`), NetBIOS, dan plain username pada seluruh modul Active Directory LDAP.
 
 ---
 
@@ -263,8 +263,8 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 
 ### [MOD-065] Missing Pre-Flight SDK Dependency Validation in `validate()` on `cloud.*`
 - **Severity**: **MEDIUM**
-- **Status**: **DEFERRED (Masuk batch fix serentak - Grup E: Robustness & Pre-flight)**
-- **Catatan**: `validate()` tidak memeriksa kelengkapan modul eksternal (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`), sehingga modul lulus scheduling tapi crash unhandled di runtime saat library belum terpasang. Estimasi fix: S (4 file, pola identik).
+- **Status**: **FIXED** (commit `b68986e` - Fase 5A)
+- **Catatan**: `validate()` memeriksa modul SDK eksternal (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`) via `find_spec`, memicu `ModuleValidationError` informatif dengan petunjuk instalasi dependensi.
 
 ### [MOD-066] 100% Normalizer Data Loss on `azure_findings`, `azure_ad_findings`, `access_tokens` on `cloud.azure` & `cloud.azure_ad`
 - **Severity**: **HIGH**
@@ -280,6 +280,29 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 - **Severity**: **HIGH**
 - **Status**: **FIXED** (commit `9f8b111` - Fase 1)
 - **Catatan**: Handler `_normalize_gcp_findings` telah diimplementasikan di `ArtifactNormalizer`. Seluruh temuan GCS buckets, project IAM owner roles, dan service account keys terserap ke `ArtifactStore`.
+
+---
+
+## FASE 5: GRUP E (TECHNICAL HONESTY, PARSERS & LOGIC) — COMPLETED
+
+- **Fase 5A (Limited & Targeted Fixes)**: **COMPLETE**
+  - MOD-072 (`linux._parsers` real recursive ASN.1 DER parser) — commit `01b966e`
+  - MOD-065 (`cloud.*` SDK preflight import check in validate) — commit `b68986e`
+  - MOD-069 (`windows.*` enum validate/run username check symmetry) — commit `6e10f8f`
+  - MOD-071 (`linux.kernel_suggester` kernel vs userspace CVE classification) — commit `ca3d469`
+  - MOD-073 (`exfil.*` explicit protocol for before_request and validation) — commit `c8d903e`
+- **Fase 5B (Remaining Grup E Findings)**: **COMPLETE**
+  - MOD-013 (`lateral.ntlm_relay` real S4U2Self + S4U2Proxy delegation abuse) — commit `0bf293c`
+  - MOD-019 (`network.pivot` raise error on no SSH backend instead of phantom ACTIVE) — commit `811cca7`
+  - MOD-020 (`lateral.ssh_pivot` real asyncssh forward_socks dynamic port forwarding) — commit `255d1f5`
+  - MOD-026 (`windows.lsass_dump` real pypykatz kerberos_creds extraction) — commit `b1303c3`
+  - MOD-039 (`linux.container` /proc/1/ns/net inode comparison and interface prefix check) — commit `3344c99`
+  - MOD-043 (`linux.ccache_hunt` real /proc/keys read, zero empty vault injection) — commit `87aaac1`
+  - MOD-044 (`linux.keytab_abuse` output key synchronization matching OUTPUTS) — commit `580c0aa`
+  - MOD-047 (`persistence.scheduled_task` dry_run=False and RRP RPC handle cleanup) — verified FIXED (Fase 4, commit `e9c7cdd`)
+  - MOD-057 (`ad.enum_acl`, `ad.laps_enum` LDAP bind format normalization via build_ad_bind_plan) — commit `41cec57`
+  - MOD-061 (`network.snmp_enum` vault Gate 6 and valid_credentials contract) — verified FIXED (Batch 10, commit `5635362`)
+
 
 
 
