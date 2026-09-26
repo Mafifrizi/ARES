@@ -25,6 +25,7 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 from ares.core.campaign import Campaign, Finding, Severity
+from ares.core.errors import ModuleExecutionError
 from ares.core.logger import audit, get_logger
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import (
@@ -1336,23 +1337,109 @@ class SSHPivot(BaseLateralModule):
         secret:     str,
         local_port: int,
         ssh_port:   int = 22,
+        key_path:   str = "",
+        **kwargs:   Any,
     ) -> dict[str, Any]:
         """
-        Establish a SOCKS5 proxy through the target host.
-        Returns proxy config: {"host": "127.0.0.1", "port": local_port, "type": "socks5"}
+        Establish a real SOCKS5 dynamic port forward through the target host using asyncssh.
+        Returns proxy config: {"host": "127.0.0.1", "port": local_port, "type": "socks5", "via_host": target}
+        Raises ModuleExecutionError if asyncssh is not available or forwarding fails.
         """
-        result = await self.move(
-            target, username, "", secret,
-            command="echo pivot_established",
-            socks_port=local_port,
-            port=ssh_port,
-        )
-        if result.success:
-            logger.info("socks5_proxy_established",
-                        target=target, local_port=local_port)
-            return {"host": "127.0.0.1", "port": local_port, "type": "socks5",
-                    "via_host": target}
-        return {}
+        try:
+            import asyncssh
+        except ImportError as exc:
+            raise ModuleExecutionError(
+                "asyncssh is not installed. Real SOCKS5 dynamic port forwarding requires asyncssh. "
+                "Install: pip install asyncssh"
+            ) from exc
+
+        if not hasattr(asyncssh, "connect"):
+            raise ModuleExecutionError(
+                "Invalid asyncssh module: connect not found."
+            )
+
+        connect_kwargs: dict[str, Any] = {
+            "host": target,
+            "port": ssh_port,
+            "username": username,
+            "known_hosts": None,
+        }
+        if key_path:
+            connect_kwargs["client_keys"] = [key_path]
+        elif secret.strip().startswith("-----BEGIN"):
+            try:
+                connect_kwargs["client_keys"] = [asyncssh.import_private_key(secret)]
+            except Exception:
+                connect_kwargs["password"] = secret
+        else:
+            connect_kwargs["password"] = secret
+
+        try:
+            conn = await asyncssh.connect(**connect_kwargs)
+            if not hasattr(conn, "forward_socks"):
+                raise ModuleExecutionError(
+                    "Installed asyncssh connection does not support forward_socks."
+                )
+            listener = await conn.forward_socks("127.0.0.1", local_port)
+        except ModuleExecutionError:
+            raise
+        except Exception as exc:
+            raise ModuleExecutionError(
+                f"Failed to establish SOCKS5 dynamic port forwarding on 127.0.0.1:{local_port} via {target}: {exc}"
+            ) from exc
+
+        # Keep alive & register to campaign PivotManager for lifecycle management & teardown
+        try:
+            from ares.modules.network.pivot import _PIVOT_MANAGERS
+            from ares.pivot.infrastructure import PivotManager, PivotTunnel, TunnelState, TunnelType
+            campaign_id = getattr(getattr(self, "campaign", None), "id", "default")
+            if campaign_id not in _PIVOT_MANAGERS:
+                _PIVOT_MANAGERS[campaign_id] = PivotManager(operator=getattr(self, "operator", "ares"))
+            pm = _PIVOT_MANAGERS[campaign_id]
+            tunnel = PivotTunnel(
+                tunnel_type=TunnelType.SSH_DYNAMIC,
+                pivot_host=target,
+                pivot_port=ssh_port,
+                local_host="127.0.0.1",
+                local_port=local_port,
+                username=username,
+                operator=pm.operator,
+                state=TunnelState.ACTIVE,
+            )
+            tunnel._conn = conn
+            tunnel._forwarder = listener
+            pm._tunnels[tunnel.tunnel_id] = tunnel
+        except Exception as e:
+            logger.warning("ssh_pivot_register_manager_error", error=str(e))
+
+        logger.info("socks5_proxy_established", target=target, local_port=local_port)
+        return {
+            "host": "127.0.0.1",
+            "port": local_port,
+            "type": "socks5",
+            "via_host": target,
+        }
+
+    async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        findings, raw = await super().run(**kwargs)
+        socks_port = kwargs.get("socks_port")
+        target = kwargs.get("target", "")
+        username = kwargs.get("username", "")
+        secret = kwargs.get("secret", "")
+        ssh_port = kwargs.get("ssh_port") or kwargs.get("port", 22)
+        key_path = kwargs.get("key_path", "")
+
+        if raw.get("result", {}).get("success") and socks_port:
+            proxy_info = await self.establish_socks5(
+                target=target,
+                username=username,
+                secret=secret,
+                local_port=int(socks_port),
+                ssh_port=int(ssh_port),
+                key_path=key_path,
+            )
+            raw["socks5_proxy"] = f"socks5://{proxy_info['host']}:{proxy_info['port']}"
+        return findings, raw
 
 
 # ── RDP Lateral ────────────────────────────────────────────────────────────────
