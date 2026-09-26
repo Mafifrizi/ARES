@@ -255,7 +255,7 @@ MODULE_EXECUTION_CHAINS: Final[tuple[ExecutionChain, ...]] = (
             {
                 "order": 2,
                 "title": "Review privilege and federation paths",
-                "module_ids": ["cloud.aws_privesc", "cloud.identity_federation_abuse", "cloud.phantom_token"],
+                "module_ids": ["cloud.aws_privesc", "cloud.identity_federation_abuse"],
                 "purpose": "Assess explicitly authorized privilege and federation exposure using the collected context.",
                 "required_inputs": ["provider credentials or token", "scope"],
                 "uses_previous_output": True,
@@ -307,7 +307,7 @@ MODULE_EXECUTION_CHAINS: Final[tuple[ExecutionChain, ...]] = (
             {
                 "order": 3,
                 "title": "Review secret-bearing artifacts",
-                "module_ids": ["exfil.secrets_scan", "windows.dpapi", "windows.lsa_secrets", "windows.lsass_dump", "windows.registry_enum", "windows.token_impersonation"],
+                "module_ids": ["exfil.secrets_scan", "windows.lsa_secrets", "windows.lsass_dump", "windows.registry_enum"],
                 "purpose": "Inspect authorized artifacts for secret exposure while retaining redaction and cleanup controls.",
                 "required_inputs": ["target", "authorized artifact context"],
                 "uses_previous_output": True,
