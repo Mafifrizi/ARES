@@ -12,6 +12,7 @@ from ares.core.campaign import Finding, Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
 from ares.core.errors import ModuleValidationError
+from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
     BaseModule,
@@ -223,20 +224,22 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
         from ldap3.core.exceptions import LDAPBindError
 
+        bind_plan = build_ad_bind_plan(username, domain)
         conn = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
-                conn = Connection(
-                    server,
-                    user=f"{domain.upper()}\\{username}",
-                    password=password,
-                    authentication=NTLM,
-                    auto_bind=ldap3.AUTO_BIND_NONE,
-                    receive_timeout=30,
-                )
+                conn_kwargs = {
+                    "user": bind_plan.user,
+                    "password": password,
+                    "auto_bind": ldap3.AUTO_BIND_NONE,
+                    "receive_timeout": 30,
+                }
+                if bind_plan.mode == "ntlm":
+                    conn_kwargs["authentication"] = NTLM
+                conn = Connection(server, **conn_kwargs)
                 if not conn.bind():
                     raise LDAPBindError(f"Bind failed: {conn.result}")
                 break
