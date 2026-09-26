@@ -128,7 +128,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
         evidence_chain: list[EvidenceRecord] = []
-        for user in raw.get("user_list", []):
+        for user in (raw.get("users") or raw.get("user_list", [])):
             username_val = user.get("samAccountName", user.get("username", "unknown"))
             ev = EvidenceRecord(
                 artifact_id=f"user-{str(username_val).lower()}",
@@ -224,7 +224,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
             raise
         except Exception as exc:
             raise NetworkError(f"LDAP failed on {dc}: {exc}") from exc
-        raw = {"user_list": users, "password_policy": policy}
+        raw = {"user_list": users, "users": users, "password_policy": policy}
         # ISU-07: produce UserArtifact objects for ArtifactIntelEngine
         try:
             from ares.normalize.artifacts import UserArtifact, ArtifactStore
@@ -393,7 +393,8 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
                 pass
 
     def _analyze(self, raw):
-        users, policy = raw.get("user_list",[]), raw.get("password_policy",{})
+        users = raw.get("users") or raw.get("user_list", [])
+        policy = raw.get("password_policy", {})
         dormant = [u for u in users if u.get("enabled") and (u.get("days_since_login") or 0) > 90]
         if dormant:
             self.finding(title=f"Dormant Active Accounts ({len(dormant)})",

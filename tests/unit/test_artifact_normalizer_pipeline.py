@@ -100,6 +100,56 @@ def test_enum_users_pipeline_recovers_users(normalizer: ArtifactNormalizer, stor
     assert users[0].is_admin is True
 
 
+@pytest.mark.asyncio
+async def test_enum_users_dual_write_users_key_mod_056(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """
+    MOD-056: ad.enum_users dual-writes raw['users'] and raw['user_list'].
+    Normalizer ingests both keys successfully into UserArtifact.
+    """
+    from unittest.mock import patch
+    from tests.unit.modules.test_modules import _make_module
+    from ares.modules.ad.enum_users import ADEnumUsersModule
+
+    mod, _ = _make_module(ADEnumUsersModule)
+    mock_users = [
+        {
+            "samAccountName": "alice",
+            "enabled": True,
+            "noExpiry": False,
+            "noPreauth": True,
+            "isAdmin": True,
+            "badPwdCount": 0,
+            "days_since_login": 10,
+            "days_since_pwd": 20,
+        }
+    ]
+    mock_policy = {"minPwdLength": 8, "pwdHistoryLength": 5, "lockoutThreshold": 5}
+
+    with patch.object(mod, "_ldap_query_sync", return_value=(mock_users, mock_policy)):
+        findings, raw = await mod.run(
+            dc="10.0.0.1",
+            username="analyst",
+            password="fake_password",
+            domain="corp.local",
+        )
+
+    # Verify dual-write in module raw output
+    assert "users" in raw
+    assert "user_list" in raw
+    assert raw["users"] == mock_users
+    assert raw["user_list"] == mock_users
+
+    # Verify normalizer reads "users"
+    added = normalizer.normalize("ad.enum_users", ["users"], raw, store)
+    assert added == 1
+    users = store.users()
+    assert len(users) == 1
+    assert users[0].username == "alice"
+    assert users[0].is_admin is True
+    assert users[0].no_preauth is True
+
+
+
 def test_enum_computers_pipeline_recovers_computers(normalizer: ArtifactNormalizer, store: ArtifactStore):
     """ad.enum_computers writes raw['computer_list']; normalizer must ingest via fallback."""
     raw = {
