@@ -65,7 +65,7 @@ class AWSPrivescModule(BaseModule):
 
     OPSEC: LOW
     MITRE: "T1078.004", "T1548", "T1098"
-    OUTPUTS:  "aws_privesc_paths", "aws_findings"
+    OUTPUTS:  "aws_privesc_paths", "iam_privesc_paths"
     """
     MODULE_ID          = "cloud.aws_privesc"
     MODULE_NAME        = "AWS IAM Privilege Escalation"
@@ -77,7 +77,7 @@ class AWSPrivescModule(BaseModule):
     MODULE_AUTHOR      = "ARES Team <team@ares-framework.io>"
     OPSEC_LEVEL        = OpsecLevel.LOW
     REQUIRES           = []
-    OUTPUTS            = ["aws_privesc_paths", "aws_findings"]
+    OUTPUTS            = ["aws_privesc_paths", "iam_privesc_paths"]
     MITRE_TECHNIQUES   = ["T1078.004", "T1548", "T1098"]
     PARAMS_MODEL       = AWSPrivescParams
 
@@ -338,5 +338,5 @@ class AWSPrivescModule(BaseModule):
             "errors":           result.get("errors", []),
         }
         raw["aws_privesc_paths"] = self._findings  # OUTPUTS key
-        raw["aws_findings"] = self._findings  # OUTPUTS key
+        raw["iam_privesc_paths"] = self._findings  # OUTPUTS key
         return self._findings[:], raw

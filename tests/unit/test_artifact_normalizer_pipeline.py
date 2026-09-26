@@ -169,6 +169,44 @@ def test_aws_privesc_pipeline_recovers_paths(normalizer: ArtifactNormalizer, sto
     assert "AdminEscalationRole" in cloud_res[0].resource_id
 
 
+def test_aws_privesc_output_key_separation(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """MOD-052: aws_privesc must use iam_privesc_paths and not overwrite aws_findings."""
+    from unittest.mock import MagicMock
+    from ares.modules.cloud.aws_privesc import AWSPrivescModule
+    assert "iam_privesc_paths" in AWSPrivescModule.OUTPUTS
+    assert "aws_findings" not in AWSPrivescModule.OUTPUTS
+
+    # Simulate existing cloud.aws findings in raw
+    cloud_aws_findings = {
+        "s3": {
+            "public_buckets": [{"name": "confidential-backup"}]
+        },
+        "region": "us-east-1",
+    }
+    raw = {
+        "aws_findings": cloud_aws_findings,
+        "s3": cloud_aws_findings["s3"],
+        "region": "us-east-1",
+    }
+
+    # aws_privesc populates raw
+    mod = AWSPrivescModule(MagicMock(), MagicMock(), MagicMock())
+    mod._findings = ["privesc_found"]
+    raw["aws_privesc_paths"] = mod._findings
+    raw["iam_privesc_paths"] = mod._findings
+
+    # aws_findings must not be overwritten by list[Finding]
+    assert raw["aws_findings"] == cloud_aws_findings
+    assert isinstance(raw["aws_findings"], dict)
+    assert raw["iam_privesc_paths"] == ["privesc_found"]
+
+    # Verify cloud.aws S3 normalization still succeeds
+    added = normalizer.normalize("cloud.aws", ["aws_findings"], raw, store)
+    assert added >= 1
+    buckets = [r for r in store.get(ArtifactType.CLOUD_RESOURCE) if r.resource_type == "s3_bucket"]
+    assert any(b.resource_id == "confidential-backup" for b in buckets)
+
+
 # ── Batch of P0 Handlers (Langkah 2B) ─────────────────────────────────────────
 
 def test_cleartext_credentials_pipeline(normalizer: ArtifactNormalizer, store: ArtifactStore):
