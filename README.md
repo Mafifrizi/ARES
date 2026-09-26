@@ -15,7 +15,7 @@
 [![MITRE](https://img.shields.io/badge/Coverage-MITRE%20ATT%26CK-FF6F00?style=for-the-badge)](docs/modules.md)
 [![Security](https://img.shields.io/badge/Security-Zero--Trust%20Enclave-22C55E?style=for-the-badge)](docs/security-model.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Tests Suite](https://img.shields.io/badge/Tests-4%2C514%20Passing-22C55E?style=for-the-badge)](tests/)
+[![Tests Suite](https://img.shields.io/badge/Tests-4%2C625%20Passing-22C55E?style=for-the-badge)](tests/)
 [![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
 [![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
 
