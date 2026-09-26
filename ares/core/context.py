@@ -106,6 +106,11 @@ class ExecutionContext(Generic[P]):
     # ── Audit ─────────────────────────────────────────────────────────────
     created_at:    float = field(default_factory=time.time)
     dry_run:       bool  = False   # simulation mode - no real network calls
+    network_io_occurred: bool = False
+
+    def mark_network_io_occurred(self, occurred: bool = True) -> None:
+        """Mark that genuine network I/O has occurred within this execution context."""
+        self.network_io_occurred = occurred
 
     # ── Metadata ──────────────────────────────────────────────────────────
     tags:     list[str] = field(default_factory=list)
@@ -201,8 +206,30 @@ class ExecutionContext(Generic[P]):
         domain: str = "",
         cred_type: str = "password",
         metadata: dict[str, Any] | None = None,
+        io_verified: bool | None = None,
     ) -> Any:
-        """Store a discovered credential in the context vault if available."""
+        """Store a discovered credential in the context vault if available (protected by Gate 6)."""
+        has_io = (
+            io_verified
+            if io_verified is not None
+            else (
+                self.network_io_occurred
+                or bool(self.findings)
+                or bool(self.collected_loot)
+                or bool(self.telemetry and getattr(self.telemetry, "network_bytes_sent", 0) > 0)
+            )
+        )
+        if not has_io:
+            from ares.core.logger import get_logger
+            get_logger("ares.core.context").warning(
+                "vault_write_blocked_zero_io",
+                username=username,
+                cred_type=cred_type,
+                module_id=self.module_id,
+                reason="no network I/O or evidence recorded in execution context",
+            )
+            return False
+
         if self.vault and hasattr(self.vault, "add"):
             try:
                 return self.vault.add(
@@ -212,6 +239,8 @@ class ExecutionContext(Generic[P]):
                     cred_type=cred_type,
                     host=self.target,
                     metadata=metadata or {},
+                    io_verified=has_io,
+                    ctx=self,
                 )
             except Exception:
                 pass

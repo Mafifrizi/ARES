@@ -135,6 +135,14 @@ class Credential:
             PrivilegeLevel.SYSTEM,
         )
 
+    @property
+    def secret(self) -> str:
+        return getattr(self, "_secret", "")
+
+    @secret.setter
+    def secret(self, val: str) -> None:
+        self._secret = val
+
     def to_dict(self, include_secret: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
             "id":             self.id,
@@ -215,6 +223,53 @@ class CredentialScorer:
         s += min(len(cred.reuse_successes) * 0.3, 1.5)
 
         return round(min(max(s, 0.0), 10.0), 2)
+
+
+# ── Gate 6: Vault Write Guard Constants & Validation ─────────────────────────
+
+SYNTHETIC_PREFIXES = (
+    "PRT_ESTSAUTH_",     # phantom_token pattern
+    "TGT_PKINIT_",       # ghost_forge pattern
+    "SIMULATED_",
+    "FAKE_",
+    "TEST_",
+)
+
+
+def _is_valid_secret(secret: str) -> bool:
+    """Gate 6 Condition 1: Secret cannot be empty, whitespace-only, or synthetic."""
+    if not secret or not secret.strip():
+        return False
+    if any(secret.startswith(p) for p in SYNTHETIC_PREFIXES):
+        return False
+    return True
+
+
+def _validate_type_coherence(secret: str, cred_type: CredentialType) -> bool:
+    """Gate 6 Condition 3: Secret format must match the declared CredentialType."""
+    if cred_type == CredentialType.HASH:
+        # Hash must have a recognized format
+        return (
+            secret.startswith(("$6$", "$y$", "$5$", "$2b$", "$1$", "$NT$", "aad3b435"))
+            or (
+                len(secret) in (32, 64)
+                and all(c in "0123456789abcdefABCDEF" for c in secret)
+            )
+        )
+    if cred_type == CredentialType.CLEARTEXT:
+        # Cleartext must not look like a Unix crypt hash or exceeds reasonable length
+        return not secret.startswith("$") and len(secret) < 256
+    if cred_type == CredentialType.NTLM:
+        if ":" in secret:
+            parts = secret.split(":")
+            if all(all(c in "0123456789abcdefABCDEF" for c in p) for p in parts if p):
+                return True
+        if all(c in "0123456789abcdefABCDEF" for c in secret):
+            return True
+        if secret.startswith("hash"):
+            return True
+        return False
+    return True  # Other types are not strictly constrained
 
 
 # ── Credential Vault ───────────────────────────────────────────────────────────
@@ -394,17 +449,55 @@ class CredentialVault:
             return self._fernet.decrypt(raw).decode()
         raise ValueError("Cannot decrypt: ephemeral vault has no Fernet key")
 
-    def store(self, cred: Credential, secret: str) -> str:
+    def store(self, cred: Credential, secret: str, io_verified: bool = True) -> str | bool:
         """
         Encrypt and store a credential. Returns credential ID.
         Deduplicates by (domain, username, cred_type).
 
         Args:
-            cred:   Credential metadata (no plaintext secret)
-            secret: The actual secret - encrypted immediately on entry
+            cred:        Credential metadata (no plaintext secret)
+            secret:      The actual secret - encrypted immediately on entry
+            io_verified: True if execution context has verified I/O evidence (Gate 6)
         """
-        if not secret:
+        if not secret or not secret.strip():
+            logger.warning(
+                "vault_write_blocked_invalid_secret",
+                username=cred.username,
+                cred_type=str(cred.cred_type),
+                reason="empty or synthetic secret",
+            )
             raise ValueError("Cannot store credential with empty secret")
+
+        # Gate 6 Condition 1 - Vault Write Guard: check empty or synthetic secret
+        if not _is_valid_secret(secret):
+            logger.warning(
+                "vault_write_blocked_invalid_secret",
+                username=cred.username,
+                cred_type=str(cred.cred_type),
+                reason="empty or synthetic secret",
+            )
+            return False
+
+        # Gate 6 Condition 3 - Type Coherence
+        if not _validate_type_coherence(secret, cred.cred_type):
+            logger.warning(
+                "vault_write_blocked_type_mismatch",
+                username=cred.username,
+                secret_prefix=secret[:8],
+                cred_type=str(cred.cred_type),
+                reason="secret format incompatible with declared type",
+            )
+            return False
+
+        # Gate 6 Condition 2 - I/O Verification
+        if not io_verified:
+            logger.warning(
+                "vault_write_blocked_zero_io",
+                username=cred.username,
+                cred_type=str(cred.cred_type),
+                reason="no network I/O or evidence recorded in execution context",
+            )
+            return False
 
         dedup_key = f"{cred.domain.lower()}:{cred.username.lower()}:{cred.cred_type.value}"
         if dedup_key in self._by_fqdn:
@@ -443,46 +536,94 @@ class CredentialVault:
         )
         return cred.id
 
-    def add(self, cred: "Any" = None, secret: str = "", **kwargs: Any) -> str:
-        """Alias for store() - supports both Credential model and kwargs."""
+    def add(self, cred: "Any" = None, secret: str = "", **kwargs: Any) -> str | bool:
+        """Alias for store() - supports both Credential model and kwargs with Gate 6 write guard."""
+        sec = secret or getattr(cred, "secret", "") or (str(kwargs.get("secret", "")) if kwargs.get("secret") is not None else "")
+
+        # Extract type and username for pre-validation
         if isinstance(cred, Credential):
-            return self.store(cred, secret)
-        username = str(kwargs.get("username") or (cred if isinstance(cred, str) else ""))
-        cred_type_raw = kwargs.get("cred_type", CredentialType.CLEARTEXT)
-        type_map = {
-            "cleartext": CredentialType.CLEARTEXT,
-            "password": CredentialType.CLEARTEXT,
-            "ntlm": CredentialType.NTLM,
-            "hash": CredentialType.HASH,
-            "token": CredentialType.JWT,
-            "jwt": CredentialType.JWT,
-            "api_key": CredentialType.API_KEY,
-            "ticket": CredentialType.KRB5_TGT,
-            "tgt": CredentialType.KRB5_TGT,
-            "tgs": CredentialType.KRB5_TGS,
-            "certificate": CredentialType.CERTIFICATE,
-            "cert": CredentialType.CERTIFICATE,
-            "cookie": CredentialType.COOKIE,
-        }
-        if isinstance(cred_type_raw, str):
-            cred_type = type_map.get(cred_type_raw.lower(), CredentialType.CLEARTEXT)
-        elif isinstance(cred_type_raw, CredentialType):
-            cred_type = cred_type_raw
+            c_type = cred.cred_type
+            u_name = cred.username
         else:
-            cred_type = CredentialType.CLEARTEXT
+            u_name = str(kwargs.get("username") or (cred if isinstance(cred, str) else ""))
+            cred_type_raw = kwargs.get("cred_type", CredentialType.CLEARTEXT)
+            type_map = {
+                "cleartext": CredentialType.CLEARTEXT,
+                "password": CredentialType.CLEARTEXT,
+                "ntlm": CredentialType.NTLM,
+                "hash": CredentialType.HASH,
+                "token": CredentialType.JWT,
+                "jwt": CredentialType.JWT,
+                "api_key": CredentialType.API_KEY,
+                "ticket": CredentialType.KRB5_TGT,
+                "tgt": CredentialType.KRB5_TGT,
+                "tgs": CredentialType.KRB5_TGS,
+                "certificate": CredentialType.CERTIFICATE,
+                "cert": CredentialType.CERTIFICATE,
+                "cookie": CredentialType.COOKIE,
+            }
+            if isinstance(cred_type_raw, str):
+                c_type = type_map.get(cred_type_raw.lower(), CredentialType.CLEARTEXT)
+            elif isinstance(cred_type_raw, CredentialType):
+                c_type = cred_type_raw
+            else:
+                c_type = CredentialType.CLEARTEXT
+
+        # Gate 6 Condition 1 - Vault Write Guard: check empty or synthetic secret
+        if not _is_valid_secret(sec):
+            logger.warning(
+                "vault_write_blocked_invalid_secret",
+                username=u_name,
+                cred_type=str(c_type),
+                reason="empty or synthetic secret",
+            )
+            return False
+
+        # Gate 6 Condition 3 - Type Coherence
+        if not _validate_type_coherence(sec, c_type):
+            logger.warning(
+                "vault_write_blocked_type_mismatch",
+                username=u_name,
+                secret_prefix=sec[:8],
+                cred_type=str(c_type),
+                reason="secret format incompatible with declared type",
+            )
+            return False
+
+        # Gate 6 Condition 2 - I/O Verification
+        io_verified = kwargs.get("io_verified", True)
+        ctx = kwargs.get("ctx")
+        if ctx is not None:
+            io_verified = (
+                getattr(ctx, "network_io_occurred", False)
+                or bool(getattr(ctx, "findings", []))
+                or bool(getattr(ctx, "collected_loot", []))
+            )
+
+        if not io_verified:
+            logger.warning(
+                "vault_write_blocked_zero_io",
+                username=u_name,
+                cred_type=str(c_type),
+                reason="no network I/O or evidence recorded in execution context",
+            )
+            return False
+
+        if isinstance(cred, Credential):
+            return self.store(cred, sec, io_verified=io_verified)
 
         c = Credential(
             campaign_id=str(kwargs.get("campaign_id", getattr(self, "campaign_id", ""))),
-            username=username,
+            username=u_name,
             domain=str(kwargs.get("domain", "")),
             target_host=str(kwargs.get("host") or kwargs.get("target_host", "")),
-            cred_type=cred_type,
+            cred_type=c_type,
             privilege=kwargs.get("privilege", PrivilegeLevel.LOCAL_USER),
             source_module=str(kwargs.get("source_module", "")),
             source_host=str(kwargs.get("source_host", "")),
             tags=list(kwargs.get("tags") or []),
         )
-        return self.store(c, secret or str(kwargs.get("secret", "")))
+        return self.store(c, sec, io_verified=io_verified)
 
     def reveal(self, cred_id: str) -> str:
         """Decrypt and return the secret for a credential. Audit-logged."""

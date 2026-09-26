@@ -400,3 +400,103 @@ class TestGate3And5IntegrationSimulations:
         # Gate 5: goal not achieved
         campaign.findings = [fake_lateral_finding]
         assert strategy_engine._check_goal_achieved(campaign, "domain_admin") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GATE 6: Vault Write Guard (MOD-045, MOD-049 Integrity Protection)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestGate6VaultWriteGuard:
+    """
+    Gate 6 verifies that:
+      1. Empty or synthetic secrets (PRT_ESTSAUTH_, TGT_PKINIT_, SIMULATED_, FAKE_, TEST_) are blocked.
+      2. Incoherent credential types (e.g. Linux crypt hash declared as CLEARTEXT) are blocked.
+      3. Secrets are only stored when genuine I/O evidence exists in the execution context.
+      4. Synthetic token injection attacks like cloud.phantom_token are blocked before vault poisoning.
+    """
+
+    def test_empty_secret_blocked(self, caplog, capsys):
+        vault = CredentialVault(encryption_key=None)
+        # Empty string via add()
+        res = vault.add(username="testuser", secret="", cred_type="cleartext")
+        assert res is False
+        captured = caplog.text + capsys.readouterr().out + capsys.readouterr().err
+        assert "vault_write_blocked_invalid_secret" in captured
+
+    def test_synthetic_prefixes_blocked(self, caplog, capsys):
+        vault = CredentialVault(encryption_key=None)
+        synthetic_secrets = [
+            "PRT_ESTSAUTH_dev-123456789abc",
+            "TGT_PKINIT_base64payloadhere",
+            "SIMULATED_TOKEN_XYZ",
+            "FAKE_PASSWORD_123",
+            "TEST_SECRET_DO_NOT_USE",
+        ]
+        for syn in synthetic_secrets:
+            res = vault.add(username="user1", secret=syn, cred_type="cleartext")
+            assert res is False
+        captured = caplog.text + capsys.readouterr().out + capsys.readouterr().err
+        assert "vault_write_blocked_invalid_secret" in captured
+
+    def test_hash_declared_as_cleartext_blocked(self, caplog, capsys):
+        vault = CredentialVault(encryption_key=None)
+        linux_sha512 = "$6$rounds=5000$saltsalt$xyz123abc456"
+        # Declared as CLEARTEXT (MOD-045 bug pattern) -> must be blocked
+        res = vault.add(username="root", secret=linux_sha512, cred_type=CredentialType.CLEARTEXT)
+        assert res is False
+        captured = caplog.text + capsys.readouterr().out + capsys.readouterr().err
+        assert "vault_write_blocked_type_mismatch" in captured
+
+    def test_hash_declared_as_hash_allowed(self):
+        vault = CredentialVault(encryption_key=None)
+        linux_sha512 = "$6$rounds=5000$saltsalt$xyz123abc456"
+        # Correctly declared as HASH
+        res = vault.add(username="root", secret=linux_sha512, cred_type=CredentialType.HASH)
+        assert res is not False
+        assert len(vault.all()) == 1
+
+    def test_credential_valid_with_io_evidence_allowed(self):
+        from ares.core.context import ExecutionContext
+        vault = CredentialVault(encryption_key=None)
+        ctx = ExecutionContext(
+            target="10.0.0.1",
+            module_id="linux.sssd_harvest",
+            vault=vault,
+        )
+        ctx.mark_network_io_occurred(True)
+        res = ctx.record_credential(
+            username="ad_admin",
+            secret="CorrectPassword2026!",
+            cred_type="cleartext",
+        )
+        assert res is not None
+        assert res is not False
+        assert len(vault.all()) == 1
+
+    def test_phantom_token_synthetic_simulation_completely_blocked(self, caplog, capsys):
+        from ares.core.context import ExecutionContext
+        vault = CredentialVault(encryption_key=None)
+        ctx = ExecutionContext(
+            target="corp.onmicrosoft.com",
+            module_id="cloud.phantom_token",
+            vault=vault,
+        )
+        # Case A: No I/O occurred -> blocked by Condition 2
+        res = ctx.record_credential(
+            username="corp.onmicrosoft.com_prt_session",
+            secret="PRT_ESTSAUTH_dev-0123456789ab",
+            cred_type="token",
+        )
+        assert res is False
+        captured = caplog.text + capsys.readouterr().out + capsys.readouterr().err
+        assert "vault_write_blocked_zero_io" in captured
+
+        # Case B: Even if someone marked I/O occurred, blocked by Condition 1 (synthetic prefix)
+        ctx.mark_network_io_occurred(True)
+        res2 = ctx.record_credential(
+            username="corp.onmicrosoft.com_prt_session",
+            secret="PRT_ESTSAUTH_dev-0123456789ab",
+            cred_type="token",
+        )
+        assert res2 is False or res2 is None
+        assert len(vault.all()) == 0
