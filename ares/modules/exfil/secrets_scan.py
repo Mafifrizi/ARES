@@ -605,7 +605,8 @@ class SecretsScan(BaseModule):
         if not username:
             return [], {"error": "no_credential_username"}
 
-        await self.before_request(target, "default")
+        protocol = "smb" if platform == "windows" else "ssh"
+        await self.before_request(target, protocol)
 
         try:
             if platform == "windows":

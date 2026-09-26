@@ -253,7 +253,7 @@ class SmbSharesExfil(BaseModule):
         if not username:
             return [], {"error": "no_credential_username"}
 
-        await self.before_request(target, "default")
+        await self.before_request(target, "smb")
 
         import asyncio as _asyncio
         loop = _asyncio.get_running_loop()
