@@ -457,32 +457,30 @@ class TestWindowsDPAPI:
 
     def test_dry_run(self):
         from ares.modules.windows.dpapi import DPAPIModule
+        from ares.core.errors import ModuleError
         mod, _      = _make_module(DPAPIModule)
         ctx         = _mock_ctx(params={"target": "10.0.0.5", "username": "user"})
         ctx.target  = "10.0.0.5"
         ctx.dry_run = True
 
         async def _test():
-            result = await mod.execute(ctx)
-            assert result.status == "dry_run"
+            with pytest.raises(ModuleError) as exc_info:
+                await mod.execute(ctx)
+            assert "module disabled: DPAPI decryption not implemented" in str(exc_info.value)
         _run(_test())
 
     def test_auth_error_classified(self):
-        """SMB login failure must surface as AuthenticationFailed, not generic error."""
+        """Disabled module must raise explicit ModuleError on run()."""
         from ares.modules.windows.dpapi import DPAPIModule
-        from ares.core.errors import AuthenticationFailed
+        from ares.core.errors import ModuleError
         mod, _ = _make_module(DPAPIModule)
 
         async def _test():
-            with patch.object(
-                mod,
-                "_transfer_dpapi_files",
-                side_effect=Exception("STATUS_LOGON_FAILURE"),
-            ):
-                with pytest.raises((AuthenticationFailed, Exception)):
-                    await mod.run(
-                        target="10.0.0.5", username="user", password="wrong"
-                    )
+            with pytest.raises(ModuleError) as exc_info:
+                await mod.run(
+                    target="10.0.0.5", username="user", password="wrong"
+                )
+            assert "module disabled: DPAPI decryption not implemented" in str(exc_info.value)
         _run(_test())
 
     def test_chrome_parse_returns_list_on_missing_file(self):

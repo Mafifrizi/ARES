@@ -168,9 +168,8 @@ class TestDPAPIFeasibility:
             params={"username": "jdoe", "password": "UserPass123"},
         )
         report = await mod.assess_feasibility(ctx)
-        assert report.feasible is True
-        assert report.score >= 0.8
-        assert report.risk_level == "medium"
+        assert report.feasible is False
+        assert any("MOD-029" in b for b in report.blockers)
 
     @pytest.mark.asyncio
     async def test_credential_guard_evasion_advantage(self, dummy_settings, test_campaign, test_noise):
@@ -187,10 +186,8 @@ class TestDPAPIFeasibility:
             session=session,
         )
         report = await mod.assess_feasibility(ctx)
-        assert report.feasible is True
-        assert report.score == 1.0
-        assert "evasion_advantage" in report.opsec_tuning
-        assert "Credential Guard" in report.opsec_tuning["evasion_advantage"]
+        assert report.feasible is False
+        assert any("MOD-029" in b for b in report.blockers)
 
     @pytest.mark.asyncio
     async def test_backup_mode_without_key_blocks(self, dummy_settings, test_campaign, test_noise):
@@ -202,8 +199,8 @@ class TestDPAPIFeasibility:
             params={"username": "jdoe", "mode": "backup"},
         )
         report = await mod.assess_feasibility(ctx)
-        assert any("Backup key" in b for b in report.blockers)
-        assert "windows.lsa_secrets" in report.recommended_alternatives
+        assert report.feasible is False
+        assert any("MOD-029" in b for b in report.blockers)
 
 
 class TestLSASecretsFeasibility:
@@ -361,13 +358,10 @@ class TestAttackPlannerDefenseEvasion:
         )
         suggestions = planner.suggest(ctx, limit=5)
 
-        # DPAPI should rank higher than LSASS dump due to Credential Guard penalty
+        # DPAPI is disabled under MOD-029 and must not be suggested by planner
         suggested_ids = [s.module_id for s in suggestions]
-        assert "windows.dpapi" in suggested_ids
-        dpapi_score = next((s.score for s in suggestions if s.module_id == "windows.dpapi"), None)
-        lsass_score = next((s.score for s in suggestions if s.module_id == "windows.lsass_dump"), 0.0)
-        assert dpapi_score is not None
-        assert dpapi_score > lsass_score
+        assert "windows.dpapi" not in suggested_ids
+        assert registry.is_disabled("windows.dpapi") is True
 
     def test_planner_penalizes_psexec_when_edr_monitors_services(self):
         from ares.goal.planner import AttackPlanner, PlannerContext

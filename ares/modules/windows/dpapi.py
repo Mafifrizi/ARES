@@ -74,124 +74,35 @@ class DPAPIModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1555.004", "T1555.003"]
     MODULE_TIMEOUT_SECONDS: int | None = 180  # seconds
     PARAMS_MODEL       = DPAPIParams
+    ENABLED            = False
+    DISABLED_REASON    = "module disabled: DPAPI decryption not implemented, stub only - false credential injection risk (MOD-029)"
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
-        """
-        Pre-flight Defense Feasibility Assessment:
-        Evaluates credential accessibility, user context, and target host defense posture.
-        DPAPI operates in user space and does not access LSASS memory, making it an optimal
-        stealthy alternative when Credential Guard, PPL, or EDR process hooks are active.
-        """
+        """Pre-flight Defense Feasibility Assessment: Disabled under MOD-029."""
         from ares.modules.base import FeasibilityReport
-        from ares.core.campaign import NoiseProfile
-
-        blockers: list[str] = []
-        recommendations: list[str] = []
-        opsec_tuning: dict[str, Any] = {}
-        score = 1.0
-        risk = "medium"
-
-        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
-        if not target:
-            blockers.append("No target host specified")
-            score -= 0.5
-
-        username = getattr(ctx, "params", {}).get("username", "")
-        mode = getattr(ctx, "params", {}).get("mode", "auto")
-        password = getattr(ctx, "params", {}).get("password", "") or getattr(ctx, "params", {}).get("secret", "")
-        nt_hash = getattr(ctx, "params", {}).get("nt_hash", "")
-        backup_key = getattr(ctx, "params", {}).get("backup_key", "")
-
-        if not username:
-            cred = getattr(ctx, "best_credential", lambda: None)()
-            if cred:
-                username = cred.username
-                if not password:
-                    password = getattr(cred, "password", "")
-                if not nt_hash and getattr(cred, "hash", ""):
-                    nt_hash = cred.hash
-
-        if not username:
-            blockers.append("Target username required for DPAPI blob masterkey resolution")
-            score -= 0.4
-            recommendations.extend(["windows.token_impersonation", "lateral.winrm"])
-
-        session = getattr(ctx, "session", None)
-        if session and hasattr(session, "get_host") and target:
-            host_state = session.get_host(target)
-            if host_state:
-                # If target has Credential Guard or PPL, DPAPI is the preferred evasion technique!
-                if host_state.has_defense("credential_guard") or host_state.has_defense("ppl"):
-                    score = min(1.0, score + 0.1)
-                    opsec_tuning["evasion_advantage"] = (
-                        "Target enforces Credential Guard / PPL. DPAPI is optimal because it recovers "
-                        "stored user secrets (browser credentials, Windows Vault, WiFi, RDP) from disk "
-                        "without triggering LSASS memory protections."
-                    )
-                if host_state.has_defense("edr"):
-                    opsec_tuning["edr_note"] = "EDR active on host: DPAPI avoids process injection; file access is low-noise."
-
-        if mode == "backup" and not backup_key:
-            blockers.append("Backup key mode selected but no domain backup key provided")
-            score -= 0.3
-            recommendations.append("windows.lsa_secrets")
-
-        if mode == "offline" and not (nt_hash or password):
-            blockers.append("Offline mode requires user NT hash or password for masterkey derivation")
-            score -= 0.3
-
-        unique_recs: list[str] = []
-        for r in recommendations:
-            if r not in unique_recs:
-                unique_recs.append(r)
-
-        feasible = len(blockers) == 0 and score >= 0.4
         return FeasibilityReport(
-            feasible=feasible,
-            score=max(0.0, min(1.0, score)),
-            risk_level=risk,
-            blockers=blockers,
-            recommended_alternatives=unique_recs,
-            opsec_tuning=opsec_tuning,
-            details={"target": target, "username": username, "mode": mode},
+            feasible=False,
+            score=0.0,
+            risk_level="high_noise",
+            blockers=[self.DISABLED_REASON],
+            recommended_alternatives=["windows.lsass_dump", "windows.lsa_secrets"],
+            details={"disabled": True, "reason": self.DISABLED_REASON},
         )
 
     async def validate(self, ctx: "Any") -> None:
-        from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        if isinstance(ctx.params, dict):
-            if not ctx.params.get("target") and getattr(ctx, "target", None):
-                ctx.params["target"] = ctx.target
-            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
-                ctx.params["domain"] = ctx.domain
-            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
-                cred = ctx.best_credential()
-                if cred and cred.username:
-                    ctx.params["username"] = cred.username
-        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
-        if not target:
-            raise ModuleValidationError(
-                "windows.dpapi requires 'target' - IP of target Windows host.",
-                module_id=self.MODULE_ID, field="target",
-            )
-        username = (ctx.params.get("username", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "username", ""))
-        if not username:
-            raise ModuleValidationError(
-                "windows.dpapi requires 'username' - target user whose DPAPI blobs to decrypt.",
-                module_id=self.MODULE_ID, field="username",
-            )
-        await super().validate(ctx)
+        raise ModuleValidationError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
-        """ExecutionContext-based entry point (v0.9.0+).
-        Thin adapter: extract params from ctx → call run() → return ModuleResult.
-        """
-        from ares.modules.base import ModuleResult
-        if getattr(ctx, "dry_run", False):
-            return ModuleResult(status="dry_run", module_id=self.MODULE_ID,
-                                raw={"dry_run": True})
+        """ExecutionContext-based entry point (v0.9.0+): Disabled under MOD-029."""
+        from ares.core.errors import ModuleError
+        raise ModuleError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
 
         target       = getattr(ctx, "target", "")
         username     = ""
@@ -321,11 +232,16 @@ class DPAPIModule(BaseModule):
         )
 
     @trace_module("windows.dpapi")
-    async def run(self, target: str, username: str, password: str = "",
+    async def run(self, target: str = "", username: str = "", password: str = "",
                   domain: str = "", lmhash: str = "", nthash_login: str = "",
                   target_user: str = "", nt_hash: str = "",
                   backup_key: str = "", mode: str = "auto",
                   campaign_id: str = "", **kwargs: Any):
+        from ares.core.errors import ModuleError
+        raise ModuleError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
 
         await self.before_request(target, "default")
         logger.info("dpapi_start", target=target, mode=mode, target_user=target_user)
