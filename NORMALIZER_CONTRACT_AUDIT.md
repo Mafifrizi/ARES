@@ -66,6 +66,10 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | **`cached_credentials`** | **`windows.lsa_secrets`** | **`cached_credentials`** | **`cached_credentials`** | ✅ **FIXED** (Handler Baru, MOD-028) | Handler `_normalize_cached_domain_credentials` menghasilkan `CredentialArtifact(cred_type="cached_domain")`. |
 | **`valid_credentials`** | **`credential.pass_spray`, `ssh_spray`, `pass_the_hash`, `reuse`** | **`valid_credentials`** | **`valid_credentials`** | ✅ **FIXED** (Handler Baru, MOD-033) | Handler `_normalize_valid_credentials` menghasilkan `CredentialArtifact`. Tipe data distandardisasi ke `list[dict]`. |
 | `converted_ticket` | `credential.ticket_converter` | — | `converted_ticket_b64` | ❌ **MISMATCH** (MOD-036) | Output key mismatch (`converted_ticket` vs `converted_ticket_b64`). Tidak ada handler. Tiket konversi hilang dari pipeline. |
+| `container_escape_vectors` | `linux.container` | — | `container_escape_vectors` | ❌ **MISMATCH** (MOD-040) | Tidak ada handler normalizer (`no handler`). Data vektor container escape hilang dari `ArtifactStore`. |
+| `k8s_rbac_findings` | `linux.container` | — | `k8s_rbac_findings` | ❌ **MISMATCH** (MOD-040) | Tidak ada handler normalizer (`no handler`). Data temuan K8s RBAC hilang dari `ArtifactStore`. |
+| `machine_account_hash` | `linux.samba_secrets` | — | `machine_account_hash` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Machine account NTLM hash tidak terserap ke `ArtifactStore`. |
+| `samba_secrets` | `linux.samba_secrets` | — | `samba_secrets` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Samba secrets tidak terserap ke `ArtifactStore`. |
 
 ---
 
