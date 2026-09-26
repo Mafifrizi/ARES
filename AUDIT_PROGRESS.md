@@ -57,10 +57,10 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 | MOD-047 | persistence.scheduled_task inverted dry_run=True default & unhandled RPC disconnect | TERBUKTI (HIGH) | Audit verified (`scheduled_task.py:549, 415-435`) | Menunggu remedi (Batch Fix Serentak) | `RegistryRunKeyPersistence.run()` secara default `dry_run=True`, memicu false success finding tanpa eksekusi. `_rrp_set_run_key` tidak memiliki `try/finally` untuk menutup koneksi DCE/RPC saat query gagal. |
 | MOD-048 | persistence.wmi_subscription broken binding cleanup & truthy persistence_established on failure | TERBUKTI (HIGH) | Audit verified (`wmi_subscription.py:353, 384-394`) | Menunggu remedi (Batch Fix Serentak) | Fungsi `cleanup()` mengabaikan penghapusan binding WMI (`name_key=None`). `raw["persistence_established"]` diisi nama subskripsi (string truthy) bahkan saat instalasi gagal, memicu false positive. |
 | MOD-049 | cloud.phantom_token fictitious PRT hijack implementation, zero network I/O & synthetic vault contamination | MITIGATED (disabled) | PASSED (Unit tests & registry validation) | `ares/modules/cloud/phantom_token.py`, `tests/unit/test_staged_modules.py` | Modul dinonaktifkan (`ENABLED = False`) dengan fail-fast guards di `assess_feasibility()`, `validate()`, `execute()`, dan `run()`, serta excluded dari active engine registry untuk mencegah suntikan kredensial/token PRT fiktif ke `AresVault` (implementasi real pending). |
-| MOD-050 | cloud.identity_federation_abuse scope bypass on on-premises ADFS probing via raw HTTP | TERBUKTI (HIGH) | Audit verified (`identity_federation.py:264-266, 505-540`) | Menunggu remedi | Modul mengirimkan HTTP request ke target `adfs_url` on-premises dengan `verify=False` tanpa validasi scope campaign dan tanpa memanggil `await self.before_request(adfs_url)` (melanggar Rule 1 dan Rule 4, pola MOD-004/009). |
-| MOD-051 | cloud.identity_federation_abuse unhandled outputs federation_trusts, golden_saml_paths, oauth_tokens, pivot_paths (100% data loss) | TERBUKTI (HIGH) | Audit verified (`identity_federation.py:77, 356-358`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Data pemetaan trust federasi dan Golden SAML hilang permanen dari `ArtifactStore`. |
-| MOD-052 | cloud.aws_privesc type confusion mismatch: aws_findings with list[Finding] overwrites S3 normalizer | TERBUKTI (HIGH) | Audit verified (`aws_privesc.py:80, 340-341`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Modul menuliskan `list[Finding]` ke `raw["aws_findings"]`. Normalizer `_normalize_cloud` mengharapkan struktur dictionary S3 (`raw["s3"]["public_buckets"]`) dari modul `cloud.aws`, menghasilkan 0 artifact dan hilangnya seluruh jalur eskalasi hak akses IAM dari `ArtifactStore`. |
-| MOD-053 | cloud.aws_privesc & cloud.identity_federation_abuse unvalidated AWS account/tenant scope & generic host attribution | TERBUKTI (MEDIUM) | Audit verified (`aws_privesc.py:331`, `identity_federation.py:1046, 1074`) | Menunggu remedi | Modul mengeksekusi query API AWS/Azure tanpa memverifikasi apakah AWS Account ID atau Tenant ID berada dalam batasan otorisasi scope campaign. Finding diatribusikan ke string generik (`host="aws"` atau `"azure_ad"`). |
+| MOD-050 | cloud.identity_federation_abuse scope bypass on on-premises ADFS probing via raw HTTP | FIXED | PASSED (Unit tests & before_request integration) | `ares/modules/cloud/identity_federation.py`, `tests/unit/test_strategic_modules.py` | Ekstraksi hostname target dari `adfs_url` via `urlparse` dan pemanggilan `await self.before_request(target_host, "http")` sebelum probing HTTP ADFS untuk mematuhi batasan scope campaign (pola MOD-004). |
+| MOD-051 | cloud.identity_federation_abuse unhandled outputs federation_trusts, golden_saml_paths, oauth_tokens, pivot_paths (100% data loss) | DEFERRED | Audit verified (`identity_federation.py:77, 356-358`) | Menunggu remedi (Batch Fix Serentak Normalizer) | Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Data pemetaan trust federasi dan Golden SAML hilang permanen dari `ArtifactStore`. |
+| MOD-052 | cloud.aws_privesc type confusion mismatch: aws_findings with list[Finding] overwrites S3 normalizer | FIXED | PASSED (Unit tests & pipeline separation) | `ares/modules/cloud/aws_privesc.py`, `tests/unit/test_artifact_normalizer_pipeline.py` | Key output diubah dari `raw["aws_findings"]` menjadi `raw["iam_privesc_paths"]` dan deklarasi diperbarui ke `OUTPUTS = ["aws_privesc_paths", "iam_privesc_paths"]`. Output tidak lagi menimpa dictionary S3 `cloud.aws` dan mencegah kontaminasi type confusion. |
+| MOD-053 | cloud.aws_privesc & cloud.identity_federation_abuse unvalidated AWS account/tenant scope & generic host attribution | DEFERRED | Audit verified (`aws_privesc.py:331`, `identity_federation.py:1046, 1074`) | Menunggu keputusan arsitektur (Architectural Gap) | ScopeGuard saat ini hanya memvalidasi IP/CIDR/DNS, tidak mengenali cloud identifiers (tenant_id, aws_account_id, subscription_id). Butuh perancangan CloudScopeGuard / ScopeGuard extension. |
 
 ---
 
@@ -153,6 +153,26 @@ Tracking file for verified findings, reproduction tests, applied fixes, test sui
 - **Severity**: **HIGH**
 - **Status**: **DEFERRED (Masuk batch fix serentak)**
 - **Catatan**: Tuple cleanup `("__FilterToConsumerBinding", None)` menyebabkan binding tidak terhapus, dan `raw["persistence_established"]` truthy pada status kegagalan. Akan difix serentak bersama MOD-046.
+
+---
+
+## BATCH FIX SERENTAK DEFERRED NOTES (Batch 8)
+
+### [MOD-051] Unhandled Outputs `federation_trusts`, `golden_saml_paths`, `oauth_tokens`, `pivot_paths` on `cloud.identity_federation_abuse`
+- **Severity**: **HIGH**
+- **Status**: **DEFERRED (Masuk batch fix serentak normalizer)**
+- **Catatan**: Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Terdaftar di `NORMALIZER_CONTRACT_AUDIT.md`. Akan difix serentak bersama capability normalizer pending lainnya.
+
+### [MOD-053] Cloud Scope Gap (ARCHITECTURAL GAP)
+- **Severity**: **MEDIUM**
+- **Status**: **DEFERRED — butuh keputusan desain lebih besar**
+- **Temuan**: ScopeGuard hanya memvalidasi IP/CIDR/DNS. Identifier cloud (`tenant_id`, `aws_account_id`, `subscription_id`) tidak dikenali.
+- **Opsi yang perlu dievaluasi**:
+  A. Extend `ScopeGuard` dengan `CloudScope` validator terpisah
+  B. Buat `CloudScopeGuard` class baru dengan interface yang sama
+  C. Validasi cloud identifier di layer campaign configuration
+- **Catatan**: Keputusan ini mempengaruhi semua cloud modules (Batch 8+) dan butuh review owner sebelum diimplementasikan.
+
 
 
 

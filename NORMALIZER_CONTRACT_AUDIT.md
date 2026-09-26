@@ -78,7 +78,8 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `golden_saml_paths` | `cloud.identity_federation_abuse` | — | `golden_saml_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Data rute Golden SAML hilang dari `ArtifactStore`. |
 | `oauth_tokens` | `cloud.identity_federation_abuse` | — | `oauth_tokens` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Token OAuth2 hilang dari `ArtifactStore`. |
 | `pivot_paths` | `cloud.identity_federation_abuse` | — | `pivot_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Analisis jalur pivot lintas-cloud hilang dari `ArtifactStore`. |
-| `aws_privesc_paths` | `cloud.aws_privesc` | — | `aws_privesc_paths`, `privesc_paths` | ❌ **MISMATCH** (MOD-052) | Tidak ada handler normalizer (`no handler`). Jalur eskalasi hak akses IAM hilang dari `ArtifactStore`. |
+| `aws_privesc_paths` | `cloud.aws_privesc` | — | `aws_privesc_paths` | ❌ **MISMATCH** (MOD-052) | Tidak ada handler normalizer (`no handler`). Jalur eskalasi hak akses IAM hilang dari `ArtifactStore`. |
+| `iam_privesc_paths` | `cloud.aws_privesc` | — | `iam_privesc_paths` | ⚠️ **NEW KEY** (aws_privesc, handler pending) | Key baru pasca-fix MOD-052 untuk memisahkan output privesc IAM dari `aws_findings` milik `cloud.aws`. Handler normalizer pending. |
 
 ---
 
