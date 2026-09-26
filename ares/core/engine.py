@@ -788,14 +788,36 @@ class AresEngine:
         from ares.core.tracing import get_current_trace_id
 
         trace_id = get_current_trace_id() or ""
-        for f in findings:
-            if not f.false_positive:
-                f.validated = True
-                f.module_id = f.module_id or module_id
-                enrich_finding_with_cvss(f)
-                if trace_id:
-                    f.trace_id = trace_id
-                confirmed.append(f)
+        for i, f in enumerate(findings):
+            if not skip_validation and i < len(validation_results):
+                v_res = validation_results[i]
+                if v_res.should_report and v_res.confidence >= 0.4:
+                    f.confidence = v_res.confidence
+                    f.validated = True
+                    f.module_id = f.module_id or module_id
+                    enrich_finding_with_cvss(f)
+                    if trace_id:
+                        f.trace_id = trace_id
+                    confirmed.append(f)
+                else:
+                    f.false_positive = True
+                    f.validated = False
+                    logger.warning(
+                        "finding_rejected_by_validator",
+                        finding_id=f.id,
+                        title=f.title,
+                        severity=str(f.severity),
+                        confidence=v_res.confidence,
+                        reason=getattr(v_res, "reason", None) or (v_res.notes[0] if v_res.notes else "below_confidence_threshold"),
+                    )
+            else:
+                if not f.false_positive:
+                    f.validated = True
+                    f.module_id = f.module_id or module_id
+                    enrich_finding_with_cvss(f)
+                    if trace_id:
+                        f.trace_id = trace_id
+                    confirmed.append(f)
 
         fp_count = len(findings) - len(confirmed)
         audit(

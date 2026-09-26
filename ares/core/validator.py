@@ -102,8 +102,10 @@ class FindingValidator:
 
         # Update the finding
         finding.confidence = result.confidence
-        finding.validated = True
-        if not result.passed:
+        if result.passed:
+            finding.validated = True
+        else:
+            finding.validated = False
             finding.mark_false_positive(f"Confidence too low: {final_confidence:.2f}")
 
         logger.info(
@@ -268,12 +270,52 @@ async def _check_lateral_evidence(
     ev = finding.evidence or {}
     tech = ev.get("technique") or "lateral"
     user = ev.get("username")
-    target = ev.get("target") or finding.host
+    target = ev.get("target") or finding.host or ev.get("relay_candidates") or ev.get("ldap_targets")
     privilege = ev.get("privilege", "user")
+
+    score = 0.0
+    notes: list[str] = []
+
+    # Target presence adds a small baseline score - not proof of execution
     if target:
-        account_str = f" as '{user}'" if user else ""
-        return True, 1.0, f"Lateral movement to {target}{account_str} verified via {tech} ({privilege} privilege)"
-    return False, 0.0, "Missing target host evidence in lateral movement finding"
+        score += 0.2
+        notes.append("target_present")
+
+    # Real execution evidence (stdout, session, ticket, delegation)
+    has_exec = bool(
+        ev.get("command_output")
+        or ev.get("output")
+        or ev.get("session_id")
+        or ev.get("ticket_path")
+        or ev.get("delegation_set")
+    )
+    if has_exec:
+        score += 0.6
+        notes.append("execution_evidence")
+
+    # Auth handshake, banner, or protocol audit evidence
+    has_auth = bool(
+        ev.get("auth_response")
+        or ev.get("banner")
+        or ev.get("auth_type")
+        or ev.get("sql_user")
+        or ev.get("smb_results")
+        or ev.get("relay_candidates")
+        or ev.get("ldap_unsigned_hosts")
+        or ev.get("method")
+    )
+    if has_auth:
+        score += 0.2
+        notes.append("auth_handshake_evidence")
+
+    score = min(1.0, round(score, 2))
+    passed = score >= 0.4
+
+    account_str = f" as '{user}'" if user else ""
+    target_str = str(target[0]) if isinstance(target, list) and target else str(target or "unknown")
+    if passed:
+        return True, score, f"Lateral movement to {target_str}{account_str} verified via {tech} ({', '.join(notes)}, confidence={score})"
+    return False, score, f"Insufficient lateral execution evidence for {target_str} (score={score}, required >= 0.4)"
 
 
 # ── Default validator registry ────────────────────────────────────────────────
