@@ -73,6 +73,7 @@ from ares.core.context import ExecutionContext
 from ares.core.errors import (
     AresError,
     ModuleError,
+    ModuleExecutionError,
     ModuleValidationError,
     ModuleTimeoutError,
     NetworkError,
@@ -353,6 +354,7 @@ __all__ = [
     # Errors
     "AresError",
     "ModuleError",
+    "ModuleExecutionError",
     "ModuleValidationError",
     "ModuleTimeoutError",
     "NetworkError",

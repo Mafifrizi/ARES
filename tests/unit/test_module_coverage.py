@@ -586,22 +586,33 @@ class TestDashboardModuleSchemaContracts:
         assert captured["listener"] == "10.0.0.10"
 
     def test_golden_ticket_form_fields_satisfy_shared_credential_requires(self):
+        from unittest.mock import MagicMock, patch
         from ares.modules.credential.golden_ticket import GoldenTicketModule
 
         mod, _ = _make_module(GoldenTicketModule)
-        _run(
-            mod.validate(
-                _ctx(
-                    params={
-                        "target": "10.0.0.5",
-                        "domain": "corp.local",
-                        "username": "Administrator",
-                        "krbtgt_hash": "0123456789abcdef0123456789abcdef",
-                        "domain_sid": "S-1-5-21-1111111111-2222222222-3333333333",
-                    }
+        with patch.dict(
+            "sys.modules",
+            {
+                "impacket": MagicMock(),
+                "impacket.krb5": MagicMock(),
+                "impacket.krb5.ticket": MagicMock(),
+                "impacket.krb5.constants": MagicMock(),
+                "impacket.krb5.types": MagicMock(),
+            },
+        ):
+            _run(
+                mod.validate(
+                    _ctx(
+                        params={
+                            "target": "10.0.0.5",
+                            "domain": "corp.local",
+                            "username": "Administrator",
+                            "krbtgt_hash": "0123456789abcdef0123456789abcdef",
+                            "domain_sid": "S-1-5-21-1111111111-2222222222-3333333333",
+                        }
+                    )
                 )
             )
-        )
 
     @pytest.mark.parametrize(
         "module_path,class_name",

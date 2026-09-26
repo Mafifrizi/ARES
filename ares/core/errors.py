@@ -122,6 +122,15 @@ class ModuleValidationError(ModuleError):
         self.field = field
 
 
+class ModuleExecutionError(ModuleError):
+    """
+    Module execution failed at runtime.
+    Raised when an underlying execution step or dependency is invalid or unavailable.
+    """
+
+    default_action = AresError.ABORT
+
+
 class ModuleTimeoutError(ModuleError):
     """
     Module exceeded wall-clock or CPU time limit.

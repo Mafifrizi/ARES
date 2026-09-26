@@ -39,6 +39,7 @@ from ares.modules.sdk import (
     InsufficientPrivilege,
     InvalidContext,
     ModuleError,
+    ModuleExecutionError,
     ModuleResult,
     ModuleTestHelper,
     ModuleTimeoutError,
@@ -159,6 +160,7 @@ __all__ = [
     # Errors
     "AresError",
     "ModuleError",
+    "ModuleExecutionError",
     "ModuleValidationError",
     "ModuleTimeoutError",
     "NetworkError",
