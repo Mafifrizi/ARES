@@ -13,21 +13,21 @@
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
 | **Total Temuan Teridentifikasi** | **74** | MOD-001 s/d MOD-074 (Batch 1 s/d Batch 12) |
-| **Sudah Diperbaiki (FIXED)** | **17** | Code fixes + regression tests lulus di main branch (termasuk MOD-061, MOD-064, MOD-067) |
+| **Sudah Diperbaiki (FIXED)** | **43** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **53** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
+| **Masih Open (DEFERRED)** | **27** | Sisa Grup C, E, F untuk eksekusi remedi bertahap |
 
 ### Ringkasan Status per Kelompok
 ```
 Total Temuan: 74
-├── FIXED (17)       [23.0%] ═══════════════
+├── FIXED (43)       [58.1%] ═══════════════════════════════════
 ├── DISABLED (4)     [ 5.4%] ═══
-└── DEFERRED (53)    [71.6%] ══════════════════════════════════════
-    ├── Grup A: Normalizer Handlers Missing (14 temuan / capability sets)
-    ├── Grup B: Hash Masking di Finding.evidence (2 temuan)
-    ├── Grup C: Teardown & Resource Cleanup (7 temuan)
-    ├── Grup D: Scope Bypass Listener / Destination Parameter (12 temuan: 11 open, 1 fixed)
-    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (18 temuan: 16 open, 2 fixed)
+└── DEFERRED (27)    [36.5%] ═══════════════════════
+    ├── Grup A: Normalizer Handlers Missing (✅ SELESAI - commit 9f8b111)
+    ├── Grup B: Hash Masking di Finding.evidence (✅ SELESAI - commit e94533b)
+    ├── Grup C: Teardown & Resource Cleanup (7 temuan open)
+    ├── Grup D: Scope Bypass Listener / Destination Parameter (✅ SELESAI - commit cc2e980)
+    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (15 temuan open, 3 fixed)
     └── Grup F: Architectural Decisions Needed (5 temuan / gates)
 ```
 
@@ -56,6 +56,10 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 | **MOD-061** | `network.snmp_enum` | Direct vault write (Gate 6) + standard `valid_credentials` contract | `5635362` |
 | **MOD-064** | `cloud.aws`, `cloud.gcp` | Removal of operator-host link-local metadata probe (`169.254.169.254` / `metadata.google.internal`) | `d86750b` |
 | **MOD-067** | `cloud.azure_ad` | Indentation defect fix: resolved UnboundLocalError & restored Microsoft Graph API enumeration | `bd2c9b4` |
+| **FASE 1 (Grup A)** | `ares/normalize/artifacts.py` | 16 new normalizer pipeline handlers & multi-key fallbacks (MOD-016, MOD-040, MOD-041, MOD-044, MOD-051, MOD-062, MOD-066, MOD-068, MOD-070, MOD-074) | `9f8b111` |
+| **FASE 2 (Grup B)** | `ares/core/security.py`, modules | Redaction masking `mask_secret_hash()` for password hashes in `Finding.evidence` & `EvidenceRecord.data` (MOD-027, MOD-042, systematic grep) | `e94533b` |
+| **FASE 3 (Grup D)** | `ares/modules/*` (10 modules) | Strict Layer 1 & 2 scope enforcement on secondary target destinations (`before_request` & `is_in_scope`) (MOD-004, MOD-009, MOD-010, MOD-011, MOD-014, MOD-015, MOD-017, MOD-032, MOD-058, MOD-059) | `cc2e980` |
+| **CHAINS FIX** | `ares/core/execution_chains.py` | Remove disabled modules from execution chains for 100% catalog parity | `ae44730` |
 
 *Catatan: Modul yang dinonaktifkan demi keamanan operator (`ad.ghost_forge` [MOD-005], `windows.dpapi` [MOD-029], `windows.token_impersonation` [MOD-030], `cloud.phantom_token` [MOD-049]) dilindungi fail-fast guard dan tidak diizinkan masuk active catalog.*
 
@@ -65,11 +69,9 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 
 ---
 
-### Grup A: Normalizer Handlers Missing (Fix di `ares/normalize/artifacts.py`)
+### Grup A: Normalizer Handlers Missing (Fix di `ares/normalize/artifacts.py`) — ✅ SELESAI (commit `9f8b111`)
 
-Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** di mana modul offensive berhasil mengambil telemetry bernilai tinggi, namun `ArtifactNormalizer.normalize()` mengabaikannya karena belum memiliki handler routing.
-
-*(Catatan: 7 handler normalizer untuk MOD-036, MOD-041, MOD-044, MOD-052, dan MOD-062 telah diimplementasikan pada commit `5635362` di `ares/normalize/artifacts.py`)*
+Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** di mana modul offensive berhasil mengambil telemetry bernilai tinggi, namun `ArtifactNormalizer.normalize()` mengabaikannya karena belum memiliki handler routing. Seluruh handler dan dual-read fallback telah diimplementasikan penuh pada **Fase 1 (commit `9f8b111`)** dan diverifikasi dengan 42/42 tests passing di `tests/unit/test_artifact_normalizer_pipeline.py`.
 
 | ID | Modul | Capability / Output Key | Tipe Artifact yang Dibutuhkan | Rencana Solusi di `artifacts.py` |
 |---|---|---|---|---|
@@ -92,9 +94,9 @@ Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** 
 
 ---
 
-### Grup B: Hash Masking di `Finding.evidence`
+### Grup B: Hash Masking di `Finding.evidence` — ✅ SELESAI (commit `e94533b`)
 
-Mengekspos hash kredensial secara plaintext pada log audit, reporting API, atau `Finding.evidence` melanggar standar OPSEC dan privacy ARES (pola MOD-007).
+Mengekspos hash kredensial secara plaintext pada log audit, reporting API, atau `Finding.evidence` melanggar standar OPSEC dan privacy ARES (pola MOD-007). Seluruh kemunculan raw hash telah diredaksi dengan `mask_secret_hash()` pada **Fase 2 (commit `e94533b`)** dan diverifikasi via `tests/unit/test_hash_masking_grup_b.py`.
 
 | ID | Modul | Lokasi Kode | Field Sensitif yang Bocor | Pola Redaksi yang Diwajibkan |
 |---|---|---|---|---|
@@ -128,9 +130,9 @@ Modul-modul ini melakukan perubahan status permanen pada sistem atau domain targ
 
 ---
 
-### Grup D: Scope Bypass Listener Parameter
+### Grup D: Scope Bypass Listener Parameter — ✅ SELESAI (commit `cc2e980`)
 
-Engine `_extract_all_targets` hanya mengekstrak parameter target primer (`target`, `dc`, `host`, `ip`). Parameter tujuan sekunder yang dapat memicu koneksi keluar (listener UNC, proxy, CA host, relay target list) terlewat dari validasi `campaign.is_in_scope()`.
+Engine `_extract_all_targets` hanya mengekstrak parameter target primer (`target`, `dc`, `host`, `ip`). Parameter tujuan sekunder yang dapat memicu koneksi keluar (listener UNC, proxy, CA host, relay target list) terlewat dari validasi `campaign.is_in_scope()`. Seluruh 10 modul target telah diperbaiki pada **Fase 3 (commit `cc2e980`)** dan diverifikasi via `tests/unit/test_scope_enforcement_grup_d.py`.
 
 | ID | Modul | Parameter yang Bypass Scope | Protokol / Port | Lokasi Fix |
 |---|---|---|---|---|
@@ -337,20 +339,20 @@ Untuk meminimalkan waktu regresi dan memaksimalkan stabilitas, eksekusi remedi s
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │  FASE 1: Grup A — Normalizer Handlers Missing (ares/normalize/artifacts.py)  │
-│  - Dampak Tertinggi: Menghentikan 100% data loss telemetry ke ArtifactStore.  │
-│  - Terisolasi pada 1 file + pipeline unit test, risiko regresi terendah.  │
+│  [STATUS: ✅ COMPLETED - commit 9f8b111]                                │
+│  - 16 new handlers & multi-key fallbacks, 42/42 tests passing.         │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │  FASE 2: Grup B — Hash Masking di Finding.evidence                     │
-│  - Penerapan fungsi mask_secret_hash() di MOD-027 dan MOD-042.          │
-│  - Menghilangkan kebocoran hash plaintext di log audit dan reporting.   │
+│  [STATUS: ✅ COMPLETED - commit e94533b]                                │
+│  - mask_secret_hash() in core/security.py, 4/4 tests passing.          │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │  FASE 3: Grup D — Scope Bypass Listener & Secondary Destination        │
-│  - Penegakan await self.before_request(...) pada 11 modul target.      │
-│  - Menjamin zero traffic keluar ke host di luar izin client engagement.│
+│  [STATUS: ✅ COMPLETED - commit cc2e980]                                │
+│  - 10 offensive modules scoped on secondary destinations, 10/10 tests. │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
