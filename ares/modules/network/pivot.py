@@ -266,6 +266,18 @@ class PivotModule(BaseModule):
 
         await self.before_request(target, "default")
 
+        # Validate reachable_subnets against campaign scope
+        valid_subnets: list[str] = []
+        for subnet in (reachable_subnets or []):
+            clean_sub = subnet.strip()
+            if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                sample_host = clean_sub.split("/")[0]
+                if not self.campaign.is_in_scope(sample_host):
+                    logger.warning("pivot_reachable_subnet_out_of_scope_skipped", subnet=clean_sub)
+                    continue
+            valid_subnets.append(clean_sub)
+        reachable_subnets = valid_subnets
+
         # Get or create campaign-level PivotManager
         if campaign_id not in _PIVOT_MANAGERS:
             _PIVOT_MANAGERS[campaign_id] = PivotManager(operator="ares")

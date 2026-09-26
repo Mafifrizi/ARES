@@ -229,6 +229,12 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         sccm_host = sccm_info["site_servers"][0]
         site_code = sccm_info.get("site_code", "")
 
+        if sccm_host and sccm_host != dc:
+            try:
+                await self.before_request(sccm_host, "rpc")
+            except Exception as exc:
+                logger.warning("sccm_host_out_of_scope", sccm_host=sccm_host, error=str(exc))
+
         self.finding(
             title=f"SCCM Infrastructure Found: {sccm_host} (Site: {site_code})",
             description=(
@@ -271,9 +277,18 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
 
         # ── Step 3: Enumerate NAA via WMI (requires admin on SCCM client) ─
         naa_target = target or sccm_host
-        naa_info = await loop.run_in_executor(
-            None, lambda: self._extract_naa(naa_target, domain, username, password)
-        )
+        if naa_target and naa_target != dc:
+            try:
+                await self.before_request(naa_target, "wmi")
+            except Exception as exc:
+                logger.warning("sccm_naa_target_out_of_scope", target=naa_target, error=str(exc))
+                naa_target = ""
+
+        naa_info: dict[str, Any] = {}
+        if naa_target:
+            naa_info = await loop.run_in_executor(
+                None, lambda: self._extract_naa(naa_target, domain, username, password)
+            )
         raw["naa"] = naa_info
 
         if naa_info.get("naa_username"):
@@ -559,6 +574,16 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         try:
             import socket
             for dp in distribution_points[:10]:
+                if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                    if not self.campaign.is_in_scope(dp):
+                        logger.warning("sccm_dp_out_of_scope_skipped", dp=dp)
+                        continue
+                if hasattr(self, "noise") and hasattr(self.noise, "scope_guard"):
+                    try:
+                        self.noise.scope_guard.assert_in_scope(dp)
+                    except Exception as exc:
+                        logger.warning("sccm_dp_scope_blocked", dp=dp, error=str(exc))
+                        continue
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     sock.settimeout(3)

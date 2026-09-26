@@ -1152,8 +1152,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 except OSError:
                     pass
 
-    @staticmethod
-    def _submit_csr_to_ca(ca_host: str, ca_name: str, template_name: str,
+    def _submit_csr_to_ca(self, ca_host: str, ca_name: str, template_name: str,
                            csr_pem: bytes, username: str, password: str,
                            domain: str) -> bytes:
         """
@@ -1163,6 +1162,9 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         Returns PEM certificate bytes on success, empty bytes on failure.
         Uses NTLM authentication (same credentials used for LDAP).
         """
+        if hasattr(self, "noise") and hasattr(self.noise, "scope_guard"):
+            self.noise.scope_guard.assert_in_scope(ca_host)
+
         try:
             import httpx
             from base64 import b64encode

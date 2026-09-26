@@ -53,13 +53,24 @@ def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
     ctx.verify_mode = ssl.CERT_NONE
 
     probe_urls: list[str] = []
-    if "microsoftonline.com" in clean_target:
+    # MOD-032: Do not probe public login.microsoftonline.com if target is private/internal RFC1918 IP
+    import ipaddress
+    is_private_ip = False
+    try:
+        ip_obj = ipaddress.ip_address(clean_target)
+        is_private_ip = ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+    except ValueError:
+        pass
+
+    if is_private_ip:
+        probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
+    elif "microsoftonline.com" in clean_target:
         probe_urls.append(f"https://{clean_target}/common/oauth2/v2.0/devicecode")
     elif "." in clean_target:
         probe_urls.append(f"https://login.microsoftonline.com/{clean_target}/oauth2/v2.0/devicecode")
         probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
     else:
-        probe_urls.append(f"https://login.microsoftonline.com/{clean_target}/oauth2/v2.0/devicecode")
+        probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
 
     for url in probe_urls:
         try:

@@ -329,6 +329,22 @@ class SMBRelayAuditModule(BaseModule):
 
         targets = [sanitize_hostname(t) for t in targets if t]
 
+        scoped_targets: list[str] = []
+        for t in targets:
+            if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                if not self.campaign.is_in_scope(t):
+                    logger.warning("smb_relay_target_out_of_scope_skipped", target=t)
+                    continue
+            try:
+                await self.before_request(t, "smb")
+                scoped_targets.append(t)
+            except Exception as exc:
+                logger.warning("smb_relay_target_scope_blocked", target=t, error=str(exc))
+                continue
+        targets = scoped_targets
+        if not targets:
+            return [], {"error": "no in-scope targets to audit"}
+
         logger.info("smb_relay_audit_start", targets=len(targets))
         audit("smb_relay_audit", actor="operator", source="operator",
               target=",".join(targets[:5]), technique="T1082")

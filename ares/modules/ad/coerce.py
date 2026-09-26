@@ -219,6 +219,8 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         listener_ip = sanitize_hostname(listener_ip)
 
         await self.before_request(dc, "default")
+        if listener_ip:
+            await self.before_request(listener_ip, "smb")
         logger.warning("coerce_start",
                        target=dc, listener=listener_ip, method=method,
                        msg="HIGH_NOISE - TRIGGERS_MDI")

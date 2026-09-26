@@ -251,10 +251,30 @@ class HttpFingerprintModule(BaseModule):
             try:
                 async with httpx.AsyncClient(
                     timeout=6.0, verify=False,
-                    follow_redirects=True,
+                    follow_redirects=False,
                     headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
                 ) as client:
                     r = await client.get(f"{base_url}/")
+                    if r.is_redirect and r.headers.get("location"):
+                        from urllib.parse import urljoin, urlparse
+                        target_loc = r.headers["location"]
+                        abs_url = urljoin(f"{base_url}/", target_loc)
+                        parsed = urlparse(abs_url)
+                        redirect_host = parsed.hostname or target
+                        is_in_scope = True
+                        if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                            is_in_scope = self.campaign.is_in_scope(redirect_host)
+                        if is_in_scope:
+                            try:
+                                r = await client.get(abs_url)
+                            except Exception:
+                                pass
+                        else:
+                            logger.warning(
+                                "http_fingerprint_redirect_out_of_scope_skipped",
+                                redirect_host=redirect_host,
+                                destination=abs_url,
+                            )
             except Exception:
                 continue
 

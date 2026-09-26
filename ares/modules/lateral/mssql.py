@@ -294,12 +294,21 @@ class MSSQLModule(BaseModule):
         # Linked server hop
         elif technique == "linked" and (linked or info.get("linked_servers")):
             linked_server = linked or info["linked_servers"][0]
-            linked_output = await loop.run_in_executor(
-                None,
-                lambda: self._linked_server_sync(
-                    target, username, password, port, linked_server, command,
-                ),
-            )
+            if linked_server:
+                try:
+                    await self.before_request(linked_server, "mssql")
+                except Exception as exc:
+                    logger.warning("mssql_linked_server_out_of_scope", server=linked_server, error=str(exc))
+                    linked_server = ""
+
+            linked_output = ""
+            if linked_server:
+                linked_output = await loop.run_in_executor(
+                    None,
+                    lambda: self._linked_server_sync(
+                        target, username, password, port, linked_server, command,
+                    ),
+                )
             if linked_output:
                 self.finding(
                     title       = f"MSSQL Linked Server RCE: {linked_server}",
@@ -319,10 +328,18 @@ class MSSQLModule(BaseModule):
 
         # UNC path NTLM coercion via xp_dirtree
         elif technique == "unc_coerce" and listener:
-            coerced = await loop.run_in_executor(
-                None,
-                lambda: self._unc_coerce_sync(target, username, password, port, listener),
-            )
+            try:
+                await self.before_request(listener, "smb")
+            except Exception as exc:
+                logger.warning("mssql_listener_out_of_scope", listener=listener, error=str(exc))
+                listener = ""
+
+            coerced = False
+            if listener:
+                coerced = await loop.run_in_executor(
+                    None,
+                    lambda: self._unc_coerce_sync(target, username, password, port, listener),
+                )
             if coerced:
                 self.finding(
                     title       = f"MSSQL NTLM Coercion to {listener} from {target}",

@@ -484,6 +484,16 @@ class NTLMRelayModule(BaseModule):
         results: list[RelayTarget] = []
 
         for host in targets[:50]:  # cap to prevent excessive scanning
+            if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                if not self.campaign.is_in_scope(host):
+                    logger.warning("ntlm_relay_target_out_of_scope_skipped", host=host)
+                    continue
+            try:
+                await self.before_request(host, "smb")
+            except Exception as exc:
+                logger.warning("ntlm_relay_target_scope_blocked", host=host, error=str(exc))
+                continue
+
             rt = RelayTarget(host=host)
 
             # Check SMB signing

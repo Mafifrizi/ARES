@@ -268,6 +268,16 @@ class DnsEnumModule(BaseModule):
 
         for ns in ns_servers[:3]:
             ns_clean = ns.rstrip(".")
+            if hasattr(self, "campaign") and self.campaign and hasattr(self.campaign, "is_in_scope"):
+                if not self.campaign.is_in_scope(ns_clean):
+                    logger.warning("dns_axfr_nameserver_out_of_scope_skipped", nameserver=ns_clean)
+                    continue
+            try:
+                await self.before_request(ns_clean, "dns")
+            except Exception as exc:
+                logger.warning("dns_axfr_nameserver_scope_blocked", nameserver=ns_clean, error=str(exc))
+                continue
+
             records  = await loop.run_in_executor(None, _try_axfr, ns_clean)
             if records:
                 zone_transfer_data = records
