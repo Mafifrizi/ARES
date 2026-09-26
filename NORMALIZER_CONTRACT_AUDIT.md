@@ -70,6 +70,10 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `k8s_rbac_findings` | `linux.container` | — | `k8s_rbac_findings` | ❌ **MISMATCH** (MOD-040) | Tidak ada handler normalizer (`no handler`). Data temuan K8s RBAC hilang dari `ArtifactStore`. |
 | `machine_account_hash` | `linux.samba_secrets` | — | `machine_account_hash` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Machine account NTLM hash tidak terserap ke `ArtifactStore`. |
 | `samba_secrets` | `linux.samba_secrets` | — | `samba_secrets` | ❌ **MISMATCH** (MOD-041) | Tidak ada handler normalizer (`no handler`). Samba secrets tidak terserap ke `ArtifactStore`. |
+| `machine_credentials` | `linux.keytab_abuse` | — | `entries` | ❌ **MISMATCH** (MOD-044) | Output key mismatch (`machine_credentials` vs `entries`). Tidak ada handler normalizer. Data kunci mesin hilang dari `ArtifactStore`. |
+| `kerberos_keys` | `linux.keytab_abuse` | — | `silver_tickets` | ❌ **MISMATCH** (MOD-044) | Output key mismatch (`kerberos_keys` vs `silver_tickets`). Tidak ada handler normalizer. Data kunci Kerberos hilang dari `ArtifactStore`. |
+| `cached_hashes` | `linux.sssd_harvest` | — | `cached_hashes`, `hashes` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `cached_hashes` (`no handler`). Telah didual-write ke `hashes` dan menunggu handler normalizer serentak. |
+| `domain_users` | `linux.sssd_harvest` | — | `domain_users`, `users` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `domain_users` (`no handler`). Telah didual-write ke `users` dan menunggu handler normalizer serentak. |
 
 ---
 
