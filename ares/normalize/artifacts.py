@@ -39,6 +39,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from ares.core.logger import get_logger
+
+logger = get_logger("ares.normalize.artifacts")
+
 
 # ── Artifact type registry ─────────────────────────────────────────────────────
 
@@ -243,9 +247,11 @@ class CredentialArtifact(NormalizedArtifact):
             self.source_host = self.host
         elif self.source_host and not self.host:
             self.host = self.source_host
+        if self.secret and not self.secret_hash:
+            self.secret_hash = hashlib.sha256(self.secret.encode("utf-8", errors="ignore")).hexdigest()
 
     def _dedup_key(self) -> str:
-        return f"{self.domain}\\{self.username}:{self.cred_type}:{self.secret_hash[:8]}"
+        return f"{self.domain}\\{self.username}:{self.cred_type}:{self.source_host}:{self.secret_hash[:8]}"
 
     def _to_dict_fields(self) -> dict[str, Any]:
         return {
@@ -446,8 +452,13 @@ class ArtifactNormalizer:
             try:
                 added = self._normalize_capability(capability, raw, store)
                 count += added
-            except Exception:
-                pass  # Never let normalization failures block the engine
+            except Exception as exc:
+                logger.warning(
+                    "artifact_normalization_failed",
+                    module_id=module_id,
+                    capability=capability,
+                    error=str(exc),
+                )
         return count
 
     def _normalize_capability(
@@ -455,15 +466,32 @@ class ArtifactNormalizer:
     ) -> int:
         """Route a capability to its specific normalizer."""
         handlers: dict[str, Any] = {
-            "user_list":        self._normalize_users,
-            "computer_list":    self._normalize_computers,
-            "kerberos_hashes":  self._normalize_kerberos_hashes,
-            "asrep_hashes":     self._normalize_asrep_hashes,
-            "ntlm_hashes":      self._normalize_ntlm_hashes,
-            "spn_list":         self._normalize_spns,
-            "acl_findings":     self._normalize_permissions,
-            "aws_findings":     self._normalize_cloud,
-            "privesc_vectors":  self._normalize_host_vuln,
+            "user_list":              self._normalize_users,
+            "users":                  self._normalize_users,
+            "computer_list":          self._normalize_computers,
+            "computers":              self._normalize_computers,
+            "kerberos_hashes":        self._normalize_kerberos_hashes,
+            "asrep_hashes":           self._normalize_asrep_hashes,
+            "ntlm_hashes":            self._normalize_ntlm_hashes,
+            "hashes":                 self._normalize_ntlm_hashes,
+            "spn_list":               self._normalize_spns,
+            "spns":                   self._normalize_spns,
+            "acl_findings":           self._normalize_permissions,
+            "misconfigs":             self._normalize_permissions,
+            "aws_findings":           self._normalize_cloud,
+            "privesc_vectors":        self._normalize_host_vuln,
+            # P0 Capabilities
+            "cleartext_credentials":  self._normalize_cleartext_credentials,
+            "credentials":            self._normalize_cleartext_credentials,
+            "browser_passwords":      self._normalize_cleartext_credentials,
+            "cracked_credentials":    self._normalize_cracked_credentials,
+            "laps_passwords":         self._normalize_laps_passwords,
+            "kerberos_tickets":       self._normalize_kerberos_tickets,
+            "kerberos_ticket":        self._normalize_kerberos_tickets,
+            "tickets":                self._normalize_kerberos_tickets,
+            "golden_ticket":          self._normalize_kerberos_tickets,
+            "open_ports":             self._normalize_open_ports,
+            "service_map":            self._normalize_open_ports,
         }
         handler = handlers.get(capability)
         if handler:
@@ -471,7 +499,7 @@ class ArtifactNormalizer:
         return 0
 
     def _normalize_users(self, raw: dict, store: ArtifactStore) -> int:
-        users = raw.get("users", [])
+        users = raw.get("users") or raw.get("user_list", [])
         count = 0
         for u in users:
             if not isinstance(u, dict):
@@ -480,102 +508,149 @@ class ArtifactNormalizer:
                 username    = u.get("samAccountName", u.get("username", "")),
                 domain      = u.get("domain", ""),
                 enabled     = u.get("enabled", True),
-                is_admin    = u.get("isAdmin", False),
-                no_preauth  = u.get("noPreauth", False),
-                spns        = u.get("spns", []),
+                is_admin    = bool(u.get("isAdmin", u.get("is_admin", u.get("adminCount", 0) > 0))),
+                no_preauth  = bool(u.get("noPreauth", u.get("no_preauth", u.get("dont_req_preauth", False)))),
+                spns        = u.get("spns", u.get("spn", [])),
             )
             store.add(artifact)
             count += 1
         return count
 
     def _normalize_computers(self, raw: dict, store: ArtifactStore) -> int:
-        computers = raw.get("computers", [])
+        computers = raw.get("computers") or raw.get("computer_list", [])
         count = 0
         for c in computers:
             if not isinstance(c, dict):
                 continue
             artifact = HostArtifact(
-                ip_address = "",
-                hostname   = c.get("dns", c.get("name", "")),
+                ip_address = c.get("ip", c.get("ip_address", "")),
+                hostname   = c.get("dns", c.get("dns_name", c.get("name", ""))),
                 is_dc      = c.get("is_dc", False),
                 os         = c.get("os", ""),
+                os_version = c.get("os_version", ""),
+                domain     = c.get("domain", ""),
             )
             store.add(artifact)
             count += 1
         return count
 
     def _normalize_kerberos_hashes(self, raw: dict, store: ArtifactStore) -> int:
-        hashes = raw.get("hashes", [])
+        hashes = raw.get("hashes") or raw.get("kerberos_hashes", [])
         count  = 0
-        accounts = raw.get("accounts", [])
         for h in hashes:
-            if not isinstance(h, str):
-                continue
-            # Parse username from hash: $krb5tgs$23$*username$DOMAIN$...
-            parts    = h.split("$")
-            username = parts[3].split("@")[0] if len(parts) > 3 else ""
-            domain   = parts[4].split("@")[0] if len(parts) > 4 else ""
-            artifact = HashArtifact(
-                username     = username,
-                domain       = domain,
-                hash_value   = h[:120],
-                hash_type    = "krb5tgs",
-                hashcat_mode = 13100,
-            )
-            store.add(artifact)
-            count += 1
+            if isinstance(h, str):
+                # Parse username from hash: $krb5tgs$23$*username$DOMAIN$...
+                parts    = h.split("$")
+                raw_user = parts[3].split("@")[0] if len(parts) > 3 else ""
+                username = raw_user.lstrip("*")
+                domain   = parts[4].split("@")[0] if len(parts) > 4 else ""
+                artifact = HashArtifact(
+                    username     = username,
+                    domain       = domain,
+                    hash_value   = h[:120],
+                    hash_type    = "krb5tgs",
+                    hashcat_mode = 13100,
+                )
+                store.add(artifact)
+                count += 1
+            elif isinstance(h, dict):
+                artifact = HashArtifact(
+                    username     = h.get("username", ""),
+                    domain       = h.get("domain", ""),
+                    hash_value   = (h.get("hash") or h.get("hash_value") or "")[:120],
+                    hash_type    = "krb5tgs",
+                    hashcat_mode = 13100,
+                )
+                store.add(artifact)
+                count += 1
         return count
 
     def _normalize_asrep_hashes(self, raw: dict, store: ArtifactStore) -> int:
-        hashes = raw.get("hashes", [])
+        hashes = raw.get("hashes") or raw.get("asrep_hashes", [])
         count  = 0
         for h in hashes:
-            if not isinstance(h, str):
-                continue
-            parts    = h.split("$")
-            username = parts[3].split("@")[0] if len(parts) > 3 else ""
-            domain   = parts[4].split("@")[0] if len(parts) > 4 else ""
-            artifact = HashArtifact(
-                username     = username,
-                domain       = domain,
-                hash_value   = h[:120],
-                hash_type    = "krb5asrep",
-                hashcat_mode = 18200,
-            )
-            store.add(artifact)
-            count += 1
+            if isinstance(h, str):
+                parts    = h.split("$")
+                user_part = parts[3] if len(parts) > 3 else ""
+                if "@" in user_part:
+                    username, domain = user_part.split("@", 1)
+                else:
+                    username = user_part
+                    domain = parts[4].split("@")[0] if len(parts) > 4 else ""
+                artifact = HashArtifact(
+                    username     = username,
+                    domain       = domain,
+                    hash_value   = h[:120],
+                    hash_type    = "krb5asrep",
+                    hashcat_mode = 18200,
+                )
+                store.add(artifact)
+                count += 1
+            elif isinstance(h, dict):
+                artifact = HashArtifact(
+                    username     = h.get("username", ""),
+                    domain       = h.get("domain", ""),
+                    hash_value   = (h.get("hash") or h.get("hash_value") or "")[:120],
+                    hash_type    = "krb5asrep",
+                    hashcat_mode = 18200,
+                )
+                store.add(artifact)
+                count += 1
         return count
 
     def _normalize_ntlm_hashes(self, raw: dict, store: ArtifactStore) -> int:
-        hashes = raw.get("hashes", [])
+        hashes = (
+            raw.get("hashes")
+            or raw.get("ntlm_hashes")
+            or raw.get("sam_hashes")
+            or []
+        )
         count  = 0
         for h in hashes:
-            if not isinstance(h, dict):
-                continue
-            artifact = HashArtifact(
-                username     = h.get("username", ""),
-                domain       = "",
-                hash_value   = h.get("nt_hash", ""),
-                hash_type    = "ntlm",
-                hashcat_mode = 1000,
-            )
-            store.add(artifact)
-            count += 1
+            if isinstance(h, dict):
+                artifact = HashArtifact(
+                    username     = h.get("username", ""),
+                    domain       = h.get("domain", ""),
+                    hash_value   = h.get("nt_hash") or h.get("hash") or h.get("ntlm", ""),
+                    hash_type    = "ntlm",
+                    hashcat_mode = 1000,
+                )
+                store.add(artifact)
+                count += 1
+            elif isinstance(h, str):
+                parts = h.split(":")
+                username = parts[0] if parts else ""
+                nt_hash = ""
+                if len(parts) >= 4:
+                    nt_hash = parts[3]
+                elif len(parts) == 2:
+                    nt_hash = parts[1]
+                else:
+                    nt_hash = h
+                artifact = HashArtifact(
+                    username     = username,
+                    domain       = "",
+                    hash_value   = nt_hash,
+                    hash_type    = "ntlm",
+                    hashcat_mode = 1000,
+                )
+                store.add(artifact)
+                count += 1
         return count
 
     def _normalize_spns(self, raw: dict, store: ArtifactStore) -> int:
-        spns = raw.get("spns", [])
+        spns = raw.get("spns") or raw.get("spn_list", [])
         count = 0
         for s in spns:
             if not isinstance(s, dict):
                 continue
+            spn_entries = s.get("spns", s.get("spn", []))
             artifact = UserArtifact(
-                username        = s.get("name", ""),
-                domain          = "",
+                username        = s.get("samAccountName", s.get("name", s.get("username", ""))),
+                domain          = s.get("domain", ""),
                 enabled         = s.get("enabled", True),
-                is_admin        = s.get("is_admin", False),
-                spns            = s.get("spns", []),
-                is_kerberoastable = bool(s.get("spns")),
+                is_admin        = s.get("is_admin", s.get("isAdmin", False)),
+                spns            = spn_entries,
             )
             store.add(artifact)
             count += 1
@@ -610,10 +685,31 @@ class ArtifactNormalizer:
             )
             store.add(artifact)
             count += 1
+        for path in raw.get("privesc_paths", []):
+            if isinstance(path, dict):
+                res_id = (
+                    path.get("role_arn")
+                    or path.get("policy_name")
+                    or path.get("action")
+                    or path.get("technique")
+                    or "iam_privesc_path"
+                )
+            elif isinstance(path, str):
+                res_id = path
+            else:
+                continue
+            artifact = CloudResourceArtifact(
+                resource_id   = str(res_id),
+                resource_type = "iam_role",
+                region        = region,
+                is_public     = False,
+            )
+            store.add(artifact)
+            count += 1
         return count
 
     def _normalize_host_vuln(self, raw: dict, store: ArtifactStore) -> int:
-        host = raw.get("host", "")
+        host = raw.get("target") or raw.get("host", "")
         if host and host != "localhost":
             artifact = HostArtifact(
                 ip_address = host,
@@ -622,3 +718,149 @@ class ArtifactNormalizer:
             store.add(artifact)
             return 1
         return 0
+
+    # ── P0 Handlers ────────────────────────────────────────────────────────────
+
+    def _normalize_cleartext_credentials(self, raw: dict, store: ArtifactStore) -> int:
+        creds = raw.get("cleartext_credentials") or raw.get("credentials", [])
+        count = 0
+        for c in creds:
+            if not isinstance(c, dict):
+                continue
+            artifact = CredentialArtifact(
+                username    = c.get("username", ""),
+                domain      = c.get("domain", ""),
+                cred_type   = "cleartext",
+                secret      = c.get("password") or c.get("secret") or c.get("plaintext", ""),
+                source_host = c.get("host") or c.get("target") or c.get("computer", ""),
+                privilege   = c.get("privilege", "unknown"),
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_cracked_credentials(self, raw: dict, store: ArtifactStore) -> int:
+        cracked = raw.get("cracked_credentials") or raw.get("cracked_users", [])
+        count = 0
+        for c in cracked:
+            if not isinstance(c, dict):
+                continue
+            secret = c.get("plaintext") or c.get("password") or c.get("secret", "")
+            artifact = CredentialArtifact(
+                username    = c.get("username", ""),
+                domain      = c.get("domain", ""),
+                cred_type   = "cleartext" if secret else (c.get("hash_type") or "ntlm"),
+                secret      = secret,
+                cracked     = True,
+                source_host = c.get("host") or c.get("target", ""),
+                privilege   = c.get("privilege", "unknown"),
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_laps_passwords(self, raw: dict, store: ArtifactStore) -> int:
+        laps = raw.get("laps_passwords") or raw.get("entries", [])
+        count = 0
+        for e in laps:
+            if not isinstance(e, dict):
+                continue
+            comp = e.get("computer") or e.get("computer_name") or e.get("host", "")
+            pwd  = e.get("password", "")
+            artifact = CredentialArtifact(
+                username    = e.get("username", "Administrator"),
+                domain      = e.get("domain", ""),
+                cred_type   = "laps",
+                secret      = pwd,
+                source_host = comp,
+                privilege   = "local_admin",
+            )
+            store.add(artifact)
+            count += 1
+        return count
+
+    def _normalize_kerberos_tickets(self, raw: dict, store: ArtifactStore) -> int:
+        tickets = (
+            raw.get("kerberos_tickets")
+            or raw.get("kerberos_ticket")
+            or raw.get("tickets")
+            or []
+        )
+        if isinstance(tickets, (str, dict)):
+            tickets = [tickets]
+        count = 0
+        for t in tickets:
+            if isinstance(t, str):
+                artifact = CredentialArtifact(
+                    username  = "unknown",
+                    domain    = "",
+                    cred_type = "kerberos_ticket",
+                    secret    = t,
+                )
+                store.add(artifact)
+                count += 1
+            elif isinstance(t, dict):
+                client = (
+                    t.get("client")
+                    or t.get("username")
+                    or t.get("default_principal")
+                    or t.get("principal", "")
+                )
+                realm = t.get("realm") or t.get("domain", "")
+                if "@" in client and not realm:
+                    parts = client.split("@", 1)
+                    client = parts[0]
+                    realm = parts[1]
+                ticket_path = (
+                    t.get("file_path")
+                    or t.get("ticket_path")
+                    or t.get("ccache_path")
+                    or t.get("path", "")
+                )
+                artifact = CredentialArtifact(
+                    username    = client,
+                    domain      = realm,
+                    cred_type   = "kerberos_ticket",
+                    secret      = ticket_path,
+                    source_host = t.get("target") or t.get("host", ""),
+                )
+                store.add(artifact)
+                count += 1
+        return count
+
+    def _normalize_open_ports(self, raw: dict, store: ArtifactStore) -> int:
+        ports_raw = raw.get("open_ports") or raw.get("port_results") or []
+        ports: list[int] = []
+        if isinstance(ports_raw, list):
+            for p in ports_raw:
+                if isinstance(p, int):
+                    ports.append(p)
+                elif isinstance(p, dict) and "port" in p and isinstance(p["port"], int):
+                    ports.append(p["port"])
+                elif str(p).isdigit():
+                    ports.append(int(p))
+        if "service_map" in raw and isinstance(raw["service_map"], dict):
+            for k in raw["service_map"]:
+                if str(k).isdigit():
+                    ports.append(int(k))
+        ports = sorted(list(set(ports)))
+        if not ports:
+            return 0
+        target = raw.get("target") or raw.get("host", "")
+        # Look for existing HostArtifact with same target/ip
+        existing_host = None
+        if target:
+            for h in store.hosts():
+                if h.ip_address == target or h.hostname == target:
+                    existing_host = h
+                    break
+        if existing_host:
+            existing_host.open_ports = sorted(list(set(existing_host.open_ports + ports)))
+            return 1
+        artifact = HostArtifact(
+            ip_address = target,
+            hostname   = target,
+            open_ports = ports,
+        )
+        store.add(artifact)
+        return 1
