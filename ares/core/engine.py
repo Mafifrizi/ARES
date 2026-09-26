@@ -52,6 +52,7 @@ class ModuleStatus(str, Enum):
     SKIPPED = "skipped"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    REJECTED = "failed"
 
 
 MODULE_OUTCOMES = (
@@ -227,7 +228,7 @@ def normalize_module_outcome(
     ):
         outcome = "unsupported"
         default_message = "The module is unsupported or blocked for this run."
-    elif status_value == ModuleStatus.FAILED.value and any(
+    elif status_value in (ModuleStatus.FAILED.value, ModuleStatus.REJECTED.value) and any(
         marker in lowered
         for marker in ("validation", "required", "scope", "credential", "auth", "role")
     ):
@@ -699,7 +700,7 @@ class AresEngine:
                         )
                         return EngineModuleResult(
                             module_id=module_id,
-                            status=ModuleStatus.FAILED,
+                            status=ModuleStatus.REJECTED,
                             error=f"Validation failed: {err_msg[:300]}",
                             duration_ms=duration_ms,
                         )
