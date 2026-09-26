@@ -11,6 +11,8 @@ from typing import Any
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from netaddr import IPNetwork, AddrFormatError
 
+from ares.core.scope import CampaignScope, CloudScope
+
 
 class Severity(str, Enum):
     CRITICAL = "critical"
@@ -130,6 +132,14 @@ class AuditEntry(BaseModel):
     module_id: str | None = None
 
 
+class ScopeEntryList(list):
+    """List of ScopeEntry items supporting .cloud_scope attribute access."""
+
+    def __init__(self, iterable: Any = (), cloud_scope: CloudScope | None = None) -> None:
+        super().__init__(iterable)
+        self.cloud_scope = cloud_scope if cloud_scope is not None else CloudScope()
+
+
 class Campaign(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(..., min_length=1, max_length=100)
@@ -150,6 +160,7 @@ class Campaign(BaseModel):
                 result.append(clean if clean else entry.strip())
         return result
     scope: list[ScopeEntry] = Field(default_factory=list)
+    cloud_scope: CloudScope = Field(default_factory=CloudScope)
     status: CampaignStatus = CampaignStatus.CREATED
     noise_profile: NoiseProfile = NoiseProfile.STEALTH
 
@@ -173,7 +184,12 @@ class Campaign(BaseModel):
     _scope_cache: dict[str, bool] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
-        """Warn if operator is still the default 'unknown'."""
+        """Initialize scope wrapper and warn if operator is still default 'unknown'."""
+        if not isinstance(self.scope, ScopeEntryList):
+            self.scope = ScopeEntryList(self.scope, cloud_scope=self.cloud_scope)
+        else:
+            self.scope.cloud_scope = self.cloud_scope
+
         if self.operator == "unknown":
             import logging as _logging
             _logging.getLogger("ares.campaign").warning(

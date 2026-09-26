@@ -123,6 +123,8 @@ class GCPModule(BaseModule):
                 "GOOGLE_APPLICATION_CREDENTIALS environment variable.",
                 module_id=self.MODULE_ID, field="project_id",
             )
+        if pdict.get("project_id"):
+            self.validate_cloud_scope(pdict.get("project_id"), "gcp")
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -229,6 +231,9 @@ class GCPModule(BaseModule):
         # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
+        if project_id:
+            self.validate_cloud_scope(project_id, "gcp")
+
         logger.info("gcp_recon_start", project_id=project_id)
         try:
             credentials = _get_gcp_credentials(credentials_file)

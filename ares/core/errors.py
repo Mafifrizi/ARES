@@ -366,6 +366,13 @@ class ScopeError(AresError):
         self.scope_cidrs = scope_cidrs or []
 
 
+class ScopeViolationError(ScopeError):
+    """
+    Operation would target an out-of-scope host, network, or cloud identifier.
+    Engine ABORTS immediately with a security audit event.
+    """
+
+
 class ScopeFirewallBlockError(ScopeError):
     """
     Direct network socket or transport connection attempt to an out-of-scope host

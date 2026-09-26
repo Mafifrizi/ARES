@@ -80,6 +80,8 @@ class AWSEnumModule(BaseModule):
                 "or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY environment variables.",
                 module_id=self.MODULE_ID, field="access_key",
             )
+        if pdict.get("account_id"):
+            self.validate_cloud_scope(pdict.get("account_id"), "aws")
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+)."""
@@ -210,8 +212,22 @@ class AWSEnumModule(BaseModule):
             raise AuthenticationFailed(f"AWS auth failed: {exc}", username="aws_key", module_id=self.MODULE_ID, target="aws") from exc
         loop = asyncio.get_running_loop()
         raw = {"region": region}
+
+        # Step 1: Caller identity & CloudScopeGuard validation
+        try:
+            identity_info = await loop.run_in_executor(None, partial(self._get_caller_identity, session))
+            raw["identity"] = identity_info
+            account_id = str(identity_info.get("Account", ""))
+            if account_id:
+                self.validate_cloud_scope(account_id, "aws")
+        except Exception as exc:
+            from ares.core.errors import ScopeViolationError
+            if isinstance(exc, ScopeViolationError):
+                raise
+            logger.warning("aws_check_failed", check="identity", error=str(exc)[:100])
+            raw["identity"] = {"error": str(exc)[:150]}
+
         for label, fn in [
-            ("identity",        partial(self._get_caller_identity, session)),
             ("iam",             partial(self._enum_iam, session)),
             ("s3",              partial(self._enum_s3, session, region)),
             ("security_groups", partial(self._enum_security_groups, session, region)),

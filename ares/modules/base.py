@@ -246,8 +246,34 @@ class BaseModule(abc.ABC, Generic[P, R]):
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
 
+        if isinstance(ctx, dict):
+            req_params = getattr(self.__class__, "REQUIRED_PARAMS", []) or getattr(self, "REQUIRED_PARAMS", [])
+            for param in req_params:
+                if param not in ctx or ctx[param] is None:
+                    raise ModuleValidationError(
+                        f"{self.MODULE_ID} requires parameter '{param}'",
+                        module_id=self.MODULE_ID,
+                        field=param,
+                    )
+            return
+
         if not isinstance(ctx, ExecutionContext):
             return  # legacy context - skip validation
+
+        req_params = getattr(self.__class__, "REQUIRED_PARAMS", []) or getattr(self, "REQUIRED_PARAMS", [])
+        if req_params:
+            params_dict = (
+                ctx.params.model_dump()
+                if hasattr(getattr(ctx, "params", None), "model_dump")
+                else (getattr(ctx, "params", {}) or {})
+            )
+            for param in req_params:
+                if param not in params_dict or params_dict[param] is None:
+                    raise ModuleValidationError(
+                        f"{self.MODULE_ID} requires parameter '{param}'",
+                        module_id=self.MODULE_ID,
+                        field=param,
+                    )
 
         if getattr(self, "PARAMS_MODEL", None) is not None:
             from ares.sdk.params import validate_params
@@ -398,6 +424,7 @@ class BaseModule(abc.ABC, Generic[P, R]):
     ENABLED:            bool        = True
     DISABLED_REASON:    str         = ""
     OPSEC_LEVEL:        OpsecLevel  = OpsecLevel.LOW
+    REQUIRED_PARAMS:    list[str]   = []   # Declarative required param keys for Gate 1
     REQUIRES:           list[str]   = []   # e.g. ["domain_creds", "ldap_access"]
     OUTPUTS:            list[str]   = []   # e.g. ["spn_list", "user_list"]
     MITRE_TECHNIQUES:   list[str]   = []
@@ -445,6 +472,45 @@ class BaseModule(abc.ABC, Generic[P, R]):
         raise NotImplementedError(  # abstract - subclasses must implement run()
             f"Module '{self.MODULE_ID}' must implement run()"
         )
+
+    # ── Cloud Scope Guardrail ──────────────────────────────────────────────
+
+    def validate_cloud_scope(self, identifier: str, provider: str) -> None:
+        """
+        Validate that the specified cloud identifier is authorized by the campaign's CloudScope.
+
+        If cloud_scope is unconfigured (empty list for provider), validation passes
+        (backward compatible).
+        Raises ScopeViolationError if the identifier is unauthorized.
+        """
+        if not identifier:
+            return
+
+        from ares.core.errors import ScopeViolationError
+
+        campaign = getattr(self, "campaign", None)
+        if not campaign:
+            return
+
+        cloud_scope = getattr(campaign, "cloud_scope", None)
+        if cloud_scope is None and hasattr(campaign, "scope"):
+            cloud_scope = getattr(campaign.scope, "cloud_scope", None)
+
+        if cloud_scope and not cloud_scope.is_authorized(identifier, provider):
+            mapping = {
+                "aws": "aws_account_ids",
+                "azure": "azure_subscription_ids",
+                "azure_ad": "azure_tenant_ids",
+                "gcp": "gcp_project_ids",
+            }
+            authorized = getattr(cloud_scope, mapping.get(provider, f"{provider}_ids"), [])
+            raise ScopeViolationError(
+                f"Cloud {provider} identifier '{identifier}' is not "
+                f"in authorized campaign scope. "
+                f"Authorized: {authorized}",
+                module_id=getattr(self, "MODULE_ID", ""),
+                target=str(identifier),
+            )
 
     # ── Pre-request hook ───────────────────────────────────────────────────
 

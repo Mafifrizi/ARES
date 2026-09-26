@@ -108,6 +108,10 @@ class AzureModule(BaseModule):
                 "AZURE_CLIENT_ID/AZURE_CLIENT_SECRET/AZURE_TENANT_ID env vars.",
                 module_id=self.MODULE_ID, field="subscription_id",
             )
+        if pdict.get("subscription_id"):
+            self.validate_cloud_scope(pdict.get("subscription_id"), "azure")
+        if pdict.get("tenant_id"):
+            self.validate_cloud_scope(pdict.get("tenant_id"), "azure_ad")
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -223,6 +227,11 @@ class AzureModule(BaseModule):
         # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
+        if subscription_id:
+            self.validate_cloud_scope(subscription_id, "azure")
+        if tenant_id:
+            self.validate_cloud_scope(tenant_id, "azure_ad")
+
         logger.info("azure_recon_start", subscription_id=subscription_id[:8] + "...")
         try:
             credential = _get_credential(tenant_id, client_id, client_secret)

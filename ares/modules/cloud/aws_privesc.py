@@ -268,12 +268,18 @@ class AWSPrivescModule(BaseModule):
             # Who am I?
             try:
                 identity = sts.get_caller_identity()
+                account_id = str(identity.get("Account", ""))
+                if account_id:
+                    self.validate_cloud_scope(account_id, "aws")
                 results["current_identity"] = {
                     "arn":     identity.get("Arn", ""),
                     "user_id": identity.get("UserId", ""),
-                    "account": identity.get("Account", ""),
+                    "account": account_id,
                 }
             except Exception as e:
+                from ares.core.errors import ScopeViolationError
+                if isinstance(e, ScopeViolationError):
+                    raise
                 results["errors"].append(f"GetCallerIdentity: {e!s:.80}")
                 return results
 

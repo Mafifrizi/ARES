@@ -118,6 +118,7 @@ class AzureADModule(BaseModule):
                 "Find via: az account show --query tenantId",
                 module_id=self.MODULE_ID, field="tenant_id",
             )
+        self.validate_cloud_scope(tenant_id, "azure_ad")
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -243,6 +244,9 @@ class AzureADModule(BaseModule):
         # Note: before_request() intentionally not called - cloud modules use
         # API credentials, not host IPs. Scope check (CIDR) does not apply to
         # cloud API endpoints. Rate limiting and jitter are handled at the API call level.
+        if tenant_id:
+            self.validate_cloud_scope(tenant_id, "azure_ad")
+
         logger.info("azure_ad_start", tenant=tenant_id[:8] + "...", technique=technique)
         audit("azure_ad_attack", actor="operator", technique="T1528",
               source="operator", target=f"tenant:{tenant_id[:8]}")
