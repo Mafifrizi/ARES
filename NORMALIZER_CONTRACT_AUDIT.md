@@ -80,6 +80,9 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `pivot_paths` | `cloud.identity_federation_abuse` | — | `pivot_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Analisis jalur pivot lintas-cloud hilang dari `ArtifactStore`. |
 | `aws_privesc_paths` | `cloud.aws_privesc` | — | `aws_privesc_paths` | ❌ **MISMATCH** (MOD-052) | Tidak ada handler normalizer (`no handler`). Jalur eskalasi hak akses IAM hilang dari `ArtifactStore`. |
 | `iam_privesc_paths` | `cloud.aws_privesc` | — | `iam_privesc_paths` | ⚠️ **NEW KEY** (aws_privesc, handler pending) | Key baru pasca-fix MOD-052 untuk memisahkan output privesc IAM dari `aws_findings` milik `cloud.aws`. Handler normalizer pending. |
+| `spn_list` (inner keys) | `ad.enum_spn` | `s["spns"]` OR `s["spn"]` | `s["spn_list"]` | ❌ **MISMATCH** (MOD-054) | Inner object key mismatch (`spn_list` vs `spns`), menyebabkan atribut `UserArtifact.spns` bernilai list kosong `[]`. |
+| `valid_credentials` | `ad.laps_enum` | `list[dict]` | `int` (`found`) | ❌ **MISMATCH** (MOD-055) | Type confusion (integer count vs `list[dict]`). Normalizer memblokir tipe non-list sehingga menghasilkan 0 artifact. |
+| `password_policy` | `ad.enum_users` | — | `password_policy` | ❌ **MISMATCH** (MOD-056) | Unhandled output telemetry (`no handler`). Data ambang lockout domain hilang dari `ArtifactStore`. |
 
 ---
 

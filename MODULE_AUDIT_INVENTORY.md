@@ -374,16 +374,22 @@ Seluruh modul **TIER 1 (Critical)** dan **TIER 2 (High)** telah dikelompokkan ke
   - [`ares/modules/cloud/identity_federation.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/identity_federation.py) — *Cloud Identity Federation Abuse (`cloud.identity_federation_abuse`)* (1,190 baris)
   - [`ares/modules/cloud/phantom_token.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/phantom_token.py) — *Hybrid Entra ID PRT Hijack (`cloud.phantom_token`)* (385 baris)
 
-### Batch 9: Active Directory Discovery & Security Posture Enumeration (TIER 2 - HIGH)
+### Batch 9: Active Directory Discovery & Security Posture Enumeration (TIER 2 - HIGH) - [STATUS: AUDITED]
 - **Deskripsi**: Modul recon LDAP dan pembacaan read-only objek direktori Active Directory (Users, Computers, SPN, ACLs, dan LAPS password attributes).
-- **Fokus Risiko Audit**: Ketahanan parsing query LDAP terhadap karakter kontrol/malformed input, kebocoran query LDAP berlebihan, validasi scope target domain controller.
+- **Fokus Risiko Audit**: Ketahanan parsing query LDAP terhadap karakter kontrol/malformed input, kebocoran query LDAP berlebihan, validasi scope target domain controller, verifikasi Gate 6 vault write guard.
+- **Status Audit**: **SELESAI (AUDITED)**
+- **Hasil Temuan**: **4 Temuan Terkonfirmasi** (0 Critical, 2 High, 2 Medium)
+  - `MOD-054` (High): Internal Key Mismatch (`spn_list` vs `spns`) pada `ad.enum_spn` menyebabkan 100% SPN list Kerberoasting menguap menjadi list kosong (`[]`) di `UserArtifact.spns`, `EvidenceRecord`, dan `ArtifactIntelEngine`.
+  - `MOD-055` (High): Output Type Confusion pada `raw["valid_credentials"]` (integer count alih-alih `list[dict]`) & Secret Evaporation pada `ArtifactNormalizer._normalize_laps_passwords` (`secret=""`) pada `ad.laps_enum`.
+  - `MOD-056` (Medium): Unhandled Output Telemetry `password_policy` (informasi lockout threshold hilang dari `ArtifactStore`) & ketiadaan dual-write key standar `users` pada `ad.enum_users`.
+  - `MOD-057` (Medium): Inconsistent LDAP Bind Authentication Formatting pada `ad.enum_acl` dan `ad.laps_enum` (`user=f"{domain.upper()}\\{username}"` tanpa `build_ad_bind_plan`, berisiko memicu bind failure saat format UPN digunakan).
 - **Jumlah File**: 5 file
 - **Daftar File**:
-  - [`ares/modules/ad/enum_users.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_users.py) — *AD User Enumeration (`ad.enum_users`)* (430 baris)
-  - [`ares/modules/ad/enum_computers.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_computers.py) — *AD Computer Enumeration (`ad.enum_computers`)* (352 baris)
-  - [`ares/modules/ad/enum_spn.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_spn.py) — *AD SPN Enumeration (`ad.enum_spn`)* (384 baris)
-  - [`ares/modules/ad/enum_acl.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_acl.py) — *AD ACL Enumeration (`ad.enum_acl`)* (371 baris)
-  - [`ares/modules/ad/laps_enum.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/laps_enum.py) — *LAPS Password Enumeration (`ad.laps_enum`)* (400 baris)
+  - [`ares/modules/ad/enum_users.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_users.py) — *AD User Enumeration (`ad.enum_users`)* (431 baris)
+  - [`ares/modules/ad/enum_computers.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_computers.py) — *AD Computer Enumeration (`ad.enum_computers`)* (353 baris)
+  - [`ares/modules/ad/enum_spn.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_spn.py) — *AD SPN Enumeration (`ad.enum_spn`)* (385 baris)
+  - [`ares/modules/ad/enum_acl.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/enum_acl.py) — *AD ACL Enumeration (`ad.enum_acl`)* (372 baris)
+  - [`ares/modules/ad/laps_enum.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/ad/laps_enum.py) — *LAPS Password Enumeration (`ad.laps_enum`)* (401 baris)
 
 ### Batch 10: Network Reconnaissance & Service Fingerprinting (TIER 2 - HIGH)
 - **Deskripsi**: Modul discovery pasif dan semi-aktif jaringan (Target Fingerprinting, DNS Enumeration, HTTP Header Banner, Service Version Detection, SNMP MIB Walk).
