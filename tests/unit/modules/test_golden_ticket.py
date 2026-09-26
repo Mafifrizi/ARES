@@ -148,5 +148,82 @@ def test_golden_ticket_primary_path_success():
         )
 
         assert raw["success"] is True
+        assert raw["ticket_data"] == b"ccache_content_here"
         assert len(findings) == 1
         assert "Golden Ticket Forged" in findings[0].title
+
+
+def test_golden_ticket_ccache_teardown_on_success():
+    """MOD-034: ccache file is deleted after successful golden ticket generation."""
+    mod = make_module(GoldenTicketModule)
+    created_files = []
+
+    mock_ticketer_cls = MagicMock()
+    mock_instance = MagicMock()
+    mock_ticketer_cls.return_value = mock_instance
+
+    def side_effect_run():
+        opts = mock_ticketer_cls.call_args[1]["options"]
+        created_files.append(opts.filename)
+        with open(opts.filename, "wb") as f:
+            f.write(b"sensitive_ticket_data")
+        assert os.path.exists(opts.filename)
+
+    mock_instance.run = side_effect_run
+
+    mock_mods = _setup_impacket_mock_modules(
+        ticketer_available=True, ticketer_cls=mock_ticketer_cls
+    )
+
+    with patch.dict("sys.modules", mock_mods):
+        findings, raw = _run(
+            mod.run(
+                domain="corp.local",
+                username="Administrator",
+                krbtgt_hash="0123456789abcdef0123456789abcdef",
+                domain_sid="S-1-5-21-1111111111-2222222222-3333333333",
+            )
+        )
+
+    assert raw["success"] is True
+    assert raw["ticket_data"] == b"sensitive_ticket_data"
+    assert len(created_files) == 1
+    assert not os.path.exists(created_files[0]), "ccache file must be unlinked from disk"
+
+
+def test_golden_ticket_ccache_teardown_on_failure():
+    """MOD-034: ccache file is deleted even if ticketer fails mid-execution."""
+    mod = make_module(GoldenTicketModule)
+    created_files = []
+
+    mock_ticketer_cls = MagicMock()
+    mock_instance = MagicMock()
+    mock_ticketer_cls.return_value = mock_instance
+
+    def failing_run():
+        opts = mock_ticketer_cls.call_args[1]["options"]
+        created_files.append(opts.filename)
+        with open(opts.filename, "wb") as f:
+            f.write(b"partial_ticket")
+        raise RuntimeError("Simulated crash mid-ticket-generation")
+
+    mock_instance.run = failing_run
+
+    mock_mods = _setup_impacket_mock_modules(
+        ticketer_available=True, ticketer_cls=mock_ticketer_cls
+    )
+
+    with patch.dict("sys.modules", mock_mods):
+        findings, raw = _run(
+            mod.run(
+                domain="corp.local",
+                username="Administrator",
+                krbtgt_hash="0123456789abcdef0123456789abcdef",
+                domain_sid="S-1-5-21-1111111111-2222222222-3333333333",
+            )
+        )
+
+    assert raw["success"] is False
+    assert len(created_files) == 1
+    assert not os.path.exists(created_files[0]), "ccache file must be cleaned up on failure"
+
