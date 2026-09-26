@@ -912,12 +912,18 @@ class TestStrategyEngine:
         assert messages[0]["data"] == 42
 
     def test_check_goal_achieved_domain_admin(self):
+        from unittest.mock import MagicMock
         from ares.strategy import StrategyEngine
         engine = StrategyEngine(ares_engine=None, settings=None)
         campaign = _mock_campaign()
-        # Simulate a DCSync finding
-        mock_finding = type("F", (), {"title": "DCSync - krbtgt hash obtained"})()
+        # Simulate a DCSync finding that passed Gate 3
+        mock_finding = type("F", (), {"title": "DCSync - krbtgt hash obtained", "validated": True, "false_positive": False})()
         campaign.findings = [mock_finding]
+        mock_vault = MagicMock()
+        mock_vault.all.return_value = [
+            MagicMock(cred_type="ntlm", privilege="domain_admin", username="krbtgt")
+        ]
+        object.__setattr__(campaign, "_vault", mock_vault)
         assert engine._check_goal_achieved(campaign, "domain_admin") is True
 
     def test_check_goal_not_achieved_empty(self):

@@ -616,8 +616,13 @@ class TestGoalAchieved:
         engine = self._make_engine()
         campaign = MagicMock()
         campaign.findings = [
-            {"title": "DCSync Attack - Domain Admin Achieved"},
+            {"title": "DCSync Attack - Domain Admin Achieved", "validated": True, "false_positive": False},
         ]
+        mock_vault = MagicMock()
+        mock_vault.all.return_value = [
+            {"cred_type": "ntlm", "privilege": "domain_admin", "username": "krbtgt"}
+        ]
+        campaign.vault = mock_vault
         assert engine._check_goal_achieved(campaign, "domain_admin") is True
 
 

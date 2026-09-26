@@ -891,9 +891,20 @@ class StrategyEngine:
             ]
             return "\n".join(lines)
 
-    def _check_goal_achieved(self, campaign: "Any", goal: str) -> bool:
-        """Check if the engagement goal has been achieved via campaign artifacts."""
-        findings = getattr(campaign, "findings", [])
+    def _check_goal_achieved(
+        self,
+        campaign: "Any",
+        goal: str,
+        confirmed_findings: list[Any] | None = None,
+    ) -> bool:
+        """
+        Check if the engagement goal has been achieved via verified campaign artifacts.
+
+        Gate 5 Enforcement:
+        - Layer 1: Title matching ONLY against confirmed findings (passed Gate 3).
+        - Layer 2: For privilege goals (domain_admin, credential_access, root_access, full_compromise),
+          supporting credentials must actually exist in the Campaign Vault.
+        """
         goal_indicators = {
             "domain_admin":     ["DCSync", "Domain Admin", "krbtgt", "ntlm_hash"],
             "cloud_admin":      ["Global Admin", "AWS Admin", "Storage Admin", "GCP Owner"],
@@ -905,9 +916,112 @@ class StrategyEngine:
         if not indicators:
             return False
 
-        for finding in findings:
+        # ── Layer 1: Filter strictly to confirmed findings ─────────────────
+        if confirmed_findings is not None:
+            active_findings = confirmed_findings
+        else:
+            all_findings = getattr(campaign, "findings", []) or []
+            active_findings = []
+            for f in all_findings:
+                if isinstance(f, dict):
+                    is_val = bool(f.get("validated", False))
+                    is_fp = bool(f.get("false_positive", False))
+                else:
+                    val_attr = getattr(f, "validated", False)
+                    fp_attr = getattr(f, "false_positive", False)
+                    is_val = bool(val_attr)
+                    is_fp = bool(fp_attr) if isinstance(fp_attr, bool) else False
+                if is_val and not is_fp:
+                    active_findings.append(f)
+
+        title_match = False
+        matching_title = ""
+        for finding in active_findings:
             title = (getattr(finding, "title", "") or
                      (finding.get("title", "") if isinstance(finding, dict) else ""))
             if any(ind.lower() in title.lower() for ind in indicators):
-                return True
+                title_match = True
+                matching_title = title
+                break
+
+        if not title_match:
+            return False
+
+        # ── Layer 2: Privilege goals require verified credentials in vault ─
+        privilege_goals = {"domain_admin", "credential_access", "root_access", "full_compromise"}
+        if goal in privilege_goals:
+            vault = (
+                getattr(campaign, "vault", None)
+                or getattr(campaign, "_vault", None)
+                or (
+                    getattr(self._engine, "_runtime_states", None)
+                    and getattr(self._engine._runtime_states.get(getattr(campaign, "id", "")), "vault", None)
+                )
+                or getattr(self, "_vault", None)
+            )
+
+            has_creds = self._verify_vault_evidence(vault, goal)
+            if not has_creds:
+                logger.info(
+                    "goal_not_achieved_no_vault_evidence",
+                    goal_type=goal,
+                    title_matches=True,
+                    matching_title=matching_title,
+                    vault_has_creds=False,
+                )
+                return False
+
+        return True
+
+    def _verify_vault_evidence(self, vault: Any, goal: str) -> bool:
+        """Verify that vault contains credentials supporting the goal."""
+        if not vault:
+            return False
+
+        # Try domain_admins() method if present
+        if goal in ("domain_admin", "full_compromise"):
+            if hasattr(vault, "domain_admins") and callable(vault.domain_admins):
+                da_creds = vault.domain_admins()
+                if da_creds:
+                    return True
+
+        # Extract credentials collection from vault
+        creds: list[Any] = []
+        if hasattr(vault, "all") and callable(vault.all):
+            creds = vault.all()
+        elif hasattr(vault, "_store") and isinstance(vault._store, dict):
+            creds = list(vault._store.values())
+        elif hasattr(vault, "has_credentials") and callable(vault.has_credentials):
+            return bool(vault.has_credentials(min_privilege=goal))
+        elif isinstance(vault, dict):
+            creds = vault.get("credentials") or list(vault.values())
+        elif isinstance(vault, (list, tuple)):
+            creds = list(vault)
+
+        if not creds:
+            return False
+
+        # Check privilege level of credentials
+        for c in creds:
+            if isinstance(c, dict):
+                priv = str(c.get("privilege", "")).lower()
+                user = str(c.get("username", "")).lower()
+                ctype = str(c.get("cred_type", "")).lower()
+            else:
+                p_attr = getattr(c, "privilege", "")
+                priv = p_attr.value.lower() if hasattr(p_attr, "value") else str(p_attr or "").lower()
+                user = str(getattr(c, "username", "") or "").lower()
+                ct_attr = getattr(c, "cred_type", "")
+                ctype = ct_attr.value.lower() if hasattr(ct_attr, "value") else str(ct_attr or "").lower()
+
+            if goal in ("domain_admin", "full_compromise"):
+                if priv in ("domain_admin", "enterprise_admin") or "krbtgt" in user:
+                    return True
+                # Fallback: any valid non-unknown credential if privilege not set
+                if ctype and ctype not in ("unknown", ""):
+                    return True
+            else:
+                if (ctype and ctype not in ("unknown", "")) or (priv and priv not in ("unknown", "")):
+                    return True
+
         return False
