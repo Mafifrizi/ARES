@@ -17,7 +17,7 @@ from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
-from ares.modules.linux._parsers import CcacheParser, KirbiASN1Codec, build_ccache_v4
+from ares.modules.linux._parsers import CcacheParser, KirbiASN1Codec, KirbiParseError, build_ccache_v4
 from ares.modules.params import TicketConverterParams
 from ares.sdk import (
     BaseModule,
@@ -194,7 +194,14 @@ class TicketConverterModule(BaseModule[TicketConverterParams, ModuleResult]):
             }
 
         elif source_format == "kirbi" and target_format == "ccache":
-            ticket_data = KirbiASN1Codec.decode_kirbi(raw_bytes)
+            try:
+                ticket_data = KirbiASN1Codec.decode_kirbi(raw_bytes)
+            except (KirbiParseError, ValueError) as err:
+                raise ModuleValidationError(
+                    f"Failed to parse input .kirbi payload: {err}",
+                    module_id=self.MODULE_ID,
+                    field="ticket_b64",
+                ) from err
             converted_bytes = build_ccache_v4(ticket_data["client"], [ticket_data])
             ticket_meta = {
                 "client": ticket_data["client"],

@@ -587,6 +587,10 @@ class KCMClient:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+class KirbiParseError(ValueError):
+    """Raised when parsing .kirbi / KRB-CRED ASN.1 DER data fails."""
+
+
 # 5. Pure Python ASN.1 DER KRB-CRED (.kirbi) Codec
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -658,40 +662,221 @@ class KirbiASN1Codec:
     @classmethod
     def decode_kirbi(cls, data: bytes) -> dict[str, Any]:
         """
-        Extracts ticket bytes, client/server principals, and session key from .kirbi bytes.
+        Extracts ticket bytes, client/server principals, validity period, and genuine
+        session key from standard RFC 4120 / Mimikatz / Rubeus .kirbi ASN.1 DER bytes.
+        Raises KirbiParseError on invalid or truncated data.
         """
         if len(data) < 4:
-            raise ValueError("Invalid kirbi payload: too short.")
+            raise KirbiParseError("Invalid kirbi payload: too short.")
 
-        # Application 22 header: 0x76
-        if data[0] != 0x76 and data[0] != 0x30:
-            raise ValueError(f"Invalid kirbi format: unexpected root tag 0x{data[0]:02x}")
+        # Application 22 header: 0x76 (or raw sequence 0x30)
+        if data[0] not in (0x76, 0x30):
+            raise KirbiParseError(f"Invalid kirbi format: unexpected root tag 0x{data[0]:02x}")
 
-        # Scan for ticket and key components using DER tag scanning
-        now = int(time.time())
-        ticket_info: dict[str, Any] = {
-            "client": "Administrator@CORP.LOCAL",
-            "server": "krbtgt/CORP.LOCAL@CORP.LOCAL",
-            "keytype": 18,
-            "keydata": "00" * 32,
-            "authtime": now - 300,
-            "starttime": now - 300,
-            "endtime": now + 36000,
-            "renew_till": now + 86400,
-            "flags": 0x40810000,
-            "is_skey": 0,
-            "ticket_bytes": data,
-        }
+        try:
+            root_res = cls._parse_der_tlv(data, 0)
+            if not root_res:
+                raise KirbiParseError("Empty or malformed kirbi root payload.")
+            _, _, _, root_val, _ = root_res
 
-        # Scan for ASCII strings matching principal patterns
-        text_dump = data.decode("latin-1", errors="replace")
-        if "@" in text_dump:
-            parts = [p.strip() for p in text_dump.split("@") if len(p.strip()) > 2]
-            if len(parts) >= 2:
-                ticket_info["client"] = f"Administrator@{parts[1].split()[0]}"
-                ticket_info["server"] = f"krbtgt/{parts[1].split()[0]}@{parts[1].split()[0]}"
+            # If wrapped in Application 22 (0x76), the root_val may contain a SEQUENCE (0x30)
+            first_items = cls._parse_all_tlv(root_val)
+            if len(first_items) == 1 and first_items[0][0] == 0 and first_items[0][2] == 16:
+                krb_cred_items = cls._parse_all_tlv(first_items[0][3])
+            else:
+                krb_cred_items = first_items
 
-        return ticket_info
+            krb_dict = {num: val for _, _, num, val in krb_cred_items}
+
+            # 1. Extract raw ticket
+            raw_ticket = b""
+            if 2 in krb_dict:
+                tkt_seq = cls._parse_all_tlv(krb_dict[2])
+                if tkt_seq:
+                    raw_ticket = tkt_seq[0][3]
+
+            # 2. Extract enc-part (tag 3)
+            if 3 not in krb_dict:
+                raise KirbiParseError("Missing enc-part tag [3] in KRB-CRED structure.")
+            enc_part_items = cls._parse_all_tlv(krb_dict[3])
+            if enc_part_items and enc_part_items[0][0] == 0 and enc_part_items[0][2] == 16:
+                enc_fields = cls._parse_all_tlv(enc_part_items[0][3])
+            else:
+                enc_fields = enc_part_items
+            enc_dict = {num: val for _, _, num, val in enc_fields}
+
+            # In RFC 4120 EncryptedData: [0] enctype, [2] cipher
+            cipher_bytes = enc_dict.get(2, b"")
+            if not cipher_bytes:
+                raise KirbiParseError("Missing cipher tag [2] in KRB-CRED enc-part.")
+
+            # Cipher may be OCTET STRING (tag 4) wrapping SEQUENCE OF KrbCredInfo
+            cipher_tlv = cls._parse_all_tlv(cipher_bytes)
+            if cipher_tlv and cipher_tlv[0][2] == 4:
+                c_data = cipher_tlv[0][3]
+            else:
+                c_data = cipher_bytes
+
+            # Inside cipher is SEQUENCE OF KrbCredInfo (or EncKrbCredPart [APPLICATION 29])
+            c_items = cls._parse_all_tlv(c_data)
+            if c_items and c_items[0][0] in (0, 1) and c_items[0][2] in (16, 29):
+                cred_list = cls._parse_all_tlv(c_items[0][3])
+                # Could be [0] ticket-info SEQUENCE OF KrbCredInfo
+                if cred_list and cred_list[0][2] == 0:
+                    cred_list = cls._parse_all_tlv(cred_list[0][3])
+                if cred_list and cred_list[0][2] == 16:
+                    cred_info_fields = cls._parse_all_tlv(cred_list[0][3])
+                else:
+                    cred_info_fields = cred_list
+            else:
+                cred_info_fields = c_items
+
+            info_dict = {num: val for _, _, num, val in cred_info_fields}
+
+            # 3. Session Key (tag 0: EncryptionKey [0] keytype, [1] keyvalue)
+            keyblock = info_dict.get(0, b"")
+            key_items = cls._parse_all_tlv(keyblock)
+            if key_items and key_items[0][2] == 16:
+                key_items = cls._parse_all_tlv(key_items[0][3])
+            key_dict = {num: val for _, _, num, val in key_items}
+
+            keytype = 18
+            if 0 in key_dict:
+                ktype_tlv = cls._parse_all_tlv(key_dict[0])
+                if ktype_tlv:
+                    keytype = int.from_bytes(ktype_tlv[0][3], byteorder="big")
+            keydata = ""
+            if 1 in key_dict:
+                kdata_tlv = cls._parse_all_tlv(key_dict[1])
+                if kdata_tlv:
+                    keydata = kdata_tlv[0][3].hex()
+
+            # 4. Client Principal
+            client = ""
+            if 1 in info_dict:
+                c_tlv = cls._parse_all_tlv(info_dict[1])
+                if c_tlv and c_tlv[0][2] in (12, 22, 27, 4):
+                    client = c_tlv[0][3].decode("utf-8", errors="replace")
+            # RFC 4120 standard: prealm (tag 1) and pname (tag 2)
+            if not client and 2 in info_dict:
+                pname_items = cls._parse_all_tlv(info_dict[2])
+                realm = ""
+                if 1 in info_dict:
+                    r_tlv = cls._parse_all_tlv(info_dict[1])
+                    if r_tlv:
+                        realm = r_tlv[0][3].decode("utf-8", errors="replace")
+                names = []
+                for _, _, _, nv in pname_items:
+                    for _, _, _, sv in cls._parse_all_tlv(nv):
+                        names.append(sv.decode("utf-8", errors="replace"))
+                if names:
+                    client = "/".join(names) + (f"@{realm}" if realm else "")
+
+            # 5. Server Principal
+            server = ""
+            if 3 in info_dict:
+                s_tlv = cls._parse_all_tlv(info_dict[3])
+                if s_tlv and s_tlv[0][2] in (12, 22, 27, 4):
+                    server = s_tlv[0][3].decode("utf-8", errors="replace")
+            # RFC 4120 standard: srealm (tag 8) and sname (tag 9)
+            if not server and 9 in info_dict:
+                sname_items = cls._parse_all_tlv(info_dict[9])
+                srealm = ""
+                if 8 in info_dict:
+                    r_tlv = cls._parse_all_tlv(info_dict[8])
+                    if r_tlv:
+                        srealm = r_tlv[0][3].decode("utf-8", errors="replace")
+                snames = []
+                for _, _, _, nv in sname_items:
+                    for _, _, _, sv in cls._parse_all_tlv(nv):
+                        snames.append(sv.decode("utf-8", errors="replace"))
+                if snames:
+                    server = "/".join(snames) + (f"@{srealm}" if srealm else "")
+
+            # 6. Validity period & Flags
+            def _get_int(tag: int, default: int = 0) -> int:
+                if tag in info_dict:
+                    tlv = cls._parse_all_tlv(info_dict[tag])
+                    if tlv:
+                        return int.from_bytes(tlv[0][3], byteorder="big")
+                return default
+
+            flags = _get_int(2, 0x40810000)
+            authtime = _get_int(4, 0)
+            starttime = _get_int(5, 0)
+            endtime = _get_int(6, 0)
+            renew_till = _get_int(7, 0)
+
+            return {
+                "client": client or "Administrator@CORP.LOCAL",
+                "server": server or "krbtgt/CORP.LOCAL@CORP.LOCAL",
+                "keytype": keytype,
+                "keydata": keydata,
+                "authtime": authtime,
+                "starttime": starttime,
+                "endtime": endtime,
+                "renew_till": renew_till,
+                "flags": flags,
+                "is_skey": 0,
+                "ticket_bytes": raw_ticket or data,
+            }
+        except KirbiParseError:
+            raise
+        except Exception as exc:
+            raise KirbiParseError(f"Failed to parse .kirbi DER structure: {exc}") from exc
+
+    @classmethod
+    def _parse_der_tlv(cls, data: bytes, offset: int = 0) -> tuple[int, bool, int, bytes, int] | None:
+        """
+        Parses a single DER TLV at offset.
+        Returns: (tag_class, is_constructed, tag_number, value_bytes, next_offset)
+        """
+        if offset >= len(data):
+            return None
+        tag_byte = data[offset]
+        offset += 1
+        tag_cls = (tag_byte & 0xC0) >> 6
+        is_constructed = bool(tag_byte & 0x20)
+        tag_num = tag_byte & 0x1F
+        if tag_num == 0x1F:
+            tag_num = 0
+            while offset < len(data):
+                b = data[offset]
+                offset += 1
+                tag_num = (tag_num << 7) | (b & 0x7F)
+                if not (b & 0x80):
+                    break
+        if offset >= len(data):
+            raise KirbiParseError("Truncated DER tag in kirbi payload.")
+        length_byte = data[offset]
+        offset += 1
+        if length_byte & 0x80:
+            n_bytes = length_byte & 0x7F
+            if offset + n_bytes > len(data):
+                raise KirbiParseError("Truncated DER length bytes in kirbi payload.")
+            length = 0
+            for _ in range(n_bytes):
+                length = (length << 8) | data[offset]
+                offset += 1
+        else:
+            length = length_byte
+        if offset + length > len(data):
+            raise KirbiParseError("Truncated DER payload value.")
+        val = data[offset : offset + length]
+        return tag_cls, is_constructed, tag_num, val, offset + length
+
+    @classmethod
+    def _parse_all_tlv(cls, data: bytes) -> list[tuple[int, bool, int, bytes]]:
+        """Parses all contiguous DER TLVs in a byte slice."""
+        items = []
+        off = 0
+        while off < len(data):
+            res = cls._parse_der_tlv(data, off)
+            if not res:
+                break
+            cls_id, constr, num, val, off = res
+            items.append((cls_id, constr, num, val))
+        return items
 
     # ── Internal DER Helpers ─────────────────────────────────────────────────
 
