@@ -324,25 +324,74 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
             return {"k8s_detected": True, "error": str(e)}
 
     async def _check_host_network(self) -> dict[str, Any]:
-        """Detect --net=host which exposes all host network interfaces."""
+        """
+        Detect --net=host which exposes all host network interfaces.
+        Uses network namespace inode comparison and host network interface detection
+        instead of naive open socket count heuristics.
+        """
         try:
-            with open("/proc/net/tcp") as f:
-                lines = f.readlines()
-            # If we see ports like 22, 80, 443 listening - likely host network
-            host_network = len(lines) > 50  # Heuristic: many open ports = host net
-            if host_network:
+            is_host_net = False
+            verified = False
+            evidence: dict[str, Any] = {}
+
+            # Check 1: Inode comparison between PID 1 and self network namespace
+            try:
+                self_net = os.stat("/proc/self/ns/net").st_ino
+                init_net = os.stat("/proc/1/ns/net").st_ino
+                if self_net == init_net:
+                    is_host_net = True
+                    verified = True
+                    evidence["net_ns_inode_match"] = True
+                    evidence["net_ns_inode"] = self_net
+            except (OSError, PermissionError):
+                pass
+
+            # Check 2: Inspect network interfaces via /proc/net/dev or /sys/class/net
+            interfaces: list[str] = []
+            try:
+                if os.path.exists("/proc/net/dev"):
+                    with open("/proc/net/dev") as f:
+                        for line in f:
+                            if ":" in line:
+                                iface = line.split(":")[0].strip()
+                                interfaces.append(iface)
+                elif os.path.exists("/sys/class/net"):
+                    interfaces = os.listdir("/sys/class/net")
+            except OSError:
+                pass
+
+            evidence["interfaces"] = interfaces
+
+            # Standard Docker/K8s container netns typically only has 'lo' and 'eth0'
+            # Host netns typically exposes 'docker0', 'cni0', physical NICs ('ens*', 'enp*', 'eno*', 'wlan*')
+            host_nic_prefixes = ("ens", "enp", "eno", "eth1", "wlan", "docker0", "cni0", "flannel", "virbr", "bond")
+            host_ifaces_found = [i for i in interfaces if any(i.startswith(p) for p in host_nic_prefixes)]
+            if host_ifaces_found:
+                is_host_net = True
+                evidence["host_interfaces_detected"] = host_ifaces_found
+
+            if is_host_net:
+                conf = 0.95 if verified else 0.45
+                title = (
+                    "Container Using Host Network Namespace (--net=host)"
+                    if verified else
+                    "Potential Container Host Network Namespace Detected"
+                )
                 self.finding(
-                    title="Container May Be Using Host Network Namespace",
+                    title=title,
                     description=(
-                        "Container appears to share the host network namespace (--net=host). "
-                        "This allows sniffing host traffic and binding to privileged ports."
+                        "Container shares or may share the host network namespace (--net=host). "
+                        "This allows sniffing host traffic, binding to privileged ports, and reaching host-local services."
                     ),
-                    severity=Severity.HIGH,
+                    severity=Severity.HIGH if verified else Severity.LOW,
+                    confidence=conf,
                     mitre_technique="T1611",
                     mitre_tactic="Privilege Escalation",
-                    evidence={"open_ports_count": len(lines)},
-                    remediation="Remove --net=host. Use CNI plugins for network isolation.",
+                    evidence=evidence,
+                    remediation="Remove --net=host. Use CNI plugins or user-defined bridge networks for network isolation.",
                 )
-            return {"host_network_suspected": host_network}
-        except OSError:
-            return {"error": "could not read /proc/net/tcp"}
+                return {"host_network_detected": True, "verified": verified, "evidence": evidence}
+
+            return {"host_network_detected": False, "interfaces": interfaces}
+        except Exception as e:
+            return {"error": str(e)}
