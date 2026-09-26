@@ -358,9 +358,16 @@ Seluruh modul **TIER 1 (Critical)** dan **TIER 2 (High)** telah dikelompokkan ke
   - [`ares/modules/persistence/scheduled_task.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/persistence/scheduled_task.py) — *Scheduled Task Persistence (`persistence.scheduled_task`), Registry Run Key Persistence (`persistence.registry_run`)* (606 baris)
   - [`ares/modules/persistence/wmi_subscription.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/persistence/wmi_subscription.py) — *WMI Event Subscription Persistence (`persistence.wmi_subscription`)* (409 baris)
 
-### Batch 8: Cloud Privilege Escalation & Identity Federation Abuse (TIER 1 - CRITICAL)
+### Batch 8: Cloud Privilege Escalation & Identity Federation Abuse (TIER 1 - CRITICAL) - [STATUS: AUDITED]
 - **Deskripsi**: Modul eksploitasi kontrol akses multi-cloud (AWS, Azure AD, GCP) melalui eskalasi role IAM, penyalahgunaan trust federasi identitas (OIDC/SAML), dan manipulasi OAuth phantom token.
 - **Fokus Risiko Audit**: Penyalahgunaan token otentikasi cloud, impersonasi peran istimewa IAM, eskalasi lintas tenant / hybrid identity takeover.
+- **Status Audit**: **SELESAI (AUDITED)**
+- **Hasil Temuan**: **5 Temuan Terkonfirmasi** (1 Critical, 3 High, 1 Medium)
+  - `MOD-049` (Critical): Fictitious PRT Hijack Implementation, Zero Network I/O & Synthetic Vault Contamination di `cloud.phantom_token`. Kembar identik `ghost_forge` (MOD-005). Modul mengklaim ekstraksi PRT dan bypass CAP/MFA, namun tidak melakukan koneksi jaringan apa pun ke Azure AD / Microsoft Graph, hanya menghitung hash lokal, memancarkan finding CRITICAL palsu, dan menyuntikkan token palsu `PRT_ESTSAUTH_...` ke `AresVault` (melanggar Rule 1 dan Rule 4).
+  - `MOD-050` (High): Scope Bypass on On-Premises ADFS Probing via Raw HTTP di `cloud.identity_federation_abuse`. Modul mengecualikan `before_request()`, namun pada `_enumerate_adfs()` mengirim HTTP GET requests ke target `adfs_url` on-premises dengan `verify=False` tanpa validasi scope campaign (melanggar Rule 1 dan Rule 4, pola MOD-004/009).
+  - `MOD-051` (High): Unhandled Outputs `federation_trusts`, `golden_saml_paths`, `oauth_tokens`, `pivot_paths` (100% Data Loss) di `cloud.identity_federation_abuse`. Keempat capability output yang dideklarasikan tidak memiliki handler di `ArtifactNormalizer`. Data pemetaan trust federasi dan Golden SAML hilang permanen dari `ArtifactStore`.
+  - `MOD-052` (High): Type Confusion Mismatch: `aws_findings` with `list[Finding]` Overwrites S3 Normalizer di `cloud.aws_privesc`. Modul menuliskan `list[Finding]` ke `raw["aws_findings"]`. Normalizer `_normalize_cloud` mengharapkan struktur dictionary S3 (`raw["s3"]["public_buckets"]`) dari modul `cloud.aws`, menghasilkan 0 artifact dan hilangnya seluruh jalur eskalasi hak akses IAM dari `ArtifactStore`.
+  - `MOD-053` (Medium): Unvalidated AWS Account/Tenant Scope & Generic Host Attribution di `cloud.aws_privesc` dan `cloud.identity_federation_abuse`. Modul mengeksekusi query API AWS/Azure tanpa memverifikasi apakah AWS Account ID atau Tenant ID berada dalam batasan otorisasi scope campaign. Finding diatribusikan ke string generik (`host="aws"` atau `"azure_ad"`).
 - **Jumlah File**: 3 file
 - **Daftar File**:
   - [`ares/modules/cloud/aws_privesc.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/aws_privesc.py) — *AWS IAM Privilege Escalation (`cloud.aws_privesc`)* (342 baris)

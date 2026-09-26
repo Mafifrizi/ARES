@@ -74,6 +74,11 @@ Tabel di bawah ini memetakan seluruh 9 capability yang memiliki handler di `ares
 | `kerberos_keys` | `linux.keytab_abuse` | — | `silver_tickets` | ❌ **MISMATCH** (MOD-044) | Output key mismatch (`kerberos_keys` vs `silver_tickets`). Tidak ada handler normalizer. Data kunci Kerberos hilang dari `ArtifactStore`. |
 | `cached_hashes` | `linux.sssd_harvest` | — | `cached_hashes`, `hashes` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `cached_hashes` (`no handler`). Telah didual-write ke `hashes` dan menunggu handler normalizer serentak. |
 | `domain_users` | `linux.sssd_harvest` | — | `domain_users`, `users` | ❌ **MISMATCH** (MOD-045) | Tidak ada handler normalizer khusus `domain_users` (`no handler`). Telah didual-write ke `users` dan menunggu handler normalizer serentak. |
+| `federation_trusts` | `cloud.identity_federation_abuse` | — | `federation_trusts` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Data trust federasi hilang dari `ArtifactStore`. |
+| `golden_saml_paths` | `cloud.identity_federation_abuse` | — | `golden_saml_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Data rute Golden SAML hilang dari `ArtifactStore`. |
+| `oauth_tokens` | `cloud.identity_federation_abuse` | — | `oauth_tokens` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Token OAuth2 hilang dari `ArtifactStore`. |
+| `pivot_paths` | `cloud.identity_federation_abuse` | — | `pivot_paths` | ❌ **MISMATCH** (MOD-051) | Tidak ada handler normalizer (`no handler`). Analisis jalur pivot lintas-cloud hilang dari `ArtifactStore`. |
+| `aws_privesc_paths` | `cloud.aws_privesc` | — | `aws_privesc_paths`, `privesc_paths` | ❌ **MISMATCH** (MOD-052) | Tidak ada handler normalizer (`no handler`). Jalur eskalasi hak akses IAM hilang dari `ArtifactStore`. |
 
 ---
 
