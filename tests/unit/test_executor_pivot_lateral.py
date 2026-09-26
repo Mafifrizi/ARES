@@ -212,21 +212,21 @@ class TestPivotManager:
 
     @pytest.mark.asyncio
     async def test_establish_socks5_no_asyncssh_no_ssh_binary(self):
-        """Without asyncssh and no ssh binary, tunnel is still registered."""
+        """Without asyncssh and no ssh binary, ModuleExecutionError is raised (MOD-019)."""
+        from ares.core.errors import ModuleExecutionError
         pm = self._make_pm()
 
         with patch.dict("sys.modules", {"asyncssh": None}), \
              patch("shutil.which", return_value=None):
-            tunnel = await pm.establish_socks5(
-                pivot_host="10.0.0.5",
-                username="root",
-                secret="pass",
-                local_port=1080,
-            )
-
-        assert tunnel.pivot_host == "10.0.0.5"
-        assert tunnel.local_port == 1080
-        assert tunnel.tunnel_id in pm._tunnels
+            with pytest.raises(ModuleExecutionError) as exc_info:
+                await pm.establish_socks5(
+                    pivot_host="10.0.0.5",
+                    username="root",
+                    secret="pass",
+                    local_port=1080,
+                )
+            assert "No SSH backend available" in str(exc_info.value)
+        assert pm.active_tunnels() == []
 
     @pytest.mark.asyncio
     async def test_establish_socks5_asyncssh_success(self):
@@ -274,8 +274,12 @@ class TestPivotManager:
     @pytest.mark.asyncio
     async def test_teardown_removes_tunnel(self):
         pm = self._make_pm()
-        with patch.dict("sys.modules", {"asyncssh": None}), \
-             patch("shutil.which", return_value=None):
+        mock_asyncssh = MagicMock()
+        mock_conn = AsyncMock()
+        mock_conn.forward_socks = AsyncMock(return_value=MagicMock())
+        mock_asyncssh.connect = AsyncMock(return_value=mock_conn)
+
+        with patch.dict("sys.modules", {"asyncssh": mock_asyncssh}):
             tunnel = await pm.establish_socks5("10.0.0.5", "root", "pass", 1080)
 
         tid = tunnel.tunnel_id
@@ -291,8 +295,12 @@ class TestPivotManager:
     @pytest.mark.asyncio
     async def test_proxy_for_target_matches_subnet(self):
         pm = self._make_pm()
-        with patch.dict("sys.modules", {"asyncssh": None}), \
-             patch("shutil.which", return_value=None):
+        mock_asyncssh = MagicMock()
+        mock_conn = AsyncMock()
+        mock_conn.forward_socks = AsyncMock(return_value=MagicMock())
+        mock_asyncssh.connect = AsyncMock(return_value=mock_conn)
+
+        with patch.dict("sys.modules", {"asyncssh": mock_asyncssh}):
             tunnel = await pm.establish_socks5(
                 "10.0.0.5", "root", "pass", 1080,
                 reachable_subnets=["192.168.1.0/24"],
@@ -329,8 +337,12 @@ class TestPivotManager:
     @pytest.mark.asyncio
     async def test_generate_proxychains_config_with_tunnel(self):
         pm = self._make_pm()
-        with patch.dict("sys.modules", {"asyncssh": None}), \
-             patch("shutil.which", return_value=None):
+        mock_asyncssh = MagicMock()
+        mock_conn = AsyncMock()
+        mock_conn.forward_socks = AsyncMock(return_value=MagicMock())
+        mock_asyncssh.connect = AsyncMock(return_value=mock_conn)
+
+        with patch.dict("sys.modules", {"asyncssh": mock_asyncssh}):
             await pm.establish_socks5("10.0.0.5", "root", "pass", 1080)
 
         cfg = pm.generate_proxychains_config()

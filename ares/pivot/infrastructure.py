@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from ares.core.errors import ModuleExecutionError
 from ares.core.logger import audit, get_logger
 
 logger = get_logger("ares.pivot")
@@ -257,19 +258,29 @@ class PivotManager:
                         logger.info("socks5_subprocess_established",
                                     pivot=pivot_host, local_port=local_port)
                 else:
-                    # asyncssh not installed and no ssh binary - record as active
-                    # (operator must establish tunnel externally)
-                    tunnel.state = TunnelState.ACTIVE
-                    logger.warning("socks5_no_backend_available",
-                                   pivot=pivot_host,
-                                   hint="Install asyncssh: pip install asyncssh")
+                    tunnel.state = TunnelState.DEAD
+                    raise ModuleExecutionError(
+                        "No SSH backend available: asyncssh not installed and "
+                        "no 'ssh' binary found in PATH. Cannot establish tunnel. "
+                        "Install: pip install asyncssh"
+                    )
+            except ModuleExecutionError:
+                raise
             except (OSError, ImportError) as exc:
                 tunnel.state = TunnelState.DEAD
                 logger.error("socks5_establishment_failed", pivot=pivot_host, error=str(exc))
+                raise ModuleExecutionError(
+                    f"Failed to establish SOCKS5 tunnel: {exc}"
+                ) from exc
 
+        except ModuleExecutionError:
+            raise
         except Exception as exc:
             tunnel.state = TunnelState.DEAD
             logger.error("socks5_asyncssh_failed", pivot=pivot_host, error=str(exc)[:200])
+            raise ModuleExecutionError(
+                f"Failed to establish SOCKS5 tunnel via asyncssh: {exc}"
+            ) from exc
 
         self._tunnels[tunnel.tunnel_id] = tunnel
         if tunnel.state == TunnelState.ACTIVE:
@@ -366,12 +377,21 @@ class PivotManager:
                     tunnel._proc = proc
                     tunnel.state = TunnelState.ACTIVE
             else:
-                tunnel.state = TunnelState.ACTIVE
-                logger.warning("local_fwd_no_backend", hint="pip install asyncssh")
+                tunnel.state = TunnelState.DEAD
+                raise ModuleExecutionError(
+                    "No SSH backend available: asyncssh not installed and "
+                    "no 'ssh' binary found in PATH. Cannot establish tunnel. "
+                    "Install: pip install asyncssh"
+                )
 
+        except ModuleExecutionError:
+            raise
         except Exception as exc:
             tunnel.state = TunnelState.DEAD
             logger.error("local_fwd_failed", error=str(exc)[:200])
+            raise ModuleExecutionError(
+                f"Failed to establish local port forward: {exc}"
+            ) from exc
 
         self._tunnels[tunnel.tunnel_id] = tunnel
         if tunnel.state == TunnelState.ACTIVE:

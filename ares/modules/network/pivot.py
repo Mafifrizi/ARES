@@ -27,6 +27,7 @@ import inspect
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
+from ares.core.errors import ModuleExecutionError
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
@@ -295,6 +296,8 @@ class PivotModule(BaseModule):
                 reachable_subnets = reachable_subnets or [],
                 key_path          = key_path,
             )
+        except ModuleExecutionError:
+            raise
         except Exception as exc:
             raise self._classify_error(exc) from exc
 
