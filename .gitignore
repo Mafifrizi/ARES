@@ -67,3 +67,4 @@ docs/assets/*.mp4
 docs/assets/*.gif
 tools/
 test*.png
+batch*_audit_report.md
