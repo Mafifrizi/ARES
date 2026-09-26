@@ -1,33 +1,33 @@
-# ARES Master Remediation Plan: Consolidated Deferred Findings (Batch 1–11)
+# ARES Master Remediation Plan: Consolidated Deferred Findings (Batch 1–12 — AUDIT COMPLETE)
 
 > **Dokumen**: `MASTER_FIX_PLAN.md`  
-> **Status**: Living Execution Blueprint  
+> **Status**: Living Execution Blueprint — Audit 100% Complete  
 > **Tanggal Konsolidasi**: 26 September 2026  
-> **Cakupan Audit**: Batch 1 sampai Batch 11 (49 modul offensive/core)  
+> **Cakupan Audit**: Seluruh 12 Batch Selesai (60 modul & parser offensive/core, 75 modul total)  
 > **Aturan Eksekusi**: Rule 1 (Zero Over-claiming), Rule 3 (Fix at Root & Grep Before Complete), Rule 4 (Zero Collateral & Guaranteed Teardown)
 
 ---
 
-## 1. Status Ringkasan Temuan (Batch 1–11)
+## 1. Status Ringkasan Temuan (Batch 1–12 — FINAL)
 
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
-| **Total Temuan Teridentifikasi** | **68** | MOD-001 s/d MOD-068 |
+| **Total Temuan Teridentifikasi** | **74** | MOD-001 s/d MOD-074 (Batch 1 s/d Batch 12) |
 | **Sudah Diperbaiki (FIXED)** | **17** | Code fixes + regression tests lulus di main branch (termasuk MOD-061, MOD-064, MOD-067) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **47** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
+| **Masih Open (DEFERRED)** | **53** | Dikonsolidasikan ke dalam Grup A–F untuk eksekusi serentak |
 
 ### Ringkasan Status per Kelompok
 ```
-Total Temuan: 68
-├── FIXED (17)       [25.0%] ════════════════
-├── DISABLED (4)     [ 5.9%] ═══
-└── DEFERRED (47)    [69.1%] ══════════════════════════════════
-    ├── Grup A: Normalizer Handlers Missing (11 temuan / capability sets)
+Total Temuan: 74
+├── FIXED (17)       [23.0%] ═══════════════
+├── DISABLED (4)     [ 5.4%] ═══
+└── DEFERRED (53)    [71.6%] ══════════════════════════════════════
+    ├── Grup A: Normalizer Handlers Missing (14 temuan / capability sets)
     ├── Grup B: Hash Masking di Finding.evidence (2 temuan)
     ├── Grup C: Teardown & Resource Cleanup (7 temuan)
-    ├── Grup D: Scope Bypass Listener / Destination Parameter (11 temuan)
-    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (11 temuan)
+    ├── Grup D: Scope Bypass Listener / Destination Parameter (12 temuan: 11 open, 1 fixed)
+    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (18 temuan: 16 open, 2 fixed)
     └── Grup F: Architectural Decisions Needed (5 temuan / gates)
 ```
 
@@ -85,8 +85,10 @@ Seluruh temuan berikut mengalami fenomena **data evaporation (100% data loss)** 
 | **MOD-062** | `recon.fingerprint`, `network.*` | `fingerprint_result`, `dns_records`, `subdomains`, `web_fingerprint`, `admin_interfaces`, `service_versions`, `vulnerable_services` | `HostArtifact` & `HostVulnArtifact` | *(7 Handler normalizer diimplementasikan di `5635362`)* (`dns_records`, `subdomains`, `service_versions`, `vulnerable_services`, `web_fingerprint`, `admin_interfaces`). Sisa recon capability ditunda ke batch fix serentak. |
 | **MOD-066** | `cloud.azure`, `cloud.azure_ad` | `azure_findings`, `azure_ad_findings`, `access_tokens` | `CloudResourceArtifact` & `CredentialArtifact` | Tambah handler `_normalize_azure` & `_normalize_azure_ad` untuk mengekstrak storage accounts, RBAC bindings, NSG rules, guest users, dan token akses. |
 | **MOD-068** | `cloud.gcp` | `gcp_findings` | `CloudResourceArtifact` & `PermissionArtifact` | Tambah handler `_normalize_gcp` untuk mengekstrak GCS public buckets, project IAM bindings, dan service account keys. |
+| **MOD-070** | `windows.*`, `linux.kernel_suggester` | `cleartext_credentials`, `credential_hints`, `scheduled_tasks`, `privesc_vectors` | `CredentialArtifact`, `PermissionArtifact` | Hapus assign Finding model objek ke raw output dict; tambahkan handler normalizer untuk registry credentials & privesc vectors. |
+| **MOD-074** | `exfil.secrets_scan`, `exfil.smb_shares` | `credential_list`, `discovered_secrets`, `sensitive_data_found`, `file_share_list`, `sensitive_file_paths` | `CredentialArtifact`, `HostArtifact` | Tambahkan handler `_normalize_secrets_scan` dan `_normalize_smb_shares` untuk menangkap kredensial dan file path sensitif ke `ArtifactStore`. |
 
-**Estimasi Pengerjaan**: 1 commit per sub-kategori capability (AD, Linux, Cloud). Semua perubahan terlokalisasi di `ares/normalize/artifacts.py` dan unit test di `tests/unit/test_artifact_normalizer_pipeline.py`.
+**Estimasi Pengerjaan**: 1 commit per sub-kategori capability (AD, Linux, Cloud, Host/Exfil). Semua perubahan terlokalisasi di `ares/normalize/artifacts.py` dan unit test di `tests/unit/test_artifact_normalizer_pipeline.py`.
 
 ---
 
@@ -174,6 +176,10 @@ Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, p
 | **MOD-061** | `network.snmp_enum` | Menyimpan list `Finding` objek mentah di `raw["snmp_findings"]` dan tidak memformat ke kontrak standar `valid_credentials` (MOD-033). | **FIXED** (commit `5635362`). Serialisasi findings ke dicts dan tuliskan community string yang valid ke vault / `valid_credentials`. |
 | **MOD-065** | `cloud.*` | `validate()` tidak memverifikasi import SDK cloud (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`). | Tambahkan import pre-flight check dengan `find_spec()` dan raise `ModuleValidationError` informatif (Estimasi Fix: S - 4 file, pola identik). |
 | **MOD-067** | `cloud.azure_ad` | Indentasi return statement salah pada `run()`, memicu `UnboundLocalError` pada default `technique="enumerate"` dan memutus 100% eksekusi Microsoft Graph API (dead code). | **FIXED** (commit `bd2c9b4`). Indentasi return blok `device_code` diperbaiki, inisialisasi `raw` di awal method, enumerasi Graph API dipulihkan. |
+| **MOD-069** | `windows.registry_enum`, `scheduled_tasks_enum` | Asimetri validasi: `validate()` lolos tanpa username tapi `run()` abort diam-diam. | Tambahkan validasi username di `validate()` atau fallback deterministik dengan raise `ModuleValidationError`. |
+| **MOD-071** | `linux.kernel_suggester` | CVE userspace (PwnKit, Baron Samedit) dicocokkan ke versi kernel dengan regex `r"[345]\.[0-9]+"` menghasilkan false finding CRITICAL. | Batasi daftar CVE hanya pada vulnerability kernel nyata (Dirty Pipe, Dirty COW, eBPF) dengan parsing versi semver yang ketat. |
+| **MOD-072** | `linux._parsers` | `KirbiASN1Codec.decode_kirbi` mengklaim parsing ASN.1 DER tapi mengembalikan session key hardcoded nol (`"00" * 32`) dan tebakan principal. | Implementasikan ASN.1 DER parser riil untuk KRB-CRED (RFC 4120) agar konversi kirbi ke ccache menghasilkan tiket yang valid untuk autentikasi. |
+| **MOD-073** | `exfil.secrets_scan`, `smb_shares` | Parameter protokol di-default ke `"default"` pada `before_request()` dan validasi username absen di `validate()`. | Lewatkan protokol spesifik (`"ssh"`, `"wmi"`, `"smb"`) ke `before_request()` dan verifikasi username pada `validate()` untuk eksekusi non-dry-run. |
 
 ---
 
@@ -239,18 +245,131 @@ graph TD
 
 | Grup Perbaikan | Perkiraan Jumlah File | Perkiraan Unit Test Baru | Estimasi Risiko Regresi | Durasi Eksekusi |
 |---|:---:|:---:|:---:|:---:|
-| **Grup A (Normalizer)** | 2–3 file (`artifacts.py`, test) | 12–15 test case | **Low** | 2–3 jam |
-| **Grup B (Hash Masking)** | 3–4 file modul | 4–6 test case | **Low** | 1 jam |
+| **Grup A (Normalizer)** | 3–4 file (`artifacts.py`, test, serializers) | 16–18 test cases | **Low** | 3–4 jam |
+| **Grup B (Hash Masking)** | 3–4 file modul | 4–6 test cases | **Low** | 1 jam |
 | **Grup C (Teardown Persistence)** | 5–6 file modul | 8–10 failure-injection tests | **High** | 4–5 jam |
 | **Grup D (Scope Bypass)** | 8–10 file modul | 10–12 scope violation tests | **Medium** | 3–4 jam |
-| **Grup E (Fake Stubs / Logic)** | 9–11 file modul | 12–16 behavior tests | **Medium** | 4–6 jam |
+| **Grup E (Fake Stubs / Logic / Parsers)** | 12–15 file modul | 18–22 behavior tests | **Medium** | 5–7 jam |
 | **Grup F (Arsitektural / Cloud)** | 4–6 core files | 8–10 integration tests | **High** | Memerlukan alignment |
-| **TOTAL KESELURUHAN** | **~35 file** | **~60 unit tests** | — | **~18–22 jam kerja terfokus** |
+| **TOTAL KESELURUHAN** | **~40 file** | **~75 unit tests** | — | **~24–28 jam kerja terfokus** |
 
 ---
 
-## 6. Template Konsolidasi untuk Batch 10–12
+## 6. AUDIT COMPLETE — RINGKASAN FINAL
 
-Setiap temuan baru yang diidentifikasi pada Batch 10, 11, dan 12 harus langsung diklasifikasikan ke salah satu Grup (A, B, C, D, E, F) atau mendefinisikan Grup Baru jika karakteristik temuan belum tercakup.
+Audit keamanan 12 Batch terhadap seluruh offensive modules ARES telah **SELESAI 100%**. Berikut adalah sintesis menyeluruh dari temuan, status remedi, postur mitigasi, dan rencana eksekusi final.
 
-*Dokumen ini diperbarui secara berkala seiring berjalannya audit.*
+### 6.1. Metrik Audit Komprehensif
+
+| Dimensi Evaluasi | Metrik | Keterangan Rinci |
+|---|:---:|---|
+| **Total Batch Diaudit** | **12 / 12 Batch** | 100% modul Tier 1 & Tier 2 tuntas diaudit |
+| **Total File Modul & Parser Diaudit** | **60 File** | 55 offensive modules + 5 core parser/engine utilities |
+| **Total Katalog Modul (Termasuk Tier 3)** | **88 File** | 60 modul ofensif/parser + 13 framework engine + 15 namespace packages |
+| **Total Temuan Teridentifikasi** | **74 Temuan** | `MOD-001` s/d `MOD-074` |
+| **Sudah Diperbaiki (FIXED)** | **17 Temuan** | Verified passing main branch tests |
+| **Mitigasi / Dinonaktifkan (DISABLED)** | **4 Modul** | Fail-fast guards aktif, 100% decoupled dari katalog |
+| **Pending Fix Serentak (DEFERRED)** | **53 Temuan** | Terpetakan ke Grup A–F dengan pola solusi terstandarisasi |
+
+---
+
+### 6.2. Distribusi Temuan per Severity
+
+| Severity Level | Jumlah | Status Breakdown | Persentase |
+|---|:---:|---|:---:|
+| **CRITICAL** | **10** | 1 Fixed (`MOD-067`), 3 Disabled (`MOD-005`, `MOD-029`, `MOD-049`), 6 Deferred (`MOD-001`, `MOD-002`, `MOD-011`, `MOD-012`, `MOD-021`, `MOD-046`) | 13.5% |
+| **HIGH** | **42** | 15 Fixed, 1 Disabled (`MOD-030`), 26 Deferred | 56.8% |
+| **MEDIUM** | **21** | 1 Fixed (`MOD-056`), 0 Disabled, 20 Deferred | 28.4% |
+| **LOW** | **1** | 0 Fixed, 0 Disabled, 1 Deferred (`MOD-073`) | 1.3% |
+| **TOTAL** | **74** | **17 Fixed, 4 Disabled, 53 Deferred** | **100.0%** |
+
+---
+
+### 6.3. Distribusi Temuan per Kategori Perbaikan (Grup A–F)
+
+| Kategori Remediasi | Jumlah Temuan / Capability Sets | Rincian Temuan | Estimasi Kompleksitas |
+|---|:---:|---|:---:|
+| **Grup A: Normalizer Pipeline Gaps** | **14** | MOD-016, 036, 040, 041, 044, 051, 052, 056, 061 (fixed), 062, 066, 068, 070, 074 | Medium (sentralisasi di `artifacts.py`) |
+| **Grup B: Hash Masking di Evidence** | **2** | MOD-027, MOD-042 | Low (standar helper fungsi redaksi) |
+| **Grup C: Guaranteed Teardown & Cleanup** | **7** | MOD-012, 018, 025, 046, 047, 048, 060 | High (failure-injection unit testing) |
+| **Grup D: Scope Bypass Listener / Destination** | **12** | MOD-004, 009, 010, 011, 014, 015, 017, 022, 032, 058, 059, MOD-064 (fixed) | Medium (enforce `before_request`) |
+| **Grup E: Technical Honesty, Validation & Parsing** | **18** | MOD-013, 019, 020, 021, 023, 024, 026, 039, 043, 047, 057, 061 (fixed), 065, 067 (fixed), 069, 071, 072, 073 | Medium-High (real ASN.1 & logic fixes) |
+| **Grup F: Architectural Decisions & Cloud Scope** | **5** | MOD-053/MOD-063 (CloudScopeGuard), Gate 1, Gate 2, Gate 4 | High (arsitektur & design review) |
+
+---
+
+### 6.4. Modul yang Dinonaktifkan & Rationale Pengamanan
+
+4 modul offensive dinonaktifkan sementara dari pipeline produksi demi keselamatan keterlibatan (engagement safety), integritas cryptographic vault, dan kepatuhan anti-hype policy:
+
+1. **`ad.ghost_forge` (`ares/modules/ad/ghost_forge.py`, MOD-005)**:
+   - *Alasan*: Fictitious implementation. Mengklaim PKINIT takeover & ADCS shadow credential tanpa koneksi jaringan/LDAP/KDC riil, dan menyuntikkan dummy certificates ke vault.
+   - *Status Mitigasi*: `ENABLED = False`, disaring dari katalog `ModuleRegistry`, API `/modules`, CLI, dan execution chains. Invokasi langsung melempar exception eksplisit `"module disabled: implementation incomplete, see MOD-005"`.
+2. **`windows.dpapi` (`ares/modules/windows/dpapi.py`, MOD-029)**:
+   - *Alasan*: Fictitious cleartext credential claim. Menghasilkan CRITICAL finding berhasil mendekripsi DPAPI tanpa masterkey atau LSASS dump yang valid.
+   - *Status Mitigasi*: `ENABLED = False`, guard fail-fast pada `validate()`, `execute()`, dan `assess_feasibility()`.
+3. **`windows.token_impersonation` (`ares/modules/windows/token_impersonation.py`, MOD-030)**:
+   - *Alasan*: Heuristic over-claiming. Mengklaim eskalasi hak akses token berhasil dikonfirmasi tanpa melakukan duplikasi atau impersonasi token Windows riil.
+   - *Status Mitigasi*: `ENABLED = False`, guard fail-fast pada seluruh method lifecycle.
+4. **`cloud.phantom_token` (`ares/modules/cloud/phantom_token.py`, MOD-049)**:
+   - *Alasan*: Fictitious PRT hijack. Mengklaim mengekstrak Primary Refresh Token (PRT) TPM Microsoft Entra ID tanpa memanggil COM interface atau LSASS API, mencemari vault dengan token sintetis palsu.
+   - *Status Mitigasi*: `ENABLED = False`, fail-fast di seluruh entry point.
+
+---
+
+### 6.5. Status Gate Kualitas & Keamanan (Implemented vs Pending)
+
+| Security Gate | Deskripsi Kontrol | Status | Komponen Penegak |
+|---|---|:---:|---|
+| **Gate 3** | Opsec Level & Rate Limiter / Jitter Enforcement | ✅ **IMPLEMENTED** | `NoiseController`, `rate_limiter.acquire()`, jitter calculation |
+| **Gate 5** | Deterministic Scope Enforcement (Layer 1 & Layer 2) | ✅ **IMPLEMENTED** | `ScopeGuard`, `before_request()`, `ScopeFirewall` in-process socket hook |
+| **Gate 6** | Cryptographic Vault Storage for Sensitive Material | ✅ **IMPLEMENTED** | `CredentialVault` direct write, validated di MOD-045, MOD-055, MOD-061 |
+| **Gate 1** | Strict Parameter & Schema Pre-Flight Guard | ⏳ **PENDING** | Butuh penegakan Pydantic schema validation sebelum scheduling modul |
+| **Gate 2** | In-Process Scope Interceptor vs OS-Level Packet Filter Sync | ⏳ **PENDING** | Butuh sinkronisasi aturan blocking antara `ScopeFirewall` dan `OSFirewallController` |
+| **Gate 4** | Subprocess Sandboxing & Execution Isolation | ⏳ **PENDING** | Butuh isolasi runner untuk eksekusi CLI/binary eksternal agar zero collateral |
+
+---
+
+### 6.6. Rekomendasi Urutan Eksekusi Fix Serentak yang Final
+
+Untuk meminimalkan waktu regresi dan memaksimalkan stabilitas, eksekusi remedi simultaneous fix harus mengikuti 6 fase terurut:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  FASE 1: Grup A — Normalizer Handlers Missing (ares/normalize/artifacts.py)  │
+│  - Dampak Tertinggi: Menghentikan 100% data loss telemetry ke ArtifactStore.  │
+│  - Terisolasi pada 1 file + pipeline unit test, risiko regresi terendah.  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│  FASE 2: Grup B — Hash Masking di Finding.evidence                     │
+│  - Penerapan fungsi mask_secret_hash() di MOD-027 dan MOD-042.          │
+│  - Menghilangkan kebocoran hash plaintext di log audit dan reporting.   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│  FASE 3: Grup D — Scope Bypass Listener & Secondary Destination        │
+│  - Penegakan await self.before_request(...) pada 11 modul target.      │
+│  - Menjamin zero traffic keluar ke host di luar izin client engagement.│
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│  FASE 4: Grup C — Guaranteed Teardown (Rule 4 Compliance)              │
+│  - Implementasi blok finally dan method teardown() di 7 modul lateral/  │
+│    persistence (termasuk CRITICAL MOD-012 RBCD dan MOD-046 tasks).    │
+│  - Validasi via failure injection tests.                               │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│  FASE 5: Grup E — Technical Honesty, Parsing & Validation Robustness    │
+│  - Perbaikan ASN.1 parser di _parsers.py (MOD-072), semver di suggester│
+│    (MOD-071), SDK check (MOD-065), dan eliminasi klaim fiktif.        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+┌───────────────────────────────────▼────────────────────────────────────┐
+│  FASE 6: Grup F — Architectural Decisions, Cloud Scope & Gates 1, 2, 4  │
+│  - Perancangan CloudScopeGuard dataclass pada CampaignScope.            │
+│  - Integrasi pre-flight admission Gate 1 dan sinkronisasi Gate 2.      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+

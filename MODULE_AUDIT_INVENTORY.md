@@ -427,9 +427,17 @@ Seluruh modul **TIER 1 (Critical)** dan **TIER 2 (High)** telah dikelompokkan ke
   - [`ares/modules/cloud/azure_ad.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/azure_ad.py) — *Azure AD Identity Attacks (`cloud.azure_ad`)* (465 baris)
   - [`ares/modules/cloud/gcp.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/cloud/gcp.py) — *GCP Recon & Attack (`cloud.gcp`)* (648 baris)
 
-### Batch 12: Host Configuration, Binary Parsing & Secrets Reconnaissance (TIER 2 - HIGH)
+### Batch 12: Host Configuration, Binary Parsing & Secrets Reconnaissance (TIER 2 - HIGH) - [STATUS: AUDITED]
 - **Deskripsi**: Modul pembacaan konfigurasi sistem host (Windows Registry Enum, Scheduled Tasks Enum, Linux Kernel Exploit Suggester), engine parser data binary, dan pemindai file rahasia / share SMB.
-- **Fokus Risiko Audit**: Crash / Denial-of-Service pada parser struktur binary eksternal (ccache v4, keytab, kirbi ASN.1, TDB SAMBA), memory bloat saat scanning file besar.
+- **Fokus Risiko Audit**: Crash / Denial-of-Service pada parser struktur binary eksternal (ccache v4, keytab, kirbi ASN.1, TDB SAMBA), memory bloat saat scanning file besar, domain object bleed ke raw keys, kelengkapan normalizer contract.
+- **Status Audit**: **SELESAI (AUDITED) — BATCH TERAKHIR SELESAI**
+- **Hasil Temuan**: **6 Temuan Terkonfirmasi** (1 High, 4 Medium, 1 Low)
+  - `MOD-069` (Medium): Pre-flight Validation Asymmetry on `windows.registry_enum` and `windows.scheduled_tasks_enum` (`validate()` passes without required `username`, causing silent aborts in `run()`).
+  - `MOD-070` (Medium): Domain `Finding` Object Bleed & 100% Normalizer Data Loss on `cleartext_credentials`, `credential_hints`, `scheduled_tasks`, `privesc_vectors` across `windows.registry_enum`, `windows.scheduled_tasks_enum`, and `linux.kernel_suggester`.
+  - `MOD-071` (Medium): Flawed Heuristic & Userspace CVE Attribution on `linux.kernel_suggester` (Polkit PwnKit CVE-2021-4034 and Sudo Baron Samedit CVE-2021-3156 matched against generic kernel regex `r"[345]\.[0-9]+"`).
+  - `MOD-072` (High): Pseudo-Parser in `KirbiASN1Codec.decode_kirbi()` on `linux._parsers.py` returning hardcoded all-zero session keys (`"00" * 32`) and synthetic principals, corrupting converted tickets.
+  - `MOD-073` (Low): Scope Guard Protocol Defaulting to `"default"` and Missing Credential Pre-flight Checks in `validate()` on `exfil.secrets_scan` and `exfil.smb_shares`.
+  - `MOD-074` (Medium): 100% Normalizer Data Loss on Exfiltration Outputs (`credential_list`, `discovered_secrets`, `sensitive_data_found`, `file_share_list`, `sensitive_file_paths`) in `ArtifactNormalizer`.
 - **Jumlah File**: 6 file
 - **Daftar File**:
   - [`ares/modules/windows/registry_enum.py`](file:///c:/Users/ASUS/Desktop/ARES/ares/modules/windows/registry_enum.py) — *Registry Credential Enumeration (`windows.registry_enum`)* (737 baris)
