@@ -9,7 +9,7 @@ from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.dcsync")
 from ares.core.campaign import Finding, Severity, NoiseProfile
-from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.security import mask_secret_hash, sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
 from ares.core.errors import ModuleValidationError
 from ares.modules.params import DCSyncParams
@@ -352,6 +352,6 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
                          + ("krbtgt obtained - Golden Ticket possible. " if krbtgt else "")),
             severity=Severity.CRITICAL, mitre_technique="T1003.006", mitre_tactic="Credential Access",
             evidence={"hash_count":len(hashes),"target":target,"krbtgt_obtained":bool(krbtgt),
-                      "sample":[f"{h['username']}:::{h['nt_hash']}" for h in hashes[:3]]},
+                      "sample":[f"{h['username']}:::{mask_secret_hash(h['nt_hash'])}" for h in hashes[:3]]},
             remediation=("1. Reset krbtgt TWICE 24h apart. 2. Investigate replication rights. "
                          "3. Enable Microsoft Defender for Identity."))

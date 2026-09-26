@@ -16,9 +16,9 @@ import asyncio
 import re
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.core.security import sanitize_hostname
+from ares.core.logger import get_logger, audit
+from ares.core.security import mask_secret_hash, sanitize_hostname
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import LSASecretsParams
 from ares.core.tracing import trace_module
@@ -369,6 +369,7 @@ class LSASecretsModule(BaseModule):
         errors           = result["errors"]
 
         if sam_hashes:
+            masked_sam = [mask_secret_hash(h) for h in sam_hashes]
             self.finding(
                 title=f"SAM Database Dumped - {len(sam_hashes)} Local Account Hash(es) from {target}",
                 description=(
@@ -380,7 +381,7 @@ class LSASecretsModule(BaseModule):
                 mitre_technique="T1003.002",
                 mitre_tactic="Credential Access",
                 evidence={"target": target, "hash_count": len(sam_hashes),
-                           "hashes": sam_hashes},
+                           "hashes": masked_sam},
                 remediation=(
                     "Enable Windows Credential Guard to protect credential material. "
                     "Rotate all local administrator passwords immediately. "
@@ -417,6 +418,7 @@ class LSASecretsModule(BaseModule):
             )
 
         if cached_creds:
+            masked_cached = [mask_secret_hash(h) for h in cached_creds]
             self.finding(
                 title=f"Cached Domain Credentials (DCC2) Found on {target}",
                 description=(
@@ -428,7 +430,7 @@ class LSASecretsModule(BaseModule):
                 mitre_technique="T1003.005",
                 mitre_tactic="Credential Access",
                 evidence={"target": target, "count": len(cached_creds),
-                           "hashes": cached_creds},
+                           "hashes": masked_cached},
                 remediation=(
                     "Set CachedLogonsCount registry value to 0 to disable credential caching "
                     "on non-laptop machines. Use SCCM/Intune offline domain join instead."

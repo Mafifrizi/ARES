@@ -16,6 +16,7 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
+from ares.core.security import mask_secret_hash
 from ares.core.tracing import trace_module
 from ares.modules.linux._parsers import TDBParser, compute_ntlm_hash
 from ares.modules.params import SambaSecretsParams
@@ -187,6 +188,8 @@ class SambaSecretsModule(BaseModule[SambaSecretsParams, ModuleResult]):
 
         evidence_chain: list[EvidenceRecord] = []
         for sec in extracted_secrets:
+            raw_ntlm = sec.get("ntlm_hash")
+            masked_ntlm = mask_secret_hash(raw_ntlm)
             ev = EvidenceRecord(
                 artifact_id=f"samba-secret-{sec.get('domain', 'ad')}",
                 source_target=target,
@@ -194,7 +197,7 @@ class SambaSecretsModule(BaseModule[SambaSecretsParams, ModuleResult]):
                 data={
                     "domain": sec.get("domain"),
                     "account": sec.get("account_name"),
-                    "ntlm_hash": sec.get("ntlm_hash"),
+                    "ntlm_hash": masked_ntlm,
                 },
                 tags=["samba", "secrets", "ntlm"],
             )
@@ -213,7 +216,7 @@ class SambaSecretsModule(BaseModule[SambaSecretsParams, ModuleResult]):
                     "secrets_path": secrets_tdb_path,
                     "domain": sec.get("domain"),
                     "account_name": sec.get("account_name"),
-                    "ntlm_hash": sec.get("ntlm_hash"),
+                    "ntlm_hash": masked_ntlm,
                 },
                 remediation=(
                     "Enforce strict permissions on /var/lib/samba/private/secrets.tdb (chmod 0600). "
