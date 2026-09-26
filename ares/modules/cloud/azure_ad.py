@@ -87,9 +87,21 @@ class AzureADModule(BaseModule):
     PARAMS_MODEL       = AzureADParams
 
     async def validate(self, ctx: "Any") -> None:
+        import importlib.util
+        from ares.core.errors import ModuleValidationError
+
+        try:
+            spec = importlib.util.find_spec("msal")
+        except (ModuleNotFoundError, ValueError):
+            spec = None
+        if spec is None:
+            raise ModuleValidationError(
+                f"{self.MODULE_ID} requires msal. Install with: pip install msal",
+                module_id=self.MODULE_ID,
+            )
+
         await super().validate(ctx)
         from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
         params = getattr(ctx, "params", {})

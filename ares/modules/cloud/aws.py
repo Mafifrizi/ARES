@@ -47,9 +47,21 @@ class AWSEnumModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
+        import importlib.util
+        from ares.core.errors import ModuleValidationError
+
+        try:
+            spec = importlib.util.find_spec("boto3")
+        except (ModuleNotFoundError, ValueError):
+            spec = None
+        if spec is None:
+            raise ModuleValidationError(
+                f"{self.MODULE_ID} requires boto3. Install with: pip install boto3",
+                module_id=self.MODULE_ID,
+            )
+
         await super().validate(ctx)
         from ares.core.context import ExecutionContext
-        from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
             return
         params = getattr(ctx, "params", {})
