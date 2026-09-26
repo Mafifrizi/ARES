@@ -60,76 +60,35 @@ class TokenImpersonationModule(BaseModule):
     OUTPUTS            = ["privesc_vectors"]
     MITRE_TECHNIQUES   = ["T1134.001", "T1134.002"]
     PARAMS_MODEL       = TokenImpersonationParams
+    ENABLED            = False
+    DISABLED_REASON    = "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)"
 
     async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
-        """
-        Pre-flight Defense Feasibility Assessment:
-        Evaluates SeImpersonatePrivilege conditions and Potato-family attack feasibility.
-        """
+        """Pre-flight Defense Feasibility Assessment: Disabled under MOD-030."""
         from ares.modules.base import FeasibilityReport
-
-        blockers: list[str] = []
-        recommendations: list[str] = []
-        opsec_tuning: dict[str, Any] = {}
-        score = 1.0
-        risk = "medium"
-
-        target = sanitize_hostname(getattr(ctx, "target", "") or getattr(ctx, "params", {}).get("target", ""))
-        if not target:
-            blockers.append("No target host specified")
-            score -= 0.5
-
-        session = getattr(ctx, "session", None)
-        if session and hasattr(session, "get_host") and target:
-            host_state = session.get_host(target)
-            if host_state:
-                if host_state.has_defense("edr"):
-                    risk = "high_noise"
-                    score -= 0.2
-                    opsec_tuning["suggested_variant"] = "GodPotato / PrintSpoofer"
-                    opsec_tuning["note"] = "EDR detected on host; classic JuicyPotato DCOM reflection is signatured. Use PrintSpoofer or GodPotato."
-
-        feasible = len(blockers) == 0 and score >= 0.4
         return FeasibilityReport(
-            feasible=feasible,
-            score=max(0.0, min(1.0, score)),
-            risk_level=risk,
-            blockers=blockers,
-            recommended_alternatives=recommendations,
-            opsec_tuning=opsec_tuning,
-            details={"target": target},
+            feasible=False,
+            score=0.0,
+            risk_level="high_noise",
+            blockers=[self.DISABLED_REASON],
+            recommended_alternatives=["windows.lsass_dump", "windows.lsa_secrets"],
+            details={"disabled": True, "reason": self.DISABLED_REASON},
         )
 
     async def validate(self, ctx: "Any") -> None:
-        """Pre-flight param checks before any network call."""
-        from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        if not isinstance(ctx, ExecutionContext):
-            return
-        if isinstance(ctx.params, dict):
-            if not ctx.params.get("target") and getattr(ctx, "target", None):
-                ctx.params["target"] = ctx.target
-            if not ctx.params.get("domain") and getattr(ctx, "domain", None):
-                ctx.params["domain"] = ctx.domain
-            if not ctx.params.get("username") and hasattr(ctx, "best_credential"):
-                cred = ctx.best_credential()
-                if cred and cred.username:
-                    ctx.params["username"] = cred.username
-        target = getattr(ctx, "target", "") or (ctx.params.get("target", "") if isinstance(ctx.params, dict) else getattr(ctx.params, "target", ""))
-        if not target:
-            raise ModuleValidationError(
-                "windows.token_impersonation requires 'target'.",
-                module_id=self.MODULE_ID, field="target",
-            )
-        await super().validate(ctx)
+        raise ModuleValidationError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
-        """ExecutionContext-based entry point (v0.9.0+).
-        Thin adapter: extract params from ctx → call run() → return ModuleResult.
-        """
-        from ares.modules.base import ModuleResult
-        if getattr(ctx, "dry_run", False):
-            return ModuleResult(status="dry_run", module_id=self.MODULE_ID, raw={"dry_run": True})
+        """ExecutionContext-based entry point (v0.9.0+): Disabled under MOD-030."""
+        from ares.core.errors import ModuleError
+        raise ModuleError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
         target   = getattr(ctx, "target", "")
         username = ""
         password = ""
@@ -232,6 +191,12 @@ class TokenImpersonationModule(BaseModule):
 
     @trace_module("windows.token_impersonation")
     async def run(self, **kwargs: Any) -> tuple[list[Finding], dict[str, Any]]:
+        from ares.core.errors import ModuleError
+        raise ModuleError(
+            self.DISABLED_REASON,
+            module_id=self.MODULE_ID,
+        )
+
         target   = sanitize_hostname(kwargs.get("target", ""))
         username = kwargs.get("username", "")
         password = kwargs.get("password", "") or kwargs.get("secret", "")

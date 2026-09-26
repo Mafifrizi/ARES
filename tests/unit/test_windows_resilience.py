@@ -14,6 +14,7 @@ import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
+from ares.core.errors import ModuleError
 from ares.core.noise import NoiseController
 from ares.modules.windows.lsass_dump import LsassDumpModule
 from ares.modules.windows.token_impersonation import TokenImpersonationModule
@@ -187,73 +188,46 @@ class TestLsassDumpResilience:
 
 
 class TestTokenImpersonationNamedPipes:
-    """Tests for Named Pipe audit and PrintSpoofer / Potato attack vector detection."""
+    """Tests for Named Pipe audit and PrintSpoofer / Potato attack vector detection (Disabled under MOD-030)."""
 
     @pytest.mark.asyncio
     async def test_printspoofer_confirmed_on_service_account(self, mock_impacket_modules):
         mod = _make_module(TokenImpersonationModule)
 
-        with patch.object(
-            mod,
-            "_audit_named_pipes_sync",
-            return_value={"spoolss": True, "efsrpc": False, "svcctl": True, "samr": True},
-        ):
-            findings, raw = await mod.run(
+        with pytest.raises(ModuleError) as exc_info:
+            await mod.run(
                 target="192.168.1.20",
                 username="iis apppool\\defaultapppool",
                 password="Password123!",
             )
-
-            assert raw["named_pipes_checked"]["spoolss"] is True
-            assert "PrintSpoofer (\\pipe\\spoolss)" in raw["impersonation_vectors"]
-
-            # Must generate CRITICAL confirmed vector finding
-            critical_finding = next((f for f in findings if f.severity == Severity.CRITICAL), None)
-            assert critical_finding is not None
-            assert "PrintSpoofer SYSTEM Escalation Vector Confirmed" in critical_finding.title
-            assert critical_finding.evidence.get("exploit_vector") == "PrintSpoofer / PipePotato"
+        assert "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)" in str(exc_info.value)
+        assert len(mod._findings) == 0
 
     @pytest.mark.asyncio
     async def test_spooler_pipe_accessible_normal_user_vector(self, mock_impacket_modules):
         mod = _make_module(TokenImpersonationModule)
 
-        with patch.object(
-            mod,
-            "_audit_named_pipes_sync",
-            return_value={"spoolss": True, "efsrpc": True, "svcctl": False, "samr": False},
-        ):
-            findings, raw = await mod.run(
+        with pytest.raises(ModuleError) as exc_info:
+            await mod.run(
                 target="192.168.1.21",
                 username="normal_user",
                 password="Password123!",
             )
-
-            assert raw["named_pipes_checked"]["spoolss"] is True
-            assert "PrintSpoofer (\\pipe\\spoolss)" in raw["impersonation_vectors"]
-            assert "EfsPotato / PetitPotam Local (\\pipe\\efsrpc)" in raw["impersonation_vectors"]
-
-            # Generates HIGH finding alerting to Spooler exposure
-            spool_finding = next((f for f in findings if "Print Spooler Named Pipe Accessible" in f.title), None)
-            assert spool_finding is not None
-            assert spool_finding.severity == Severity.HIGH
+        assert "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)" in str(exc_info.value)
+        assert len(mod._findings) == 0
 
     @pytest.mark.asyncio
     async def test_service_account_without_spooler_reports_potato(self, mock_impacket_modules):
         mod = _make_module(TokenImpersonationModule)
 
-        with patch.object(
-            mod,
-            "_audit_named_pipes_sync",
-            return_value={"spoolss": False, "efsrpc": False, "svcctl": False, "samr": False},
-        ):
-            findings, raw = await mod.run(
+        with pytest.raises(ModuleError) as exc_info:
+            await mod.run(
                 target="192.168.1.22",
                 username="nt service\\mssql$sqlexpress",
                 password="Password123!",
             )
-
-            assert raw["has_impersonate_indicator"] is True
-            assert any("SeImpersonatePrivilege Likely Present" in f.title for f in findings)
+        assert "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)" in str(exc_info.value)
+        assert len(mod._findings) == 0
 
 
 class TestRegistryEnumDriverBlocklist:

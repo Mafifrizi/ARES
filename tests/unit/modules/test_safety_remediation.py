@@ -226,6 +226,13 @@ def test_onprem_modules_rate_limiter_never_calls_cloud_api(mod_path, cls_name, e
         "impacket.dcerpc.v5.dcomrt": MagicMock(),
         "paramiko": MagicMock(),
     }):
+        if getattr(module_cls, "ENABLED", True) is False:
+            with pytest.raises(Exception) as exc_info:
+                asyncio.run(instance.run(**run_kwargs))
+            assert "module disabled" in str(exc_info.value).lower()
+            assert not acquire_mock.called, f"Disabled {cls_name} should not acquire rate limiter"
+            return
+
         # Mock inner execution loop or functions
         try:
             asyncio.run(instance.run(**run_kwargs))
@@ -236,4 +243,5 @@ def test_onprem_modules_rate_limiter_never_calls_cloud_api(mod_path, cls_name, e
     called_bucket = acquire_mock.call_args[0][0]
     assert called_bucket == expected_bucket, f"{cls_name} expected bucket {expected_bucket}, got {called_bucket}"
     assert called_bucket != "cloud_api", f"{cls_name} improperly used cloud_api rate limiter bucket!"
+
 

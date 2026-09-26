@@ -250,8 +250,8 @@ class TestTokenImpersonationFeasibility:
             session=session,
         )
         report = await mod.assess_feasibility(ctx)
-        assert report.feasible is True
-        assert "GodPotato" in report.opsec_tuning.get("suggested_variant", "")
+        assert report.feasible is False
+        assert any("MOD-030" in b for b in report.blockers)
 
 
 class TestLateralMovementFeasibility:

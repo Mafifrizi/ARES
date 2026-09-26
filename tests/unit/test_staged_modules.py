@@ -441,17 +441,13 @@ class TestGhostForgeModule:
 
     def test_token_impersonation_closed_loop_telemetry(self, monkeypatch):
         from ares.modules.windows.token_impersonation import TokenImpersonationModule
+        from ares.core.errors import ModuleError
         mod, _ = _make_module(TokenImpersonationModule)
-        async def fake_run(*args, **kwargs):
-            return [], {"success": True, "tokens": ["NT AUTHORITY\\SYSTEM"], "loot": []}
-        monkeypatch.setattr(mod, "run", fake_run)
         ctx = _mock_ctx(params={"target": "10.0.0.5", "username": "Admin", "password": "Password123!"})
         ctx.dry_run = False
-        res = _run(mod.execute(ctx))
-        assert res.status in ("partial", "success")
-        assert res.raw.get("se_impersonate_privilege_evaluated") is True
-        assert any(l["loot_type"] == "detection_rule_kql" for l in res.raw["loot"])
-        assert any(l["loot_type"] == "detection_rule_sigma" for l in res.raw["loot"])
+        with pytest.raises(ModuleError) as exc_info:
+            _run(mod.execute(ctx))
+        assert "module disabled: privilege check heuristic insufficient" in str(exc_info.value)
 
     def test_uac_bypass_closed_loop_telemetry(self, monkeypatch):
         from ares.modules.windows.uac_bypass import UACBypassModule
