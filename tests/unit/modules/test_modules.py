@@ -65,14 +65,41 @@ class TestContainerEscape:
 
 class TestLinuxPrivesc:
     @pytest.mark.asyncio
-    async def test_writable_path_detection(self):
-        import os
+    async def test_writable_path_detection_executes_on_target(self):
+        """Path writability check must execute via remote runner on target, ignoring operator filesystem."""
+        from unittest.mock import AsyncMock
         module, _ = _make_module(LinuxPrivescModule)
-        with patch("os.environ.get", return_value="/usr/bin:/tmp/writable"), \
-             patch("os.path.isdir", return_value=True), \
-             patch("os.access", side_effect=lambda p, m: "writable" in p):
-            result = await module._check_writable_path()
-        assert "/tmp/writable" in result
+
+        # Mock target runner returning writable paths found on remote target
+        mock_runner = AsyncMock(return_value="/usr/local/bin\n/opt/tools/bin\n")
+
+        result = await module._check_writable_path(run=mock_runner)
+
+        # Verify command executed on target
+        assert mock_runner.called
+        assert "echo \"$PATH\"" in mock_runner.call_args[0][0]
+        assert result == ["/usr/local/bin", "/opt/tools/bin"]
+
+    @pytest.mark.asyncio
+    async def test_writable_path_finding_attributed_to_target_host(self):
+        """Finding.host must be attributed to remote target IP/hostname, not localhost."""
+        module, _ = _make_module(LinuxPrivescModule)
+
+        target_host = "192.168.100.55"
+        raw = {
+            "host": target_host,
+            "writable_path": ["/usr/local/bin"],
+        }
+        module._analyze(raw)
+
+        writable_findings = [f for f in module._findings if "Writable PATH Dirs" in f.title]
+        assert len(writable_findings) == 1
+        finding = writable_findings[0]
+        assert finding.host == target_host
+        assert finding.host != "localhost"
+        assert target_host in finding.title
+        assert finding.evidence["host"] == target_host
+        assert "/usr/local/bin" in finding.evidence["directories"]
 
     @pytest.mark.asyncio
     async def test_world_writable_etc_passwd(self):
@@ -83,3 +110,4 @@ class TestLinuxPrivesc:
         assert len(result) > 0
         assert len(module._findings) > 0
         assert module._findings[0].severity.value == "critical"
+

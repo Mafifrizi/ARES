@@ -355,13 +355,14 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         output = await run("getcap -r / 2>/dev/null")
         return [line for line in output.splitlines() if line.strip()]
 
-    async def _check_writable_path(self, run: Any = None) -> list[str]:
-        path_env = os.environ.get("PATH", "")
-        writable: list[str] = []
-        for directory in path_env.split(":"):
-            if directory and os.path.isdir(directory) and os.access(directory, os.W_OK):
-                writable.append(directory)
-        return writable
+    async def _check_writable_path(self, run: Callable[[str], Awaitable[str]] | None = None) -> list[str]:
+        if run is None:
+            return []
+        cmd = 'echo "$PATH" | tr \':\' \'\\n\' | while IFS= read -r d; do [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] && echo "$d"; done'
+        output = await run(cmd)
+        if not output or not isinstance(output, str):
+            return []
+        return [line.strip() for line in output.splitlines() if line.strip()]
 
     async def _check_world_writable_sensitive(self, run: Any = None) -> list[str]:
         sensitive_paths = [
@@ -454,14 +455,18 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         writable = raw.get("writable_path", [])
         if writable:
             self.finding(
-                title=f"Writable PATH Dirs ({len(writable)})",
-                description="Current user can write to $PATH dirs - PATH hijacking possible.",
+                title=f"Writable PATH Dirs on {target_host} ({len(writable)})",
+                description=(
+                    f"Current user on {target_host} has write access to $PATH directory/directories "
+                    f"({', '.join(writable[:3])}). PATH hijacking or malicious binary planting is possible."
+                ),
                 severity=Severity.HIGH,
                 mitre_technique="T1574.006",
                 mitre_tactic="Privilege Escalation",
-                evidence={"directories": writable},
-                remediation="Remove write permissions from PATH directories.",
+                evidence={"host": target_host, "directories": writable},
+                remediation="Remove write permissions from PATH directories: chmod go-w <dir>.",
                 host=target_host,
+                confidence=0.95,
             )
 
         has_root_vector = bool(exploitable) or any("NOPASSWD" in line for line in sudo_rules) or bool(found_caps)
