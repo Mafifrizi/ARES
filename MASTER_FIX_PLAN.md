@@ -13,21 +13,21 @@
 | Metrik Audit | Jumlah | Keterangan |
 |---|:---:|---|
 | **Total Temuan Teridentifikasi** | **74** | MOD-001 s/d MOD-074 (Batch 1 s/d Batch 12) |
-| **Sudah Diperbaiki (FIXED)** | **50** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, Fase 2, Fase 3, dan Fase 4 COMPLETE - 7/7) |
+| **Sudah Diperbaiki (FIXED)** | **55** | Code fixes + regression tests lulus di main branch (termasuk Fase 1, 2, 3, 4 COMPLETE, dan Fase 5A COMPLETE - 5/5) |
 | **Mitigasi / Dinonaktifkan (DISABLED)** | **4** | `ad.ghost_forge`, `windows.dpapi`, `windows.token_impersonation`, `cloud.phantom_token` |
-| **Masih Open (DEFERRED)** | **20** | Sisa Grup E (Technical Honesty) & Grup F (Cloud Scope) |
+| **Masih Open (DEFERRED)** | **15** | Sisa Grup E (10 temuan) & Grup F (5 temuan / gates) |
 
 ### Ringkasan Status per Kelompok
 ```
 Total Temuan: 74
-├── FIXED (50)       [67.6%] ══════════════════════════════════════════
+├── FIXED (55)       [74.3%] ════════════════════════════════════════════════
 ├── DISABLED (4)     [ 5.4%] ═══
-└── DEFERRED (20)    [27.0%] ═════════════════
+└── DEFERRED (15)    [20.3%] ═════════════
     ├── Grup A: Normalizer Handlers Missing (✅ SELESAI - commit 9f8b111)
     ├── Grup B: Hash Masking di Finding.evidence (✅ SELESAI - commit e94533b)
     ├── Grup C: Teardown & Resource Cleanup (✅ SELESAI - 7/7 FIXED - commit facdb61)
     ├── Grup D: Scope Bypass Listener / Destination Parameter (✅ SELESAI - commit cc2e980)
-    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (15 temuan open, 3 fixed)
+    ├── Grup E: Fake/Stub Implementation & Pipeline Disconnect (Fase 5A: 5 FIXED, 10 open)
     └── Grup F: Architectural Decisions Needed (5 temuan / gates)
 ```
 
@@ -66,6 +66,12 @@ Berikut adalah daftar temuan yang telah diselesaikan dengan bukti commit pada br
 | **MOD-047 (Grup C)** | `ares/modules/persistence/scheduled_task.py` | Default `dry_run=False` in `RegistryRunKeyPersistence` and RRP RPC handle cleanup | `e9c7cdd` |
 | **MOD-046 (Grup C)** | `ares/modules/persistence/scheduled_task.py` | `created_artifacts` tracking, RPC task deletion via `finally` & `teardown()` method | `327458b` |
 | **MOD-012 (Grup C)** | `ares/modules/lateral/ntlm_relay.py` | RBCD machine account deletion via `conn.delete()` and initial DACL restoration | `28e983a` |
+| **MOD-018 (Grup C)** | `ares/core/engine.py`, `network/pivot.py`, `infrastructure.py` | SSH subprocess teardown guaranteed via engine finally block (Opsi B) | `facdb61` |
+| **MOD-072 (Fase 5A)** | `ares/modules/linux/_parsers.py`, `ticket_converter.py` | Real recursive ASN.1 DER parser for RFC 4120 KRB-CRED (.kirbi), genuine session key & principal extraction | `01b966e` |
+| **MOD-071 (Fase 5A)** | `ares/modules/linux/kernel_suggester.py` | Separate kernel vs userspace CVEs; remote sudo query & calibrated confidence (<0.7) | `ca3d469` |
+| **MOD-065 (Fase 5A)** | `ares/modules/cloud/aws.py`, `azure.py`, `azure_ad.py`, `gcp.py` | Pre-flight SDK import validation in validate() with install hints for 4 cloud modules | `b68986e` |
+| **MOD-069 (Fase 5A)** | `ares/modules/windows/registry_enum.py`, `scheduled_tasks_enum.py` | Fast fail ModuleValidationError on missing username in validate(); non-silent warnings in run() | `6e10f8f` |
+| **MOD-073 (Fase 5A)** | `ares/modules/exfil/secrets_scan.py`, `smb_shares.py` | Explicit protocol ('ssh'/'smb') in before_request() for rate limiter & scope guard calibration | `c8d903e` |
 
 *Catatan: Modul yang dinonaktifkan demi keamanan operator (`ad.ghost_forge` [MOD-005], `windows.dpapi` [MOD-029], `windows.token_impersonation` [MOD-030], `cloud.phantom_token` [MOD-049]) dilindungi fail-fast guard dan tidak diizinkan masuk active catalog.*
 
@@ -179,15 +185,15 @@ Modul-modul ini masih aktif di katalog, namun memiliki klaim kemampuan fiktif, p
 | **MOD-026** | `windows.lsass_dump` | Deklarasi output `kerberos_tickets`, tapi pypykatz parser mengembalikan list kosong hardcoded `[]`. | Hapus `kerberos_tickets` dari `OUTPUTS` sampai parser Kirbi/ccache diimplementasikan. |
 | **MOD-039** | `linux.container` | Heuristik `len(lines) > 50` pada `/proc/net/tcp` memicu false finding `--net=host`. | Periksa kesamaan inode namespace network (`/proc/1/ns/net` vs `/proc/self/ns/net`). |
 | **MOD-043** | `linux.ccache_hunt` | Scan `/proc/keys` dan socket KCM menyuntikkan string kosong `""` ke `AresVault`. | Blokir penyimpanan vault jika byte tiket kosong (sejalan dengan Gate 6). |
-| **MOD-047** | `persistence.scheduled_task` | Inverted default `dry_run=True` pada `RegistryRunKeyPersistence`. | Set default `dry_run=False` (mengikuti setting context eksekusi). |
+| **MOD-047** | `persistence.scheduled_task` | Inverted default `dry_run=True` pada `RegistryRunKeyPersistence`. | **FIXED** (commit `e9c7cdd`). Set default `dry_run=False` (mengikuti context eksekusi). |
 | **MOD-057** | `ad.enum_acl`, `ad.laps_enum` | Raw string concatenation `user=f"{domain}\\{username}"` membypass `build_ad_bind_plan()`. | Migrasi ke `build_ad_bind_plan()` untuk standardisasi UPN/NTLM domain binding. |
 | **MOD-061** | `network.snmp_enum` | Menyimpan list `Finding` objek mentah di `raw["snmp_findings"]` dan tidak memformat ke kontrak standar `valid_credentials` (MOD-033). | **FIXED** (commit `5635362`). Serialisasi findings ke dicts dan tuliskan community string yang valid ke vault / `valid_credentials`. |
-| **MOD-065** | `cloud.*` | `validate()` tidak memverifikasi import SDK cloud (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`). | Tambahkan import pre-flight check dengan `find_spec()` dan raise `ModuleValidationError` informatif (Estimasi Fix: S - 4 file, pola identik). |
+| **MOD-065** | `cloud.*` | `validate()` tidak memverifikasi import SDK cloud (`boto3`, `azure-identity`, `azure-mgmt-*`, `msal`, `google-auth`). | **FIXED** (commit `b68986e`). Import pre-flight check dengan `find_spec()` dan raise `ModuleValidationError` informatif dengan petunjuk instalasi. |
 | **MOD-067** | `cloud.azure_ad` | Indentasi return statement salah pada `run()`, memicu `UnboundLocalError` pada default `technique="enumerate"` dan memutus 100% eksekusi Microsoft Graph API (dead code). | **FIXED** (commit `bd2c9b4`). Indentasi return blok `device_code` diperbaiki, inisialisasi `raw` di awal method, enumerasi Graph API dipulihkan. |
-| **MOD-069** | `windows.registry_enum`, `scheduled_tasks_enum` | Asimetri validasi: `validate()` lolos tanpa username tapi `run()` abort diam-diam. | Tambahkan validasi username di `validate()` atau fallback deterministik dengan raise `ModuleValidationError`. |
-| **MOD-071** | `linux.kernel_suggester` | CVE userspace (PwnKit, Baron Samedit) dicocokkan ke versi kernel dengan regex `r"[345]\.[0-9]+"` menghasilkan false finding CRITICAL. | Batasi daftar CVE hanya pada vulnerability kernel nyata (Dirty Pipe, Dirty COW, eBPF) dengan parsing versi semver yang ketat. |
-| **MOD-072** | `linux._parsers` | `KirbiASN1Codec.decode_kirbi` mengklaim parsing ASN.1 DER tapi mengembalikan session key hardcoded nol (`"00" * 32`) dan tebakan principal. | Implementasikan ASN.1 DER parser riil untuk KRB-CRED (RFC 4120) agar konversi kirbi ke ccache menghasilkan tiket yang valid untuk autentikasi. |
-| **MOD-073** | `exfil.secrets_scan`, `smb_shares` | Parameter protokol di-default ke `"default"` pada `before_request()` dan validasi username absen di `validate()`. | Lewatkan protokol spesifik (`"ssh"`, `"wmi"`, `"smb"`) ke `before_request()` dan verifikasi username pada `validate()` untuk eksekusi non-dry-run. |
+| **MOD-069** | `windows.registry_enum`, `scheduled_tasks_enum` | Asimetri validasi: `validate()` lolos tanpa username tapi `run()` abort diam-diam. | **FIXED** (commit `6e10f8f`). Fail-fast validasi username di `validate()` dengan `ModuleValidationError`; logging warning terstruktur di `run()`. |
+| **MOD-071** | `linux.kernel_suggester` | CVE userspace (PwnKit, Baron Samedit) dicocokkan ke versi kernel dengan regex `r"[345]\.[0-9]+"` menghasilkan false finding CRITICAL. | **FIXED** (commit `ca3d469`). Pemisahan `_KERNEL_CVES` vs `_USERSPACE_CVES`; remote query versi sudo, dan confidence < 0.7 untuk kernel unverified. |
+| **MOD-072** | `linux._parsers` | `KirbiASN1Codec.decode_kirbi` mengklaim parsing ASN.1 DER tapi mengembalikan session key hardcoded nol (`"00" * 32`) dan tebakan principal. | **FIXED** (commit `01b966e`). Real recursive ASN.1 DER parser untuk RFC 4120 KRB-CRED (.kirbi), ekstraksi session key dan principal nyata, melempar `KirbiParseError`. |
+| **MOD-073** | `exfil.secrets_scan`, `smb_shares` | Parameter protokol di-default ke `"default"` pada `before_request()` dan validasi username absen di `validate()`. | **FIXED** (commit `c8d903e`). Protokol eksplisit (`"ssh"`, `"smb"`) ke `before_request()` kalibrasi rate limiter & scope guard. |
 
 ---
 
@@ -370,8 +376,10 @@ Untuk meminimalkan waktu regresi dan memaksimalkan stabilitas, eksekusi remedi s
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
 │  FASE 5: Grup E — Technical Honesty, Parsing & Validation Robustness    │
-│  - Perbaikan ASN.1 parser di _parsers.py (MOD-072), semver di suggester│
-│    (MOD-071), SDK check (MOD-065), dan eliminasi klaim fiktif.        │
+│  [STATUS: 🔄 FASE 5A COMPLETED (5/5 FIXED) — MOD-072, 071, 065, 069, 073] │
+│  - Real ASN.1 parser di _parsers.py (MOD-072), semver di suggester     │
+│    (MOD-071), SDK check (MOD-065), enum validate (MOD-069), exfil (073)│
+│  - Sisa 10 temuan Grup E menunggu Fase 5B.                             │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────▼────────────────────────────────────┐
