@@ -51,6 +51,7 @@ The documentation is organized into six functional pillars:
 | Document | Description | Target Audience |
 | --- | --- | --- |
 | [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001 (Implemented): Cross-platform Linux Active Directory post-exploitation suite (SSSD cache harvesting, Kerberos ccache extraction, keytab abuse, Samba secrets, ticket converter). | Offensive Researchers, Red Team |
+| [goad-validation-matrix.md](research/goad-validation-matrix.md) | BENCHMARK 2026: ARES vs Orange Cyberdefense GOAD (Game of Active Directory) Validation Matrix, Kahn DAG execution proof, and architectural rigor report. | Red Team Leads, Architects, SecOps |
 
 ---
 

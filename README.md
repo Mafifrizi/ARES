@@ -710,6 +710,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 - [**Documentation Portal & Subsystem Index**](docs/README.md)
 - [**Quickstart Engagement Guide**](QUICKSTART.md)
+- [**ARES vs GOAD Validation Matrix & Benchmark Report**](docs/research/goad-validation-matrix.md)
 - [**RFC 001: Linux Active Directory & Cross-Platform Tradecraft**](docs/research/linux-active-directory-tradecraft.md)
 - [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
 - [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md)
