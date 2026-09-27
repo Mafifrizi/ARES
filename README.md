@@ -21,7 +21,7 @@
 
 <br>
 
-[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Credits**](#credits) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
@@ -737,6 +737,23 @@ If ARES has accelerated your security assessments, helped protect your enterpris
 </div>
 
 > *Your support helps keep ARES open-source, robust, and continuously updated against the latest adversary tradecraft.*
+
+---
+
+## Credits
+
+<div align="center">
+
+<a href="https://www.linkedin.com/in/muhamad-d-alvito-58607934b/">
+  <img src="docs/assets/credits/muhamad-d-alvito.png" width="96" height="96" alt="Muhamad D Alvito" style="border-radius: 50%;">
+</a>
+
+### [Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
+**My Partner Work for UI & UX**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
+
+</div>
 
 ---
 
