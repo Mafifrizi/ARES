@@ -1,4 +1,5 @@
 import { createContext, Dispatch, SetStateAction, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { Campaign, UserProfile } from "../../api/types";
 
 const DASHBOARD_SESSION_PREFIX = "ares.dashboard.";
@@ -9,14 +10,6 @@ const PERSISTENT_DASHBOARD_KEYS = new Set<string>([
   "ares.dashboard.live.campaignId",
   "ares.dashboard.campaigns.compareId",
   "ares.dashboard.modules.selectedId",
-  "ares.dashboard.campaigns.tab",
-  "ares.dashboard.modules.tab",
-  "ares.dashboard.reports.tab",
-  "ares.dashboard.templates.tab",
-  "ares.dashboard.strategy.tab",
-  "ares.dashboard.security.tab",
-  "ares.dashboard.edr.tab",
-  "ares.dashboard.live.tab",
   "ares.dashboard.modules.category",
   "ares.dashboard.modules.opsec",
   "ares.dashboard.reports.format",
@@ -191,3 +184,41 @@ export function useSessionState<T>(key: string, initialValue: T): readonly [T, D
 
   return [value, setValue] as const;
 }
+
+export function useTabParam(defaultTab: string) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawTab = searchParams.get("tab");
+
+  useEffect(() => {
+    if (!searchParams.get("tab")) {
+      setSearchParams(
+        (prev) => {
+          if (prev.get("tab")) return prev;
+          const next = new URLSearchParams(prev);
+          next.set("tab", defaultTab);
+          return next;
+        },
+        { replace: true }
+      );
+    }
+  }, [defaultTab, searchParams, setSearchParams]);
+
+  const activeTab = rawTab ?? defaultTab;
+
+  const setActiveTab = useCallback(
+    (tab: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("tab", tab);
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  return [activeTab, setActiveTab] as const;
+}
+

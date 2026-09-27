@@ -1006,7 +1006,7 @@ button:disabled {
 .dashboard-empty-hero {
   border: 1px solid #27272a;
   border-radius: 12px;
-  background: radial-gradient(ellipse at 50% 0%, rgba(225, 29, 72, 0.08) 0%, rgba(18, 18, 21, 0.9) 70%, #0c0c0e 100%);
+  background: radial-gradient(ellipse at 50% 0%, rgba(6, 182, 212, 0.08) 0%, rgba(18, 18, 21, 0.9) 70%, #0c0c0e 100%);
   padding: 3.5rem 2rem 2.75rem;
   text-align: center;
   display: flex;
@@ -1022,9 +1022,9 @@ button:disabled {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: rgba(225, 29, 72, 0.1);
-  border: 1px solid rgba(225, 29, 72, 0.3);
-  box-shadow: 0 0 24px rgba(225, 29, 72, 0.15);
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 24px rgba(6, 182, 212, 0.15);
   margin-bottom: 1.25rem;
 }
 
@@ -1257,6 +1257,13 @@ textarea.field {
   border-color: rgba(244, 63, 94, 0.25);
   background: rgba(244, 63, 94, 0.08);
   color: #fda4af;
+}
+
+.notice-info,
+.notice-active {
+  border-color: rgba(6, 182, 212, 0.25);
+  background: rgba(6, 182, 212, 0.08);
+  color: #22d3ee;
 }
 
 .notice-optimal,

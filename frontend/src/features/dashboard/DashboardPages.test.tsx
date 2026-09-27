@@ -382,10 +382,14 @@ describe("Live Events session partitioning & reactive switching", () => {
       refetchCampaigns: vi.fn().mockResolvedValue(true)
     };
 
+    const { MemoryRouter } = await import("react-router-dom");
+
     const view = render(
-      <DashboardUiContext.Provider value={mockUiState}>
-        <LivePage />
-      </DashboardUiContext.Provider>
+      <MemoryRouter>
+        <DashboardUiContext.Provider value={mockUiState}>
+          <LivePage />
+        </DashboardUiContext.Provider>
+      </MemoryRouter>
     );
 
     // Should display Operation Alpha's session events
@@ -409,9 +413,11 @@ describe("Live Events session partitioning & reactive switching", () => {
     };
 
     view.rerender(
-      <DashboardUiContext.Provider value={updatedUiState}>
-        <LivePage />
-      </DashboardUiContext.Provider>
+      <MemoryRouter>
+        <DashboardUiContext.Provider value={updatedUiState}>
+          <LivePage />
+        </DashboardUiContext.Provider>
+      </MemoryRouter>
     );
 
     // Now should display Operation Bravo's session event

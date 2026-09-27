@@ -91,7 +91,6 @@ describe("Campaign deletion state synchronization across consumers", () => {
     sessionStorage.clear();
     localStorage.clear();
     clearDashboardSession();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     mockCampaigns = [
       {
         id: "camp-001",
@@ -148,9 +147,16 @@ describe("Campaign deletion state synchronization across consumers", () => {
     const deleteBtn = screen.getByRole("button", { name: "Delete" });
     expect(deleteBtn).not.toBeDisabled();
 
-    // 3. Click Delete
+    // 3. Click Delete (opens confirmation modal)
     await act(async () => {
       fireEvent.click(deleteBtn);
+    });
+
+    // Confirm deletion in ConfirmModal
+    const confirmModalBtn = screen.getByRole("button", { name: "Delete Campaign" });
+    expect(confirmModalBtn).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(confirmModalBtn);
     });
 
     // 4. Assert backend delete was called with camp-001
@@ -249,6 +255,11 @@ describe("Campaign deletion state synchronization across consumers", () => {
     const deleteBtn = screen.getByRole("button", { name: "Delete" });
     await act(async () => {
       fireEvent.click(deleteBtn);
+    });
+
+    const confirmModalBtn = screen.getByRole("button", { name: "Delete Campaign" });
+    await act(async () => {
+      fireEvent.click(confirmModalBtn);
     });
 
     await waitFor(() => {

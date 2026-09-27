@@ -152,7 +152,6 @@ export function TacticalInspectorDrawer({
         ...(customParams ?? {})
       };
       sessionStorage.setItem("ares.dashboard.modules.selectedId", JSON.stringify(moduleId));
-      sessionStorage.setItem("ares.dashboard.modules.tab", JSON.stringify("Run Panel"));
       navigate(`/modules?module=${encodeURIComponent(moduleId)}&target=${encodeURIComponent(targetVal)}&tab=Run+Panel`, {
         state: { moduleId, target: targetVal, params: armParams, tab: "Run Panel" }
       });

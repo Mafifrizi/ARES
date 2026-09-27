@@ -27,14 +27,6 @@ const PERSISTENT_CASES: StateCase[] = [
   { label: "live campaign", key: "ares.dashboard.live.campaignId", fallback: "", stored: "campaign-a", updated: "campaign-b" },
   { label: "campaign comparison", key: "ares.dashboard.campaigns.compareId", fallback: "", stored: "campaign-a", updated: "campaign-b" },
   { label: "selected module", key: "ares.dashboard.modules.selectedId", fallback: "", stored: "module-a", updated: "module-b" },
-  { label: "campaign tab", key: "ares.dashboard.campaigns.tab", fallback: "List", stored: "Scope", updated: "Findings" },
-  { label: "module tab", key: "ares.dashboard.modules.tab", fallback: "Catalog", stored: "Run Panel", updated: "Results" },
-  { label: "report tab", key: "ares.dashboard.reports.tab", fallback: "Generate", stored: "Library", updated: "Generate" },
-  { label: "template tab", key: "ares.dashboard.templates.tab", fallback: "Templates", stored: "Plan Builder", updated: "Templates" },
-  { label: "strategy tab", key: "ares.dashboard.strategy.tab", fallback: "Objective", stored: "Active", updated: "Result" },
-  { label: "security tab", key: "ares.dashboard.security.tab", fallback: "Account", stored: "API Keys", updated: "Audit" },
-  { label: "EDR tab", key: "ares.dashboard.edr.tab", fallback: "Knowledge Base", stored: "Report Outcome", updated: "Knowledge Base" },
-  { label: "live tab", key: "ares.dashboard.live.tab", fallback: "Stream", stored: "Buffer", updated: "Stream" },
   { label: "module category", key: "ares.dashboard.modules.category", fallback: "", stored: "network", updated: "recon" },
   { label: "module OPSEC", key: "ares.dashboard.modules.opsec", fallback: "", stored: "LOW", updated: "MEDIUM" },
   { label: "report format", key: "ares.dashboard.reports.format", fallback: "html", stored: "pdf", updated: "markdown" },
@@ -69,12 +61,11 @@ const VOLATILE_CASES: StateCase[] = [
 ];
 
 const DIRECT_WRITER_CASES = [
-  ["campaign tab", "ares.dashboard.campaigns.tab", "Scope"],
+  ["selected campaign", "ares.dashboard.selectedCampaignId", "campaign-b"],
   ["selected module", "ares.dashboard.modules.selectedId", "module-a"],
-  ["module tab", "ares.dashboard.modules.tab", "Run Panel"],
-  ["report tab", "ares.dashboard.reports.tab", "Library"],
-  ["template name", "ares.dashboard.templates.name", "template-a"],
-  ["template tab", "ares.dashboard.templates.tab", "Plan Builder"]
+  ["module category", "ares.dashboard.modules.category", "recon"],
+  ["report format", "ares.dashboard.reports.format", "markdown"],
+  ["template name", "ares.dashboard.templates.name", "template-a"]
 ] as const;
 
 function requireFixed(condition: boolean, message: string): void {
@@ -323,20 +314,20 @@ describe("dashboard session persistence policy", () => {
   });
 
   it("blocks an old epoch writer after full cleanup and permits a new mount", () => {
-    const key = "ares.dashboard.modules.tab";
+    const key = "ares.dashboard.modules.selectedId";
     const stale = renderHook(() => useDashboardSessionWriter());
-    const initialAccepted = stale.result.current(key, "Run Panel");
+    const initialAccepted = stale.result.current(key, "module-a");
     requireFixed(initialAccepted, "Initial mounted writer should be accepted.");
 
     clearDashboardSession();
 
-    const staleRejected = stale.result.current(key, "Results") === false;
+    const staleRejected = stale.result.current(key, "module-b") === false;
     const staleAbsent = sessionStorage.getItem(key) === null;
     requireFixed(staleRejected && staleAbsent, "Old epoch writer should remain blocked.");
 
     const current = renderHook(() => useDashboardSessionWriter());
-    const currentAccepted = current.result.current(key, "Catalog");
-    const currentPersisted = sessionStorage.getItem(key) === JSON.stringify("Catalog");
+    const currentAccepted = current.result.current(key, "module-c");
+    const currentPersisted = sessionStorage.getItem(key) === JSON.stringify("module-c");
     requireFixed(currentAccepted && currentPersisted, "New epoch writer should persist normally.");
   });
 
@@ -346,18 +337,18 @@ describe("dashboard session persistence policy", () => {
       throw new DOMException("unavailable", "SecurityError");
     });
     try {
-      const rejected = result.current("ares.dashboard.modules.tab", "Run Panel") === false;
+      const rejected = result.current("ares.dashboard.modules.selectedId", "module-a") === false;
       requireFixed(rejected, "Failed storage write should be rejected.");
     } finally {
       setItem.mockRestore();
     }
-    const storageAbsent = sessionStorage.getItem("ares.dashboard.modules.tab") === null;
+    const storageAbsent = sessionStorage.getItem("ares.dashboard.modules.selectedId") === null;
     requireFixed(storageAbsent, "Failed storage write should remain absent.");
   });
 
   it("logically blocks an allowed key whose full-cleanup removal fails", () => {
-    const key = "ares.dashboard.modules.tab";
-    sessionStorage.setItem(key, JSON.stringify("Run Panel"));
+    const key = "ares.dashboard.modules.selectedId";
+    sessionStorage.setItem(key, JSON.stringify("module-a"));
     const originalRemoveItem = Storage.prototype.removeItem;
     const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(function (
       this: Storage,
@@ -376,8 +367,8 @@ describe("dashboard session persistence policy", () => {
 
     const neutralized = sessionStorage.getItem(key) === "";
     requireFixed(neutralized, "Failed cleanup should neutralize the stored key.");
-    const { result } = renderHook(() => useSessionState(key, "Catalog"));
-    const fallbackUsed = result.current[0] === "Catalog";
+    const { result } = renderHook(() => useSessionState(key, "module-c"));
+    const fallbackUsed = result.current[0] === "module-c";
     requireFixed(fallbackUsed, "Blocked key should not rehydrate old account state.");
   });
 

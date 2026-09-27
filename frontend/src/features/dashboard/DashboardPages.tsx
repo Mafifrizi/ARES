@@ -57,9 +57,11 @@ import {
   type DashboardUiState,
   useDashboardSessionWriter,
   useDashboardUi,
-  useSessionState
+  useSessionState,
+  useTabParam
 } from "./dashboardUiState";
 import { StructuredJsonViewer } from "../../components/common/StructuredJsonViewer";
+import { ConfirmModal } from "../../components/ui/ConfirmModal";
 
 interface ModuleRunRecord {
   campaignId: string;
@@ -361,6 +363,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [operatorMenuOpen, setOperatorMenuOpen] = useState(false);
   const [telemetryOpen, setTelemetryOpen] = useState(false);
@@ -370,6 +373,29 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   const [deletedNotificationIds, setDeletedNotificationIds] = useState<string[]>(() =>
     getStoredNotificationIds(NOTIFICATIONS_DELETED_KEY, username)
   );
+
+  useEffect(() => {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase() || "";
+      const isEditable =
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        Boolean(target?.isContentEditable) ||
+        target?.getAttribute?.("contenteditable") === "true" ||
+        Boolean(target?.closest?.("[contenteditable='true']"));
+
+      if (e.key === "/" && !isEditable && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     if (username) {
@@ -575,10 +601,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           id: `campaign:${campaign.id}`,
           label: campaign.name || campaign.id,
           detail: `Campaign ${campaign.id.slice(0, 12)}`,
-          route: "/campaigns",
+          route: "/campaigns?tab=Scope",
           onSelect: () => {
             setSelectedCampaignId(campaign.id);
-            writeDashboardSession("ares.dashboard.campaigns.tab", "Scope");
           }
         },
         `${campaign.name ?? ""} ${campaign.id} ${campaign.client ?? ""} ${campaign.status ?? ""}`
@@ -591,10 +616,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           id: `module:${module.id}`,
           label: module.id,
           detail: module.description || "Module",
-          route: "/modules",
+          route: `/modules?tab=Run+Panel&module=${encodeURIComponent(module.id)}`,
           onSelect: () => {
             writeDashboardSession("ares.dashboard.modules.selectedId", module.id);
-            writeDashboardSession("ares.dashboard.modules.tab", "Run Panel");
           }
         },
         `${module.id} ${module.name ?? ""} ${module.description ?? ""} ${module.category ?? ""} ${module.mitre ?? ""}`
@@ -608,10 +632,8 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           id: `report:${report.filename}`,
           label: report.filename,
           detail: `${report.format || "report"} artifact`,
-          route: "/reports",
-          onSelect: () => {
-            writeDashboardSession("ares.dashboard.reports.tab", "Library");
-          }
+          route: "/reports?tab=Library",
+          onSelect: () => {}
         },
         `${report.filename} ${report.format ?? ""}`
       );
@@ -625,10 +647,9 @@ export function DashboardShell({ children }: { children: ReactNode }) {
           id: `template:${templateName}`,
           label: templateName,
           detail: String(template.description ?? "Campaign template"),
-          route: "/templates",
+          route: "/templates?tab=Plan+Builder",
           onSelect: () => {
             writeDashboardSession("ares.dashboard.templates.name", templateName);
-            writeDashboardSession("ares.dashboard.templates.tab", "Plan Builder");
           }
         },
         `${templateName} ${String(template.description ?? "")}`
@@ -852,9 +873,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                   value={selectedCampaignId && campaignList.some((c) => c.id === selectedCampaignId) ? selectedCampaignId : ""}
                   onChange={(e) => {
                     setSelectedCampaignId(e.target.value);
-                    if (e.target.value) {
-                      writeDashboardSession("ares.dashboard.campaigns.tab", "Scope");
-                    }
                   }}
                 >
                   <option value="">Scope: Global / All</option>
@@ -870,6 +888,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                 <label className="topbar-search" aria-label="Dashboard search">
                   <Search size={15} />
                   <input
+                    ref={searchInputRef}
                     aria-label="Search dashboard"
                     onBlur={() => window.setTimeout(() => setSearchOpen(false), 140)}
                     onChange={(event) => {
@@ -880,6 +899,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         setSearchOpen(false);
+                        (event.target as HTMLInputElement).blur();
                       }
                       if (event.key === "Enter" && searchResults.length > 0) {
                         event.preventDefault();
@@ -1146,7 +1166,7 @@ export function OverviewPage() {
       <Page title="Overview" subtitle={overviewSubtitle}>
         <div className="dashboard-empty-hero">
           <div className="fresh-hero-icon-wrap">
-            <ShieldAlert size={32} className="text-rose-500" />
+            <Target size={32} className="text-cyan-400" />
           </div>
           <h2>No Campaigns Initialized</h2>
           <p>
@@ -1157,8 +1177,7 @@ export function OverviewPage() {
             <button
               className="btn btn-primary flex items-center gap-2 px-4 py-2 text-sm font-semibold"
               onClick={() => {
-                writeDashboardSession("ares.dashboard.campaigns.tab", "List");
-                navigate("/campaigns");
+                navigate("/campaigns?tab=List");
               }}
               type="button"
             >
@@ -1211,8 +1230,7 @@ export function OverviewPage() {
         type="button"
         className="btn btn-primary text-xs flex items-center gap-1.5"
         onClick={() => {
-          writeDashboardSession("ares.dashboard.campaigns.tab", "List");
-          navigate("/campaigns");
+          navigate("/campaigns?tab=List");
         }}
         title="Initialize an authorized engagement"
       >
@@ -1457,6 +1475,9 @@ function normalizeMonthlySeries(
   });
 }
 
+const VALID_TABS_CAMPAIGNS = ["List", "Scope", "Findings"] as const;
+type CampaignsTab = typeof VALID_TABS_CAMPAIGNS[number];
+
 export function CampaignsPage() {
   const queryClient = useQueryClient();
   const {
@@ -1475,8 +1496,12 @@ export function CampaignsPage() {
   const [noiseProfile, setNoiseProfile] = useSessionState("ares.dashboard.campaigns.create.noiseProfile", "stealth");
   const [createWarning, setCreateWarning] = useState("");
   const [otherId, setOtherId] = useSessionState("ares.dashboard.campaigns.compareId", "");
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.campaigns.tab", "List");
+  const [rawTab, setActiveTab] = useTabParam("List");
+  const activeTab = (VALID_TABS_CAMPAIGNS as readonly string[]).includes(rawTab)
+    ? (rawTab as CampaignsTab)
+    : "List";
   const [deleteError, setDeleteError] = useState<unknown>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [localDeleting, setLocalDeleting] = useState(false);
   const isDeleting = localDeleting || Boolean(isDeletingCampaign);
   const detail = useQuery({
@@ -1604,9 +1629,6 @@ export function CampaignsPage() {
 
   const handleDelete = async (targetId: string) => {
     if (!targetId || isDeleting) return;
-    if (!window.confirm("Delete this campaign and its stored findings, hosts, credentials, and loot?")) {
-      return;
-    }
     setLocalDeleting(true);
     setDeleteError(null);
     try {
@@ -1702,7 +1724,7 @@ export function CampaignsPage() {
               <button
                 className="btn btn-danger"
                 disabled={!selected || isDeleting}
-                onClick={() => handleDelete(selected)}
+                onClick={() => setDeleteTarget(selected)}
               >
                 {isDeleting ? "Deleting…" : "Delete"}
               </button>
@@ -1736,6 +1758,22 @@ export function CampaignsPage() {
           {selected ? <FindingsTable findings={findings.data ?? []} /> : null}
         </section>
       )}
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title="Delete Campaign"
+        description="Permanently delete this campaign and all its stored findings, hosts, credentials, and loot artifacts. This action cannot be undone."
+        confirmLabel="Delete Campaign"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (deleteTarget) {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            void handleDelete(target);
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Page>
   );
 }
@@ -1807,6 +1845,9 @@ function ExecutionChainsPanel({
   );
 }
 
+const VALID_TABS_MODULES = ["Catalog", "Execution Chains", "Run Panel", "Results"] as const;
+type ModulesTab = typeof VALID_TABS_MODULES[number];
+
 export function ModulesPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
   const [searchParams] = useSearchParams();
@@ -1822,22 +1863,19 @@ export function ModulesPage() {
   const [confirmed, setConfirmed] = useSessionState("ares.dashboard.modules.confirmed", false);
   const [params, setParams] = useSessionState<Record<string, unknown>>("ares.dashboard.modules.params", {});
   const [lastRunRecord, setLastRunRecord] = useSessionState<ModuleRunRecord | null>("ares.dashboard.modules.lastRun", null);
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.modules.tab", "Catalog");
+  const [rawTab, setActiveTab] = useTabParam("Catalog");
+  const activeTab = (VALID_TABS_MODULES as readonly string[]).includes(rawTab)
+    ? (rawTab as ModulesTab)
+    : "Catalog";
   const previousSelectedId = useRef(selectedId);
 
   useEffect(() => {
     const queryModule = searchParams.get("module") || (location.state as { moduleId?: string } | null)?.moduleId;
-    const queryTab = searchParams.get("tab") || (location.state as { tab?: string } | null)?.tab;
 
     if (queryModule) {
       setSelectedId(queryModule);
-      if (queryTab) {
-        setActiveTab(queryTab);
-      } else {
-        setActiveTab("Run Panel");
-      }
     }
-  }, [searchParams, location.state, setSelectedId, setActiveTab]);
+  }, [searchParams, location.state, setSelectedId]);
   const campaignDetail = useQuery({
     queryKey: ["campaign", campaignId],
     queryFn: () => api.campaign(campaignId),
@@ -2255,7 +2293,7 @@ export function ModulesPage() {
                 </div>
 
                 {run.isPending && (
-                  <div className="notice notice-danger text-xs" role="status" aria-live="polite">
+                  <div className="notice notice-info text-xs" role="status" aria-live="polite">
                     <Loader2 className="spin shrink-0" size={15} />
                     Module execution in progress. Keep this page open while ARES validates the target and collects results.
                   </div>
@@ -2323,13 +2361,21 @@ export function ModulesPage() {
   );
 }
 
+const VALID_TABS_REPORTS = ["Generate", "Library"] as const;
+type ReportsTab = typeof VALID_TABS_REPORTS[number];
+
 export function ReportsPage() {
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
   const [format, setFormat] = useSessionState("ares.dashboard.reports.format", "html");
   const [warning, setWarning] = useState("");
   const [libraryError, setLibraryError] = useState("");
+  const [deleteReportTarget, setDeleteReportTarget] = useState<ReportItem | null>(null);
+  const [confirmClearAllReports, setConfirmClearAllReports] = useState(false);
   const [lastGenerateResult, setLastGenerateResult] = useSessionState<PersistedResult | null>("ares.dashboard.reports.lastGenerate", null);
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.reports.tab", "Generate");
+  const [rawTab, setActiveTab] = useTabParam("Generate");
+  const activeTab = (VALID_TABS_REPORTS as readonly string[]).includes(rawTab)
+    ? (rawTab as ReportsTab)
+    : "Generate";
   const queryClient = useQueryClient();
   const reports = useQuery({
     queryKey: ["reports", campaignId],
@@ -2518,13 +2564,7 @@ export function ReportsPage() {
             <button
               className="btn btn-danger"
               disabled={deleteDisabled}
-              onClick={() => {
-                if (!window.confirm(`Delete all ${reportItems.length} report artifacts for this campaign? This cannot be undone.`)) {
-                  return;
-                }
-                setLibraryError("");
-                clearReports.mutate();
-              }}
+              onClick={() => setConfirmClearAllReports(true)}
             >
               {clearReports.isPending ? (
                 <Loader2 className="spin" size={15} />
@@ -2533,39 +2573,49 @@ export function ReportsPage() {
             </button>
           ) : null}
         />
-        <div className="table-scroll">
-          <table className="table">
-            <thead><tr><th>Filename</th><th>Format</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
-            <tbody>
-              {reportItems.map((item) => (
-                <tr key={item.filename}>
-                  <td className="font-medium text-zinc-100 font-mono text-sm">{item.filename}</td>
-                  <td><span className="badge">{item.format}</span></td>
-                  <td>{formatBytes(item.size_bytes)}</td>
-                  <td>{formatReportDate(item.modified_at)}</td>
-                  <td>
-                    <button className="btn" disabled={download.isPending || deleteDisabled} onClick={() => download.mutate(item)}>
-                      Download
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      disabled={deleteDisabled}
-                      onClick={() => {
-                        if (!window.confirm(`Delete report artifact "${item.filename}"? This cannot be undone.`)) {
-                          return;
-                        }
-                        setLibraryError("");
-                        deleteReport.mutate(item);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="p-4 border-b border-zinc-800/80">
+          <label htmlFor="library-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
+            Target Campaign
+          </label>
+          <CampaignPicker
+            id="library-campaign-select"
+            campaigns={campaignList}
+            value={campaignId}
+            onChange={(id) => {
+              setCampaignId(id);
+              setWarning("");
+            }}
+          />
         </div>
+        {campaignId && reportItems.length > 0 && (
+          <div className="table-scroll">
+            <table className="table">
+              <thead><tr><th>Filename</th><th>Format</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+              <tbody>
+                {reportItems.map((item) => (
+                  <tr key={item.filename}>
+                    <td className="font-medium text-zinc-100 font-mono text-sm">{item.filename}</td>
+                    <td><span className="badge">{item.format}</span></td>
+                    <td>{formatBytes(item.size_bytes)}</td>
+                    <td>{formatReportDate(item.modified_at)}</td>
+                    <td>
+                      <button className="btn" disabled={download.isPending || deleteDisabled} onClick={() => download.mutate(item)}>
+                        Download
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        disabled={deleteDisabled}
+                        onClick={() => setDeleteReportTarget(item)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {libraryError && (
           <p className="notice notice-danger mt-3">
             <AlertTriangle size={16} />
@@ -2580,9 +2630,42 @@ export function ReportsPage() {
         <DataPanel title="Download Result" data={download.error} />
       </section>
       )}
+      <ConfirmModal
+        open={deleteReportTarget !== null}
+        title="Delete Report"
+        description={`Permanently delete report artifact "${deleteReportTarget?.filename ?? ""}". This action cannot be undone.`}
+        confirmLabel="Delete Report"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (deleteReportTarget) {
+            setLibraryError("");
+            deleteReport.mutate(deleteReportTarget);
+            setDeleteReportTarget(null);
+          }
+        }}
+        onCancel={() => setDeleteReportTarget(null)}
+      />
+      <ConfirmModal
+        open={confirmClearAllReports}
+        title="Delete All Reports"
+        description={`Permanently delete all ${reportItems.length} report artifacts for this campaign. This action cannot be undone.`}
+        confirmLabel="Delete All Reports"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          setLibraryError("");
+          clearReports.mutate();
+          setConfirmClearAllReports(false);
+        }}
+        onCancel={() => setConfirmClearAllReports(false)}
+      />
     </Page>
   );
 }
+
+const VALID_TABS_TEMPLATES = ["Templates", "Plan Builder"] as const;
+type TemplatesTab = typeof VALID_TABS_TEMPLATES[number];
 
 export function TemplatesPage() {
   const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates });
@@ -2590,7 +2673,10 @@ export function TemplatesPage() {
   const [params, setParams] = useSessionState("ares.dashboard.templates.params", "{}");
   const [warning, setWarning] = useState("");
   const [lastPlanResult, setLastPlanResult] = useSessionState<PersistedResult | null>("ares.dashboard.templates.lastPlan", null);
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.templates.tab", "Templates");
+  const [rawTab, setActiveTab] = useTabParam("Templates");
+  const activeTab = (VALID_TABS_TEMPLATES as readonly string[]).includes(rawTab)
+    ? (rawTab as TemplatesTab)
+    : "Templates";
   const templatePlanKey = `${name.trim()}:${params}`;
   const plan = useMutation({
     mutationFn: () => api.templatePlan(name, safeJson(params)),
@@ -2721,6 +2807,9 @@ export function TemplatesPage() {
   );
 }
 
+const VALID_TABS_STRATEGY = ["Objective", "Active", "Result"] as const;
+type StrategyTab = typeof VALID_TABS_STRATEGY[number];
+
 export function StrategyPage() {
   const { user } = useAuth();
   const { selectedCampaignId: campaignId, setSelectedCampaignId: setCampaignId, campaigns: campaignList } = useDashboardUi();
@@ -2729,7 +2818,10 @@ export function StrategyPage() {
   const [llmBackend, setLlmBackend] = useSessionState("ares.dashboard.strategy.llmBackend", "claude");
   const [authorizations, setAuthorizations] = useSessionState("ares.dashboard.strategy.authorizations", "");
   const [lastEngageResult, setLastEngageResult] = useSessionState<PersistedResult | null>("ares.dashboard.strategy.lastEngage", null);
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.strategy.tab", "Objective");
+  const [rawTab, setActiveTab] = useTabParam("Objective");
+  const activeTab = (VALID_TABS_STRATEGY as readonly string[]).includes(rawTab)
+    ? (rawTab as StrategyTab)
+    : "Objective";
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const strategyResultKey = `${campaignId}:${goal}:${llmBackend}:${authorizations}`;
   const engage = useMutation({
@@ -2930,6 +3022,9 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+const VALID_TABS_SECURITY = ["Account", "API Keys", "Audit"] as const;
+type SecurityTab = typeof VALID_TABS_SECURITY[number];
+
 export function SecurityPage() {
   const { user } = useAuth();
   const keys = useQuery({ queryKey: ["api-keys"], queryFn: api.apiKeys });
@@ -2939,18 +3034,26 @@ export function SecurityPage() {
   const secretKeyInputRef = useRef<HTMLInputElement | null>(null);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [confirmTouched, setConfirmTouched] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [scopes, setScopes] = useState("read");
   const [creatingApiKey, setCreatingApiKey] = useState(false);
   const [generatedApiKey, setGeneratedApiKey] = useState<GeneratedApiKey | null>(null);
   const [apiKeyError, setApiKeyError] = useState<unknown>(null);
   const [copyStatus, setCopyStatus] = useState<ApiKeyCopyStatus>("idle");
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.security.tab", "Account");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [rawTab, setActiveTab] = useTabParam("Account");
+  const activeTab = (VALID_TABS_SECURITY as readonly string[]).includes(rawTab)
+    ? (rawTab as SecurityTab)
+    : "Account";
   const change = useMutation({
     mutationFn: () => api.changePassword({ current_password: currentPassword, new_password: newPassword }),
     onSuccess: () => {
       setCurrentPassword("");
       setNewPassword("");
+      setConfirmPassword("");
+      setConfirmTouched(false);
     }
   });
   const remove = useMutation({
@@ -3045,11 +3148,45 @@ export function SecurityPage() {
           <form className="grid gap-2" onSubmit={(event) => {
             event.preventDefault();
             if (!event.currentTarget.reportValidity()) return;
+            if (newPassword !== confirmPassword) return;
             change.mutate();
           }}>
             <input className="field" required type="password" placeholder="Current password" value={currentPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setCurrentPassword(e.target.value); }} />
             <input className="field" required minLength={12} type="password" placeholder="New password" value={newPassword} onInvalid={setRequiredMessage} onChange={(e) => { clearValidationMessage(e); setNewPassword(e.target.value); }} />
-            <button className="btn" disabled={change.isPending} type="submit">
+            <div>
+              <input
+                className={`field ${confirmTouched && confirmPassword !== "" && newPassword !== confirmPassword ? "border-rose-500/70 focus:border-rose-500" : ""}`}
+                required
+                minLength={12}
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onInvalid={setRequiredMessage}
+                onBlur={() => setConfirmTouched(true)}
+                onChange={(e) => {
+                  clearValidationMessage(e);
+                  setConfirmTouched(true);
+                  setConfirmPassword(e.target.value);
+                }}
+              />
+              {confirmTouched && confirmPassword !== "" && newPassword !== confirmPassword && (
+                <p className="mt-1.5 flex items-center gap-1.5 text-xs text-rose-400" role="alert">
+                  <AlertTriangle size={13} className="shrink-0 text-rose-400" />
+                  Passwords do not match
+                </p>
+              )}
+            </div>
+            <button
+              className="btn"
+              disabled={
+                change.isPending ||
+                !currentPassword.trim() ||
+                !newPassword ||
+                !confirmPassword ||
+                newPassword !== confirmPassword
+              }
+              type="submit"
+            >
               {change.isPending && <Loader2 className="spin" size={16} />}
               Change Password
             </button>
@@ -3090,7 +3227,7 @@ export function SecurityPage() {
                   {key.expires_at ? <span>Expires: {formatDateTime(key.expires_at)}</span> : <span>No expiry</span>}
                 </div>
               </div>
-              <button className="btn btn-danger" disabled={remove.isPending} onClick={() => remove.mutate(key.id)}>Delete</button>
+              <button className="btn btn-danger" disabled={remove.isPending} onClick={() => setDeleteTarget(key.id)} type="button">Delete</button>
             </div>
           ))}
           {(keys.data ?? []).length === 0 && <EmptyState text="No API keys yet." />}
@@ -3159,9 +3296,27 @@ export function SecurityPage() {
           </section>
         </div>
       )}
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title="Delete API Key"
+        description="This action cannot be undone. All integrations using this key will immediately lose access."
+        confirmLabel="Delete API Key"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={() => {
+          if (deleteTarget) {
+            remove.mutate(deleteTarget);
+            setDeleteTarget(null);
+          }
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Page>
   );
 }
+
+const VALID_TABS_EDR = ["Knowledge Base", "Report Outcome"] as const;
+type EdrTab = typeof VALID_TABS_EDR[number];
 
 export function EdrPage() {
   const stats = useQuery({ queryKey: ["edr-stats"], queryFn: api.edrStats });
@@ -3171,7 +3326,10 @@ export function EdrPage() {
   const [success, setSuccess] = useSessionState("ares.dashboard.edr.success", false);
   const [notes, setNotes] = useSessionState("ares.dashboard.edr.notes", "");
   const [lastReportResult, setLastReportResult] = useSessionState<PersistedResult | null>("ares.dashboard.edr.lastReport", null);
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.edr.tab", "Knowledge Base");
+  const [rawTab, setActiveTab] = useTabParam("Knowledge Base");
+  const activeTab = (VALID_TABS_EDR as readonly string[]).includes(rawTab)
+    ? (rawTab as EdrTab)
+    : "Knowledge Base";
   const edrReportKey = `${techniqueId.trim()}:${vendor.trim()}:${version.trim()}:${success}:${notes.trim()}`;
   const report = useMutation({
     mutationFn: () =>
@@ -3286,6 +3444,9 @@ export function EdrPage() {
   );
 }
 
+const VALID_TABS_LIVE = ["Stream", "Buffer"] as const;
+type LiveTab = typeof VALID_TABS_LIVE[number];
+
 export function LivePage() {
   const {
     selectedCampaignId,
@@ -3299,7 +3460,10 @@ export function LivePage() {
     campaigns: campaignList
   } = useDashboardUi();
   const campaignId = liveCampaignId || selectedCampaignId;
-  const [activeTab, setActiveTab] = useSessionState("ares.dashboard.live.tab", "Stream");
+  const [rawTab, setActiveTab] = useTabParam("Stream");
+  const activeTab = (VALID_TABS_LIVE as readonly string[]).includes(rawTab)
+    ? (rawTab as LiveTab)
+    : "Stream";
   const [bufferViewScope, setBufferViewScope] = useState<"session" | "all">("session");
 
   const currentCampaign = useMemo(() => {
