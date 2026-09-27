@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="440">
+<img src="frontend/public/brand/ares-logo-v2.png" alt="ARES Logo" width="440">
 
 ### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
@@ -98,7 +98,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 <div align="center">
 
-![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
+![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave-v2.png)
 
 *ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Minimalist Rive-style showcase featuring the animated ARES Ruby Dragon mascot on the right panel.*
 
