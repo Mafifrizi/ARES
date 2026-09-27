@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  ArrowUpDown,
   Bell,
   Check,
   CheckCircle2,
@@ -18,6 +19,7 @@ import {
   Loader2,
   Lock,
   Menu,
+  MinusCircle,
   Plus,
   Radio,
   Search,
@@ -2807,6 +2809,244 @@ export function TemplatesPage() {
   );
 }
 
+function StrategyActiveView({
+  activeData,
+  goal,
+  llmBackend,
+  allowed
+}: {
+  activeData?: Record<string, unknown>;
+  goal: string;
+  llmBackend: string;
+  allowed: boolean;
+}) {
+  const [showRaw, setShowRaw] = useState(false);
+  const activeCount = typeof activeData?.count === "number" ? activeData.count : 0;
+  const maxAllowed = typeof activeData?.max_allowed === "number" ? activeData.max_allowed : 1;
+  const slotsAvailable = typeof activeData?.slots_available === "number" ? activeData.slots_available : 1;
+  const llmBackends = (activeData?.llm_backends as Record<string, boolean> | undefined);
+  const backendReady = llmBackends ? llmBackends[llmBackend] !== false : true;
+
+  const stages = [
+    { number: 1, name: "Surface Discovery", desc: "Network & service perimeter mapping, host discovery", status: activeCount > 0 ? "active" : "standby" },
+    { number: 2, name: "Defense Feasibility", desc: "EDR telemetry inspection, AMSI bypass calibration", status: "standby" },
+    { number: 3, name: "Credential Extraction", desc: "Memory dumps, Kerberoasting, AS-REP extraction", status: "standby" },
+    { number: 4, name: "Lateral Movement", desc: "Pivoting via WinRM, SMB, token impersonation", status: "standby" },
+    { number: 5, name: "Domain Escalation", desc: "Privilege elevation, DCSync, Domain Admin achievement", status: "standby" }
+  ];
+
+  return (
+    <div className="grid gap-4">
+      <section className="panel p-4">
+        <SectionHeader
+          title="Planning Snapshot"
+          action={
+            <div className="flex items-center gap-2">
+              <span className={`badge ${activeCount > 0 ? "badge-low" : "badge-info"}`}>
+                {activeCount > 0 ? `${activeCount} Active Engagement` : "Idle / Ready"}
+              </span>
+              <span className="badge font-mono text-xs">{slotsAvailable} slot{slotsAvailable === 1 ? "" : "s"} free</span>
+            </div>
+          }
+        />
+        <div className="mini-stat-grid">
+          <MiniStat title="Strategic Goal" value={goal} detail="Objective target" />
+          <MiniStat
+            title="LLM Backend"
+            value={llmBackend}
+            detail={backendReady ? "Engine online" : "Unconfigured key"}
+          />
+          <MiniStat
+            title="Concurrency Slots"
+            value={`${activeCount} / ${maxAllowed}`}
+            detail={`${slotsAvailable} slot${slotsAvailable === 1 ? "" : "s"} available`}
+          />
+          <MiniStat
+            title="Authorization"
+            value={allowed ? "authorized" : "restricted"}
+            detail={allowed ? "Ready to engage" : "Requires operator"}
+          />
+        </div>
+      </section>
+
+      <section className="panel p-4">
+        <SectionHeader
+          title="Autonomous Engagement Lifecycle"
+          description="Sequential execution stages executed during autonomous strategy engagement."
+        />
+        <div className="compact-list mt-3">
+          {stages.map((st) => (
+            <div key={st.number} className="compact-row flex items-center justify-between gap-3 p-3">
+              <div className="flex items-center gap-3">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                  st.status === "active"
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/50"
+                    : "bg-zinc-800 text-zinc-400 border border-zinc-700/60"
+                }`}>
+                  {st.status === "active" ? <Loader2 size={13} className="spin text-emerald-400" /> : st.number}
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
+                    <span>{st.name}</span>
+                    {st.status === "active" && (
+                      <span className="badge badge-low text-[10px] uppercase font-mono">Running</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-zinc-400 mt-0.5">{st.desc}</div>
+                </div>
+              </div>
+              <span className="badge font-mono text-xs">
+                {st.status === "active" ? "In Progress" : "Standby"}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {activeData && (
+          <div className="mt-4 pt-3 border-t border-zinc-800/80">
+            <button
+              type="button"
+              onClick={() => setShowRaw(!showRaw)}
+              className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+            >
+              <FileText size={12} />
+              <span>{showRaw ? "Hide Raw Active State" : "View Raw Active State"}</span>
+              <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+            </button>
+            {showRaw && (
+              <div className="mt-2">
+                <StructuredJsonViewer data={activeData} title="Active Strategy State" maxHeightClass="max-h-72" />
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function StrategyResultView({
+  resultData,
+  isError
+}: {
+  resultData: unknown;
+  isError?: boolean;
+}) {
+  const [showRaw, setShowRaw] = useState(false);
+  const data = (resultData ?? {}) as Record<string, unknown>;
+  const status = typeof data.status === "string" ? data.status : isError ? "failed" : "completed";
+  const goal = typeof data.goal === "string" ? data.goal : "objective";
+  const campaignId = typeof data.campaign_id === "string" ? data.campaign_id : "";
+  const modulesRun = typeof data.modules_run === "number" ? data.modules_run : 0;
+  const children = Array.isArray(data.children) ? (data.children as Record<string, unknown>[]) : [];
+
+  const totalFindings = children.reduce((acc, c) => acc + (typeof c.findings_count === "number" ? c.findings_count : 0), 0);
+  const totalDurationMs = children.reduce((acc, c) => acc + (typeof c.duration_ms === "number" ? c.duration_ms : 0), 0);
+
+  return (
+    <div className="grid gap-4">
+      {isError && (
+        <p className="notice notice-danger">
+          Engagement failed: {String(data.detail ?? data.error ?? "Unknown execution error")}
+        </p>
+      )}
+
+      <section className="panel p-4">
+        <SectionHeader
+          title="Engagement Summary"
+          action={<StatusBadge status={status} />}
+        />
+        <div className="mini-stat-grid">
+          <MiniStat title="Status" value={status} detail={campaignId ? `Campaign ${campaignId.slice(0, 8)}` : "Finished"} />
+          <MiniStat title="Objective Goal" value={goal} detail="Strategic target" />
+          <MiniStat title="Modules Run" value={String(modulesRun || children.length)} detail="Autonomous pipeline" />
+          <MiniStat title="Total Findings" value={String(totalFindings)} detail="Security telemetry" />
+          <MiniStat title="Total Duration" value={`${(totalDurationMs / 1000).toFixed(2)}s`} detail={`${totalDurationMs} ms total`} />
+        </div>
+      </section>
+
+      {children.length > 0 && (
+        <section className="panel table-panel">
+          <SectionHeader
+            title="Module Execution Breakdown"
+            action={<span className="badge">{children.length} step{children.length === 1 ? "" : "s"}</span>}
+          />
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Stage</th>
+                  <th>Module</th>
+                  <th>Status</th>
+                  <th>Findings</th>
+                  <th>Duration</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {children.map((child, index) => {
+                  const stageOrdinal = typeof child.stage_ordinal === "number" ? child.stage_ordinal + 1 : index + 1;
+                  const modId = typeof child.module_id === "string" ? child.module_id : `step-${index}`;
+                  const modStatus = typeof child.status === "string" ? child.status : "unknown";
+                  const findingsCount = typeof child.findings_count === "number" ? child.findings_count : 0;
+                  const durMs = typeof child.duration_ms === "number" ? child.duration_ms : 0;
+                  const errText = child.error ? String(child.error) : null;
+                  return (
+                    <tr key={`${modId}-${index}`}>
+                      <td className="muted-cell">#{String(index + 1).padStart(2, "0")}</td>
+                      <td>
+                        <span className="badge font-mono text-[11px]">Stage {stageOrdinal}</span>
+                      </td>
+                      <td>
+                        <span className="font-mono text-xs font-semibold text-zinc-100">{modId}</span>
+                      </td>
+                      <td>
+                        <StatusBadge status={modStatus} />
+                      </td>
+                      <td>
+                        <span className={`badge ${findingsCount > 0 ? "badge-info" : ""}`}>{findingsCount}</span>
+                      </td>
+                      <td className="font-mono text-xs text-zinc-400">{durMs} ms</td>
+                      <td>
+                        {errText ? (
+                          <span className="text-xs text-rose-400 font-mono" title={errText}>{errText.slice(0, 40)}</span>
+                        ) : (
+                          <span className="text-zinc-500 text-xs">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <section className="panel p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-zinc-400">Raw execution output and identity digest:</span>
+          <button
+            type="button"
+            onClick={() => setShowRaw(!showRaw)}
+            className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+          >
+            <FileText size={12} />
+            <span>{showRaw ? "Hide Raw Result" : "View Raw Result"}</span>
+            <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+        {showRaw && (
+          <div className="mt-3">
+            <StructuredJsonViewer data={resultData} title="Raw Engagement Result" maxHeightClass="max-h-80" />
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 const VALID_TABS_STRATEGY = ["Objective", "Active", "Result"] as const;
 type StrategyTab = typeof VALID_TABS_STRATEGY[number];
 
@@ -2975,24 +3215,26 @@ export function StrategyPage() {
       )}
       {activeTab === "Active" && (
         <section className="grid gap-4">
-          <section className="panel p-4">
-            <SectionHeader title="Planning Snapshot" />
-            <div className="mini-stat-grid">
-              <MiniStat title="Goal" value={goal} />
-              <MiniStat title="Backend" value={llmBackend} />
-              <MiniStat title="Authorization" value={allowed ? "ready" : "restricted"} />
-            </div>
-          </section>
-          {active.error ? <DataPanel title="Active Strategy Error" data={active.error} /> : active.data ? <DataPanel title="Active" data={active.data} /> : <EmptyState text="No active strategy state is available yet." />}
+          {active.error ? (
+            <DataPanel title="Active Strategy Error" data={active.error} />
+          ) : active.data ? (
+            <StrategyActiveView
+              activeData={active.data as Record<string, unknown> | undefined}
+              goal={goal}
+              llmBackend={llmBackend}
+              allowed={allowed}
+            />
+          ) : (
+            <EmptyState text="No active strategy state is available yet." />
+          )}
         </section>
       )}
       {activeTab === "Result" && (
         <section className="panel p-4">
-          <SectionHeader title="Engagement Result" />
           {(engage.data ?? engage.error ?? persistedEngageResult?.payload) ? (
-            <DataPanel
-              title={(engage.error ?? (persistedEngageResult?.isError ? persistedEngageResult.payload : undefined)) ? "Engagement Error" : "Engagement Result"}
-              data={engage.data ?? engage.error ?? persistedEngageResult?.payload}
+            <StrategyResultView
+              resultData={engage.data ?? engage.error ?? persistedEngageResult?.payload}
+              isError={Boolean(engage.error ?? persistedEngageResult?.isError)}
             />
           ) : (
             <EmptyState text="Engage a strategy objective to see results here." />
@@ -3022,7 +3264,269 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-const VALID_TABS_SECURITY = ["Account", "API Keys", "Audit"] as const;
+function SecurityAuditTable({ auditData, error }: { auditData?: unknown; error?: unknown }) {
+  const [sortAsc, setSortAsc] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
+
+  const rows = useMemo((): Array<{ id: string; timestamp: string | number; actor: string; action: string; resource: string; status: string }> => {
+    if (!auditData) return [];
+    if (Array.isArray(auditData)) {
+      return auditData.map((item, idx) => {
+        const rawTs = (item as Record<string, unknown>).timestamp ?? (item as Record<string, unknown>).created_at;
+        const ts: string | number = typeof rawTs === "string" || typeof rawTs === "number" ? rawTs : "";
+        return {
+          id: String((item as Record<string, unknown>).id ?? idx),
+          timestamp: ts,
+          actor: String((item as Record<string, unknown>).actor ?? (item as Record<string, unknown>).username ?? "system"),
+          action: String((item as Record<string, unknown>).action ?? (item as Record<string, unknown>).event ?? "audit"),
+          resource: String((item as Record<string, unknown>).resource ?? (item as Record<string, unknown>).target ?? (item as Record<string, unknown>).detail ?? "—"),
+          status: String((item as Record<string, unknown>).status ?? "logged")
+        };
+      });
+    }
+    const obj = auditData as Record<string, unknown>;
+    if (Array.isArray(obj.events)) {
+      return (obj.events as Record<string, unknown>[]).map((item, idx) => {
+        const rawTs = item.timestamp ?? item.created_at;
+        const ts: string | number = typeof rawTs === "string" || typeof rawTs === "number" ? rawTs : "";
+        return {
+          id: String(item.id ?? idx),
+          timestamp: ts,
+          actor: String(item.actor ?? item.username ?? "system"),
+          action: String(item.action ?? item.event ?? "audit"),
+          resource: String(item.resource ?? item.target ?? item.detail ?? "—"),
+          status: String(item.status ?? "logged")
+        };
+      });
+    }
+    if (Array.isArray(obj.logs)) {
+      return (obj.logs as Record<string, unknown>[]).map((item, idx) => {
+        const rawTs = item.timestamp ?? item.created_at;
+        const ts: string | number = typeof rawTs === "string" || typeof rawTs === "number" ? rawTs : "";
+        return {
+          id: String(item.id ?? idx),
+          timestamp: ts,
+          actor: String(item.actor ?? item.username ?? "system"),
+          action: String(item.action ?? item.event ?? "audit"),
+          resource: String(item.resource ?? item.target ?? item.detail ?? "—"),
+          status: String(item.status ?? "logged")
+        };
+      });
+    }
+    if (Array.isArray(obj.vulnerabilities)) {
+      const scanTime = typeof obj.scan_timestamp === "number" ? new Date(obj.scan_timestamp * 1000).toISOString() : new Date().toISOString();
+      const scanner = String(obj.scanner ?? "pip-audit");
+      return (obj.vulnerabilities as Record<string, unknown>[]).map((v, idx) => ({
+        id: String(v.vuln_id ?? idx),
+        timestamp: scanTime,
+        actor: scanner,
+        action: String(v.vuln_id ?? "cve_detected"),
+        resource: `${String(v.package ?? "")} ${String(v.version ?? "")}`,
+        status: String(v.severity ?? "high")
+      }));
+    }
+    return [];
+  }, [auditData]);
+
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const timeA = new Date(a.timestamp || 0).getTime() || 0;
+      const timeB = new Date(b.timestamp || 0).getTime() || 0;
+      return sortAsc ? timeA - timeB : timeB - timeA;
+    });
+  }, [rows, sortAsc]);
+
+  if (error) {
+    return <DataPanel title="Security Audit Error" data={error} />;
+  }
+
+  return (
+    <section className="panel table-panel">
+      <SectionHeader
+        title="Security Audit Log"
+        description="Immutable record of sensitive operations, security scans, and administrative activity."
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSortAsc(!sortAsc)}
+              className="btn btn-compact text-xs flex items-center gap-1.5"
+              title="Toggle sort direction by timestamp"
+            >
+              <ArrowUpDown size={12} />
+              <span>{sortAsc ? "Oldest First" : "Newest First"}</span>
+            </button>
+            <span className="badge">{rows.length} event{rows.length === 1 ? "" : "s"}</span>
+          </div>
+        }
+      />
+      {sortedRows.length > 0 ? (
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th
+                  className="cursor-pointer select-none hover:text-zinc-100"
+                  onClick={() => setSortAsc(!sortAsc)}
+                  title="Click to sort by timestamp"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Timestamp</span>
+                    <ArrowUpDown size={12} className="text-zinc-400" />
+                  </div>
+                </th>
+                <th>Actor</th>
+                <th>Action</th>
+                <th>Resource</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="font-mono text-xs text-zinc-300 whitespace-nowrap">
+                    {row.timestamp ? formatDateTime(String(row.timestamp)) : "—"}
+                  </td>
+                  <td>
+                    <span className="font-mono text-xs font-semibold text-zinc-200">{row.actor}</span>
+                  </td>
+                  <td>
+                    <span className="badge font-mono text-[11px]">{row.action}</span>
+                  </td>
+                  <td>
+                    <span className="font-mono text-xs text-zinc-300">{row.resource}</span>
+                  </td>
+                  <td>
+                    <StatusBadge status={row.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-4">
+          <EmptyState text="No security audit events recorded yet." />
+        </div>
+      )}
+
+      {Boolean(auditData) && (
+        <div className="p-4 border-t border-zinc-800/80">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Underlying telemetry payload:</span>
+            <button
+              type="button"
+              onClick={() => setShowRaw(!showRaw)}
+              className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+            >
+              <FileText size={12} />
+              <span>{showRaw ? "Hide Raw Audit JSON" : "View Raw Audit JSON"}</span>
+              <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+            </button>
+          </div>
+          {showRaw && (
+            <div className="mt-3">
+              <StructuredJsonViewer data={auditData} title="Raw Audit Payload" maxHeightClass="max-h-72" />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SecurityUsersTable({ usersData, error }: { usersData?: unknown; error?: unknown }) {
+  const [showRaw, setShowRaw] = useState(false);
+  const usersList = Array.isArray(usersData) ? (usersData as Record<string, unknown>[]) : [];
+
+  if (error) {
+    return <DataPanel title="Users Error" data={error} />;
+  }
+
+  return (
+    <section className="panel table-panel">
+      <SectionHeader
+        title="Platform Users"
+        description="Registered accounts and role-based access control."
+        action={<span className="badge">{usersList.length} user{usersList.length === 1 ? "" : "s"}</span>}
+      />
+      {usersList.length > 0 ? (
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Last Active</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usersList.map((u, index) => {
+                const username = String(u.username ?? `user-${index}`);
+                const role = String(u.role ?? "viewer");
+                const isActive = u.is_active === true || u.is_active === 1;
+                const lastLogin = u.last_login ? formatDateTime(String(u.last_login)) : "Never";
+                const roleTone = role === "team_lead" ? "badge badge-high" : role === "operator" ? "badge badge-low" : "badge";
+                return (
+                  <tr key={String(u.id ?? username)}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 font-bold text-xs flex items-center justify-center">
+                          {username.slice(0, 1).toUpperCase()}
+                        </span>
+                        <span className="font-semibold text-zinc-100 text-sm">{username}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={roleTone}>{formatRole(role)}</span>
+                    </td>
+                    <td className="text-xs text-zinc-400 font-mono">
+                      {lastLogin}
+                    </td>
+                    <td>
+                      <span className={`badge ${isActive ? "badge-low" : "badge-high"}`}>
+                        {isActive ? "Active" : "Disabled"}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-4">
+          <EmptyState text="No user records loaded yet." />
+        </div>
+      )}
+
+      {Boolean(usersData) && (
+        <div className="p-4 border-t border-zinc-800/80">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-400">Raw database user records:</span>
+            <button
+              type="button"
+              onClick={() => setShowRaw(!showRaw)}
+              className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+            >
+              <FileText size={12} />
+              <span>{showRaw ? "Hide Raw Users JSON" : "View Raw Users JSON"}</span>
+              <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+            </button>
+          </div>
+          {showRaw && (
+            <div className="mt-3">
+              <StructuredJsonViewer data={usersData} title="Raw User Records" maxHeightClass="max-h-72" />
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const VALID_TABS_SECURITY = ["Account", "API Keys", "Audit", "Users"] as const;
 type SecurityTab = typeof VALID_TABS_SECURITY[number];
 
 export function SecurityPage() {
@@ -3131,7 +3635,7 @@ export function SecurityPage() {
     <Page
       title="Security"
       actions={<span className="status-pill">{formatRole(user?.role)}</span>}
-      tabs={["Account", "API Keys", "Audit"]}
+      tabs={["Account", "API Keys", "Audit", "Users"]}
       activeTab={activeTab}
       onTabChange={setActiveTab}
     >
@@ -3237,12 +3741,18 @@ export function SecurityPage() {
       {activeTab === "Audit" && (
         <section className="grid gap-4">
           {user?.role === "team_lead" ? (
-            <>
-              {audit.error ? <DataPanel title="Security Audit Error" data={audit.error} /> : audit.data ? <DataPanel title="Security Audit" data={audit.data} /> : <EmptyState text="No security audit data loaded yet." />}
-              {users.error ? <DataPanel title="Users Error" data={users.error} /> : users.data ? <DataPanel title="Users" data={users.data} /> : <EmptyState text="No user records loaded yet." />}
-            </>
+            <SecurityAuditTable auditData={audit.data} error={audit.error} />
           ) : (
             <EmptyState text="Audit data is available to team leads." />
+          )}
+        </section>
+      )}
+      {activeTab === "Users" && (
+        <section className="grid gap-4">
+          {user?.role === "team_lead" ? (
+            <SecurityUsersTable usersData={users.data} error={users.error} />
+          ) : (
+            <EmptyState text="User management is available to team leads." />
           )}
         </section>
       )}
@@ -3315,7 +3825,135 @@ export function SecurityPage() {
   );
 }
 
-const VALID_TABS_EDR = ["Knowledge Base", "Report Outcome"] as const;
+function EdrStatsSummary({
+  statsData,
+  error
+}: {
+  statsData?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  const [showRaw, setShowRaw] = useState(false);
+  const technique = typeof statsData?.technique_id === "string" && statsData.technique_id ? statsData.technique_id : "All Techniques";
+  const vendor = typeof statsData?.edr_vendor === "string" && statsData.edr_vendor ? statsData.edr_vendor : "All Vendors";
+  const rate = typeof statsData?.success_rate === "number" ? statsData.success_rate : null;
+  const message = typeof statsData?.message === "string" ? statsData.message : "Historical bypass knowledge base telemetry.";
+  const statsList = Array.isArray(statsData?.stats) ? (statsData.stats as Record<string, unknown>[]) : [];
+
+  const rateTone = rate != null ? (rate >= 0.8 ? "badge badge-low" : rate >= 0.5 ? "badge badge-medium" : "badge badge-high") : "badge";
+  const rateLabel = rate != null ? `${(rate * 100).toFixed(0)}%` : "N/A";
+  const evasionAssessment = rate != null ? (rate >= 0.8 ? "High Evasion" : rate >= 0.5 ? "Moderate Evasion" : "High Detection Risk") : "Insufficient Samples";
+
+  return (
+    <div className="grid gap-4">
+      {error ? (
+        <DataPanel title="Stats Error" data={error} />
+      ) : (
+        <>
+          <section className="panel p-4">
+            <SectionHeader
+              title="Bypass Knowledge Base"
+              description="Historical evasion success metrics calibrated against active endpoint detection agents."
+              action={<span className={rateTone}>{evasionAssessment}</span>}
+            />
+            <div className="mini-stat-grid mt-3">
+              <MiniStat
+                title="Technique Under Test"
+                value={technique}
+                detail="MITRE / ARES technique ID"
+              />
+              <MiniStat
+                title="Target EDR Vendor"
+                value={vendor}
+                detail="Security agent signature"
+              />
+              <MiniStat
+                title="Historical Bypass Rate"
+                value={rateLabel}
+                detail={rate != null ? `${evasionAssessment} probability` : "Min 3 samples required"}
+              />
+              <MiniStat
+                title="Telemetry Status"
+                value={rate != null ? "Calibrated" : "Sampling"}
+                detail={rate != null ? "Statistically valid" : "Pending further reports"}
+              />
+            </div>
+            <div className="mt-3 p-3 rounded border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-300 flex items-center gap-2">
+              <ShieldCheck size={14} className="text-cyan-400 shrink-0" />
+              <span>{message}</span>
+            </div>
+          </section>
+
+          {statsList.length > 0 && (
+            <section className="panel table-panel">
+              <SectionHeader
+                title="Historical Technique Records"
+                action={<span className="badge">{statsList.length} records</span>}
+              />
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Technique</th>
+                      <th>EDR Vendor</th>
+                      <th>Success Rate</th>
+                      <th>Samples</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statsList.map((item, index) => {
+                      const t = String(item.technique_id ?? `technique-${index}`);
+                      const v = String(item.edr_vendor ?? "all");
+                      const r = typeof item.success_rate === "number" ? item.success_rate : null;
+                      const count = typeof item.sample_count === "number" ? item.sample_count : (item.count ?? "—");
+                      return (
+                        <tr key={`${t}-${v}-${index}`}>
+                          <td className="font-mono text-xs font-semibold text-zinc-200">{t}</td>
+                          <td>
+                            <span className="badge font-mono text-[11px]">{v}</span>
+                          </td>
+                          <td>
+                            <span className={r != null ? (r >= 0.8 ? "badge badge-low" : r >= 0.5 ? "badge badge-medium" : "badge badge-high") : "badge"}>
+                              {r != null ? `${(r * 100).toFixed(0)}%` : "N/A"}
+                            </span>
+                          </td>
+                          <td className="font-mono text-xs text-zinc-400">{String(count)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {statsData && (
+            <section className="panel p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-400">Raw telemetry dataset:</span>
+                <button
+                  type="button"
+                  onClick={() => setShowRaw(!showRaw)}
+                  className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+                >
+                  <FileText size={12} />
+                  <span>{showRaw ? "Hide Raw Stats JSON" : "View Raw Stats JSON"}</span>
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+                </button>
+              </div>
+              {showRaw && (
+                <div className="mt-3">
+                  <StructuredJsonViewer data={statsData} title="Raw EDR Bypass Stats" maxHeightClass="max-h-72" />
+                </div>
+              )}
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const VALID_TABS_EDR = ["Knowledge Base", "Report Outcome", "Stats"] as const;
 type EdrTab = typeof VALID_TABS_EDR[number];
 
 export function EdrPage() {
@@ -3349,35 +3987,11 @@ export function EdrPage() {
       title="EDR/OPSEC"
       actions={<span className={success ? "status-pill status-low" : "status-pill status-medium"}>{success ? "Successful" : "Blocked / detected"}</span>}
       tabs={["Knowledge Base", "Report Outcome"]}
-      activeTab={activeTab}
+      activeTab={activeTab === "Stats" ? "Knowledge Base" : activeTab}
       onTabChange={setActiveTab}
     >
-      {activeTab === "Knowledge Base" && (
-      <>
-      <section className="panel p-4">
-        <SectionHeader
-          title="Bypass Knowledge Base"
-          description="Track outcomes by technique and vendor."
-        />
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div className="telemetry-strip">
-            <span>Technique</span>
-            <strong>{String(stats.data?.technique_id ?? "all")}</strong>
-          </div>
-          <div className="telemetry-strip">
-            <span>Vendor</span>
-            <strong>{String(stats.data?.edr_vendor ?? "all")}</strong>
-          </div>
-          <div className="telemetry-strip">
-            <span>Current rate</span>
-            <strong>{formatRate(stats.data?.success_rate)}</strong>
-          </div>
-        </div>
-        <p className="mt-3 text-sm text-zinc-400">{String(stats.data?.message ?? "No historical sample loaded yet.")}</p>
-      </section>
-      <DataPanel title="Stats Details" data={stats.data} />
-      <DataPanel title="Stats Error" data={stats.error} />
-      </>
+      {(activeTab === "Knowledge Base" || (activeTab as string) === "Stats") && (
+        <EdrStatsSummary statsData={stats.data as Record<string, unknown> | undefined} error={stats.error} />
       )}
       {activeTab === "Report Outcome" && (
       <>
@@ -5211,6 +5825,7 @@ function TemplatePlanSummary({ plan }: { plan?: TemplatePlanResponse }) {
 
 function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; loading?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   if (loading) {
     return (
       <div className="detail-summary mt-3">
@@ -5225,6 +5840,7 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
   }
   const targets = campaignTargets(campaign);
   const scope = campaignScopeEntries(campaign);
+  const excluded = campaignExcludedHosts(campaign);
 
   const copyScope = () => {
     void navigator.clipboard.writeText(JSON.stringify(campaign, null, 2));
@@ -5255,13 +5871,95 @@ function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaign; load
       <div className="mini-stat-grid">
         <MiniStat title="Targets" value={String(targets.length)} detail={targets.slice(0, 3).join(", ") || "none declared"} />
         <MiniStat title="Scope CIDRs" value={String(scope.length)} detail={scope.slice(0, 3).join(", ") || "none declared"} />
+        <MiniStat title="Excluded Hosts" value={String(excluded.length)} detail={excluded.length > 0 ? excluded.slice(0, 2).join(", ") : "none"} />
         <MiniStat title="Noise Profile" value={String(campaign.noise_profile ?? "stealth")} detail="OPSEC guardrail" />
-        <MiniStat title="Campaign ID" value={campaign.id.slice(0, 8)} detail="API/report key" />
       </div>
-      <details className="advanced-details mt-3">
-        <summary className="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer mb-2">Inspect Raw Scope Parameters</summary>
-        <StructuredJsonViewer data={campaign} title="Campaign Scope & Target Configuration" maxHeightClass="max-h-72" />
-      </details>
+
+      <div className="mt-4 space-y-3">
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Authorized IP Ranges &amp; CIDRs</span>
+            <span className="badge font-mono text-[10px]">{scope.length} range{scope.length === 1 ? "" : "s"}</span>
+          </div>
+          {scope.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {scope.map((cidr) => (
+                <span
+                  key={cidr}
+                  className="badge badge-info font-mono text-xs px-2.5 py-1 flex items-center gap-1.5"
+                >
+                  <Radio size={11} className="text-cyan-400" />
+                  <span>{cidr}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-zinc-500 italic">No network CIDRs declared for this campaign.</p>
+          )}
+        </div>
+
+        {targets.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Target Hosts</span>
+              <span className="badge font-mono text-[10px]">{targets.length} host{targets.length === 1 ? "" : "s"}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {targets.map((tgt) => (
+                <span
+                  key={tgt}
+                  className="badge font-mono text-xs px-2 py-0.5 flex items-center gap-1 text-zinc-200"
+                >
+                  <Target size={11} className="text-emerald-400" />
+                  <span>{tgt}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Excluded Hosts / Out-of-Scope</span>
+            <span className="badge font-mono text-[10px]">{excluded.length} excluded</span>
+          </div>
+          {excluded.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {excluded.map((host) => (
+                <span
+                  key={host}
+                  className="badge badge-high font-mono text-xs px-2.5 py-1 flex items-center gap-1.5 border-rose-500/30 bg-rose-950/20 text-rose-300"
+                >
+                  <MinusCircle size={12} className="text-rose-400" />
+                  <span>{host}</span>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-zinc-500 italic flex items-center gap-1.5">
+              <ShieldCheck size={13} className="text-zinc-600" />
+              <span>None declared (all addresses within defined CIDRs are active scope)</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-zinc-800/80">
+        <button
+          type="button"
+          onClick={() => setShowRaw(!showRaw)}
+          className="btn btn-compact text-[11px] py-1 px-2.5 text-zinc-400 hover:text-zinc-200 flex items-center gap-1.5"
+        >
+          <FileText size={12} />
+          <span>{showRaw ? "Hide Raw Scope JSON" : "View Raw Scope JSON"}</span>
+          <ChevronDown size={12} className={`transition-transform duration-200 ${showRaw ? "rotate-180" : ""}`} />
+        </button>
+        {showRaw && (
+          <div className="mt-2">
+            <StructuredJsonViewer data={campaign} title="Campaign Scope & Target Configuration" maxHeightClass="max-h-72" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -5864,6 +6562,30 @@ function campaignTargets(campaign: Campaign): string[] {
       const parsed = JSON.parse(campaign.targets_json) as unknown;
       if (Array.isArray(parsed)) {
         return parsed.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function campaignExcludedHosts(campaign: Campaign): string[] {
+  const explicit = campaign as { excluded_hosts?: unknown; excluded?: unknown };
+  if (Array.isArray(explicit.excluded_hosts)) {
+    return explicit.excluded_hosts.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+  }
+  if (Array.isArray(explicit.excluded)) {
+    return explicit.excluded.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+  }
+  if (typeof campaign.scope_json === "string" && campaign.scope_json.trim()) {
+    try {
+      const parsed = JSON.parse(campaign.scope_json) as Record<string, unknown>;
+      if (parsed && Array.isArray(parsed.excluded_hosts)) {
+        return parsed.excluded_hosts.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
+      }
+      if (parsed && Array.isArray(parsed.excluded)) {
+        return parsed.excluded.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "");
       }
     } catch {
       return [];

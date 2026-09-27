@@ -164,6 +164,25 @@ describe("Tab Navigation URL Synchronization (Item 6)", () => {
     expect(screen.getByRole("heading", { name: "API Keys" })).toBeDefined();
   });
 
+  it("activates Users tab directly when opening /security?tab=Users", async () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <DashboardUiProvider value={mockDashboardUi}>
+          <MemoryRouter initialEntries={["/security?tab=Users"]}>
+            <UrlTracker />
+            <Routes>
+              <Route path="/security" element={<SecurityPage />} />
+            </Routes>
+          </MemoryRouter>
+        </DashboardUiProvider>
+      </QueryClientProvider>
+    );
+
+    const usersTab = screen.getByRole("tab", { name: "Users" });
+    expect(usersTab.classList.contains("active")).toBe(true);
+    expect(screen.getByRole("heading", { name: "Platform Users" })).toBeDefined();
+  });
+
   it("falls back to default List tab when opening /campaigns?tab=xyz without crashing", async () => {
     render(
       <QueryClientProvider client={queryClient}>
