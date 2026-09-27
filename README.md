@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="480">
+<img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="440">
 
 ### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
@@ -100,14 +100,14 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
 
-*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas, system environment specifications, and ARES Cyber Dragon mascot on the right panel.*
+*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Minimalist Rive-style showcase featuring the animated ARES Ruby Dragon mascot on the right panel.*
 
 </div>
 
 - **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
 - **Key Capabilities**:
   - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) - physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
-  - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
+  - **ARES Ruby Dragon Living Mascot**: Integrated brand mascot showcase with calibrated ruby red palette, fire-breathing animation, and clean dark backdrop.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
   - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level AES-256-GCM credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
