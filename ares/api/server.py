@@ -138,10 +138,10 @@ def _campaign_from_db_row(row: Any) -> Campaign:
                 for s in scope:
                     if isinstance(s, str):
                         try:
-                            from netaddr import IPNetwork
-                            IPNetwork(s)
+                            import ipaddress
+                            ipaddress.ip_network(s, strict=False)
                             coerced_scope.append({"cidr": s, "description": ""})
-                        except Exception:
+                        except (ValueError, TypeError):
                             continue
                     elif isinstance(s, dict):
                         coerced_scope.append(s)
@@ -1950,8 +1950,9 @@ class CampaignCreate(BaseModel):
             if not entry:
                 continue
             try:
-                IPNetwork(entry)
-            except (AddrFormatError, ValueError) as exc:
+                import ipaddress
+                ipaddress.ip_network(entry, strict=False)
+            except (ValueError, TypeError) as exc:
                 raise ValueError(
                     f"scope_cidrs[{i}]: {entry!r} is not a valid CIDR or IP range. "
                     "Examples: '10.0.0.0/24', '192.168.1.10/32'"

@@ -498,17 +498,17 @@ def sanitize_path(value: str) -> str:
 
 def validate_ip_or_cidr(value: str) -> bool:
     """Returns True if value is a valid IP or CIDR."""
-    from netaddr import AddrFormatError, IPAddress, IPNetwork
+    import ipaddress
 
     try:
-        IPAddress(value)
+        ipaddress.ip_address(value)
         return True
-    except (AddrFormatError, ValueError):
+    except (ValueError, TypeError):
         pass
     try:
-        IPNetwork(value)
+        ipaddress.ip_network(value, strict=False)
         return True
-    except (AddrFormatError, ValueError):
+    except (ValueError, TypeError):
         return False
 
 

@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
-from netaddr import IPNetwork, AddrFormatError
+import ipaddress
 
 from ares.core.scope import CampaignScope, CloudScope
 
@@ -116,8 +116,8 @@ class ScopeEntry(BaseModel):
     @classmethod
     def validate_cidr(cls, v: str) -> str:
         try:
-            IPNetwork(v)
-        except (AddrFormatError, ValueError) as e:
+            ipaddress.ip_network(v, strict=False)
+        except ValueError as e:
             raise ValueError(f"Invalid CIDR: {v}") from e
         return v
 
@@ -241,10 +241,9 @@ class Campaign(BaseModel):
 
     def _check_scope_uncached(self, target: str) -> bool:
         try:
-            from netaddr import IPAddress
-            addr = IPAddress(target)
-            return any(addr in IPNetwork(s.cidr) for s in self.scope)
-        except (AddrFormatError, ValueError):
+            addr = ipaddress.ip_address(target)
+            return any(addr in ipaddress.ip_network(s.cidr, strict=False) for s in self.scope)
+        except ValueError:
             pass
 
         explicit_hosts = {
@@ -270,9 +269,8 @@ class Campaign(BaseModel):
 
             if results:
                 resolved_ip = results[0][4][0]
-                from netaddr import IPAddress as _IPAddr
-                addr = _IPAddr(resolved_ip)
-                in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
+                addr = ipaddress.ip_address(resolved_ip)
+                in_scope = any(addr in ipaddress.ip_network(s.cidr, strict=False) for s in self.scope)
                 if not in_scope:
                     _log.warning(
                         "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",

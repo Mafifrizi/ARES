@@ -20,13 +20,11 @@
 #   pip install -r requirements-lock.txt
 #
 # Core
-click>=8.1
 rich>=13.7
 pydantic>=2.6
 pydantic-settings>=2.2
 pyyaml>=6.0
 python-dotenv>=1.0
-anyio>=4.3
 structlog>=24.1
 
 # API + Auth
@@ -46,7 +44,6 @@ cryptography>=42.0
 # Database
 aiosqlite>=0.20
 sqlalchemy>=2.0
-aiofiles>=23.2
 alembic>=1.13
 
 # Graph
@@ -54,14 +51,12 @@ networkx>=3.3
 
 # Reporting
 jinja2>=3.1
-markdown>=3.5
 
 # CLI
 typer>=0.12
 
 # Network / DNS
 dnspython>=2.6
-netaddr>=1.2
 
 # SSH lateral movement
 paramiko>=3.4

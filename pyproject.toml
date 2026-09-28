@@ -11,13 +11,11 @@ license = { text = "MIT" }
 requires-python = ">=3.10,<3.13"
 dependencies = [
     # Core
-    "click>=8.1",
     "rich>=13.7",
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
-    "anyio>=4.3",
 
     # Structured logging
     "structlog>=24.1",
@@ -46,13 +44,11 @@ dependencies = [
 
     # Reporting
     "jinja2>=3.1",
-    "markdown>=3.5",
 
     # Database (async + sync SQLite + migrations)
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0",
     "greenlet>=3.0",
-    "aiofiles>=23.2",
     "alembic>=1.13",       # DB migrations - required for revoked_access_tokens table
 
     # CLI
@@ -60,7 +56,6 @@ dependencies = [
 
     # Network
     "dnspython>=2.6",
-    "netaddr>=1.2",
 ]
 
 [project.optional-dependencies]
