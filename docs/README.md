@@ -21,7 +21,7 @@ The documentation is organized into six functional pillars:
 ### Attack Modules and Module SDK
 | Document | Description | Target Audience |
 | --- | --- | --- |
-| [modules.md](modules.md) | Comprehensive catalog of all 64 attack modules and capability definitions. | Operators, Red Team |
+| [modules.md](modules.md) | Comprehensive catalog of all 66 active attack modules (70 total) and capability definitions. | Operators, Red Team |
 | [MODULE_GUIDE.md](MODULE_GUIDE.md) | Operator quickstart for executing and chaining modules across target hosts. | Operators |
 | [module-development.md](module-development.md) | Step-by-step developer guide for writing, testing with `ModuleTestHarness`, and signing attack modules. | Module Developers |
 | [module_sdk.md](module_sdk.md) | Modern v2 SDK specification (`BaseModule[P, R]`, Pydantic v2 params, testing harness, and `AresClient`). | Developers, Integrators |
