@@ -14,7 +14,7 @@
 
 Modern enterprise hybrid networks increasingly deploy Linux hosts (CI/CD build nodes, container hosts, database clusters, identity proxies) as domain members integrated with Active Directory via **SSSD (`realmd`)** and **Winbind/Samba**. While Windows AD attack vectors (Pass-the-Hash, DPAPI, LSASS injection) have mature offensive tooling, Linux domain members remain an under-researched, high-value blindspot.
 
-We have published a formal technical specification: **[RFC 001: Linux Active Directory Tradecraft](docs/research/linux-active-directory-tradecraft.md)**, establishing an open architecture for native, high-performance, non-destructive post-exploitation modules in ARES.
+We have published a formal technical specification: **[RFC 001: Linux Active Directory Tradecraft](https://github.com/Mafifrizi/ARES/blob/main/docs/research/linux-active-directory-tradecraft.md)**, establishing an open architecture for native, high-performance, non-destructive post-exploitation modules in ARES.
 
 We are opening this RFC to gather technical feedback, coordinate module implementations, and invite researchers and practitioners specializing in Linux offensive tradecraft and Active Directory internals to collaborate.
 
@@ -57,8 +57,8 @@ To ensure safety, stability, and detection-minimization:
 
 ### How to Get Involved
 
-1. Read the full technical specification: [`docs/research/linux-active-directory-tradecraft.md`](docs/research/linux-active-directory-tradecraft.md).
-2. Review our developer guide: [`docs/module-development.md`](docs/module-development.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+1. Read the full technical specification: [`docs/research/linux-active-directory-tradecraft.md`](https://github.com/Mafifrizi/ARES/blob/main/docs/research/linux-active-directory-tradecraft.md).
+2. Review our developer guide: [`docs/module-development.md`](https://github.com/Mafifrizi/ARES/blob/main/docs/module-development.md) and [`CONTRIBUTING.md`](https://github.com/Mafifrizi/ARES/blob/main/CONTRIBUTING.md).
 3. Drop a comment below with:
    - Module you're interested in building or reviewing
    - Edge cases or exotic configurations in your lab/enterprise experience

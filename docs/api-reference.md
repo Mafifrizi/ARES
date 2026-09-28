@@ -545,7 +545,7 @@ Hot-reload attack modules in-memory from builtin and external module sources. St
 {
   "status": "ok",
   "reloaded": true,
-  "module_count": 64
+  "module_count": 66
 }
 ```
 

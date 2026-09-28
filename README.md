@@ -31,7 +31,7 @@
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 69 production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 66 active production execution modules (70 total catalogued) covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
 
 ---
 
@@ -164,7 +164,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 4. Modular Adversary Orchestration (30+ Execution Modules, 60+ Techniques)
+### 4. Modular Adversary Orchestration (66 Active Modules, 60+ Techniques)
 
 *Extensive catalog of weaponized adversary techniques aligned with the MITRE ATT&CK enterprise matrix.*
 
@@ -178,7 +178,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 - **The Problem Solved**: Replaces unvalidated, unreliable GitHub scripts with typed, reproducible, and auditable adversary modules.
 - **Key Capabilities**:
-  - **Comprehensive Vector Coverage**: 30+ production execution modules covering 60+ mapped adversary techniques across Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`, `windows.lsass_dump`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
+  - **Comprehensive Vector Coverage**: 66 active production execution modules (70 total catalogued) covering 60+ mapped adversary techniques across Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`, `windows.lsass_dump`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
   - **Streamlined Execution Panel**: Clean execution view with persistent field labels, demoted low-weight dependency hints, and focused on-submit validation replacing intrusive default warning cards.
   - **Dynamic Typed Schemas**: UI forms are generated dynamically from Python Pydantic models with strict validation.
   - **Dry-Run Safety Engine**: Validate target responsiveness, parameters, and expected outcome before transmitting offensive traffic.
@@ -397,7 +397,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 | :--- | :--- | :--- | :--- |
 | **Overview** | Executive health, telemetry counters, finding severity metrics. | Single Pane | All Stakeholders |
 | **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
-| **Modules** | 69 module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
+| **Modules** | 66 active module catalog (70 total, 60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
 | **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
 | **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
 | **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
@@ -415,7 +415,7 @@ ARES follows a strict defense-in-depth architecture separating presentation, exe
 ```mermaid
 flowchart TB
     subgraph Client["Presentation Layer (Operator Enclave)"]
-        UI["React 19 Dashboard<br>(Vite + TypeScript)"]
+        UI["React 18 Dashboard<br>(Vite + TypeScript)"]
         Mesh["Dynamic Architectural Grid<br>(Canvas 2D Engine)"]
         WSClient["WebSocket Client<br>(Real-Time Telemetry Stream)"]
     end
@@ -428,7 +428,7 @@ flowchart TB
     end
 
     subgraph Core["ARES Core Engine & Governance"]
-        ScopeFirewall["Scope Firewall & Egress Filter<br>(OS Kernel Filtering & Transport Sockets)"]
+        ScopeFirewall["Scope Firewall & Transport Egress Hook<br>(In-Process Transport & OS Packet Filtering)"]
         Governor["OPSEC Noise Governor<br>(Adaptive Jitter & Throttling)"]
         Orchestrator["Module Execution Orchestrator<br>(Worker Thread Pool)"]
         AutoPlanner["Goal-Directed Strategy Engine<br>(DAG Heuristics / Planner)"]
@@ -461,7 +461,7 @@ flowchart TB
 
 ## Adversary Techniques & MITRE ATT&CK Matrix
 
-ARES implements 30+ production execution modules mapping to 60+ adversary techniques across the MITRE ATT&CK Enterprise Framework:
+ARES implements 66 active production execution modules (70 total catalogued) mapping to 60+ adversary techniques across the MITRE ATT&CK Enterprise Framework:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -477,10 +477,10 @@ ARES implements 30+ production execution modules mapping to 60+ adversary techni
 └─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┴──────────────────────────┘
 ```
 
-- **Active Directory & Kerberos Suites (Windows & Linux)**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
+- **Active Directory & Kerberos Suites (Windows & Linux)**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and enrollment checks (`ad.adcs`; `ad.ghost_forge` retained as disabled audit stub), DCSync account replication, and BloodHound data generation.
 - **Linux Active Directory Tradecraft (RFC-ARES-2026-001)**: Native, zero-subprocess post-exploitation suite targeting Linux domain members: SSSD cache harvesting (`linux.sssd_harvest`), pure-Python Kerberos ccache ticket hunting (`linux.ccache_hunt`), keytab parsing & Silver Ticket generation (`linux.keytab_abuse`), Samba machine secrets extraction (`linux.samba_secrets`), and bidirectional ccache <-> kirbi ticket transcoding (`credential.ticket_converter`).
 - **Endpoint Posture Checkers**: Windows UAC Bypass methods, registry key persistence inspection, Linux container breakouts, and Sudo privilege enumeration.
-- **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token hijacking (`cloud.phantom_token`).
+- **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token review (`cloud.phantom_token` retained as disabled audit stub).
 
 ---
 
@@ -591,7 +591,7 @@ Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, A
 For operators or developers connecting Cursor, Claude Desktop, or Windsurf to ARES:
 
 1. **Verify Subsystem Readiness (`doctor`)**:
-   Ensure all core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Modules, Security Gates) report `PASS`:
+   Ensure all core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Descriptors, Security Gates) report `PASS`:
    ```powershell
    .\mcp.bat doctor
    ```
@@ -629,7 +629,7 @@ For operators or developers connecting Cursor, Claude Desktop, or Windsurf to AR
 
 5. **Issue Your First Command to the AI Agent**:
    Open Cursor Composer / Chat (`Ctrl + I` or `Ctrl + L`), and try this prompt:
-   > *"Check active campaign status, verify scope for target 10.0.1.50, and stage a dry-run of module ad_kerberoast."*
+   > *"Check active campaign status, verify scope for target 10.0.1.50, and stage a dry-run of module ad.kerberoast."*
 
 For in-depth architecture, the 7 security invariants, CLI scriptability (`--json`), POSIX exit codes, and operational tool schemas, see [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
 

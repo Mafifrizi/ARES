@@ -45,11 +45,16 @@ ARES is **not** a C2 framework. It does not include implants, beacons, or persis
 ┌───────────────────────────▼─────────────────────────────────────┐
 │                       MODULE LAYER                               │
 │  BaseModule (validate → execute → report)                        │
-│       ├── ares/modules/ad/         (7 modules)                   │
-│       ├── ares/modules/linux/      (2 modules)                   │
-│       ├── ares/modules/cloud/      (3 modules: AWS/Azure/GCP)    │
-│       ├── ares/lateral/            (5 modules)                   │
-│       └── ares/modules/reporting/  (report generator)            │
+│       ├── ares/modules/ad/         (14 modules: 13 active, 1 dis.)│
+│       ├── ares/modules/linux/      (10 modules)                   │
+│       ├── ares/modules/cloud/      (7 modules: 6 active, 1 dis.) │
+│       ├── ares/modules/lateral/    (9 modules)                   │
+│       ├── ares/modules/windows/    (8 modules: 6 active, 2 dis.) │
+│       ├── ares/modules/credential/ (7 modules)                   │
+│       ├── ares/modules/network/    (6 modules)                   │
+│       ├── ares/modules/exfil/      (3 modules)                   │
+│       ├── ares/modules/persistence/(3 modules)                   │
+│       └── ares/modules/{edr,opsec,ai,recon,reporting}/ (6 modules)│
 └───────────────────────────┬─────────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────────┐
