@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/brand/ares-logo.png" alt="ARES Logo" width="480">
+<img src="frontend/public/brand/ares-logo-v2.png" alt="ARES Logo" width="440">
 
 ### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
@@ -11,17 +11,17 @@
 [![Version](https://img.shields.io/badge/Release-v6.0--Enterprise-red?style=for-the-badge&logo=shield)](releases/)
 [![Python](https://img.shields.io/badge/Engine-Python%203.12%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20Async-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/Frontend-React%2019%20%7C%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
+[![React](https://img.shields.io/badge/Frontend-React%2018%20%7C%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![MITRE](https://img.shields.io/badge/Coverage-MITRE%20ATT%26CK-FF6F00?style=for-the-badge)](docs/modules.md)
 [![Security](https://img.shields.io/badge/Security-Zero--Trust%20Enclave-22C55E?style=for-the-badge)](docs/security-model.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Tests Suite](https://img.shields.io/badge/Tests-4%2C514%20Passing-22C55E?style=for-the-badge)](tests/)
+[![Tests Suite](https://img.shields.io/badge/Tests-4%2C625%20Passing-22C55E?style=for-the-badge)](tests/)
 [![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
 [![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
 
 <br>
 
-[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Credits**](#credits) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
 
 </div>
 
@@ -31,7 +31,7 @@
 
 Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 30+ production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 69 production execution modules covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
 
 ---
 
@@ -98,16 +98,16 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 <div align="center">
 
-![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave.png)
+![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave-v2.png)
 
-*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Dynamic Architectural Grid canvas, system environment specifications, and ARES Cyber Dragon mascot on the right panel.*
+*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Minimalist Rive-style showcase featuring the animated ARES Ruby Dragon mascot on the right panel.*
 
 </div>
 
 - **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
 - **Key Capabilities**:
   - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) - physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
-  - **ARES Cyber Dragon Ambient Mascot**: Integrated brand mascot watermark on the telemetry pane with calibrated opacity and crimson back-glow, harmonized with frosted glass environment specs.
+  - **ARES Ruby Dragon Living Mascot**: Integrated brand mascot showcase with calibrated ruby red palette, fire-breathing animation, and clean dark backdrop.
   - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
   - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
   - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level AES-256-GCM credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
@@ -186,29 +186,35 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 
 ---
 
-### 5. Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Dock
+### 5. Multi-Vector Pivot Graph & ARES Beacon Terminal Console
 
-*Interactive Cobalt Strike-styled hierarchical lateral pivot topology graph paired with a real-time multi-tabbed Beacon session terminal console.*
+*Interactive hierarchical lateral pivot topology graph with perimeter firewall flame effects, slide-over Tactical Inspector Drawer, and a real-time docked Beacon session terminal console.*
 
 <div align="center">
 
-![ARES Multi-Vector Pivot Graph & Cobalt Strike Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
+![ARES Multi-Vector Pivot Graph & Interactive Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
 
-*Cobalt Strike Hierarchical Pivot Graph & Docked Beacon Terminal Console - Live enterprise campaign topology (`Operation Titan Shield`), multi-hop lateral pivot routes, dynamic privilege borders (SYSTEM * / ADMIN / BEACON), and real-time interactive command terminal.*
+*ARES Tactical Pivot Graph & Interactive Beacon Terminal Console - Live enterprise campaign topology (`Kali test`), perimeter ingress firewall with animated flames, Linux/Windows compromised footholds, slide-over Tactical Inspector Drawer, and real-time interactive beacon terminal.*
 
 </div>
 
 - **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
 - **Key Capabilities**:
-  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`K8S-INGRESS-01`), initial foothold workstations (`WS-FIN-042`, `AWS-IMDS-GW`), internal database and file servers (`SQL01`, `FS01`), and high-value Active Directory Domain Controllers (`DC01`).
-  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
+  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`PERIMETER INGRESS 0.0.0.0/0`), initial foothold workstations and services, internal servers, and high-value Active Directory Domain Controllers (`DC01`).
+  - **Perimeter Ingress Firewall with Animated Flames**: Dedicated perimeter boundary node featuring an ambient breathing aura and multi-layered CSS animated flame particle effects above a classic red brick firewall icon, designating the external ingress boundary.
+  - **Slide-Over Tactical Inspector Drawer**: Instant deep-dive host and lateral traversal intelligence panel:
+    - **Live Compromise & OS State**: Real-time status indicators (`COMPROMISED (ACTIVE)` vs `RECON TARGET`), OS detection, and perimeter access ports (e.g. `22/TCP`).
+    - **Confirmed Vulnerabilities & Findings**: Full-fidelity finding titles without premature truncation, MITRE ATT&CK technique badges (e.g. `T1548.001`, `T1552.001`), and pattern summaries.
+    - **Intelligent Finding Deduplication**: Redundant finding records on the same target are automatically grouped with instance multipliers (`×4`, `×3`) to preserve a clean, high-signal view.
+    - **Unified Dark Scrollbar**: Single sleek custom scrollbar matching the dark theme, eliminating nested OS scrollbars.
+  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers and root access, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
   - **Organic Cubic Bezier Routing & Telemetry Stream**: Fluid vector curves with directional arrowheads and animated glowing particle pulses visualizing live command-and-control and pivot traffic.
   - **Persistent Click-to-Lock Pathway Tracking**: Click any node to instantly freeze its upstream compromise lineage and downstream lateral reachability, complete with a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan across complex topologies without losing situational focus.
   - **Docked Multi-Row Beacon Terminal Console (`CobaltSessionDock`)**:
     - **Dual-Row Java Swing Session Tabs**: Automatic focus and session switching when clicking nodes on the canvas.
-    - **Cobalt Strike Status Bar**: Real-time privilege context (`[HOST] operator` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
+    - **Real-Time Status Bar**: Privilege context (`[HOST] root` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
     - **Interactive Command Prompt (`beacon>`)**:
-      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *`).
+      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *` or `root`).
       - `hashdump` / `creds`: Harvests and displays cached NTLM SAM/LSA hashes.
       - `ps` / `process`: Enumerates active process trees and resolves parent PIDs.
       - `ppid <pid>`: Tasks beacon to spoof parent process IDs for EDR evasion.
@@ -391,7 +397,7 @@ The ARES Platform features a high-performance, responsive operator dashboard eng
 | :--- | :--- | :--- | :--- |
 | **Overview** | Executive health, telemetry counters, finding severity metrics. | Single Pane | All Stakeholders |
 | **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
-| **Modules** | 30+ module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
+| **Modules** | 69 module catalog (60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
 | **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
 | **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
 | **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
@@ -471,7 +477,8 @@ ARES implements 30+ production execution modules mapping to 60+ adversary techni
 └─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┴──────────────────────────┘
 ```
 
-- **Active Directory Lab Suites**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
+- **Active Directory & Kerberos Suites (Windows & Linux)**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and forged persistence (`ad.adcs`, `ad.ghost_forge`), DCSync account replication, and BloodHound data generation.
+- **Linux Active Directory Tradecraft (RFC-ARES-2026-001)**: Native, zero-subprocess post-exploitation suite targeting Linux domain members: SSSD cache harvesting (`linux.sssd_harvest`), pure-Python Kerberos ccache ticket hunting (`linux.ccache_hunt`), keytab parsing & Silver Ticket generation (`linux.keytab_abuse`), Samba machine secrets extraction (`linux.samba_secrets`), and bidirectional ccache <-> kirbi ticket transcoding (`credential.ticket_converter`).
 - **Endpoint Posture Checkers**: Windows UAC Bypass methods, registry key persistence inspection, Linux container breakouts, and Sudo privilege enumeration.
 - **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token hijacking (`cloud.phantom_token`).
 
@@ -730,6 +737,23 @@ If ARES has accelerated your security assessments, helped protect your enterpris
 </div>
 
 > *Your support helps keep ARES open-source, robust, and continuously updated against the latest adversary tradecraft.*
+
+---
+
+## Credits
+
+<div align="center">
+
+<a href="https://www.linkedin.com/in/muhamad-d-alvito-58607934b/">
+  <img src="docs/assets/credits/muhamad-d-alvito.png" width="96" height="96" alt="Muhamad D Alvito" style="border-radius: 50%;">
+</a>
+
+### [Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
+**My Partner Work for UI & UX**
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
+
+</div>
 
 ---
 
