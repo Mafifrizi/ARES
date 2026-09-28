@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from ares.core.logger import get_logger
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.context import ExecutionContext
@@ -301,6 +301,7 @@ class EngineModuleResult(BaseModel):
     outcome: str = ""
     outcome_message: str = ""
     operator_next_steps: list[str] = []
+    filtered_findings: dict[str, Any] = Field(default_factory=lambda: {"count": 0, "reasons": {}})
 
     def model_post_init(self, __context: Any) -> None:
         self.error = redact_error_message(self.error)
@@ -403,6 +404,32 @@ def _fire_and_log(coro, label: str = "background_task") -> None:
             logger.warning("background_task_error", task=label, error=str(_exc)[:120])
 
     _aio.create_task(_wrapper())
+
+
+def _categorize_rejection_reason(v_res: Any, finding: Finding) -> str:
+    """Categorize why a finding was rejected by the validator."""
+    explicit_reason = getattr(v_res, "reason", None)
+    if explicit_reason and isinstance(explicit_reason, str):
+        return explicit_reason
+    if hasattr(v_res, "notes") and v_res.notes:
+        for n in v_res.notes:
+            if n in ("no_evidence", "below_confidence_threshold", "validator_rejected"):
+                return n
+    ev = finding.evidence or {}
+    if not ev or not any(bool(v) for v in ev.values()):
+        return "no_evidence"
+    if hasattr(v_res, "stage_results") and isinstance(v_res.stage_results, dict):
+        for _, _, note in v_res.stage_results.values():
+            note_lower = (note or "").lower()
+            if (
+                "no captured hash" in note_lower
+                or "no evidence" in note_lower
+                or "missing" in note_lower
+            ):
+                return "no_evidence"
+    if getattr(v_res, "confidence", 0.0) < 0.4:
+        return "below_confidence_threshold"
+    return "validator_rejected"
 
 
 class AresEngine:
@@ -777,6 +804,8 @@ class AresEngine:
         # Validate
         validation_results: list[ValidationResult] = []
         if not skip_validation:
+            for f in findings:
+                f.module_id = f.module_id or module_id
             # Run all validations in parallel too
             validation_results = list(
                 await asyncio.gather(*[self.validator.validate(f, raw) for f in findings])
@@ -786,6 +815,8 @@ class AresEngine:
         # mutation, or artifact normalization.  Those effects are released only
         # after the coordinator durably commits the terminal attempt.
         confirmed: list[Finding] = []
+        filtered_count = 0
+        filtered_reasons: dict[str, int] = {}
         from ares.core.cvss import enrich_finding_with_cvss
         from ares.core.tracing import get_current_trace_id
 
@@ -804,13 +835,16 @@ class AresEngine:
                 else:
                     f.false_positive = True
                     f.validated = False
+                    reason = _categorize_rejection_reason(v_res, f)
+                    filtered_count += 1
+                    filtered_reasons[reason] = filtered_reasons.get(reason, 0) + 1
                     logger.warning(
                         "finding_rejected_by_validator",
                         finding_id=f.id,
                         title=f.title,
                         severity=str(f.severity),
                         confidence=v_res.confidence,
-                        reason=getattr(v_res, "reason", None) or (v_res.notes[0] if v_res.notes else "below_confidence_threshold"),
+                        reason=reason,
                     )
             else:
                 if not f.false_positive:
@@ -837,6 +871,7 @@ class AresEngine:
             validation_results=validation_results,
             raw_output=raw,
             duration_ms=duration_ms,
+            filtered_findings={"count": filtered_count, "reasons": filtered_reasons},
         )
 
     # ── Parallel plan ──────────────────────────────────────────────────────

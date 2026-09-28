@@ -9,6 +9,7 @@ not individual module behavior (which is tested in test_modules.py).
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch, AsyncMock
@@ -863,10 +864,78 @@ class TestAsyncEngine:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-from contextlib import contextmanager
 
 
 @contextmanager
 def _noop_ctx():
     """No-op context manager for optional patches."""
     yield
+
+
+# ── Filtered Findings Indicator & Reason Categorization Tests ─────────────────
+
+
+def test_categorize_rejection_reason_all_branches():
+    from ares.core.campaign import Finding, Severity
+    from ares.core.engine import _categorize_rejection_reason
+    from ares.core.validator import ValidationResult
+
+    finding = Finding(title="Test", description="Desc", severity=Severity.LOW)
+
+    # 1. Validator result with explicit .reason
+    v_explicit = ValidationResult(finding_id="f1", passed=False, confidence=0.2)
+    v_explicit.reason = "custom_reason"
+    assert _categorize_rejection_reason(v_explicit, finding) == "custom_reason"
+
+    # 2. Validator result with .notes containing a known label
+    v_notes = ValidationResult(
+        finding_id="f2",
+        passed=False,
+        confidence=0.1,
+        notes=["below_confidence_threshold"],
+    )
+    assert _categorize_rejection_reason(v_notes, finding) == "below_confidence_threshold"
+
+    # 3. Empty evidence
+    v_empty_ev = ValidationResult(finding_id="f3", passed=False, confidence=0.0)
+    finding_empty = Finding(title="No Ev", description="None", severity=Severity.LOW, evidence={})
+    assert _categorize_rejection_reason(v_empty_ev, finding_empty) == "no_evidence"
+
+    # 4. stage_results text containing "no captured hash"
+    v_stage = ValidationResult(
+        finding_id="f4",
+        passed=False,
+        confidence=0.0,
+        stage_results={"check1": (False, 0.0, "No captured hash evidence found")},
+    )
+    finding_with_ev = Finding(
+        title="With Ev",
+        description="Has",
+        severity=Severity.LOW,
+        evidence={"target": "dc"},
+    )
+    assert _categorize_rejection_reason(v_stage, finding_with_ev) == "no_evidence"
+
+    # 5. Low-confidence result with evidence present
+    v_low = ValidationResult(
+        finding_id="f5",
+        passed=False,
+        confidence=0.2,
+        stage_results={"check1": (False, 0.2, "Insufficient lateral execution evidence")},
+    )
+    assert _categorize_rejection_reason(v_low, finding_with_ev) == "below_confidence_threshold"
+
+
+def test_engine_module_result_default_filtered_findings_serialization():
+    from ares.core.engine import EngineModuleResult, ModuleStatus
+
+    res = EngineModuleResult(module_id="test.module", status=ModuleStatus.DONE)
+    assert res.filtered_findings == {"count": 0, "reasons": {}}
+
+    dumped = res.model_dump()
+    assert "filtered_findings" in dumped
+    assert dumped["filtered_findings"] == {"count": 0, "reasons": {}}
+
+    json_dumped = res.model_dump(mode="json")
+    assert json_dumped["filtered_findings"] == {"count": 0, "reasons": {}}
+
