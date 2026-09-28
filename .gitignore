@@ -51,6 +51,11 @@ ares_redteam.egg-info/
 # Backup files
 *.bak
 *.orig
+*.backup
+*.db
+*.db.backup
+ares-login-export.zip
+ares-login-export/
 # Local runtime artifacts restored from checkpoints
 ares.db-shm
 ares.db-wal
