@@ -2756,8 +2756,8 @@ async def run_module(
             db,
             body.campaign_id,
             module_id,
-            outcome=str(getattr(module_result, "status", "done")),
-            success=str(getattr(module_result, "status", "")).lower() in ("success", "done"),
+            outcome=_module_outcome_value(getattr(module_result, "status", "done")),
+            success=_is_successful_module_outcome(getattr(module_result, "status", "")),
             duration_ms=float(getattr(module_result, "duration_ms", 0.0)),
         )
         await _broadcast_event(
