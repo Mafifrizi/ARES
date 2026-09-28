@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  --ares-accent: #b91c1c;
   color: #f4f4f5;
   background: #09090b;
   font-family:
@@ -13,6 +14,16 @@
 
 * {
   box-sizing: border-box;
+}
+
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--ares-accent, #b91c1c);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 body {
@@ -343,6 +354,10 @@ button:disabled {
   font-size: 0.84rem;
 }
 
+.topbar-search input:focus-visible {
+  outline: none;
+}
+
 .topbar-scope-wrap {
   display: flex;
   align-items: center;
@@ -353,6 +368,12 @@ button:disabled {
   padding: 0.35rem 0.65rem;
   color: #a1a1aa;
   font-size: 0.8rem;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.topbar-scope-wrap:focus-within {
+  border-color: #52525b;
+  box-shadow: 0 0 0 1px #52525b;
 }
 
 .topbar-scope-select {
@@ -364,6 +385,10 @@ button:disabled {
   outline: none;
   cursor: pointer;
   max-width: 180px;
+}
+
+.topbar-scope-select:focus-visible {
+  outline: none;
 }
 
 .topbar-scope-select option {
@@ -421,6 +446,12 @@ button:disabled {
 .search-results button:focus {
   background: #1c1c20;
   outline: none;
+}
+
+.search-results button:focus-visible {
+  background: #1c1c20;
+  outline: 2px solid var(--ares-accent, #b91c1c);
+  outline-offset: -2px;
 }
 
 .search-results button:last-child {
@@ -1193,9 +1224,11 @@ button:disabled {
 }
 
 .field:focus,
+.field:focus-visible,
 .field-with-icon:focus-within {
   border-color: #52525b;
   outline: 1px solid #52525b;
+  outline-offset: 0;
 }
 
 textarea.field {
@@ -1223,6 +1256,10 @@ textarea.field {
   color: #f4f4f5;
   outline: none;
   font-size: 0.84rem;
+}
+
+.field-with-icon input:focus-visible {
+  outline: none;
 }
 
 .toggle-row {
@@ -2823,5 +2860,43 @@ input:-webkit-autofill:focus {
   -webkit-box-shadow: 0 0 0 1000px #09090b inset, 0 0 0 1px #dc2626 !important;
   box-shadow: 0 0 0 1000px #09090b inset, 0 0 0 1px #dc2626 !important;
 }
+
+/* ==========================================================================
+   Keyboard Focus Visible & Accessibility Specific Overrides (Item 9)
+   Preserve component border-radii while keyboard focus-visible is active
+   ========================================================================== */
+
+.btn:focus-visible,
+.btn-compact:focus-visible,
+.icon-button:focus-visible,
+.icon-button-small:focus-visible,
+.nav-link:focus-visible,
+.topbar-status-btn:focus-visible,
+.topbar-heartbeat:focus-visible,
+.operator-trigger:focus-visible,
+.rounded-md:focus-visible,
+[class*="rounded-md"]:focus-visible {
+  border-radius: 6px;
+}
+
+.panel:focus-visible,
+.card:focus-visible,
+.notification-item:focus-visible,
+.rounded-lg:focus-visible,
+[class*="rounded-lg"]:focus-visible {
+  border-radius: 8px;
+}
+
+.rounded-full:focus-visible,
+[class*="rounded-full"]:focus-visible,
+.btn-rounded:focus-visible,
+.user-chip-avatar:focus-visible,
+.profile-avatar-light:focus-visible,
+.operator-avatar:focus-visible,
+.status-pill:focus-visible,
+.badge:focus-visible {
+  border-radius: 999px;
+}
+
 
 
