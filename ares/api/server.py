@@ -1932,7 +1932,7 @@ class CampaignCreate(BaseModel):
         This keeps invalid operator input on the normal HTTP 422 path instead
         of surfacing as an unhandled server exception.
         """
-        from netaddr import AddrFormatError, IPNetwork
+        import ipaddress
 
         if not isinstance(v, list):
             raise ValueError("scope_cidrs must be a list")
