@@ -9,7 +9,9 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
-from netaddr import IPNetwork, AddrFormatError
+import ipaddress
+
+from ares.core.scope import CampaignScope, CloudScope
 
 
 class Severity(str, Enum):
@@ -114,8 +116,8 @@ class ScopeEntry(BaseModel):
     @classmethod
     def validate_cidr(cls, v: str) -> str:
         try:
-            IPNetwork(v)
-        except (AddrFormatError, ValueError) as e:
+            ipaddress.ip_network(v, strict=False)
+        except ValueError as e:
             raise ValueError(f"Invalid CIDR: {v}") from e
         return v
 
@@ -128,6 +130,14 @@ class AuditEntry(BaseModel):
     action: str
     detail: str = ""
     module_id: str | None = None
+
+
+class ScopeEntryList(list):
+    """List of ScopeEntry items supporting .cloud_scope attribute access."""
+
+    def __init__(self, iterable: Any = (), cloud_scope: CloudScope | None = None) -> None:
+        super().__init__(iterable)
+        self.cloud_scope = cloud_scope if cloud_scope is not None else CloudScope()
 
 
 class Campaign(BaseModel):
@@ -150,6 +160,7 @@ class Campaign(BaseModel):
                 result.append(clean if clean else entry.strip())
         return result
     scope: list[ScopeEntry] = Field(default_factory=list)
+    cloud_scope: CloudScope = Field(default_factory=CloudScope)
     status: CampaignStatus = CampaignStatus.CREATED
     noise_profile: NoiseProfile = NoiseProfile.STEALTH
 
@@ -173,7 +184,12 @@ class Campaign(BaseModel):
     _scope_cache: dict[str, bool] = PrivateAttr(default_factory=dict)
 
     def model_post_init(self, __context: Any) -> None:
-        """Warn if operator is still the default 'unknown'."""
+        """Initialize scope wrapper and warn if operator is still default 'unknown'."""
+        if not isinstance(self.scope, ScopeEntryList):
+            self.scope = ScopeEntryList(self.scope, cloud_scope=self.cloud_scope)
+        else:
+            self.scope.cloud_scope = self.cloud_scope
+
         if self.operator == "unknown":
             import logging as _logging
             _logging.getLogger("ares.campaign").warning(
@@ -225,10 +241,9 @@ class Campaign(BaseModel):
 
     def _check_scope_uncached(self, target: str) -> bool:
         try:
-            from netaddr import IPAddress
-            addr = IPAddress(target)
-            return any(addr in IPNetwork(s.cidr) for s in self.scope)
-        except (AddrFormatError, ValueError):
+            addr = ipaddress.ip_address(target)
+            return any(addr in ipaddress.ip_network(s.cidr, strict=False) for s in self.scope)
+        except ValueError:
             pass
 
         explicit_hosts = {
@@ -254,9 +269,8 @@ class Campaign(BaseModel):
 
             if results:
                 resolved_ip = results[0][4][0]
-                from netaddr import IPAddress as _IPAddr
-                addr = _IPAddr(resolved_ip)
-                in_scope = any(addr in IPNetwork(s.cidr) for s in self.scope)
+                addr = ipaddress.ip_address(resolved_ip)
+                in_scope = any(addr in ipaddress.ip_network(s.cidr, strict=False) for s in self.scope)
                 if not in_scope:
                     _log.warning(
                         "scope_check_hostname_out_of_scope: %r resolved to %s which is NOT in scope %s",

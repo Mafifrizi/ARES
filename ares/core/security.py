@@ -498,17 +498,17 @@ def sanitize_path(value: str) -> str:
 
 def validate_ip_or_cidr(value: str) -> bool:
     """Returns True if value is a valid IP or CIDR."""
-    from netaddr import AddrFormatError, IPAddress, IPNetwork
+    import ipaddress
 
     try:
-        IPAddress(value)
+        ipaddress.ip_address(value)
         return True
-    except (AddrFormatError, ValueError):
+    except (ValueError, TypeError):
         pass
     try:
-        IPNetwork(value)
+        ipaddress.ip_network(value, strict=False)
         return True
-    except (AddrFormatError, ValueError):
+    except (ValueError, TypeError):
         return False
 
 
@@ -721,3 +721,24 @@ def cleanup_all_credential_artifacts() -> int:
     for scope in all_scopes:
         total += cleanup_credential_artifacts(scope)
     return total
+
+
+def mask_secret_hash(hash_str: str | Any) -> str:
+    """Mask hash for evidence display. Full hash stays in vault/raw."""
+    if not hash_str or not isinstance(hash_str, str):
+        return "***"
+    if ":" in hash_str:
+        parts = hash_str.split(":")
+        if len(parts) >= 4:
+            masked_parts = list(parts)
+            for i in range(2, min(4, len(parts))):
+                if masked_parts[i] and len(masked_parts[i]) >= 10:
+                    masked_parts[i] = f"{masked_parts[i][:6]}...{masked_parts[i][-4:]}"
+                elif masked_parts[i]:
+                    masked_parts[i] = "***"
+            return ":".join(masked_parts)
+    if len(hash_str) < 10:
+        return "***"
+    return f"{hash_str[:6]}...{hash_str[-4:]}"
+
+
