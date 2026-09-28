@@ -5508,7 +5508,7 @@ function DiscoveredTicketsEvidenceViewer({
   );
 }
 
-function ModuleRunSummary({
+export function ModuleRunSummary({
   result,
   error,
   onSelectModule
@@ -5553,6 +5553,23 @@ function ModuleRunSummary({
   const hasOutcomeError = ["operator_error", "dependency_error", "network_error", "unsupported", "module_error", "failed", "timeout"].includes(displayOutcome);
   const openPorts = Array.isArray(rawOutput?.open_ports) ? (rawOutput.open_ports as (number | string)[]) : [];
   const hasPerimeter = openPorts.length > 0 || Object.keys((rawOutput?.service_versions ?? {}) as object).length > 0;
+  const filteredFindings = (result?.filtered_findings as { count?: number; reasons?: Record<string, number> } | undefined) ?? {};
+  const filteredCount = typeof filteredFindings.count === "number" ? filteredFindings.count : 0;
+  const filteredReasons = filteredFindings.reasons && typeof filteredFindings.reasons === "object" ? filteredFindings.reasons : {};
+  let topReasonLabel = "below reporting threshold";
+  const reasonEntries = Object.entries(filteredReasons).sort((a, b) => b[1] - a[1]);
+  if (reasonEntries.length > 0) {
+    const topKey = reasonEntries[0][0];
+    if (topKey === "below_confidence_threshold") {
+      topReasonLabel = "below reporting threshold";
+    } else if (topKey === "no_evidence") {
+      topReasonLabel = "no evidence";
+    } else if (topKey === "validator_rejected") {
+      topReasonLabel = "validator rejected";
+    } else {
+      topReasonLabel = topKey.replace(/_/g, " ");
+    }
+  }
   const emptyText = dryRun
     ? "No live execution was performed."
     : rawError
@@ -5782,6 +5799,18 @@ function ModuleRunSummary({
         </div>
       ) : (
         <EmptyState text={emptyText} />
+      )}
+
+      {filteredCount > 0 && (
+        <div
+          data-testid="filtered-findings-notice"
+          className="flex items-center gap-2 px-3 py-2 rounded-sm border border-zinc-800 bg-zinc-900/60 text-xs font-mono text-zinc-400 mt-2"
+        >
+          <Info size={13} className="text-zinc-500 shrink-0" />
+          <span>
+            {filteredCount} finding{filteredCount === 1 ? "" : "s"} filtered as low-confidence ({topReasonLabel})
+          </span>
+        </div>
       )}
     </section>
   );
