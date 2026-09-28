@@ -7,7 +7,8 @@ import { BackgroundAnimationCanvas } from "./BackgroundAnimationCanvas";
 import { useAuth } from "./authContext";
 
 const brandMarkPath = "/dashboard/brand/ares-mark.png";
-const brandMascotPath = "/dashboard/brand/ares-mascot.png";
+const brandMascotVideoPath = "/dashboard/brand/ares-dragon-mascot.mp4";
+const brandMascotPosterPath = "/dashboard/brand/ares-dragon-poster.png";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -170,72 +171,26 @@ export function LoginPage() {
           </form>
         </div>
 
-        {/* Minimalist Subtext Footer */}
-        <div className="text-xs text-zinc-500 font-mono">
-          ARES Automated Red Team Engagement System
-        </div>
       </div>
 
-      {/* Right Column: High-Precision Modern Presentation with Living Canvas Motion */}
-      <div className="hidden lg:flex flex-col items-center justify-center p-12 xl:p-16 border-l border-zinc-800/80 bg-[#070709] relative overflow-hidden select-none">
-        {/* Dynamic Architectural Grid & Traveling Light Pulses Canvas */}
-        <BackgroundAnimationCanvas className="opacity-90" />
+      {/* Right Column: Clean Premium Showcase with Living HD Mascot */}
+      <div className="hidden lg:flex flex-col items-center justify-center p-8 xl:p-12 border-l border-zinc-800/80 bg-black relative overflow-hidden select-none">
+        {/* Subtle Architectural Grid & Traveling Light Pulses Canvas */}
+        <BackgroundAnimationCanvas className="opacity-15" />
 
-        {/* Ambient Warmth Glow behind content */}
-        <div className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[32rem] w-[32rem] rounded-full bg-red-950/15 blur-[140px]" />
-
-        {/* ARES Cyber Dragon Mascot with Tastefully Lowered Opacity */}
-        <div className="pointer-events-none absolute -right-6 -bottom-8 w-[520px] xl:w-[600px] select-none opacity-35 transition-opacity duration-700">
-          <img
-            src={brandMascotPath}
-            alt="ARES Dragon Mascot"
-            className="w-full h-auto object-contain drop-shadow-[0_0_60px_rgba(220,38,38,0.3)]"
-          />
-        </div>
-
-        {/* Centerpiece Content */}
-        <div className="relative z-10 w-full max-w-md space-y-8">
-          {/* Typography */}
-          <div>
-            <h2 className="text-3xl xl:text-4xl font-semibold text-white tracking-tight leading-tight">
-              Offensive security,
-              <br />
-              <span className="text-zinc-300 font-normal">engineered for precision.</span>
-            </h2>
-            <p className="text-sm text-zinc-300/80 leading-relaxed mt-3 max-w-sm">
-              Automate multi-stage attack chains with deterministic execution and full audit fidelity.
-            </p>
-          </div>
-
-          {/* Clean Enterprise Specification Card */}
-          <div className="w-full max-w-sm rounded-lg border border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md p-5 shadow-2xl">
-            <div className="text-xs font-mono font-medium text-zinc-300 tracking-wider pb-3 border-b border-zinc-800/80 uppercase">
-              System Environment
-            </div>
-
-            <div className="divide-y divide-zinc-800/60 text-xs font-mono">
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-400">Architecture</span>
-                <span className="text-zinc-200">Distributed Core</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-400">Policy Engine</span>
-                <span className="text-zinc-200">Deterministic Fail-Closed</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-400">Isolation Layer</span>
-                <span className="text-zinc-200">Hermetic Enclave</span>
-              </div>
-              <div className="flex items-center justify-between py-2.5">
-                <span className="text-zinc-400">Audit Protocol</span>
-                <span className="text-zinc-200">Cryptographic Verification</span>
-              </div>
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-zinc-800/60 flex items-center justify-between text-[11px] font-mono text-zinc-400">
-              <span>Host: 127.0.0.1</span>
-              <span>API Gateway: 8080</span>
-            </div>
+        {/* Centerpiece Hero Mascot */}
+        <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-2xl px-4">
+          <div className="relative w-full aspect-video flex items-center justify-center">
+            <video
+              src={brandMascotVideoPath}
+              poster={brandMascotPosterPath}
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="auto"
+              className="w-full h-auto max-h-[78vh] object-contain select-none pointer-events-none transition-transform duration-700"
+            />
           </div>
         </div>
       </div>
