@@ -21,7 +21,7 @@ The documentation is organized into six functional pillars:
 ### Attack Modules and Module SDK
 | Document | Description | Target Audience |
 | --- | --- | --- |
-| [modules.md](modules.md) | Comprehensive catalog of all 64 attack modules and capability definitions. | Operators, Red Team |
+| [modules.md](modules.md) | Comprehensive catalog of all 66 active attack modules (70 total) and capability definitions. | Operators, Red Team |
 | [MODULE_GUIDE.md](MODULE_GUIDE.md) | Operator quickstart for executing and chaining modules across target hosts. | Operators |
 | [module-development.md](module-development.md) | Step-by-step developer guide for writing, testing with `ModuleTestHarness`, and signing attack modules. | Module Developers |
 | [module_sdk.md](module_sdk.md) | Modern v2 SDK specification (`BaseModule[P, R]`, Pydantic v2 params, testing harness, and `AresClient`). | Developers, Integrators |
@@ -40,7 +40,7 @@ The documentation is organized into six functional pillars:
 | Document | Description | Target Audience |
 | --- | --- | --- |
 | [frontend.md](frontend.md) | React 18 + Vite dashboard architecture, Web Locks, session management, and state coordination. | Frontend Engineers |
-| [dashboard-guide.md](dashboard-guide.md) | Complete operational cockpit guide: campaigns, modules, telemetry, and live telemetry. | Red Team Operators |
+| [dashboard-guide.md](dashboard-guide.md) | Complete operational cockpit guide: campaigns, modules, tactical pivot graph & beacon console, and live telemetry. | Red Team Operators |
 
 ### Release and Community
 | Document | Description | Target Audience |
@@ -50,7 +50,7 @@ The documentation is organized into six functional pillars:
 ### Research Tracks and Architecture RFCs
 | Document | Description | Target Audience |
 | --- | --- | --- |
-| [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001: Cross-platform Active Directory post-exploitation, SSSD cache harvesting, Kerberos ccache extraction, and module specifications. | Offensive Researchers, Red Team |
+| [linux-active-directory-tradecraft.md](research/linux-active-directory-tradecraft.md) | RFC 001 (Implemented): Cross-platform Linux Active Directory post-exploitation suite (SSSD cache harvesting, Kerberos ccache extraction, keytab abuse, Samba secrets, ticket converter). | Offensive Researchers, Red Team |
 
 ---
 
@@ -80,7 +80,7 @@ ARES decouples policy enforcement, orchestration, data storage, and presentation
         |                                                 |
 +------------------------------+        +---------------------------------+
 |      ATTACK MODULES          |        |        PERSISTENCE LAYER        |
-|  64 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
+|  69 Built-in Attack Modules  |        |  AresDatabase (SQLite / PG)     |
 |  81 Capability Bindings      |        |  AES-256-GCM Vault Encryption   |
 |  Safe Preview & Execution    |        |  Alembic Migrations (Head 0011) |
 +------------------------------+        +---------------------------------+
