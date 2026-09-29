@@ -64,8 +64,12 @@ async def _require_dashboard_auth(
                             raise HTTPException(status_code=401, detail="Token revoked")
                 except HTTPException:
                     raise
-                except Exception:
-                    pass  # DB unavailable - still accept if token signature valid
+                except Exception as exc:
+                    logger.warning("dashboard_auth_revocation_check_failed", error=str(exc))
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Authentication service temporarily unavailable: cannot verify token revocation status.",
+                    )
             return
 
     # Check X-API-Key header
@@ -596,10 +600,16 @@ async def api_workers(_auth: None = Depends(_require_dashboard_auth)) -> dict[st
 
 @dashboard_app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket) -> None:
-    # Auth via query param token (WebSocket cannot send Authorization header before connect)
+    # Auth via Authorization header first, fallback to query param
     from ares.core.config import get_settings
     from ares.core.security import decode_access_token
-    token = websocket.query_params.get("token")
+    token = None
+    auth_header = websocket.headers.get("authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+    if not token:
+        token = websocket.query_params.get("token")
+
     if not token:
         await websocket.close(code=4001, reason="Authentication required")
         return
@@ -608,6 +618,21 @@ async def websocket_live(websocket: WebSocket) -> None:
     if not payload:
         await websocket.close(code=4001, reason="Invalid token")
         return
+
+    # Check token revocation against shared DB
+    jti = payload.get("jti")
+    if jti:
+        shared_db = getattr(dashboard_app.state, "db", None)
+        if shared_db is not None:
+            try:
+                if await shared_db.is_access_token_revoked(jti):
+                    await websocket.close(code=4001, reason="Token revoked")
+                    return
+            except Exception as db_exc:
+                logger.warning("dashboard_ws_revocation_check_failed", error=str(db_exc))
+                await websocket.close(code=4003, reason="Revocation check unavailable")
+                return
+
     await websocket.accept()
     _live_connections.append(websocket)
     logger.info("dashboard_ws_connect", total=len(_live_connections))

@@ -3583,29 +3583,34 @@ class ExecutionLifecycleStore:
             return None
         try:
             from ares.modules.descriptors import (
+                get_descriptor,
                 prepare_admission_parameters,
-                require_descriptor,
             )
 
-            descriptor = require_descriptor(intent.module_id)
-            if ExecutionLifecycleStore._raw_credential_material_present(
-                intent.raw_parameters,
-                descriptor.parameter_fields,
-            ):
-                return None
-            canonical, extracted = prepare_admission_parameters(
-                intent.module_id, intent.raw_parameters
-            )
-            values = {key: canonical.values[key] for key in sorted(canonical.values)}
-            destination_refs = tuple(
-                sorted(
-                    {
-                        (item.kind.value, str(item.value).strip().lower())
-                        for item in extracted
-                        if str(item.value).strip()
-                    }
+            descriptor = get_descriptor(intent.module_id)
+            if descriptor is not None:
+                if ExecutionLifecycleStore._raw_credential_material_present(
+                    intent.raw_parameters,
+                    descriptor.parameter_fields,
+                ):
+                    return None
+                canonical, extracted = prepare_admission_parameters(
+                    intent.module_id, intent.raw_parameters
                 )
-            )
+                values = {key: canonical.values[key] for key in sorted(canonical.values)}
+                destination_refs = tuple(
+                    sorted(
+                        {
+                            (item.kind.value, str(item.value).strip().lower())
+                            for item in extracted
+                            if str(item.value).strip()
+                        }
+                    )
+                )
+            else:
+                # Dynamic / plugin modules without formal Phase 5C descriptor (e.g. RFC-001 modules)
+                values = {key: intent.raw_parameters[key] for key in sorted(intent.raw_parameters)}
+                destination_refs = ()
             canonical_json = json.dumps(
                 values,
                 sort_keys=True,

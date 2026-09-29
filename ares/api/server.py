@@ -1330,11 +1330,13 @@ async def logout_all(
 
 
 def _validate_password_complexity(v: str) -> str:
-    """Enforce password complexity: min 12 chars, upper+lower+digit+special."""
+    """Enforce password complexity: min 12 chars, upper+lower+digit+special, max 72 bytes."""
     import re
 
     if len(v) < 12:
         raise ValueError("Password must be at least 12 characters")
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Password cannot exceed 72 UTF-8 bytes (bcrypt limit)")
     if not re.search(r"[A-Z]", v):
         raise ValueError("Password must contain at least one uppercase letter")
     if not re.search(r"[a-z]", v):
@@ -1348,7 +1350,7 @@ def _validate_password_complexity(v: str) -> str:
 
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
-    password: str = Field(..., min_length=12, max_length=128)
+    password: str = Field(..., min_length=12, max_length=72)
     role: str = Field("reporter")
 
     @field_validator("password")
@@ -1388,7 +1390,7 @@ async def register(
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(..., min_length=12, max_length=128)
+    new_password: str = Field(..., min_length=12, max_length=72)
 
     @field_validator("new_password")
     @classmethod

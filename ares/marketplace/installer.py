@@ -385,7 +385,7 @@ class ModuleInstaller:
                 "success":  True,
                 "version":  manifest.version,
                 "path":     str(manifest.plugin_dir) if manifest.plugin_dir else "",
-                "verified": verify_signature,
+                "verified": manifest.verified,
                 "module_id": manifest.module_id,
                 "name":     manifest.name,
             }
@@ -504,9 +504,52 @@ class ModuleInstaller:
                 urllib.request.urlretrieve(url, str(local))
             except Exception as e:
                 raise ConnectionError(f"Failed to download {url}: {e}") from e
-            # Verify BEFORE installing - if hash fails, file never touches plugin dir
+            # Verify BEFORE installing - fail-closed cryptographic check
+            is_cryptographically_verified = False
             if verify_signature and local.exists():
-                # Read manifest from tmp file to get sha256 without installing
+                # 1. Try to fetch detached signature (.sig) if available
+                sig_file = local.with_suffix(local.suffix + ".sig")
+                try:
+                    import httpx
+                    with httpx.Client(follow_redirects=False, timeout=10) as client:
+                        sig_resp = client.get(f"{url}.sig")
+                        if sig_resp.status_code == 200 and sig_resp.content:
+                            sig_file.write_bytes(sig_resp.content)
+                except Exception:
+                    pass
+
+                # If detached .sig exists, verify via Ed25519 subsystem
+                if sig_file.exists():
+                    try:
+                        from ares.core.signing import ModuleVerifier, SigningPolicy
+                        verifier = ModuleVerifier(policy=SigningPolicy.REQUIRE_SIGNED)
+                        v_res = verifier.verify_file(local)
+                        if v_res.blocked or not v_res.trusted:
+                            raise ValueError(
+                                f"Module from {url} failed cryptographic signature verification: "
+                                f"{v_res.error or 'untrusted signature'}. File was NOT installed."
+                            )
+                        is_cryptographically_verified = True
+                        logger.info("marketplace_sig_verified", url=url, key_id=v_res.key_id)
+                    except ValueError:
+                        raise
+                    except Exception as sig_err:
+                        logger.warning("marketplace_sig_check_error", error=str(sig_err))
+
+                # 2. Try to fetch sidecar manifest.json if present
+                sidecar_manifest = local.parent / "manifest.json"
+                if not sidecar_manifest.exists() and "/" in url:
+                    try:
+                        manifest_url = url.rsplit("/", 1)[0] + "/manifest.json"
+                        import httpx
+                        with httpx.Client(follow_redirects=False, timeout=10) as client:
+                            m_resp = client.get(manifest_url)
+                            if m_resp.status_code == 200 and m_resp.content:
+                                sidecar_manifest.write_bytes(m_resp.content)
+                    except Exception:
+                        pass
+
+                # Read manifest from tmp file or sidecar to check sha256
                 _tmp_manifest = self._read_manifest_from_file(local)
                 if _tmp_manifest and _tmp_manifest.get("sha256"):
                     import hashlib
@@ -519,16 +562,19 @@ class ModuleInstaller:
                             f"got {actual_hash[:16]}... "
                             "File was NOT installed. Use verify_signature=False to override (not recommended)."
                         )
-                else:
-                    logger.warning(
-                        "marketplace_no_signature: module has no sha256 in manifest "
-                        " -  cannot verify integrity. Set verify_signature=False to silence.",
-                        url=url,
+                    is_cryptographically_verified = True
+
+                # Fail-closed: verify_signature=True requires an authentic signature or manifest hash
+                if not is_cryptographically_verified:
+                    raise ValueError(
+                        f"Module from {url} has no cryptographic signature (.sig) or manifest SHA-256 hash. "
+                        "Refusing to install unverified module under verify_signature=True (fail-closed). "
+                        "Provide a valid signature/manifest, or explicitly pass verify_signature=False to override."
                     )
+
             manifest = self._install_single_file(local, source_url=url, force=force)
-            # Post-install: set verified flag if hash matched above
-            if verify_signature and manifest.sha256:
-                manifest.verified = True
+            # Post-install: set verified flag only if cryptographic verification passed
+            manifest.verified = is_cryptographically_verified
             return manifest
 
     def _install_github(self, spec: str, force: bool,
@@ -536,19 +582,28 @@ class ModuleInstaller:
         """
         spec formats:
           github.com/user/repo
-          github.com/user/repo/blob/main/module.py
+          github.com/user/repo@v1.0.0
+          github.com/user/repo@<commit_sha>
+          github.com/user/repo/blob/<ref>/module.py
         """
         spec = spec.replace("github.com/", "")
-        parts = spec.split("/")
+        ref = "main"
+        if "@" in spec:
+            spec, ref = spec.split("@", 1)
 
+        parts = spec.split("/")
         if len(parts) >= 2:
             user, repo = parts[0], parts[1]
-            file_path  = "/".join(parts[4:]) if len(parts) > 4 else f"{repo}.py"
-            raw_url    = f"https://raw.githubusercontent.com/{user}/{repo}/main/{file_path}"
+            if len(parts) > 2 and parts[2] in ("blob", "tree", "commit") and len(parts) > 3:
+                ref = parts[3]
+                file_path = "/".join(parts[4:]) if len(parts) > 4 else f"{repo}.py"
+            else:
+                file_path = "/".join(parts[2:]) if len(parts) > 2 else f"{repo}.py"
+            raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/{ref}/{file_path}"
         else:
             raise ValueError(f"Invalid GitHub spec: {spec}")
 
-        logger.info("marketplace_github_install", url=raw_url)
+        logger.info("marketplace_github_install", url=raw_url, ref=ref)
         return self._install_url(raw_url, force, verify_signature=verify_signature)
 
     def _install_community(self, short_name: str, force: bool) -> ModuleManifest:

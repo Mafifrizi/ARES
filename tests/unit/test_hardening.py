@@ -663,6 +663,61 @@ class TestMarketplaceAndCrackerHardening:
         with pytest.raises(ValueError, match="missing hostname"):
             installer._install_url("https://", force=False)
 
+    def test_marketplace_installer_fail_closed_without_signature(self, monkeypatch):
+        """When verify_signature=True, modules without signature or hash must fail-closed."""
+        from ares.marketplace.installer import ModuleInstaller
+        import httpx
+
+        installer = ModuleInstaller()
+
+        # Mock httpx to return sample module content for .py and 404 for .sig / manifest
+        def mock_get(self, url, *args, **kwargs):
+            req = httpx.Request("GET", url)
+            if url.endswith(".py"):
+                return httpx.Response(
+                    200, request=req, content=b"class DummyModule:\n    MODULE_ID = 'test.dummy'\n"
+                )
+            return httpx.Response(404, request=req)
+
+        monkeypatch.setattr(httpx.Client, "get", mock_get)
+
+        with pytest.raises(ValueError, match="Refusing to install unverified module under verify_signature=True"):
+            installer._install_url("https://example.com/dummy.py", force=False, verify_signature=True)
+
+    def test_marketplace_accurate_verified_status(self, tmp_path, monkeypatch):
+        """Status returned by install_as_dict must match manifest.verified, not request flag."""
+        from ares.marketplace.installer import ModuleInstaller, ModuleManifest
+
+        installer = ModuleInstaller()
+        mock_manifest = ModuleManifest(
+            module_id="test.dummy",
+            name="test_dummy",
+            version="1.0.0",
+            verified=False,  # Unverified
+        )
+        monkeypatch.setattr(installer, "install", lambda *a, **kw: mock_manifest)
+
+        res = installer.install_as_dict("https://example.com/dummy.py", verify_signature=False)
+        assert res["verified"] is False  # Must not return True or request flag!
+
+    def test_marketplace_github_spec_supports_immutable_ref(self, monkeypatch):
+        """GitHub spec with @<ref> must resolve to immutable ref in raw URL."""
+        from ares.marketplace.installer import ModuleInstaller
+
+        installer = ModuleInstaller()
+        captured_url = None
+
+        def mock_install_url(url, force, verify_signature):
+            nonlocal captured_url
+            captured_url = url
+            from ares.marketplace.installer import ModuleManifest
+            return ModuleManifest(module_id="test.gh")
+
+        monkeypatch.setattr(installer, "_install_url", mock_install_url)
+
+        installer._install_github("github.com/user/repo@v2.1.0", force=False)
+        assert captured_url == "https://raw.githubusercontent.com/user/repo/v2.1.0/repo.py"
+
     def test_cracker_worker_cross_platform_tmpdir(self, tmp_path):
         import tempfile
         from unittest.mock import MagicMock

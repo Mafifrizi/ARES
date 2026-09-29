@@ -115,6 +115,7 @@ class ScopeFirewall:
 
         # Fast IP lookup cache (bounded to 1024 entries)
         self._ip_cache: dict[str, bool] = {}
+        self._pinned_ip_cache: dict[str, str] = {}
         self._blocked_attempts: list[dict[str, Any]] = []
 
     @property
@@ -152,64 +153,73 @@ class ScopeFirewall:
 
         return False
 
-    def is_allowed_address(self, address: Any) -> bool:
-        """Check if destination address is permitted under campaign scope."""
-        host, _ = self._extract_host_and_port(address)
+    def resolve_and_pin_address(self, address: Any) -> tuple[bool, Any]:
+        """Check if destination address is permitted and return pinned address for DNS rebinding protection."""
+        host, port = self._extract_host_and_port(address)
         if not host:
-            return False
+            return False, address
 
         lowered_host = host.lower()
 
         # 1. Internal loopback IPC protection
         if self.allow_loopback_ipc and lowered_host in _LOOPBACK_HOSTS:
-            return True
+            return True, address
 
-        # 2. Cloud module domain whitelist
+        # 2. Cloud module domain whitelist (preserves hostname for TLS SNI)
         if self._is_cloud_allowed(lowered_host):
-            return True
+            return True, address
 
-        # 3. Check fast IP cache
-        if lowered_host in self._ip_cache:
-            return self._ip_cache[lowered_host]
-
-        # 4. Check if host is an IP literal
+        # 3. Check if host is an IP literal
         try:
             addr = ipaddress.ip_address(lowered_host)
-            # Loopback IP check
             if self.allow_loopback_ipc and addr.is_loopback:
                 self._ip_cache[lowered_host] = True
-                return True
+                return True, address
 
             in_scope = any(addr in net for net in self._networks)
             if len(self._ip_cache) < 1024:
                 self._ip_cache[lowered_host] = in_scope
-            return in_scope
+            return in_scope, address
         except ValueError:
             pass  # Not an IP literal - proceed to hostname verification
 
+        # 4. Check cached pinned resolution
+        if lowered_host in self._pinned_ip_cache:
+            pinned_ip = self._pinned_ip_cache[lowered_host]
+            if isinstance(address, tuple):
+                if len(address) == 2:
+                    return True, (pinned_ip, address[1])
+                elif len(address) > 2:
+                    return True, (pinned_ip, address[1], *address[2:])
+            return True, pinned_ip
+
+        if lowered_host in self._ip_cache and not self._ip_cache[lowered_host]:
+            return False, address
+
         # 5. Hostname DNS resolution with re-entrancy lock
         if _in_firewall_resolution.get():
-            # Currently inside DNS resolution; allow query to resolver
-            return True
+            return True, address
 
         _token = _in_firewall_resolution.set(True)
         try:
-            # Resolve hostname using getaddrinfo
             results = socket.getaddrinfo(
-                lowered_host, None, socket.AF_UNSPEC, socket.SOCK_STREAM
+                lowered_host, port or 0, socket.AF_UNSPEC, socket.SOCK_STREAM
             )
             if not results:
                 logger.warning("scope_firewall_dns_empty", host=lowered_host)
-                return False
+                if len(self._ip_cache) < 1024:
+                    self._ip_cache[lowered_host] = False
+                return False, address
 
             # Strict verification: All resolved IPs must be in scope
-            resolved_in_scope = False
+            pinned_ip: str | None = None
             for res in results:
                 raw_ip = res[4][0]
                 try:
                     ip_obj = ipaddress.ip_address(raw_ip)
                     if any(ip_obj in net for net in self._networks):
-                        resolved_in_scope = True
+                        if pinned_ip is None:
+                            pinned_ip = raw_ip
                     else:
                         logger.warning(
                             "scope_firewall_dns_resolved_out_of_scope",
@@ -217,31 +227,51 @@ class ScopeFirewall:
                             resolved_ip=raw_ip,
                             scope=self.scope_cidrs,
                         )
-                        resolved_in_scope = False
-                        break
+                        if len(self._ip_cache) < 1024:
+                            self._ip_cache[lowered_host] = False
+                        return False, address
                 except ValueError:
-                    resolved_in_scope = False
-                    break
+                    if len(self._ip_cache) < 1024:
+                        self._ip_cache[lowered_host] = False
+                    return False, address
 
-            if len(self._ip_cache) < 1024:
-                self._ip_cache[lowered_host] = resolved_in_scope
-            return resolved_in_scope
+            if pinned_ip is not None:
+                if len(self._pinned_ip_cache) < 1024:
+                    self._pinned_ip_cache[lowered_host] = pinned_ip
+                if len(self._ip_cache) < 1024:
+                    self._ip_cache[lowered_host] = True
+
+                if isinstance(address, tuple):
+                    if len(address) == 2:
+                        return True, (pinned_ip, address[1])
+                    elif len(address) > 2:
+                        return True, (pinned_ip, address[1], *address[2:])
+                return True, pinned_ip
+
+            return False, address
         except (socket.gaierror, TimeoutError, Exception) as exc:
             logger.warning(
                 "scope_firewall_dns_failed",
                 host=lowered_host,
                 error=str(exc)[:100],
             )
-            # Offline lab / mock environment fallback: allow if explicitly defined in campaign targets/dc/domain
             if lowered_host in self._explicit_hosts:
-                return True
-            return False  # Fail closed
+                return True, address
+            return False, address
         finally:
             _in_firewall_resolution.reset(_token)
 
-    def assert_allowed_address(self, address: Any) -> None:
-        """Assert address is in scope; raises ScopeFirewallBlockError if not."""
-        if not self.is_allowed_address(address):
+    def is_allowed_address(self, address: Any) -> bool:
+        """Check if destination address is permitted under campaign scope."""
+        allowed, _ = self.resolve_and_pin_address(address)
+        return allowed
+
+    def assert_allowed_address(self, address: Any) -> Any:
+        """Assert address is in scope; raises ScopeFirewallBlockError if not.
+        Returns pinned address for DNS rebinding protection.
+        """
+        allowed, pinned = self.resolve_and_pin_address(address)
+        if not allowed:
             host, port = self._extract_host_and_port(address)
             self._blocked_attempts.append(
                 {
@@ -274,11 +304,14 @@ class ScopeFirewall:
                 module_id=self.module_id,
                 scope_cidrs=self.scope_cidrs,
             )
+        return pinned
 
 
 # ── Global Socket & Transport Hooks ──────────────────────────────────────────
 _orig_socket_connect = socket.socket.connect
+_orig_socket_connect_ex = socket.socket.connect_ex
 _orig_socket_sendto = socket.socket.sendto
+_orig_socket_sendmsg = getattr(socket.socket, "sendmsg", None)
 _orig_loop_create_connection = asyncio.base_events.BaseEventLoop.create_connection
 _hooks_installed: bool = False
 
@@ -286,19 +319,58 @@ _hooks_installed: bool = False
 @functools.wraps(_orig_socket_connect)
 def _firewall_socket_connect(self: socket.socket, address: Any) -> None:
     fw = _current_firewall.get()
+    target_address = address
     if fw is not None and not _in_firewall_resolution.get():
-        fw.assert_allowed_address(address)
-    return _orig_socket_connect(self, address)
+        pinned = fw.assert_allowed_address(address)
+        if pinned is not None:
+            target_address = pinned
+    return _orig_socket_connect(self, target_address)
+
+
+@functools.wraps(_orig_socket_connect_ex)
+def _firewall_socket_connect_ex(self: socket.socket, address: Any) -> int:
+    fw = _current_firewall.get()
+    target_address = address
+    if fw is not None and not _in_firewall_resolution.get():
+        pinned = fw.assert_allowed_address(address)
+        if pinned is not None:
+            target_address = pinned
+    return _orig_socket_connect_ex(self, target_address)
 
 
 @functools.wraps(_orig_socket_sendto)
 def _firewall_socket_sendto(self: socket.socket, data: Any, *args: Any) -> int:
     fw = _current_firewall.get()
-    if fw is not None and not _in_firewall_resolution.get():
-        address = args[-1] if args else None
+    new_args = list(args)
+    if fw is not None and not _in_firewall_resolution.get() and new_args:
+        address = new_args[-1]
         if address is not None:
-            fw.assert_allowed_address(address)
-    return _orig_socket_sendto(self, data, *args)
+            pinned = fw.assert_allowed_address(address)
+            if pinned is not None:
+                new_args[-1] = pinned
+    return _orig_socket_sendto(self, data, *new_args)
+
+
+if _orig_socket_sendmsg is not None:
+
+    @functools.wraps(_orig_socket_sendmsg)
+    def _firewall_socket_sendmsg(
+        self: socket.socket, buffers: Any, *args: Any, **kwargs: Any
+    ) -> int:
+        fw = _current_firewall.get()
+        if fw is not None and not _in_firewall_resolution.get():
+            target_addr = kwargs.get("address")
+            if target_addr is None and len(args) >= 3:
+                target_addr = args[2]
+            if target_addr is not None:
+                pinned = fw.assert_allowed_address(target_addr)
+                if "address" in kwargs:
+                    kwargs["address"] = pinned
+                elif len(args) >= 3:
+                    args_list = list(args)
+                    args_list[2] = pinned
+                    args = tuple(args_list)
+        return _orig_socket_sendmsg(self, buffers, *args, **kwargs)
 
 
 @functools.wraps(_orig_loop_create_connection)
@@ -311,10 +383,15 @@ async def _firewall_loop_create_connection(
     **kwargs: Any,
 ) -> tuple[asyncio.Transport, asyncio.Protocol]:
     fw = _current_firewall.get()
+    target_host = host
     if fw is not None and not _in_firewall_resolution.get() and host is not None:
-        fw.assert_allowed_address((host, port or 0))
+        pinned = fw.assert_allowed_address((host, port or 0))
+        if isinstance(pinned, tuple) and len(pinned) >= 2:
+            target_host = pinned[0]
+            if kwargs.get("ssl") and "server_hostname" not in kwargs and isinstance(host, str):
+                kwargs["server_hostname"] = host
     return await _orig_loop_create_connection(
-        self, protocol_factory, host=host, port=port, *args, **kwargs
+        self, protocol_factory, host=target_host, port=port, *args, **kwargs
     )
 
 
@@ -325,7 +402,10 @@ def install_hooks() -> None:
         return
 
     socket.socket.connect = _firewall_socket_connect  # type: ignore[assignment]
-    socket.socket.sendto = _firewall_socket_sendto    # type: ignore[assignment]
+    socket.socket.connect_ex = _firewall_socket_connect_ex  # type: ignore[assignment]
+    socket.socket.sendto = _firewall_socket_sendto  # type: ignore[assignment]
+    if _orig_socket_sendmsg is not None:
+        socket.socket.sendmsg = _firewall_socket_sendmsg  # type: ignore[assignment]
     asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
         _firewall_loop_create_connection
     )
@@ -340,7 +420,10 @@ def uninstall_hooks() -> None:
         return
 
     socket.socket.connect = _orig_socket_connect  # type: ignore[assignment]
-    socket.socket.sendto = _orig_socket_sendto    # type: ignore[assignment]
+    socket.socket.connect_ex = _orig_socket_connect_ex  # type: ignore[assignment]
+    socket.socket.sendto = _orig_socket_sendto  # type: ignore[assignment]
+    if _orig_socket_sendmsg is not None:
+        socket.socket.sendmsg = _orig_socket_sendmsg  # type: ignore[assignment]
     asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
         _orig_loop_create_connection
     )

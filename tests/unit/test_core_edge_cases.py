@@ -980,6 +980,21 @@ class TestSecurityBoundaries:
         assert verify_password("", h) is False
         assert verify_password("correct_password" + "\x00", h) is False  # null terminator
 
+    def test_password_72_byte_limit_no_silent_truncation(self):
+        """Passwords exceeding 72 UTF-8 bytes must raise ValueError, not silently truncate."""
+        from ares.core.security import hash_password, verify_password
+        import pytest
+
+        # 73-character password must raise ValueError on hash
+        long_pass = "A" * 73
+        with pytest.raises(ValueError, match="exceeds bcrypt 72-byte limit"):
+            hash_password(long_pass)
+
+        # verify_password must return False for > 72 bytes
+        valid_hash = hash_password("A" * 70)
+        assert verify_password("A" * 70, valid_hash) is True
+        assert verify_password("A" * 70 + "EXTRA", valid_hash) is False  # No collision!
+
     def test_api_key_prefix_validation(self):
         """API key verification must reject keys without ares_ prefix."""
         # This tests that random strings can't bypass the prefix check

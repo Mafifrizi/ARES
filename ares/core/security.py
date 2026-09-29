@@ -38,14 +38,21 @@ def _get_legacy_salt() -> bytes:
 
 # ── Password hashing ──────────────────────────────────────────────────────────
 # NOTE: Use bcrypt directly - passlib 1.7.4 is incompatible with bcrypt >= 4.0
-# which added an explicit 72-byte limit. We truncate + call bcrypt directly.
+# which added an explicit 72-byte limit. We enforce <= 72 bytes explicitly (fail closed).
 def hash_password(password: str) -> str:
-    pw_bytes = password.encode("utf-8")[:72]
+    pw_bytes = password.encode("utf-8")
+    if len(pw_bytes) > 72:
+        raise ValueError(
+            f"Password length ({len(pw_bytes)} bytes) exceeds bcrypt 72-byte limit. "
+            "Please use a password of 72 UTF-8 bytes or fewer."
+        )
     return _bcrypt.hashpw(pw_bytes, _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    pw_bytes = plain.encode("utf-8")[:72]
+    pw_bytes = plain.encode("utf-8")
+    if len(pw_bytes) > 72:
+        return False
     hashed_bytes = hashed.encode("utf-8") if isinstance(hashed, str) else hashed
     try:
         return _bcrypt.checkpw(pw_bytes, hashed_bytes)

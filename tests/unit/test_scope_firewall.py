@@ -108,6 +108,56 @@ class TestScopeFirewallInterception:
                 s.close()
 
     @pytest.mark.asyncio
+    async def test_socket_connect_ex_intercepted(self, sample_campaign: Campaign):
+        """Regression test: connect_ex must be intercepted and raise ScopeFirewallBlockError when out-of-scope."""
+        async with scope_firewall_guard(sample_campaign, module_id="lateral.ntlm_relay"):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                with pytest.raises(ScopeFirewallBlockError) as exc_info:
+                    s.connect_ex(("1.1.1.1", 445))
+                assert exc_info.value.target_host == "1.1.1.1"
+                assert exc_info.value.target_port == 445
+                assert exc_info.value.module_id == "lateral.ntlm_relay"
+            finally:
+                s.close()
+
+    @pytest.mark.asyncio
+    async def test_socket_sendmsg_intercepted(self, sample_campaign: Campaign):
+        """Regression test: sendmsg (if available on platform) must be intercepted."""
+        if not hasattr(socket.socket, "sendmsg"):
+            pytest.skip("socket.sendmsg not supported on this platform")
+        async with scope_firewall_guard(sample_campaign, module_id="recon.sendmsg"):
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                with pytest.raises(ScopeFirewallBlockError) as exc_info:
+                    s.sendmsg([b"data"], [], 0, ("1.1.1.1", 53))
+                assert exc_info.value.target_host == "1.1.1.1"
+            finally:
+                s.close()
+
+    def test_dns_rebinding_address_pinning(self, sample_campaign: Campaign, monkeypatch):
+        """Verify that DNS resolution pins the validated IP to prevent DNS rebinding."""
+        from ares.core.scope_firewall import ScopeFirewall
+
+        fw = ScopeFirewall(campaign=sample_campaign, module_id="test.rebinding")
+
+        # Mock getaddrinfo to return 10.0.0.99 (in-scope for 10.0.0.0/24)
+        mock_addrinfo = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.99", 80))
+        ]
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: mock_addrinfo)
+
+        allowed, pinned = fw.resolve_and_pin_address(("rebind-target.internal", 80))
+        assert allowed is True
+        assert pinned == ("10.0.0.99", 80)
+
+        # Subsequent call should return cached pinned IP without re-querying DNS
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: [])
+        allowed2, pinned2 = fw.resolve_and_pin_address(("rebind-target.internal", 80))
+        assert allowed2 is True
+        assert pinned2 == ("10.0.0.99", 80)
+
+    @pytest.mark.asyncio
     async def test_asyncio_create_connection_intercepted(self, sample_campaign: Campaign):
         loop = asyncio.get_running_loop()
         async with scope_firewall_guard(sample_campaign, module_id="async.test"):

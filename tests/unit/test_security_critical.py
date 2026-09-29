@@ -422,6 +422,28 @@ class TestDashboardAuthentication:
 
         _run(_run_test())
 
+    def test_dashboard_auth_fails_closed_when_db_error(self, monkeypatch):
+        """When revocation check database fails, request must return 503 (fail closed), not 200."""
+        from ares.db.database import AresDatabase
+
+        async def mock_create(*a, **kw):
+            raise ConnectionError("Database cluster unreachable")
+
+        monkeypatch.setattr(AresDatabase, "create", mock_create)
+
+        async def _run_test():
+            import httpx
+            from ares.api.dashboard.app import dashboard_app
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=dashboard_app),
+                base_url="http://localhost",
+            ) as c:
+                r = await c.get("/api/campaigns", headers=_auth("alice", "operator"))
+            assert r.status_code == 503
+
+        _run(_run_test())
+
 
 # ══════════════════════════════════════════════════════════════════════
 # TEST CLASS 3 - RBAC ENFORCEMENT PER ROLE
