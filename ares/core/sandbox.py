@@ -617,10 +617,12 @@ class SandboxRunner:
         drop_privileges = self.policy.drop_privileges
         allow_write = self.policy.allow_write
         target_uid = self.policy.sandbox_uid
+        _parent_pid = os.getpid()
 
         def _limits():
-            # 1. Best-effort resource limits
-            if resource is not None:
+            # 1. Best-effort resource limits (only applied in child process after fork)
+            in_child = (os.getpid() != _parent_pid)
+            if resource is not None and in_child:
                 try:
                     resource.setrlimit(resource.RLIMIT_CPU,   (cpu_limit, cpu_limit))
                     resource.setrlimit(resource.RLIMIT_AS,    (mem_bytes, mem_bytes))

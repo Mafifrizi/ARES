@@ -965,7 +965,7 @@ class TestSandboxAndFirewallHardening:
         mock_docker.from_env.return_value = mock_client
         mock_client.containers.run.return_value = b'{"success": true, "findings": [], "extra": {}}'
 
-        monkeypatch.setattr("sys.modules", {**sys.modules, "docker": mock_docker})
+        monkeypatch.setitem(sys.modules, "docker", mock_docker)
 
         res = asyncio.run(runner._run_docker("test.module", {}, "camp-123"))
         assert res.success is True
@@ -1035,6 +1035,42 @@ class TestSecurityBoundariesAndLifecycle:
     - OSFirewallController transactional state machine & rollback
     - Defense-in-depth write barrier in subprocess wrapper
     """
+
+    @pytest.fixture(autouse=True)
+    def _protect_test_process_limits(self, monkeypatch):
+        """Prevent in-process unit tests on Linux from mutating pytest runner's own OS rlimits."""
+        mock_resource = MagicMock()
+        monkeypatch.setattr("ares.core.sandbox.resource", mock_resource)
+
+    def test_preexec_rlimits_only_apply_in_forked_child(self, monkeypatch):
+        """
+        Verify that _limits() never mutates parent process rlimits when invoked
+        directly in-process, but calls setrlimit when running in a forked child.
+        """
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(cpu_time_s=15, memory_mb=128, allow_network=True, allow_write=False)
+        runner = SandboxRunner(policy=policy)
+        mock_res = MagicMock()
+        monkeypatch.setattr("ares.core.sandbox.resource", mock_res)
+
+        preexec = runner._make_preexec_fn()
+        assert preexec is not None
+
+        # 1. Direct in-process call in parent: setrlimit must NOT be called
+        preexec()
+        assert mock_res.setrlimit.call_count == 0
+
+        # 2. In forked child (simulated PID change): setrlimit MUST be called
+        parent_pid = os.getpid()
+        monkeypatch.setattr(os, "getpid", lambda: parent_pid + 999)
+        preexec()
+        assert mock_res.setrlimit.call_count >= 4
+        # Verify RLIMIT_CPU, RLIMIT_AS, RLIMIT_NPROC, RLIMIT_NOFILE, RLIMIT_FSIZE
+        calls = [c[0] for c in mock_res.setrlimit.call_args_list]
+        assert (mock_res.RLIMIT_CPU, (15, 15)) in calls
+        assert (mock_res.RLIMIT_AS, (128 * 1024 * 1024, 128 * 1024 * 1024)) in calls
+        assert (mock_res.RLIMIT_FSIZE, (0, 0)) in calls
 
     def test_subprocess_allow_network_false_fails_closed(self, monkeypatch):
         """
@@ -1742,7 +1778,7 @@ class TestPostFed3098SecurityBoundaryProof:
         mock_client = MagicMock()
         mock_docker.from_env.return_value = mock_client
         mock_client.containers.run.return_value = b'{"success": true, "findings": [], "extra": {}}'
-        monkeypatch.setattr("sys.modules", {**sys.modules, "docker": mock_docker})
+        monkeypatch.setitem(sys.modules, "docker", mock_docker)
 
         result = asyncio.run(runner.run_module("test.module", {}, "camp-123"))
         assert result.success is True
@@ -2225,7 +2261,7 @@ class TestPostFed3098SecurityBoundaryProof:
         mock_client = MagicMock()
         mock_docker.from_env.return_value = mock_client
         mock_client.containers.run.return_value = b'{"success": true, "findings": [], "extra": {}}'
-        monkeypatch.setattr("sys.modules", {**sys.modules, "docker": mock_docker})
+        monkeypatch.setitem(sys.modules, "docker", mock_docker)
 
         res = asyncio.run(runner._run_docker("test.module", {}, "camp-123"))
         assert res.success is True
