@@ -297,32 +297,59 @@ class SandboxRunner:
 
             wrapper = self._build_wrapper_script(use_seccomp)
             script_path = os.path.join(tmpdir, "runner.py")
-            with open(script_path, "w") as f:
+            with open(script_path, "w", encoding="utf-8") as f:
                 f.write(wrapper)
 
             preexec = self._make_preexec_fn() if os.name != "nt" else None
 
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, script_path,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                preexec_fn=preexec,
-                cwd=tmpdir,
+            # If drop_privileges is requested on Linux while running as root, the parent
+            # orchestrator installs the UID-based OS firewall rules before spawning the child,
+            # ensuring that the child is restricted by Netfilter the instant it drops privileges.
+            parent_uid_firewall = None
+            if os.name != "nt" and self.policy.drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
+                try:
+                    import pwd
+                    parent_uid_firewall = pwd.getpwnam("nobody").pw_uid
+                except Exception:
+                    parent_uid_firewall = 65534
+
+            from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+            from ares.core.scope_firewall import scope_firewall_guard
+
+            parent_scope = [ScopeEntry(cidr=c) for c in _scope_cidrs] if self.policy.allow_network else []
+            parent_campaign = Campaign(
+                id=campaign_id or str(uuid.uuid4()),
+                name="sandbox-subprocess-parent",
+                scope=parent_scope,
+                noise_profile=NoiseProfile.NORMAL,
             )
 
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(
-                    proc.communicate(payload.encode()),
-                    timeout=self.policy.timeout_s,
+            async with scope_firewall_guard(
+                campaign=parent_campaign,
+                enable_os_firewall=(parent_uid_firewall is not None),
+                uid_owner=parent_uid_firewall,
+            ):
+                proc = await asyncio.create_subprocess_exec(
+                    sys.executable, script_path,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    preexec_fn=preexec,
+                    cwd=tmpdir,
                 )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return SandboxResult(
-                    module_id=module_id, sandbox_tier=IsolationTier.SUBPROCESS,
-                    success=False, error=f"Sandbox timeout ({self.policy.timeout_s}s)",
-                )
+
+                try:
+                    stdout_b, stderr_b = await asyncio.wait_for(
+                        proc.communicate(payload.encode()),
+                        timeout=self.policy.timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return SandboxResult(
+                        module_id=module_id, sandbox_tier=IsolationTier.SUBPROCESS,
+                        success=False, error=f"Sandbox timeout ({self.policy.timeout_s}s)",
+                    )
 
             stdout = stdout_b.decode(errors="replace")
             stderr = stderr_b.decode(errors="replace")
@@ -533,20 +560,30 @@ class SandboxRunner:
             "params      = payload[\"params\"]\n"
             "campaign_id = payload.get(\"campaign_id\", \"\")\n"
             "\n# ── Defense-in-depth: Python-level write hooks (when allow_write=False) ──\n"
+            "# Classification: DEFENSE-IN-DEPTH for Python stdlib. Complete filesystem sandboxing\n"
+            "# requires the DOCKER tier (read_only=True rootfs mount).\n"
             "_allow_write = payload.get(\"allow_write\", False)\n"
             "_tmpdir = payload.get(\"tmpdir\", \"\")\n"
             "if not _allow_write and _tmpdir:\n"
             "    import builtins\n"
+            "    def _is_contained_in_sandbox(target_path, sandbox_dir):\n"
+            "        try:\n"
+            "            real_sandbox = os.path.realpath(sandbox_dir)\n"
+            "            target_str = str(target_path)\n"
+            "            if not os.path.exists(target_str):\n"
+            "                parent = os.path.dirname(target_str) or \".\"\n"
+            "                real_target = os.path.join(os.path.realpath(parent), os.path.basename(target_str))\n"
+            "            else:\n"
+            "                real_target = os.path.realpath(target_str)\n"
+            "            return os.path.commonpath([real_sandbox, real_target]) == real_sandbox\n"
+            "        except (ValueError, OSError, TypeError):\n"
+            "            return False\n"
+            "\n"
             "    _orig_open = builtins.open\n"
-            "    _tmpdir_abs = os.path.abspath(_tmpdir)\n"
             "    def _sandboxed_open(file, mode=\"r\", *args, **kwargs):\n"
             "        if any(m in mode for m in (\"w\", \"a\", \"+\", \"x\")):\n"
-            "            try:\n"
-            "                target_path = os.path.abspath(str(file))\n"
-            "                if not target_path.startswith(_tmpdir_abs):\n"
-            "                    raise PermissionError(f\"[Sandbox] Write prohibited outside sandbox directory: {file}\")\n"
-            "            except (TypeError, ValueError):\n"
-            "                pass\n"
+            "            if not _is_contained_in_sandbox(file, _tmpdir):\n"
+            "                raise PermissionError(f\"[Sandbox] Write prohibited outside sandbox directory: {file}\")\n"
             "        return _orig_open(file, mode, *args, **kwargs)\n"
             "    builtins.open = _sandboxed_open\n"
             "\n"
@@ -560,12 +597,8 @@ class SandboxRunner:
             "            getattr(os, \"O_APPEND\", 1024)\n"
             "        )\n"
             "        if flags & write_flags:\n"
-            "            try:\n"
-            "                target_path = os.path.abspath(str(path))\n"
-            "                if not target_path.startswith(_tmpdir_abs):\n"
-            "                    raise PermissionError(f\"[Sandbox] os.open write prohibited outside sandbox directory: {path}\")\n"
-            "            except (TypeError, ValueError):\n"
-            "                pass\n"
+            "            if not _is_contained_in_sandbox(path, _tmpdir):\n"
+            "                raise PermissionError(f\"[Sandbox] os.open write prohibited outside sandbox directory: {path}\")\n"
             "        return _orig_os_open(path, flags, *args, **kwargs)\n"
             "    os.open = _sandboxed_os_open\n"
             "\n"
@@ -608,7 +641,7 @@ class SandboxRunner:
             "        module   = module_cls(settings=settings, campaign=campaign, noise=noise)\n"
             "        from ares.core.scope_firewall import scope_firewall_guard\n"
             "        _current_uid = getattr(os, 'getuid', lambda: None)()\n"
-            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id, uid_owner=_current_uid):\n"
+            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id, enable_os_firewall=False, uid_owner=_current_uid):\n"
             "            findings, extra = await module.run(**params)\n"
             "        return {\n"
             "            \"success\":  True,\n"

@@ -594,7 +594,9 @@ def compute_out_of_scope_cidrs(
 class OSFirewallState(str, Enum):
     UNINITIALIZED = "UNINITIALIZED"
     APPLYING = "APPLYING"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
     VERIFIED_ACTIVE = "VERIFIED_ACTIVE"
+    CLEANUP_PENDING = "CLEANUP_PENDING"
     INACTIVE = "INACTIVE"
 
 
@@ -617,9 +619,10 @@ class OSFirewallController:
          NOTE: `--uid-owner` is a UID-wide firewall boundary affecting all processes sharing that UID,
          not process-tree or namespace isolation.
       3. Transactional Safety & State Machine:
-         Transitions: UNINITIALIZED -> APPLYING -> VERIFIED_ACTIVE -> INACTIVE.
-         If any subrule in a transaction fails, all created rules in that transaction are rolled back
-         immediately in reverse order, leaving zero lingering or partial firewall state.
+         Transitions: UNINITIALIZED -> APPLYING -> (verify in OS) -> VERIFIED_ACTIVE -> INACTIVE.
+         If any subrule fails or fails OS verification, all applied rules in that transaction are rolled
+         back immediately in reverse order. If cleanup of any rule fails, the rule is retained in
+         state tracking, transitioning to CLEANUP_PENDING rather than falsely claiming INACTIVE.
     """
 
     _active_rules: set[str] = set()
@@ -648,6 +651,7 @@ class OSFirewallController:
             active_count = len(cls._active_rules)
             rule_list = sorted(list(cls._active_rules))
             state_val = cls._state.value
+            cleanup_pending = cls._state == OSFirewallState.CLEANUP_PENDING
 
         engine = (
             "Windows Defender Firewall (netsh)"
@@ -660,10 +664,45 @@ class OSFirewallController:
             "elevated": elevated,
             "state": state_val,
             "os_level_active": elevated and active_count > 0 and cls._state == OSFirewallState.VERIFIED_ACTIVE,
+            "cleanup_pending": cleanup_pending,
             "active_rules_count": active_count,
             "active_rules": rule_list,
             "fallback_mode": "In-Process Transport Socket Interception",
         }
+
+    @classmethod
+    def _verify_subrules(cls, sub_rules: list[tuple[list[str], list[str]]]) -> bool:
+        """Query kernel/OS packet filter directly to verify that all applied rules exist in kernel state."""
+        for apply_cmd, _ in sub_rules:
+            try:
+                if sys.platform == "win32":
+                    sub_name = None
+                    for arg in apply_cmd:
+                        if arg.startswith("name="):
+                            sub_name = arg.split("=", 1)[1]
+                            break
+                    if not sub_name:
+                        return False
+                    check_cmd = ["netsh", "advfirewall", "firewall", "show", "rule", f"name={sub_name}"]
+                    res = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
+                    if res.returncode != 0 or "no rules match" in res.stdout.lower():
+                        logger.warning("os_firewall_verification_failed_windows", sub_rule=sub_name, output=res.stdout.strip())
+                        return False
+                elif sys.platform.startswith("linux"):
+                    bin_name = apply_cmd[0]
+                    # apply_cmd format: [bin, "-I", "OUTPUT", pos, *spec]
+                    if len(apply_cmd) >= 4 and apply_cmd[1] == "-I":
+                        check_cmd = [bin_name, "-C", apply_cmd[2]] + apply_cmd[4:]
+                    else:
+                        check_cmd = [bin_name, "-C", "OUTPUT"] + apply_cmd[3:]
+                    res = subprocess.run(check_cmd, capture_output=True, text=True, timeout=5)
+                    if res.returncode != 0:
+                        logger.warning("os_firewall_verification_failed_linux", cmd=check_cmd, error=res.stderr.strip() or res.stdout.strip())
+                        return False
+            except Exception as exc:
+                logger.warning("os_firewall_verification_exception", error=str(exc))
+                return False
+        return True
 
     @classmethod
     def apply_rules(
@@ -807,16 +846,50 @@ class OSFirewallController:
                 break
 
         if not all_succeeded or len(applied_cleanups) != len(sub_rules):
+            failed_rollbacks = []
             for cleanup_cmd in reversed(applied_cleanups):
                 try:
-                    subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
+                    cres = subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
+                    if cres.returncode != 0:
+                        failed_rollbacks.append(cleanup_cmd)
                 except Exception:
-                    pass
+                    failed_rollbacks.append(cleanup_cmd)
             with cls._lock:
-                cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
+                if failed_rollbacks:
+                    cls._rule_cleanups[rule_name] = failed_rollbacks
+                    cls._active_rules.add(rule_name)
+                    cls._state = OSFirewallState.CLEANUP_PENDING
+                else:
+                    cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
             if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
                 raise ScopeFirewallBlockError(
                     f"[ScopeFirewall] Transactional OS firewall configuration failed for {rule_name}."
+                )
+            return []
+
+        # Explicit Verification Phase: Query actual kernel/OS firewall state directly
+        verified = cls._verify_subrules(sub_rules)
+        if not verified:
+            logger.error("os_firewall_verification_failed_rolling_back", rule=rule_name)
+            failed_rollbacks = []
+            for cleanup_cmd in reversed(applied_cleanups):
+                try:
+                    cres = subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
+                    if cres.returncode != 0:
+                        failed_rollbacks.append(cleanup_cmd)
+                except Exception:
+                    failed_rollbacks.append(cleanup_cmd)
+            with cls._lock:
+                cls._state = OSFirewallState.VERIFICATION_FAILED
+                if failed_rollbacks:
+                    cls._rule_cleanups[rule_name] = failed_rollbacks
+                    cls._active_rules.add(rule_name)
+                    cls._state = OSFirewallState.CLEANUP_PENDING
+                else:
+                    cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
+            if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
+                raise ScopeFirewallBlockError(
+                    f"[ScopeFirewall] OS firewall verification failed for {rule_name}; rolled back."
                 )
             return []
 
@@ -835,23 +908,38 @@ class OSFirewallController:
 
     @classmethod
     def remove_rules(cls, rule_ids: list[str]) -> int:
-        """Remove previously created OS firewall rules using exact recorded cleanups."""
-        removed = 0
-        for rule_name in rule_ids:
-            with cls._lock:
-                cleanups = cls._rule_cleanups.pop(rule_name, None)
-                cls._active_rules.discard(rule_name)
-                if not cls._active_rules:
-                    cls._state = OSFirewallState.INACTIVE
+        """Remove previously created OS firewall rules using exact recorded cleanups.
 
+        State invariant: Rules and cleanup commands are ONLY removed from internal
+        tracking after cleanup has succeeded in the OS. If any cleanup command fails,
+        the rule is retained, state becomes CLEANUP_PENDING, and retry remains possible.
+        """
+        removed = 0
+        with cls._lock:
+            rules_to_process = list(rule_ids)
+
+        for rule_name in rules_to_process:
+            with cls._lock:
+                cleanups = list(cls._rule_cleanups.get(rule_name, []))
+
+            failed_cleanups: list[list[str]] = []
             if cleanups:
                 for cleanup_cmd in reversed(cleanups):
                     try:
                         res = subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
                         if res.returncode == 0:
                             removed += 1
+                        else:
+                            failed_cleanups.append(cleanup_cmd)
+                            logger.warning(
+                                "os_firewall_cleanup_failed",
+                                rule=rule_name,
+                                cmd=cleanup_cmd,
+                                error=res.stderr.strip() or res.stdout.strip(),
+                            )
                     except Exception as exc:
-                        logger.warning("os_firewall_cleanup_failed", rule=rule_name, cmd=cleanup_cmd, error=str(exc))
+                        failed_cleanups.append(cleanup_cmd)
+                        logger.warning("os_firewall_cleanup_exception", rule=rule_name, cmd=cleanup_cmd, error=str(exc))
             else:
                 try:
                     if sys.platform == "win32":
@@ -859,6 +947,8 @@ class OSFirewallController:
                         res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                         if res.returncode == 0:
                             removed += 1
+                        else:
+                            failed_cleanups.append(cmd)
                     elif sys.platform.startswith("linux"):
                         for suffix in ("_lo", "_scope", "_drop", ""):
                             comment = f"{rule_name}{suffix}"
@@ -870,13 +960,31 @@ class OSFirewallController:
                 except Exception as exc:
                     logger.warning("os_firewall_remove_fallback_failed", rule=rule_name, error=str(exc))
 
+            with cls._lock:
+                if failed_cleanups:
+                    cls._rule_cleanups[rule_name] = failed_cleanups
+                    cls._active_rules.add(rule_name)
+                    cls._state = OSFirewallState.CLEANUP_PENDING
+                    logger.warning(
+                        "os_firewall_rule_cleanup_incomplete_retained",
+                        rule=rule_name,
+                        remaining_commands=len(failed_cleanups),
+                    )
+                else:
+                    cls._rule_cleanups.pop(rule_name, None)
+                    cls._active_rules.discard(rule_name)
+                    if not cls._active_rules:
+                        cls._state = OSFirewallState.INACTIVE
+                    elif cls._state != OSFirewallState.CLEANUP_PENDING:
+                        cls._state = OSFirewallState.VERIFIED_ACTIVE
+
         if removed > 0:
             logger.info("os_firewall_rules_removed", count=removed)
         return removed
 
     @classmethod
     def cleanup_all(cls) -> None:
-        """Emergency cleanup handler executed at exit to guarantee zero orphaned OS rules."""
+        """Emergency cleanup handler executed at exit to retry and guarantee zero orphaned OS rules."""
         with cls._lock:
             rules_to_clean = list(cls._active_rules)
         if rules_to_clean:

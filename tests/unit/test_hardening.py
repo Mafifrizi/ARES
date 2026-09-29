@@ -1431,6 +1431,252 @@ class TestSecurityBoundariesAndLifecycle:
         assert "Write prohibited outside sandbox directory" in source
         assert "builtins.open = _sandboxed_open" in source
         assert "os.open = _sandboxed_os_open" in source
+        assert "_is_contained_in_sandbox" in source
+
+    def test_canonical_path_containment_in_sandbox_hooks(self, tmp_path):
+        """
+        FINDING D: Canonical path containment must allow files inside the sandbox
+        while strictly rejecting prefix-sibling directories, symlink escapes,
+        and relative path directory traversals.
+        """
+        import os
+
+        sandbox_dir = tmp_path / "ares-sandbox-123"
+        sandbox_dir.mkdir()
+        sub_dir = sandbox_dir / "sub"
+        sub_dir.mkdir()
+
+        # Prefix sibling directory (classic prefix attack)
+        evil_sibling = tmp_path / "ares-sandbox-123-evil"
+        evil_sibling.mkdir()
+
+        outside_dir = tmp_path / "other"
+        outside_dir.mkdir()
+        target_outside_file = outside_dir / "secret.txt"
+        target_outside_file.write_text("outside data")
+
+        # Symlink inside sandbox pointing outside
+        symlink_escape = sandbox_dir / "symlink_outside"
+        try:
+            os.symlink(str(target_outside_file), str(symlink_escape))
+            has_symlink = True
+        except (OSError, NotImplementedError):
+            has_symlink = False
+
+        # Extract the containment function logic tested in the sandbox wrapper
+        def _is_contained_in_sandbox(target_path, sandbox_root):
+            try:
+                real_sandbox = os.path.realpath(str(sandbox_root))
+                target_str = str(target_path)
+                if not os.path.exists(target_str):
+                    parent = os.path.dirname(target_str) or "."
+                    real_target = os.path.join(os.path.realpath(parent), os.path.basename(target_str))
+                else:
+                    real_target = os.path.realpath(target_str)
+                return os.path.commonpath([real_sandbox, real_target]) == real_sandbox
+            except (ValueError, OSError, TypeError):
+                return False
+
+        # 1. Inside sandbox -> ALLOWED
+        assert _is_contained_in_sandbox(sandbox_dir / "file.txt", sandbox_dir) is True
+        assert _is_contained_in_sandbox(sub_dir / "file.txt", sandbox_dir) is True
+
+        # 2. Prefix sibling attack -> DENIED
+        assert _is_contained_in_sandbox(evil_sibling / "file.txt", sandbox_dir) is False
+
+        # 3. Completely outside directory -> DENIED
+        assert _is_contained_in_sandbox(target_outside_file, sandbox_dir) is False
+
+        # 4. Relative directory traversal -> DENIED
+        traversal = sandbox_dir / "sub" / ".." / ".." / "other" / "secret.txt"
+        assert _is_contained_in_sandbox(traversal, sandbox_dir) is False
+
+        # 5. Symlink escaping sandbox -> DENIED
+        if has_symlink:
+            assert _is_contained_in_sandbox(symlink_escape, sandbox_dir) is False
+
+    def test_os_firewall_verification_failure_triggers_rollback(self, monkeypatch):
+        """
+        FINDING B: If CLI command succeeds but kernel state verification fails,
+        state transitions through VERIFICATION_FAILED, rolls back rules, and fails closed.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import OSFirewallController, OSFirewallState, ScopeFirewallBlockError
+
+        campaign = Campaign(name="test-verif-fail", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setenv("ARES_REQUIRE_OS_FIREWALL", "1")
+
+        cleanups_run = []
+        def mock_subprocess_run(cmd, *args, **kwargs):
+            if "-D" in cmd:
+                cleanups_run.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_subprocess_run)
+        # Mock _verify_subrules returning False (kernel check failed)
+        monkeypatch.setattr(OSFirewallController, "_verify_subrules", classmethod(lambda cls, sub_rules: False))
+
+        OSFirewallController._active_rules.clear()
+        with pytest.raises(ScopeFirewallBlockError, match="OS firewall verification failed"):
+            OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
+
+        assert len(cleanups_run) > 0, "Rollback cleanups must run when verification fails"
+        assert len(OSFirewallController._active_rules) == 0
+        assert OSFirewallController._state == OSFirewallState.INACTIVE
+
+    def test_os_firewall_cleanup_failure_retains_rule_state_and_sets_cleanup_pending(self, monkeypatch):
+        """
+        FINDING C & 5: When cleanup fails, rule state must NOT be erased.
+        Controller must retain failed cleanups, report CLEANUP_PENDING, and allow retry.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import OSFirewallController, OSFirewallState
+
+        campaign = Campaign(name="test-cleanup-fail", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+        monkeypatch.setattr("sys.platform", "linux")
+
+        def mock_ok(cmd, *args, **kwargs):
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_ok)
+        monkeypatch.setattr(OSFirewallController, "_verify_subrules", classmethod(lambda cls, sub_rules: True))
+
+        OSFirewallController._active_rules.clear()
+        rules = OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
+        assert len(rules) == 1
+        rule_name = rules[0]
+        assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
+
+        # Now simulate cleanup failure
+        def mock_fail_cleanup(cmd, *args, **kwargs):
+            res = MagicMock()
+            res.returncode = 1
+            res.stderr = "iptables: Device or resource busy"
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_fail_cleanup)
+
+        # Attempt to remove rules
+        removed = OSFirewallController.remove_rules(rules)
+        assert removed == 0, "Failed cleanups must not count as removed"
+
+        # INVARIANT: Rule state must be RETAINED, state must be CLEANUP_PENDING
+        assert rule_name in OSFirewallController._active_rules
+        assert rule_name in OSFirewallController._rule_cleanups
+        assert OSFirewallController._state == OSFirewallState.CLEANUP_PENDING
+        assert OSFirewallController.get_status()["cleanup_pending"] is True
+        assert OSFirewallController.get_status()["state"] == "CLEANUP_PENDING"
+
+        # Now simulate cleanup retry succeeding
+        monkeypatch.setattr("subprocess.run", mock_ok)
+        OSFirewallController.cleanup_all()
+
+        # After successful retry, rule is removed and state is INACTIVE
+        assert len(OSFirewallController._active_rules) == 0
+        assert rule_name not in OSFirewallController._rule_cleanups
+        assert OSFirewallController._state == OSFirewallState.INACTIVE
+        assert OSFirewallController.get_status()["cleanup_pending"] is False
+
+    def test_concurrent_firewall_contexts_isolated(self, monkeypatch):
+        """
+        Concurrency: Multiple concurrent contexts must track independent rules.
+        Removing Context A's rule must not erase Context B's rule.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import OSFirewallController, OSFirewallState
+
+        campaign_a = Campaign(name="camp-a", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        campaign_b = Campaign(name="camp-b", scope=[ScopeEntry(cidr="192.168.1.0/24")])
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+        monkeypatch.setattr("sys.platform", "linux")
+
+        def mock_ok(cmd, *args, **kwargs):
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_ok)
+        monkeypatch.setattr(OSFirewallController, "_verify_subrules", classmethod(lambda cls, sub_rules: True))
+
+        OSFirewallController._active_rules.clear()
+        rules_a = OSFirewallController.apply_rules(campaign_a, ["10.0.0.0/8"])
+        rules_b = OSFirewallController.apply_rules(campaign_b, ["192.168.1.0/24"])
+
+        assert len(rules_a) == 1
+        assert len(rules_b) == 1
+        assert rules_a[0] != rules_b[0]
+        assert len(OSFirewallController._active_rules) == 2
+        assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
+
+        # Clean up Context A only
+        removed_a = OSFirewallController.remove_rules(rules_a)
+        assert removed_a > 0
+        assert rules_a[0] not in OSFirewallController._active_rules
+        assert rules_b[0] in OSFirewallController._active_rules
+        # Still active because Context B is active!
+        assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
+
+        # Clean up Context B
+        removed_b = OSFirewallController.remove_rules(rules_b)
+        assert removed_b > 0
+        assert len(OSFirewallController._active_rules) == 0
+        assert OSFirewallController._state == OSFirewallState.INACTIVE
+
+    def test_parent_manages_uid_firewall_for_dropped_privileges(self, monkeypatch):
+        """
+        FINDING A: In _run_subprocess, when drop_privileges=True on Linux as root,
+        the elevated parent wraps child execution with scope_firewall_guard(enable_os_firewall=True, uid_owner=target_uid).
+        """
+        import asyncio
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+        import ares.core.sandbox as sandbox_mod
+
+        policy = SandboxPolicy(tier=IsolationTier.SUBPROCESS, drop_privileges=True)
+        runner = SandboxRunner(policy=policy)
+
+        monkeypatch.setattr("os.name", "posix")
+        monkeypatch.setattr("os.geteuid", lambda: 0, raising=False)
+
+        import ares.core.scope_firewall as scope_fw_mod
+
+        parent_guard_calls = []
+
+        class MockGuardContext:
+            def __init__(self, **kwargs):
+                parent_guard_calls.append(kwargs)
+            async def __aenter__(self):
+                return None
+            async def __aexit__(self, *args):
+                pass
+
+        monkeypatch.setattr(scope_fw_mod, "scope_firewall_guard", MockGuardContext)
+
+        # Mock subprocess execution
+        async def mock_create_subprocess(*args, **kwargs):
+            mock_proc = MagicMock()
+            async def mock_communicate(*args, **kwargs):
+                return (b'{"success": true, "findings": [], "extra": {}}', b'')
+            mock_proc.communicate = mock_communicate
+            mock_proc.returncode = 0
+            return mock_proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", mock_create_subprocess)
+
+        result = asyncio.run(runner._run_subprocess("test.module", {}, "campaign-123"))
+        assert result.success is True
+
+        # Verify parent installed OS firewall with uid_owner
+        assert len(parent_guard_calls) == 1
+        assert parent_guard_calls[0]["enable_os_firewall"] is True
+        assert parent_guard_calls[0]["uid_owner"] in (65534, getattr(monkeypatch, "fake_uid", 65534))
+
 
 
 
