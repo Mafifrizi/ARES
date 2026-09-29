@@ -531,18 +531,22 @@ def uninstall_hooks() -> None:
 def compute_out_of_scope_cidrs(
     scope_cidrs: list[str],
     allow_loopback: bool = True,
+    include_ipv6: bool = True,
 ) -> list[str]:
-    """Calculate the mathematical complement of in-scope CIDRs in IPv4 address space.
+    """Calculate the mathematical complement of in-scope CIDRs in IPv4 and IPv6 address space.
 
-    Returns a minimal list of CIDR blocks covering all of IPv4 (0.0.0.0/0)
-    EXCEPT for the in-scope CIDRs and (optionally) the loopback network (127.0.0.0/8).
-    Applying an explicit BLOCK rule to this complement set enforces an exact deny-by-default
-    allowlist under Windows Defender Firewall without altering global host policy.
+    Returns a minimal list of CIDR blocks covering all of IPv4 (0.0.0.0/0) and IPv6 (::/0)
+    EXCEPT for the in-scope CIDRs and (optionally) the loopback networks (127.0.0.0/8 and ::1/128).
+    Applying explicit BLOCK rules to this complement set enforces an exact dual-stack
+    deny-by-default allowlist under Windows Defender Firewall without altering global host policy.
     """
-    all_v4 = [ipaddress.ip_network("0.0.0.0/0")]
-    excluded_nets: list[ipaddress.IPv4Network] = []
+    excluded_v4: list[ipaddress.IPv4Network] = []
+    excluded_v6: list[ipaddress.IPv6Network] = []
+
     if allow_loopback:
-        excluded_nets.append(ipaddress.ip_network("127.0.0.0/8"))
+        excluded_v4.append(ipaddress.ip_network("127.0.0.0/8"))
+        excluded_v6.append(ipaddress.ip_network("::1/128"))
+
     for c in scope_cidrs:
         c_str = str(c).strip()
         if not c_str:
@@ -550,22 +554,40 @@ def compute_out_of_scope_cidrs(
         try:
             net = ipaddress.ip_network(c_str, strict=False)
             if isinstance(net, ipaddress.IPv4Network):
-                excluded_nets.append(net)
+                excluded_v4.append(net)
+            elif isinstance(net, ipaddress.IPv6Network):
+                excluded_v6.append(net)
         except ValueError:
             pass
 
-    current_blocks = all_v4
-    for ex in excluded_nets:
+    # IPv4 complement
+    current_v4 = [ipaddress.ip_network("0.0.0.0/0")]
+    for ex in excluded_v4:
         next_blocks: list[ipaddress.IPv4Network] = []
-        for blk in current_blocks:
+        for blk in current_v4:
             if blk.overlaps(ex):
                 next_blocks.extend(list(blk.address_exclude(ex)))
             else:
                 next_blocks.append(blk)
-        current_blocks = next_blocks
+        current_v4 = next_blocks
 
-    collapsed = list(ipaddress.collapse_addresses(current_blocks))
-    return [str(b) for b in collapsed]
+    res = [str(b) for b in ipaddress.collapse_addresses(current_v4)]
+
+    # IPv6 complement
+    if include_ipv6:
+        current_v6 = [ipaddress.ip_network("::/0")]
+        for ex in excluded_v6:
+            next_v6: list[ipaddress.IPv6Network] = []
+            for blk in current_v6:
+                if blk.overlaps(ex):
+                    next_v6.extend(list(blk.address_exclude(ex)))
+                else:
+                    next_v6.append(blk)
+            current_v6 = next_v6
+        res.extend([str(b) for b in ipaddress.collapse_addresses(current_v6)])
+
+    return res
+
 
 
 class OSFirewallController:
@@ -638,6 +660,7 @@ class OSFirewallController:
         campaign: Campaign | None,
         scope_cidrs: list[str],
         program: str | None = None,
+        uid_owner: int | str | None = None,
     ) -> list[str]:
         """Apply OS-level firewall rules restricting outbound egress to scope_cidrs.
 
@@ -659,21 +682,41 @@ class OSFirewallController:
             )
             return []
 
-        cidrs_str = ",".join(scope_cidrs)
         rule_token = secrets.token_hex(6)
         rule_name = f"ARES_SCOPE_WALL_{rule_token}"
         prog = program or sys.executable
         sub_rules: list[tuple[list[str], list[str]]] = []
 
         if sys.platform == "win32":
-            out_of_scope = compute_out_of_scope_cidrs(scope_cidrs, allow_loopback=True)
+            out_of_scope = compute_out_of_scope_cidrs(scope_cidrs, allow_loopback=True, include_ipv6=True)
             if not out_of_scope:
                 return []
 
+            v4_out = [c for c in out_of_scope if ":" not in c]
+            v6_out = [c for c in out_of_scope if ":" in c]
+
             batch_size = 40
-            for i in range(0, len(out_of_scope), batch_size):
-                batch = out_of_scope[i : i + batch_size]
-                sub_name = f"{rule_name}_blk{i // batch_size}"
+            for i in range(0, len(v4_out), batch_size):
+                batch = v4_out[i : i + batch_size]
+                sub_name = f"{rule_name}_v4_{i // batch_size}"
+                apply_cmd = [
+                    "netsh", "advfirewall", "firewall", "add", "rule",
+                    f"name={sub_name}",
+                    "dir=out",
+                    "action=block",
+                    f"program={prog}",
+                    f"remoteip={','.join(batch)}",
+                    "enable=yes",
+                ]
+                cleanup_cmd = [
+                    "netsh", "advfirewall", "firewall", "delete", "rule",
+                    f"name={sub_name}",
+                ]
+                sub_rules.append((apply_cmd, cleanup_cmd))
+
+            for j in range(0, len(v6_out), batch_size):
+                batch = v6_out[j : j + batch_size]
+                sub_name = f"{rule_name}_v6_{j // batch_size}"
                 apply_cmd = [
                     "netsh", "advfirewall", "firewall", "add", "rule",
                     f"name={sub_name}",
@@ -691,49 +734,38 @@ class OSFirewallController:
 
         elif sys.platform.startswith("linux"):
             pid = str(os.getpid())
-            # Rule 1: Allow loopback for this process
-            lo_apply = [
-                "iptables", "-I", "OUTPUT", "1",
-                "-m", "owner", "--pid-owner", pid,
-                "-o", "lo",
-                "-j", "ACCEPT",
-                "-m", "comment", "--comment", f"{rule_name}_lo",
-            ]
-            lo_cleanup = [
-                "iptables", "-D", "OUTPUT",
-                "-m", "comment", "--comment", f"{rule_name}_lo",
-                "-j", "ACCEPT",
-            ]
+            owner_match = ["-m", "owner", "--uid-owner", str(uid_owner)] if uid_owner is not None else ["-m", "owner", "--pid-owner", pid]
+
+            v4_scope = [c for c in scope_cidrs if ":" not in c]
+            v6_scope = [c for c in scope_cidrs if ":" in c]
+
+            # IPv4 Netfilter rules
+            lo_apply = ["iptables", "-I", "OUTPUT", "1"] + owner_match + ["-o", "lo", "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_lo"]
+            lo_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_lo", "-j", "ACCEPT"]
             sub_rules.append((lo_apply, lo_cleanup))
 
-            # Rule 2: Allow authorized scope CIDRs for this process
-            scope_apply = [
-                "iptables", "-I", "OUTPUT", "2",
-                "-m", "owner", "--pid-owner", pid,
-                "-d", cidrs_str,
-                "-j", "ACCEPT",
-                "-m", "comment", "--comment", f"{rule_name}_scope",
-            ]
-            scope_cleanup = [
-                "iptables", "-D", "OUTPUT",
-                "-m", "comment", "--comment", f"{rule_name}_scope",
-                "-j", "ACCEPT",
-            ]
-            sub_rules.append((scope_apply, scope_cleanup))
+            if v4_scope:
+                scope_apply = ["iptables", "-I", "OUTPUT", "2"] + owner_match + ["-d", ",".join(v4_scope), "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_scope"]
+                scope_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_scope", "-j", "ACCEPT"]
+                sub_rules.append((scope_apply, scope_cleanup))
 
-            # Rule 3: DROP all other outbound egress from this process (strict allowlist)
-            drop_apply = [
-                "iptables", "-I", "OUTPUT", "3",
-                "-m", "owner", "--pid-owner", pid,
-                "-j", "DROP",
-                "-m", "comment", "--comment", f"{rule_name}_drop",
-            ]
-            drop_cleanup = [
-                "iptables", "-D", "OUTPUT",
-                "-m", "comment", "--comment", f"{rule_name}_drop",
-                "-j", "DROP",
-            ]
+            drop_apply = ["iptables", "-I", "OUTPUT", "3"] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop"]
+            drop_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_drop", "-j", "DROP"]
             sub_rules.append((drop_apply, drop_cleanup))
+
+            # IPv6 Netfilter rules
+            if v6_scope:
+                lo6_apply = ["ip6tables", "-I", "OUTPUT", "1"] + owner_match + ["-o", "lo", "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_lo6"]
+                lo6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_lo6", "-j", "ACCEPT"]
+                sub_rules.append((lo6_apply, lo6_cleanup))
+
+                scope6_apply = ["ip6tables", "-I", "OUTPUT", "2"] + owner_match + ["-d", ",".join(v6_scope), "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_scope6"]
+                scope6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_scope6", "-j", "ACCEPT"]
+                sub_rules.append((scope6_apply, scope6_cleanup))
+
+                drop6_apply = ["ip6tables", "-I", "OUTPUT", "3"] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop6"]
+                drop6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_drop6", "-j", "DROP"]
+                sub_rules.append((drop6_apply, drop6_cleanup))
 
         applied_cleanups: list[list[str]] = []
         all_succeeded = True

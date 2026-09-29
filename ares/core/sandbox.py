@@ -128,7 +128,7 @@ class SandboxRunner:
         t0 = time.monotonic()
 
         # Core modules always run in-process
-        if any(module_id.startswith(p) for p in self.policy.trusted_prefixes):
+        if self.is_trusted_module(module_id):
             effective_tier = IsolationTier.NONE
 
         audit("sandbox_run_start", actor="engine",
@@ -170,6 +170,7 @@ class SandboxRunner:
         from ares.core.noise import NoiseController
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.plugin.loader import ModuleRegistry
+        from ares.core.scope_firewall import scope_firewall_guard
 
         registry = ModuleRegistry()
         module_cls = registry.get(module_id)
@@ -216,7 +217,8 @@ class SandboxRunner:
         settings = AresSettings()
         noise    = NoiseController(campaign)
         module   = module_cls(settings=settings, campaign=campaign, noise=noise)
-        findings, extra = await module.run(**params)
+        async with scope_firewall_guard(campaign=campaign, module_id=module_id):
+            findings, extra = await module.run(**params)
         return SandboxResult(
             module_id=module_id, sandbox_tier=IsolationTier.NONE, success=True,
             findings=[f.to_dict() if hasattr(f, "to_dict") else {} for f in findings],
@@ -254,12 +256,13 @@ class SandboxRunner:
             except Exception:
                 pass  # fallback handled in wrapper - fails closed
             payload = json.dumps({
-                "module_id":   module_id,
-                "params":      params,
-                "campaign_id": campaign_id,
-                "use_seccomp": use_seccomp,
-                "tmpdir":      tmpdir,
-                "scope_cidrs": _scope_cidrs,
+                "module_id":     module_id,
+                "params":        params,
+                "campaign_id":   campaign_id,
+                "use_seccomp":   use_seccomp,
+                "tmpdir":        tmpdir,
+                "scope_cidrs":   _scope_cidrs,
+                "allow_network": self.policy.allow_network,
             })
 
             wrapper = self._build_wrapper_script(use_seccomp)
@@ -348,11 +351,15 @@ class SandboxRunner:
         except Exception:
             pass  # fails closed in inline_runner
         payload  = json.dumps({
-            "module_id": module_id, "params": params,
-            "campaign_id": campaign_id, "scope_cidrs": _docker_scope,
+            "module_id":     module_id,
+            "params":        params,
+            "campaign_id":   campaign_id,
+            "scope_cidrs":   _docker_scope,
+            "allow_network": self.policy.allow_network,
         })
         image    = self.policy.docker_image
-        network  = self.policy.docker_network
+        network  = "none" if not self.policy.allow_network else self.policy.docker_network
+        read_only = not self.policy.allow_write
         mem_limit = f"{self.policy.memory_mb}m"
 
         client = docker.from_env()
@@ -365,6 +372,7 @@ class SandboxRunner:
                 cpu_period=100000,
                 cpu_quota=50000,   # 50% of one CPU
                 network_mode=network,
+                read_only=read_only,
                 remove=True,
                 stdout=True,
                 stderr=True,
@@ -389,7 +397,7 @@ class SandboxRunner:
 
     def _make_preexec_fn(self):
         """
-        Return preexec_fn that applies resource limits in child process.
+        Return preexec_fn that applies resource limits and security privileges in child process.
         Only called on Unix systems.
         """
         cpu_limit = self.policy.cpu_time_s
@@ -401,8 +409,29 @@ class SandboxRunner:
                 resource.setrlimit(resource.RLIMIT_AS,    (mem_bytes, mem_bytes))
                 resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
                 resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+                if not self.policy.allow_write:
+                    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
             except (OSError, ValueError, AttributeError):
                 pass  # best-effort - don't fail the child
+
+            if not self.policy.allow_network:
+                try:
+                    import ctypes
+                    # CLONE_NEWNET = 0x40000000
+                    _libc = ctypes.CDLL(None)
+                    _libc.unshare(0x40000000)
+                except Exception:
+                    pass
+
+            if self.policy.drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
+                try:
+                    import pwd
+                    nobody = pwd.getpwnam("nobody")
+                    os.setgroups([])
+                    os.setgid(nobody.pw_gid)
+                    os.setuid(nobody.pw_uid)
+                except Exception:
+                    pass
 
         return _limits
 
@@ -412,34 +441,32 @@ class SandboxRunner:
         Build Python source that runs in the sandbox child process.
         When use_seccomp=True, applies PR_SET_NO_NEW_PRIVS (prctl 38) as a
         mandatory minimum, preventing the child from ever regaining privileges.
-        Full BPF syscall allowlist filtering is applied if pyseccomp is installed
-        and ARES_SECCOMP_BPF=1 env var is set.
+        Full BPF syscall allowlist filtering is applied via pyseccomp.
+        Fails closed with RuntimeError if seccomp enforcement cannot be established.
         """
         if use_seccomp:
             allowed_list = repr(sorted(_SECCOMP_ALLOWED))
             seccomp_preamble = (
-                "# ── SECCOMP: apply privilege restrictions ─────────────────────────────\n"
-                "import ctypes as _ct, ctypes.util as _cu, os as _so\n"
+                "# ── SECCOMP: apply mandatory privilege restrictions ───────────────────\n"
+                "import ctypes as _ct, ctypes.util as _cu, os as _so, sys as _sys\n"
                 "try:\n"
                 "    _libc = _ct.CDLL(_cu.find_library('c'), use_errno=True)\n"
-                "    _libc.prctl(38, 1, 0, 0, 0)  # PR_SET_NO_NEW_PRIVS - child cannot gain privs\n"
+                "    if _libc.prctl(38, 1, 0, 0, 0) != 0:\n"
+                "        raise RuntimeError('prctl PR_SET_NO_NEW_PRIVS returned non-zero')\n"
                 "except Exception as _pe:\n"
-                "    import sys as _ps; print(f'[sandbox] prctl failed: {_pe}', file=_ps.stderr)\n"
-                "if _so.environ.get('ARES_SECCOMP_BPF') == '1':\n"
-                "    try:\n"
-                "        import seccomp as _sc  # pyseccomp\n"
-                f"        _allowed = {allowed_list}\n"
-                "        _f = _sc.SyscallFilter(defaction=_sc.KILL)\n"
-                "        for _sn in _allowed:\n"
-                "            try: _f.add_rule(_sc.ALLOW, _sn)\n"
-                "            except Exception: pass\n"
-                "        _f.load()\n"
-                "    except ImportError:\n"
-                "        import sys as _s2\n"
-                "        print('[sandbox] pyseccomp not installed - BPF filter skipped', file=_s2.stderr)\n"
-                "    except Exception as _be:\n"
-                "        import sys as _s3\n"
-                "        print(f'[sandbox] BPF filter failed: {_be}', file=_s3.stderr)\n"
+                "    print(f'[sandbox] prctl failed: {_pe}', file=_sys.stderr)\n"
+                "    raise RuntimeError(f'Seccomp PR_SET_NO_NEW_PRIVS enforcement failed: {_pe}')\n"
+                "try:\n"
+                "    import seccomp as _sc  # pyseccomp\n"
+                f"    _allowed = {allowed_list}\n"
+                "    _f = _sc.SyscallFilter(defaction=_sc.KILL)\n"
+                "    for _sn in _allowed:\n"
+                "        try: _f.add_rule(_sc.ALLOW, _sn)\n"
+                "        except Exception: pass\n"
+                "    _f.load()\n"
+                "except Exception as _be:\n"
+                "    print(f'[sandbox] BPF filter failed: {_be}', file=_sys.stderr)\n"
+                "    raise RuntimeError(f'IsolationTier.SECCOMP failed to load BPF syscall filter: {_be}')\n"
                 "# ── end SECCOMP ────────────────────────────────────────────────────────\n"
             )
         else:
@@ -465,18 +492,27 @@ class SandboxRunner:
             "        if not module_cls:\n"
             "            return {\"success\": False, \"error\": f\"Module {module_id!r} not found\", \"findings\": [], \"extra\": {}}\n"
             "\n"
+            "        _allow_net   = payload.get(\"allow_network\", True)\n"
             "        _scope_cidrs = payload.get(\"scope_cidrs\", [])\n"
-            "        if not _scope_cidrs:\n"
+            "        if not _allow_net:\n"
+            "            campaign = Campaign(\n"
+            "                id=campaign_id or str(uuid.uuid4()),\n"
+            "                name=\"sandbox\",\n"
+            "                scope=[],\n"
+            "                noise_profile=NoiseProfile.NORMAL,\n"
+            "            )\n"
+            "        elif not _scope_cidrs:\n"
             "            print(json.dumps({\"success\": False, \"error\":\n"
             "                \"Sandbox scope not provided - refusing to run with unbounded scope\",\n"
             "                \"findings\": [], \"extra\": {}}))\n"
             "            return\n"
-            "        campaign = Campaign(\n"
-            "            id=campaign_id or str(uuid.uuid4()),\n"
-            "            name=\"sandbox\",\n"
-            "            scope=[ScopeEntry(cidr=c) for c in _scope_cidrs],\n"
-            "            noise_profile=NoiseProfile.NORMAL,\n"
-            "        )\n"
+            "        else:\n"
+            "            campaign = Campaign(\n"
+            "                id=campaign_id or str(uuid.uuid4()),\n"
+            "                name=\"sandbox\",\n"
+            "                scope=[ScopeEntry(cidr=c) for c in _scope_cidrs],\n"
+            "                noise_profile=NoiseProfile.NORMAL,\n"
+            "            )\n"
             "        settings = AresSettings()\n"
             "        noise    = NoiseController(campaign)\n"
             "        module   = module_cls(settings=settings, campaign=campaign, noise=noise)\n"
@@ -523,17 +559,26 @@ class SandboxRunner:
             '        if not module_cls:\n'
             '            return {"success": False, "error": f"Module {module_id!r} not found",\n'
             '                    "findings": [], "extra": {}}\n'
+            '        _allow_net   = payload.get("allow_network", True)\n'
             '        _scope_cidrs = payload.get("scope_cidrs", [])\n'
-            '        if not _scope_cidrs:\n'
+            '        if not _allow_net:\n'
+            '            campaign = Campaign(\n'
+            '                id=campaign_id or str(uuid.uuid4()),\n'
+            '                name="sandbox", operator="sandbox",\n'
+            '                scope=[],\n'
+            '                noise_profile=NoiseProfile.NORMAL,\n'
+            '            )\n'
+            '        elif not _scope_cidrs:\n'
             '            return {"success": False,\n'
             '                    "error": "Sandbox scope not provided - refusing to run with unbounded scope",\n'
             '                    "findings": [], "extra": {}}\n'
-            '        campaign = Campaign(\n'
-            '            id=campaign_id or str(uuid.uuid4()),\n'
-            '            name="sandbox", operator="sandbox",\n'
-            '            scope=[ScopeEntry(cidr=c) for c in _scope_cidrs],\n'
-            '            noise_profile=NoiseProfile.NORMAL,\n'
-            '        )\n'
+            '        else:\n'
+            '            campaign = Campaign(\n'
+            '                id=campaign_id or str(uuid.uuid4()),\n'
+            '                name="sandbox", operator="sandbox",\n'
+            '                scope=[ScopeEntry(cidr=c) for c in _scope_cidrs],\n'
+            '                noise_profile=NoiseProfile.NORMAL,\n'
+            '            )\n'
             '        try:\n'
             '            from ares.core.config import AresSettings\n'
             '            from ares.core.noise import NoiseController\n'
@@ -542,7 +587,9 @@ class SandboxRunner:
             '            module   = module_cls(settings=settings, campaign=campaign, noise=noise)\n'
             '        except Exception:\n'
             '            module = module_cls()\n'
-            '        findings, extra = await module.run(**params)\n'
+            '        from ares.core.scope_firewall import scope_firewall_guard\n'
+            '        async with scope_firewall_guard(campaign=campaign, module_id=module_id):\n'
+            '            findings, extra = await module.run(**params)\n'
             '        findings_out = []\n'
             '        for f in findings:\n'
             '            if hasattr(f, "model_dump"):\n'
@@ -561,4 +608,7 @@ class SandboxRunner:
         )
 
     def is_trusted_module(self, module_id: str) -> bool:
-        return any(module_id.startswith(p) for p in self.policy.trusted_prefixes)
+        return any(
+            module_id == p or module_id.startswith(f"{p}.")
+            for p in self.policy.trusted_prefixes
+        )

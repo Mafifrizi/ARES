@@ -883,3 +883,141 @@ class TestMarketplaceAndCrackerHardening:
             installer._install_pip_deps(["urllib3"])
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADVANCED BOUNDARY HARDENING PROOFS: Sandbox & Firewall Strictness
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSandboxAndFirewallHardening:
+    """Validates the 6 advanced security boundary hardening findings."""
+
+    def test_trusted_module_namespace_boundary(self):
+        """
+        FINDING 6: Trusted-prefix matching must respect namespace boundaries.
+        'ares.coreevil' and 'ares.dbsomething' must NOT bypass sandboxing.
+        """
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(trusted_prefixes=["ares.core", "ares.db"])
+        runner = SandboxRunner(policy=policy)
+
+        # Authorized exact matches and submodule paths
+        assert runner.is_trusted_module("ares.core") is True
+        assert runner.is_trusted_module("ares.core.engine") is True
+        assert runner.is_trusted_module("ares.db") is True
+        assert runner.is_trusted_module("ares.db.database") is True
+
+        # Malicious prefix overlaps must be strictly REJECTED
+        assert runner.is_trusted_module("ares.coreevil") is False
+        assert runner.is_trusted_module("ares.core_bypass") is False
+        assert runner.is_trusted_module("ares.dbsomething") is False
+        assert runner.is_trusted_module("ares.db_leak") is False
+        assert runner.is_trusted_module("untrusted.module") is False
+
+    def test_docker_runner_source_wraps_module_in_scope_firewall(self):
+        """
+        FINDING 1: Docker sandbox runner script must wrap module execution
+        inside scope_firewall_guard.
+        """
+        from ares.core.sandbox import SandboxRunner
+
+        inline_source = SandboxRunner._inline_runner()
+        assert "from ares.core.scope_firewall import scope_firewall_guard" in inline_source, \
+            "Docker inline runner missing scope_firewall_guard import"
+        assert "async with scope_firewall_guard(campaign=campaign, module_id=module_id):" in inline_source, \
+            "Docker inline runner does not wrap module.run in scope_firewall_guard"
+
+    def test_subprocess_wrapper_script_wraps_module_in_scope_firewall(self):
+        """
+        Subprocess runner script must wrap module execution inside scope_firewall_guard.
+        """
+        from ares.core.sandbox import SandboxRunner
+
+        wrapper_source = SandboxRunner._build_wrapper_script(use_seccomp=False)
+        assert "from ares.core.scope_firewall import scope_firewall_guard" in wrapper_source
+        assert "async with scope_firewall_guard(campaign=campaign, module_id=module_id):" in wrapper_source
+
+    def test_seccomp_tier_is_fail_closed(self):
+        """
+        FINDING 5: IsolationTier.SECCOMP must fail closed with RuntimeError if
+        prctl PR_SET_NO_NEW_PRIVS or pyseccomp BPF loading fails.
+        """
+        from ares.core.sandbox import SandboxRunner
+
+        wrapper_source = SandboxRunner._build_wrapper_script(use_seccomp=True)
+        assert "raise RuntimeError('prctl PR_SET_NO_NEW_PRIVS returned non-zero')" in wrapper_source
+        assert "raise RuntimeError(f'IsolationTier.SECCOMP failed to load BPF syscall filter: {_be}')" in wrapper_source
+
+    def test_sandbox_policy_enforcement_docker_options(self, monkeypatch):
+        """
+        FINDINGS 1 & 4: SandboxPolicy allow_network=False must set network_mode='none',
+        and allow_write=False must set read_only=True in Docker.
+        """
+        import asyncio
+        from unittest.mock import MagicMock
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(allow_network=False, allow_write=False)
+        runner = SandboxRunner(policy=policy)
+
+        # Mock docker library
+        mock_docker = MagicMock()
+        mock_client = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+        mock_client.containers.run.return_value = b'{"success": true, "findings": [], "extra": {}}'
+
+        monkeypatch.setattr("sys.modules", {**sys.modules, "docker": mock_docker})
+
+        res = asyncio.run(runner._run_docker("test.module", {}, "camp-123"))
+        assert res.success is True
+
+        # Check call arguments to containers.run
+        _, run_kwargs = mock_client.containers.run.call_args
+        assert run_kwargs.get("network_mode") == "none", "allow_network=False did not set network_mode='none'"
+        assert run_kwargs.get("read_only") is True, "allow_write=False did not set read_only=True"
+
+    def test_dual_stack_out_of_scope_cidrs_complement(self):
+        """
+        FINDING 2: compute_out_of_scope_cidrs must compute complements for BOTH
+        IPv4 (0.0.0.0/0) AND IPv6 (::/0), enabling dual-stack OS firewall enforcement.
+        """
+        from ares.core.scope_firewall import compute_out_of_scope_cidrs
+
+        # Single IPv4 and IPv6 in-scope targets
+        scope = ["192.168.1.0/24", "2001:db8::/32"]
+        out_of_scope = compute_out_of_scope_cidrs(scope, allow_loopback=True, include_ipv6=True)
+
+        v4_cidrs = [c for c in out_of_scope if ":" not in c]
+        v6_cidrs = [c for c in out_of_scope if ":" in c]
+
+        # Both IPv4 and IPv6 complements must be non-empty
+        assert len(v4_cidrs) > 0, "IPv4 complement must not be empty"
+        assert len(v6_cidrs) > 0, "IPv6 complement must not be empty"
+
+        # Verify loopback is NOT in out-of-scope blocks (loopback is allowed)
+        import ipaddress
+        for c in v4_cidrs:
+            net = ipaddress.ip_network(c)
+            assert not net.overlaps(ipaddress.ip_network("127.0.0.1/32")), f"Loopback blocked in {c}"
+
+        for c in v6_cidrs:
+            net = ipaddress.ip_network(c)
+            assert not net.overlaps(ipaddress.ip_network("::1/128")), f"IPv6 Loopback blocked in {c}"
+
+        # Verify in-scope CIDRs are NOT in out-of-scope blocks
+        for c in v4_cidrs:
+            net = ipaddress.ip_network(c)
+            assert not net.overlaps(ipaddress.ip_network("192.168.1.1/32")), f"In-scope IPv4 blocked in {c}"
+
+        for c in v6_cidrs:
+            net = ipaddress.ip_network(c)
+            assert not net.overlaps(ipaddress.ip_network("2001:db8::1/128")), f"In-scope IPv6 blocked in {c}"
+
+        # External arbitrary IPv4 and IPv6 must be covered by out_of_scope (so they are blocked)
+        ext_v4 = ipaddress.ip_address("8.8.8.8")
+        assert any(ext_v4 in ipaddress.ip_network(c) for c in v4_cidrs), "8.8.8.8 must be in out-of-scope complement"
+
+        ext_v6 = ipaddress.ip_address("2606:4700:4700::1111")
+        assert any(ext_v6 in ipaddress.ip_network(c) for c in v6_cidrs), "Cloudflare IPv6 must be in out-of-scope complement"
+
+
+
