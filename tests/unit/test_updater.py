@@ -243,18 +243,39 @@ def test_upgrade_ui_dry_run():
 
 # ── 7. POST /modules/reload API Endpoint ──────────────────────────────────────
 
-def test_post_modules_reload_loopback():
+def test_post_modules_reload_auth_enforced():
     saved_modules = dict(sys.modules)
     try:
-        with TestClient(app, base_url="http://localhost") as client:
-            resp = client.post("/modules/reload")
-            assert resp.status_code == 200
-            data = resp.json()
+        from ares.api.rbac import AuthenticatedUser, get_current_user
+
+        with TestClient(app, base_url="http://127.0.0.1") as client:
+            # 1. Unauthenticated from 127.0.0.1 / localhost must return 401 (no loopback bypass)
+            resp_no_auth = client.post("/modules/reload")
+            assert resp_no_auth.status_code == 401
+
+            with TestClient(app, base_url="http://localhost") as client_lh:
+                assert client_lh.post("/modules/reload").status_code == 401
+
+            # 2. Non-operator role (reporter) must return 403 Forbidden
+            app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+                username="auditor", role="reporter"
+            )
+            resp_forbidden = client.post("/modules/reload")
+            assert resp_forbidden.status_code == 403
+
+            # 3. Valid operator role must return 200 OK
+            app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+                username="alice", role="operator"
+            )
+            resp_ok = client.post("/modules/reload")
+            assert resp_ok.status_code == 200
+            data = resp_ok.json()
             assert data.get("status") == "ok"
             assert data.get("reloaded") is True
             assert "module_count" in data
             assert data["module_count"] >= 1
     finally:
+        app.dependency_overrides.clear()
         sys.modules.clear()
         sys.modules.update(saved_modules)
 

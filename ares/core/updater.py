@@ -1197,10 +1197,26 @@ class PlatformUpdateManager:
             raise SecurityViolationError(f"Reload notification target '{host}' rejected: Loopback only.")
 
         url = f"http://{host}:{port}/modules/reload"
+        headers = {"Content-Type": "application/json", "User-Agent": "ARES-CLI-Updater"}
+        try:
+            from ares.core.config import get_settings
+            from ares.core.security import create_access_token
+
+            settings = get_settings()
+            token = create_access_token(
+                data={"sub": "cli-updater", "role": "operator"},
+                secret_key=settings.jwt_signing_key,
+                algorithm=settings.ares_jwt_algorithm,
+                expires_minutes=5,
+            )
+            headers["Authorization"] = f"Bearer {token}"
+        except Exception:
+            pass
+
         req = urllib.request.Request(
             url,
             data=b"{}",
-            headers={"Content-Type": "application/json", "User-Agent": "ARES-CLI-Updater"},
+            headers=headers,
             method="POST",
         )
         try:

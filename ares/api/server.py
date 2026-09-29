@@ -2257,33 +2257,14 @@ async def list_modules(
 @app.post("/modules/reload", tags=["modules"])
 async def reload_modules(
     request: Request,
+    actor: AuthenticatedUser = Depends(require_operator()),
     engine: AresEngine = Depends(get_engine),
 ) -> dict[str, Any]:
     """
     Reload plugin registry in-memory from builtin and external module sources.
-    Security: Strictly permitted for loopback origins (127.0.0.1, ::1, testclient)
-    or authenticated operators with write/admin privileges.
+    Security: Strictly requires operator or team_lead authorization (no IP-based bypass).
     """
     import importlib
-
-    client_host = request.client.host if request.client else "127.0.0.1"
-    is_loopback = client_host in ("127.0.0.1", "::1", "localhost", "testclient")
-
-    if not is_loopback:
-        auth_hdr = request.headers.get("Authorization") or request.headers.get("X-API-Key")
-        if not auth_hdr:
-            raise HTTPException(
-                status_code=403,
-                detail="Remote module reload requires operator authorization.",
-            )
-        try:
-            _ = await require_operator()(request)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=403,
-                detail="Insufficient permissions for module reload.",
-            ) from exc
-
     import sys
 
     for mod_name in list(sys.modules.keys()):
@@ -2292,7 +2273,7 @@ async def reload_modules(
 
     importlib.invalidate_caches()
     count = engine.load_modules()
-    logger.info("engine_modules_reloaded", total_modules=count, client=client_host)
+    logger.info("engine_modules_reloaded", total_modules=count, operator=actor.username)
     return {
         "status": "ok",
         "reloaded": True,
