@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import threading
+import urllib.request
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Generator
 
@@ -291,8 +292,7 @@ class ScopeFirewall:
                 host=lowered_host,
                 error=str(exc)[:100],
             )
-            if lowered_host in self._explicit_hosts:
-                return True, address
+            # Fail closed: If DNS resolution fails, the destination IP cannot be verified or pinned.
             return False, address
         finally:
             _in_firewall_resolution.reset(_token)
@@ -349,7 +349,14 @@ _orig_socket_connect_ex = socket.socket.connect_ex
 _orig_socket_sendto = socket.socket.sendto
 _orig_socket_sendmsg = getattr(socket.socket, "sendmsg", None)
 _orig_loop_create_connection = asyncio.base_events.BaseEventLoop.create_connection
+_orig_urllib_getproxies = urllib.request.getproxies
 _hooks_installed: bool = False
+
+
+def _firewall_getproxies() -> dict[str, str]:
+    if _current_firewall.get() is not None:
+        return {}
+    return _orig_urllib_getproxies()
 
 
 @functools.wraps(_orig_socket_connect)
@@ -445,6 +452,7 @@ def install_hooks() -> None:
     asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
         _firewall_loop_create_connection
     )
+    urllib.request.getproxies = _firewall_getproxies  # type: ignore[assignment]
     _hooks_installed = True
     logger.debug("scope_firewall_hooks_installed")
 
@@ -463,6 +471,7 @@ def uninstall_hooks() -> None:
     asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
         _orig_loop_create_connection
     )
+    urllib.request.getproxies = _orig_urllib_getproxies  # type: ignore[assignment]
     _hooks_installed = False
     logger.debug("scope_firewall_hooks_uninstalled")
 
@@ -574,19 +583,37 @@ class OSFirewallController:
 
             elif sys.platform.startswith("linux"):
                 pid = str(os.getpid())
-                cmd = [
+                # Rule 1: Allow loopback for this process
+                cmd_lo = [
                     "iptables", "-I", "OUTPUT", "1",
+                    "-m", "owner", "--pid-owner", pid,
+                    "-o", "lo",
+                    "-j", "ACCEPT",
+                    "-m", "comment", "--comment", rule_name,
+                ]
+                # Rule 2: Allow authorized scope CIDRs for this process
+                cmd_scope = [
+                    "iptables", "-I", "OUTPUT", "2",
                     "-m", "owner", "--pid-owner", pid,
                     "-d", cidrs_str,
                     "-j", "ACCEPT",
                     "-m", "comment", "--comment", rule_name,
                 ]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                # Rule 3: DROP all other outbound egress from this process (strict allowlist)
+                cmd_drop = [
+                    "iptables", "-I", "OUTPUT", "3",
+                    "-m", "owner", "--pid-owner", pid,
+                    "-j", "DROP",
+                    "-m", "comment", "--comment", rule_name,
+                ]
+                subprocess.run(cmd_lo, capture_output=True, text=True, timeout=5)
+                res = subprocess.run(cmd_scope, capture_output=True, text=True, timeout=5)
+                subprocess.run(cmd_drop, capture_output=True, text=True, timeout=5)
                 if res.returncode == 0:
                     applied.append(rule_name)
                     with cls._lock:
                         cls._active_rules.add(rule_name)
-                    logger.info("os_firewall_rule_applied", rule=rule_name, cidrs=scope_cidrs, platform="linux")
+                    logger.info("os_firewall_rule_applied", rule=rule_name, cidrs=scope_cidrs, platform="linux", mode="strict_pid_allowlist")
                 else:
                     logger.warning("os_firewall_rule_failed", rule=rule_name, error=res.stderr.strip())
 
@@ -611,6 +638,8 @@ class OSFirewallController:
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                     if res.returncode == 0:
                         removed += 1
+                    cmd_drop = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", rule_name, "-j", "DROP"]
+                    subprocess.run(cmd_drop, capture_output=True, text=True, timeout=5)
             except Exception as exc:
                 logger.warning("os_firewall_remove_failed", rule=rule_name, error=str(exc))
             finally:
@@ -648,6 +677,32 @@ _PROXY_KEYS: tuple[str, ...] = (
     "https_proxy",
     "all_proxy",
 )
+
+_proxy_lock = threading.Lock()
+_proxy_guard_count = 0
+_saved_global_proxies: dict[str, str] = {}
+
+
+def _enter_proxy_neutralization() -> None:
+    """Thread-safe, re-entrant proxy neutralization across concurrent/nested tasks."""
+    global _proxy_guard_count
+    with _proxy_lock:
+        if _proxy_guard_count == 0:
+            for k in _PROXY_KEYS:
+                if k in os.environ:
+                    _saved_global_proxies[k] = os.environ.pop(k)
+        _proxy_guard_count += 1
+
+
+def _exit_proxy_neutralization() -> None:
+    """Restore proxy environment variables once all active firewall contexts exit."""
+    global _proxy_guard_count
+    with _proxy_lock:
+        _proxy_guard_count = max(0, _proxy_guard_count - 1)
+        if _proxy_guard_count == 0:
+            for k, v in _saved_global_proxies.items():
+                os.environ[k] = v
+            _saved_global_proxies.clear()
 
 
 @contextlib.asynccontextmanager
@@ -689,7 +744,7 @@ async def scope_firewall_guard(
         os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
 
     # Neutralize proxy environment variables that could route traffic out-of-scope
-    saved_proxies = {k: os.environ.pop(k) for k in _PROXY_KEYS if k in os.environ}
+    _enter_proxy_neutralization()
 
     try:
         yield fw
@@ -697,7 +752,7 @@ async def scope_firewall_guard(
         _current_firewall.reset(token)
         if os_rules:
             OSFirewallController.remove_rules(os_rules)
-        os.environ.update(saved_proxies)
+        _exit_proxy_neutralization()
 
 
 @contextlib.contextmanager
@@ -739,7 +794,7 @@ def scope_firewall_sync_guard(
         os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
 
     # Neutralize proxy environment variables that could route traffic out-of-scope
-    saved_proxies = {k: os.environ.pop(k) for k in _PROXY_KEYS if k in os.environ}
+    _enter_proxy_neutralization()
 
     try:
         yield fw
@@ -747,4 +802,4 @@ def scope_firewall_sync_guard(
         _current_firewall.reset(token)
         if os_rules:
             OSFirewallController.remove_rules(os_rules)
-        os.environ.update(saved_proxies)
+        _exit_proxy_neutralization()

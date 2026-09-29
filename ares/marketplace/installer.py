@@ -504,77 +504,76 @@ class ModuleInstaller:
                 urllib.request.urlretrieve(url, str(local))
             except Exception as e:
                 raise ConnectionError(f"Failed to download {url}: {e}") from e
-            # Verify BEFORE installing - fail-closed cryptographic check
-            is_cryptographically_verified = False
-            if verify_signature and local.exists():
-                # 1. Try to fetch detached signature (.sig) if available
-                sig_file = local.with_suffix(local.suffix + ".sig")
+            # Verification BEFORE installing
+            is_signature_verified = False
+            is_hash_verified = False
+
+            # Check integrity via manifest SHA-256 if sidecar/manifest is present
+            sidecar_manifest = local.parent / "manifest.json"
+            if not sidecar_manifest.exists() and "/" in url:
                 try:
+                    manifest_url = url.rsplit("/", 1)[0] + "/manifest.json"
                     import httpx
                     with httpx.Client(follow_redirects=False, timeout=10) as client:
-                        sig_resp = client.get(f"{url}.sig")
-                        if sig_resp.status_code == 200 and sig_resp.content:
-                            sig_file.write_bytes(sig_resp.content)
+                        m_resp = client.get(manifest_url)
+                        if m_resp.status_code == 200 and m_resp.content:
+                            sidecar_manifest.write_bytes(m_resp.content)
                 except Exception:
                     pass
 
-                # If detached .sig exists, verify via Ed25519 subsystem
-                if sig_file.exists():
-                    try:
-                        from ares.core.signing import ModuleVerifier, SigningPolicy
-                        verifier = ModuleVerifier(policy=SigningPolicy.REQUIRE_SIGNED)
-                        v_res = verifier.verify_file(local)
-                        if v_res.blocked or not v_res.trusted:
-                            raise ValueError(
-                                f"Module from {url} failed cryptographic signature verification: "
-                                f"{v_res.error or 'untrusted signature'}. File was NOT installed."
-                            )
-                        is_cryptographically_verified = True
-                        logger.info("marketplace_sig_verified", url=url, key_id=v_res.key_id)
-                    except ValueError:
-                        raise
-                    except Exception as sig_err:
-                        logger.warning("marketplace_sig_check_error", error=str(sig_err))
-
-                # 2. Try to fetch sidecar manifest.json if present
-                sidecar_manifest = local.parent / "manifest.json"
-                if not sidecar_manifest.exists() and "/" in url:
-                    try:
-                        manifest_url = url.rsplit("/", 1)[0] + "/manifest.json"
-                        import httpx
-                        with httpx.Client(follow_redirects=False, timeout=10) as client:
-                            m_resp = client.get(manifest_url)
-                            if m_resp.status_code == 200 and m_resp.content:
-                                sidecar_manifest.write_bytes(m_resp.content)
-                    except Exception:
-                        pass
-
-                # Read manifest from tmp file or sidecar to check sha256
-                _tmp_manifest = self._read_manifest_from_file(local)
-                if _tmp_manifest and _tmp_manifest.get("sha256"):
-                    import hashlib
-                    actual_hash = hashlib.sha256(local.read_bytes()).hexdigest()
-                    expected    = _tmp_manifest["sha256"]
-                    if actual_hash != expected:
-                        raise ValueError(
-                            f"Module from {url} failed integrity check BEFORE install: "
-                            f"expected SHA-256 {expected[:16]}... "
-                            f"got {actual_hash[:16]}... "
-                            "File was NOT installed. Use verify_signature=False to override (not recommended)."
-                        )
-                    is_cryptographically_verified = True
-
-                # Fail-closed: verify_signature=True requires an authentic signature or manifest hash
-                if not is_cryptographically_verified:
+            _tmp_manifest = self._read_manifest_from_file(local)
+            if _tmp_manifest and _tmp_manifest.get("sha256"):
+                import hashlib
+                actual_hash = hashlib.sha256(local.read_bytes()).hexdigest()
+                expected = _tmp_manifest["sha256"]
+                if actual_hash != expected:
                     raise ValueError(
-                        f"Module from {url} has no cryptographic signature (.sig) or manifest SHA-256 hash. "
-                        "Refusing to install unverified module under verify_signature=True (fail-closed). "
-                        "Provide a valid signature/manifest, or explicitly pass verify_signature=False to override."
+                        f"Module from {url} failed integrity check BEFORE install: "
+                        f"expected SHA-256 {expected[:16]}... "
+                        f"got {actual_hash[:16]}... File was NOT installed."
                     )
+                is_hash_verified = True
+
+            # If detached .sig exists, verify authenticity via Ed25519 subsystem
+            sig_file = local.with_suffix(local.suffix + ".sig")
+            try:
+                import httpx
+                with httpx.Client(follow_redirects=False, timeout=10) as client:
+                    sig_resp = client.get(f"{url}.sig")
+                    if sig_resp.status_code == 200 and sig_resp.content:
+                        sig_file.write_bytes(sig_resp.content)
+            except Exception:
+                pass
+
+            if sig_file.exists():
+                try:
+                    from ares.core.signing import ModuleVerifier, SigningPolicy
+                    verifier = ModuleVerifier(policy=SigningPolicy.REQUIRE_SIGNED)
+                    v_res = verifier.verify_file(local)
+                    if v_res.blocked or not v_res.trusted:
+                        raise ValueError(
+                            f"Module from {url} failed cryptographic signature verification: "
+                            f"{v_res.error or 'untrusted signature'}. File was NOT installed."
+                        )
+                    is_signature_verified = True
+                    logger.info("marketplace_sig_verified", url=url, key_id=v_res.key_id)
+                except ValueError:
+                    raise
+                except Exception as sig_err:
+                    logger.warning("marketplace_sig_check_error", error=str(sig_err))
+
+            # When verify_signature=True, cryptographic authenticity (Ed25519 signature) is strictly required
+            if verify_signature and not is_signature_verified:
+                raise ValueError(
+                    f"Module from {url} has no valid Ed25519 cryptographic signature (.sig). "
+                    "Refusing to install unverified module under verify_signature=True (fail-closed). "
+                    "An unauthenticated manifest hash from the same origin does not provide cryptographic authenticity. "
+                    "Sign the module with a trusted key, or explicitly pass verify_signature=False to override."
+                )
 
             manifest = self._install_single_file(local, source_url=url, force=force)
-            # Post-install: set verified flag only if cryptographic verification passed
-            manifest.verified = is_cryptographically_verified
+            # Post-install: verified flag is strictly True ONLY if cryptographic Ed25519 signature passed
+            manifest.verified = is_signature_verified
             return manifest
 
     def _install_github(self, spec: str, force: bool,
@@ -667,29 +666,40 @@ class ModuleInstaller:
         if not deps:
             return
 
-        # Allowlist regex - rejects pip flags (--index-url, etc.) and shell injection
+        # Check operator configuration: auto-installing pip deps from marketplace modules
+        # is disabled by default for supply chain isolation.
+        allow_deps = _os.getenv("ARES_MARKETPLACE_INSTALL_DEPS", "0").lower() in ("1", "true", "yes")
+        if not allow_deps:
+            logger.warning(
+                "marketplace_pip_deps_skipped",
+                deps=deps,
+                reason="Automatic dependency installation is disabled by default (ARES_MARKETPLACE_INSTALL_DEPS=0). "
+                       "Dependencies must be reviewed and installed manually.",
+            )
+            return
+
+        # Strict validation: Only exact-pinned package specs allowed (e.g. package==1.2.3)
         import re
-        _DEP_RE = re.compile(
-            r"^[a-zA-Z0-9]"               # must start with alphanumeric
-            r"[a-zA-Z0-9._-]*"            # package name chars
-            r"(\[[\w,\s]+\])?"            # optional extras e.g. [security,async]
-            r"(==|>=|<=|~=|!=|>|<)?"      # optional version operator
-            r"[\w.*]*$"                    # optional version value
+        _EXACT_DEP_RE = re.compile(
+            r"^[a-zA-Z0-9][a-zA-Z0-9._-]*"
+            r"(\[[a-zA-Z0-9._,-]+\])?"
+            r"==[a-zA-Z0-9._+-]+$"
         )
-        invalid = [d for d in deps if not _DEP_RE.match(d)]
+        invalid = [d for d in deps if not _EXACT_DEP_RE.match(d)]
         if invalid:
             raise ValueError(
-                f"Dependency validation failed - rejected unsafe dep string(s): {invalid}. "
-                "Only PEP 508 package specifiers are allowed (no flags, no URLs, no shell)."
+                f"Supply-chain policy violation: unpinned or unsafe dependency specifications rejected: {invalid}. "
+                "Every marketplace dependency must be strictly pinned with exact version (e.g., 'package==1.2.3') "
+                "to prevent supply-chain drift and dependency hijacking."
             )
 
         logger.info("marketplace_installing_deps", deps=deps)
         import subprocess
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--quiet",
-             "--break-system-packages", *deps],
+            [sys.executable, "-m", "pip", "install", "--quiet", "--no-deps",
+             "--isolated", "--break-system-packages", *deps],
             check=True,
-            timeout=300,  # 5 minutes max - prevents hang on network issues
+            timeout=120,
         )
 
     def _infer_manifest_from_file(self, path: Path, source_url: str = "") -> ModuleManifest:

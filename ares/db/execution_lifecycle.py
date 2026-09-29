@@ -3588,44 +3588,30 @@ class ExecutionLifecycleStore:
             )
 
             descriptor = get_descriptor(intent.module_id)
-            if descriptor is not None:
-                if ExecutionLifecycleStore._raw_credential_material_present(
-                    intent.raw_parameters,
-                    descriptor.parameter_fields,
-                ):
-                    return None
-                canonical, extracted = prepare_admission_parameters(
-                    intent.module_id, intent.raw_parameters
+            if descriptor is None:
+                # C-LIVE generation-11 strictly requires a proven security contract.
+                # Modules lacking a registered descriptor cannot prove their capabilities,
+                # opsec noise, credential policies, or parameter schema, and fail-closed.
+                return None
+
+            if ExecutionLifecycleStore._raw_credential_material_present(
+                intent.raw_parameters,
+                descriptor.parameter_fields,
+            ):
+                return None
+            canonical, extracted = prepare_admission_parameters(
+                intent.module_id, intent.raw_parameters
+            )
+            values = {key: canonical.values[key] for key in sorted(canonical.values)}
+            destination_refs = tuple(
+                sorted(
+                    {
+                        (item.kind.value, str(item.value).strip().lower())
+                        for item in extracted
+                        if str(item.value).strip()
+                    }
                 )
-                values = {key: canonical.values[key] for key in sorted(canonical.values)}
-                destination_refs = tuple(
-                    sorted(
-                        {
-                            (item.kind.value, str(item.value).strip().lower())
-                            for item in extracted
-                            if str(item.value).strip()
-                        }
-                    )
-                )
-            else:
-                # Dynamic / plugin modules without formal Phase 5C descriptor (e.g. RFC-001 modules)
-                values = {key: intent.raw_parameters[key] for key in sorted(intent.raw_parameters)}
-                extracted_dest_list: list[tuple[str, str]] = []
-                for d_key in ("target", "targets", "host", "hosts", "rhost", "rhosts", "dc", "server"):
-                    if d_key in intent.raw_parameters:
-                        v = intent.raw_parameters[d_key]
-                        if isinstance(v, (list, tuple)):
-                            for item in v:
-                                if isinstance(item, str) and item.strip():
-                                    extracted_dest_list.append(("host", item.strip().lower()))
-                        elif isinstance(v, str) and v.strip():
-                            extracted_dest_list.append(("host", v.strip().lower()))
-                for d_key in ("domain", "realm"):
-                    if d_key in intent.raw_parameters:
-                        v = intent.raw_parameters[d_key]
-                        if isinstance(v, str) and v.strip():
-                            extracted_dest_list.append(("domain", v.strip().lower()))
-                destination_refs = tuple(sorted(set(extracted_dest_list)))
+            )
             canonical_json = json.dumps(
                 values,
                 sort_keys=True,

@@ -752,8 +752,8 @@ class TestMarketplaceAndCrackerHardening:
         with pytest.raises(ValueError, match="Path traversal detected|Invalid or unsafe module ID"):
             installer._install_single_file(fake_file, source_url="https://example.com/test.py", force=True)
 
-    def test_dynamic_module_destination_extracted_in_lifecycle_admission(self):
-        """Lifecycle admission must extract target/host for dynamic modules without static descriptors."""
+    def test_dynamic_module_lifecycle_fail_closed_without_descriptor(self):
+        """Dynamic modules without a registered Phase 5C descriptor must fail admission preparation."""
         import uuid
 
         from ares.db.execution_lifecycle import AdmissionIntentV3, ExecutionLifecycleStore
@@ -765,7 +765,7 @@ class TestMarketplaceAndCrackerHardening:
             outbox_id=None,
             publication_key=None,
             campaign_id=str(uuid.uuid4()),
-            module_id="custom.dynamic_scanner",
+            module_id="custom.unregistered_module",
             ingress_code="direct_engine",
             operation_id=str(uuid.uuid4()),
             evaluation_mode="live",
@@ -775,9 +775,111 @@ class TestMarketplaceAndCrackerHardening:
             noise_units=1,
             exfiltration_units=0,
         )
+        # Without a registered descriptor, preparation returns None (fail-closed INVALID_CONTRACT)
         prepared = ExecutionLifecycleStore._prepared_admission(intent)
-        assert prepared is not None
-        assert ("host", "192.168.1.50") in prepared.destination_refs
-        assert ("domain", "corp.local") in prepared.destination_refs
+        assert prepared is None
+
+    def test_dynamic_module_descriptor_registration_and_admission(self):
+        """When a valid descriptor is registered dynamically, admission preparation succeeds and extracts destinations."""
+        import dataclasses
+        import uuid
+
+        from ares.db.execution_lifecycle import AdmissionIntentV3, ExecutionLifecycleStore
+        from ares.modules.descriptors import (
+            FIRST_PARTY_DESCRIPTORS,
+            get_descriptor,
+            register_dynamic_descriptor,
+            unregister_dynamic_descriptor,
+        )
+
+        sample = FIRST_PARTY_DESCRIPTORS["network.port_scan"]
+        dyn_desc = dataclasses.replace(sample, module_id="network.dynamic_scanner")
+        try:
+            register_dynamic_descriptor(dyn_desc)
+            assert get_descriptor("network.dynamic_scanner") is dyn_desc
+
+            intent = AdmissionIntentV3(
+                logical_execution_id=str(uuid.uuid4()),
+                submission_id=str(uuid.uuid4()),
+                attempt_id=str(uuid.uuid4()),
+                outbox_id=None,
+                publication_key=None,
+                campaign_id=str(uuid.uuid4()),
+                module_id="network.dynamic_scanner",
+                ingress_code="direct_engine",
+                operation_id=str(uuid.uuid4()),
+                evaluation_mode="live",
+                raw_parameters={"target": "192.168.1.50", "ports": "80,443", "timeout": 5.0},
+                credential_ids=(),
+                approval_ref=None,
+                noise_units=1,
+                exfiltration_units=0,
+            )
+            prepared = ExecutionLifecycleStore._prepared_admission(intent)
+            assert prepared is not None
+            assert ("host", "192.168.1.50") in prepared.destination_refs
+        finally:
+            unregister_dynamic_descriptor("network.dynamic_scanner")
+            assert get_descriptor("network.dynamic_scanner") is None
+
+    def test_marketplace_manifest_hash_without_ed25519_fails_closed_under_verify_signature(self, monkeypatch):
+        """Under verify_signature=True, an unauthenticated manifest hash from same origin must NOT satisfy verification."""
+        import httpx
+        from ares.marketplace.installer import ModuleInstaller
+
+        installer = ModuleInstaller()
+        sample_code = b"class DummyModule:\n    MODULE_ID = 'test.untrusted'\n"
+
+        import hashlib
+        sample_hash = hashlib.sha256(sample_code).hexdigest()
+        manifest_json = f'{{"id": "test.untrusted", "sha256": "{sample_hash}"}}'.encode("utf-8")
+
+        def mock_get(self, url, *args, **kwargs):
+            req = httpx.Request("GET", url)
+            if url.endswith(".py"):
+                return httpx.Response(200, request=req, content=sample_code)
+            elif url.endswith("manifest.json"):
+                return httpx.Response(200, request=req, content=manifest_json)
+            # .sig is missing (404)
+            return httpx.Response(404, request=req)
+
+        monkeypatch.setattr(httpx.Client, "get", mock_get)
+
+        # verify_signature=True must reject module despite matching manifest hash
+        with pytest.raises(ValueError, match="has no valid Ed25519 cryptographic signature"):
+            installer._install_url("https://example.com/untrusted.py", force=False, verify_signature=True)
+
+    def test_marketplace_deps_skipped_by_default_without_operator_flag(self, monkeypatch):
+        """Dependencies must be skipped by default for supply chain isolation unless operator explicitly enables them."""
+        import os
+        from ares.marketplace.installer import ModuleInstaller
+
+        installer = ModuleInstaller()
+        monkeypatch.delenv("ARES_MARKETPLACE_INSTALL_DEPS", raising=False)
+
+        # Calling _install_pip_deps without env flag must not run pip
+        called = False
+
+        def mock_run(*a, **kw):
+            nonlocal called
+            called = True
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        installer._install_pip_deps(["requests==2.31.0"])
+        assert called is False
+
+    def test_marketplace_deps_rejects_unpinned_versions(self, monkeypatch):
+        """Even when operator enables deps, unpinned or floating versions (>=, >, etc.) must be rejected."""
+        from ares.marketplace.installer import ModuleInstaller
+
+        installer = ModuleInstaller()
+        monkeypatch.setenv("ARES_MARKETPLACE_INSTALL_DEPS", "1")
+
+        with pytest.raises(ValueError, match="Supply-chain policy violation"):
+            installer._install_pip_deps(["requests>=2.0.0"])
+
+        with pytest.raises(ValueError, match="Supply-chain policy violation"):
+            installer._install_pip_deps(["urllib3"])
 
 

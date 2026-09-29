@@ -351,10 +351,9 @@ class TestOSFirewallController:
             rules = OSFirewallController.apply_rules(sample_campaign, ["172.16.0.0/16"])
             assert len(rules) == 1
             assert rules[0].startswith("ARES_SCOPE_WALL_")
-            cmd = mock_run.call_args[0][0]
-            assert cmd[0] == "iptables"
-            assert "-d" in cmd
-            assert "172.16.0.0/16" in cmd
+            all_cmds = [call[0][0] for call in mock_run.call_args_list]
+            assert any(cmd[0] == "iptables" and "-d" in cmd and "172.16.0.0/16" in cmd for cmd in all_cmds)
+            assert any(cmd[0] == "iptables" and "-j" in cmd and "DROP" in cmd for cmd in all_cmds)
 
             removed = OSFirewallController.remove_rules(rules)
             assert removed == 1
@@ -395,6 +394,7 @@ class TestOSFirewallController:
 
     def test_proxy_environment_variables_neutralized_during_guard(self, sample_campaign: Campaign):
         import os
+        import urllib.request
         os.environ["HTTP_PROXY"] = "http://127.0.0.1:8080"
         os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8443"
         try:
@@ -403,10 +403,78 @@ class TestOSFirewallController:
                 # Proxies must be stripped while guard is active
                 assert "HTTP_PROXY" not in os.environ
                 assert "HTTPS_PROXY" not in os.environ
-            # Proxies must be safely restored upon exit
+                assert urllib.request.getproxies() == {}
+
+                # Nested guard must not clobber outer saved proxies
+                with scope_firewall_sync_guard(sample_campaign) as inner_fw:
+                    assert inner_fw is not None
+                    assert "HTTP_PROXY" not in os.environ
+
+                # Exiting nested guard must still maintain proxy neutralization while outer guard is alive
+                assert "HTTP_PROXY" not in os.environ
+
+            # Proxies must be safely restored only upon final exit
             assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:8080"
             assert os.environ.get("HTTPS_PROXY") == "http://127.0.0.1:8443"
         finally:
             os.environ.pop("HTTP_PROXY", None)
             os.environ.pop("HTTPS_PROXY", None)
+
+    def test_scope_firewall_dns_failure_fails_closed(self, sample_campaign: Campaign, monkeypatch: pytest.MonkeyPatch):
+        """If DNS resolution fails, the address must fail-closed (False) even if hostname is in explicit_hosts."""
+        fw = ScopeFirewall(campaign=sample_campaign, module_id="test.dns_fail")
+
+        def mock_getaddrinfo(*args, **kwargs):
+            raise socket.gaierror(-2, "Name or service not known")
+
+        monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+        # Attempt to resolve an unresolvable hostname
+        allowed, pinned = fw.resolve_and_pin_address("unresolvable.in-targets.local")
+        assert allowed is False
+
+    def test_os_firewall_linux_strict_allowlist_commands(self, monkeypatch: pytest.MonkeyPatch):
+        """Linux OS firewall must apply lo ACCEPT, scope ACCEPT, and process DROP rules."""
+        from ares.core.scope_firewall import OSFirewallController
+        import subprocess
+        import sys
+
+        commands_executed: list[list[str]] = []
+
+        def mock_run(cmd, *args, **kwargs):
+            commands_executed.append(list(cmd))
+            class MockRes:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return MockRes()
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        monkeypatch.setattr(OSFirewallController, "is_elevated", lambda: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        rules = OSFirewallController.apply_rules(None, ["10.0.0.0/24"], program="/usr/bin/python3")
+        assert len(rules) == 1
+        rule_name = rules[0]
+
+        # Verify that all 3 rules were applied:
+        # Rule 1: loopback ACCEPT
+        assert any(
+            "-o" in cmd and "lo" in cmd and "-j" in cmd and "ACCEPT" in cmd
+            for cmd in commands_executed
+        )
+        # Rule 2: scope ACCEPT
+        assert any(
+            "-d" in cmd and "10.0.0.0/24" in cmd and "-j" in cmd and "ACCEPT" in cmd
+            for cmd in commands_executed
+        )
+        # Rule 3: DROP other outbound packets (strict allowlist)
+        assert any(
+            "-j" in cmd and "DROP" in cmd
+            for cmd in commands_executed
+        )
+
+        # Now test remove_rules
+        commands_executed.clear()
+        removed = OSFirewallController.remove_rules([rule_name])
+        assert any("iptables" in cmd and "-D" in cmd for cmd in commands_executed)
 

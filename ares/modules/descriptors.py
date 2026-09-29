@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+import threading
 import types
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -8796,10 +8797,32 @@ FIRST_PARTY_DESCRIPTORS: Mapping[str, ModuleDescriptor] = types.MappingProxyType
 )
 
 
+_DYNAMIC_DESCRIPTORS: dict[str, ModuleDescriptor] = {}
+_dynamic_lock = threading.Lock()
+
+
+def register_dynamic_descriptor(descriptor: ModuleDescriptor) -> None:
+    """Register a runtime descriptor for an approved dynamic/plugin module."""
+    if not isinstance(descriptor, ModuleDescriptor):
+        raise TypeError("descriptor must be a ModuleDescriptor instance")
+    with _dynamic_lock:
+        _DYNAMIC_DESCRIPTORS[descriptor.module_id] = descriptor
+
+
+def unregister_dynamic_descriptor(module_id: str) -> bool:
+    """Unregister a dynamic descriptor."""
+    with _dynamic_lock:
+        return _DYNAMIC_DESCRIPTORS.pop(module_id, None) is not None
+
+
 def get_descriptor(module_id: str) -> ModuleDescriptor | None:
     if type(module_id) is not str:
         return None
-    return FIRST_PARTY_DESCRIPTORS.get(module_id)
+    first_party = FIRST_PARTY_DESCRIPTORS.get(module_id)
+    if first_party is not None:
+        return first_party
+    with _dynamic_lock:
+        return _DYNAMIC_DESCRIPTORS.get(module_id)
 
 
 def require_descriptor(module_id: str) -> ModuleDescriptor:
@@ -9218,6 +9241,8 @@ __all__ = [
     "descriptor_semantic_digest",
     "extract_destinations",
     "get_descriptor",
+    "register_dynamic_descriptor",
+    "unregister_dynamic_descriptor",
     "prepare_admission_parameters",
     "readiness_summary",
     "require_descriptor",
