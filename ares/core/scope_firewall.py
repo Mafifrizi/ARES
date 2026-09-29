@@ -350,6 +350,8 @@ _orig_socket_sendto = socket.socket.sendto
 _orig_socket_sendmsg = getattr(socket.socket, "sendmsg", None)
 _orig_loop_create_connection = asyncio.base_events.BaseEventLoop.create_connection
 _orig_urllib_getproxies = urllib.request.getproxies
+_orig_requests_get_environ_proxies: Any = None
+_orig_httpx_get_environment_proxies: Any = None
 _hooks_installed: bool = False
 
 
@@ -357,6 +359,22 @@ def _firewall_getproxies() -> dict[str, str]:
     if _current_firewall.get() is not None:
         return {}
     return _orig_urllib_getproxies()
+
+
+def _firewall_requests_get_environ_proxies(url: Any, no_proxy: Any = None) -> dict[str, str]:
+    if _current_firewall.get() is not None:
+        return {}
+    if _orig_requests_get_environ_proxies is not None:
+        return _orig_requests_get_environ_proxies(url, no_proxy=no_proxy)
+    return {}
+
+
+def _firewall_httpx_get_environment_proxies() -> dict[str, Any]:
+    if _current_firewall.get() is not None:
+        return {}
+    if _orig_httpx_get_environment_proxies is not None:
+        return _orig_httpx_get_environment_proxies()
+    return {}
 
 
 @functools.wraps(_orig_socket_connect)
@@ -440,7 +458,7 @@ async def _firewall_loop_create_connection(
 
 def install_hooks() -> None:
     """Install process-wide socket and event loop interception hooks."""
-    global _hooks_installed
+    global _hooks_installed, _orig_requests_get_environ_proxies, _orig_httpx_get_environment_proxies
     if _hooks_installed:
         return
 
@@ -453,13 +471,30 @@ def install_hooks() -> None:
         _firewall_loop_create_connection
     )
     urllib.request.getproxies = _firewall_getproxies  # type: ignore[assignment]
+
+    try:
+        import requests.utils
+        if _orig_requests_get_environ_proxies is None:
+            _orig_requests_get_environ_proxies = requests.utils.get_environ_proxies
+        requests.utils.get_environ_proxies = _firewall_requests_get_environ_proxies  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import httpx._utils
+        if _orig_httpx_get_environment_proxies is None:
+            _orig_httpx_get_environment_proxies = httpx._utils.get_environment_proxies
+        httpx._utils.get_environment_proxies = _firewall_httpx_get_environment_proxies  # type: ignore[assignment]
+    except (ImportError, AttributeError):
+        pass
+
     _hooks_installed = True
     logger.debug("scope_firewall_hooks_installed")
 
 
 def uninstall_hooks() -> None:
     """Restore original socket and event loop functions."""
-    global _hooks_installed
+    global _hooks_installed, _orig_requests_get_environ_proxies, _orig_httpx_get_environment_proxies
     if not _hooks_installed:
         return
 
@@ -472,11 +507,66 @@ def uninstall_hooks() -> None:
         _orig_loop_create_connection
     )
     urllib.request.getproxies = _orig_urllib_getproxies  # type: ignore[assignment]
+
+    if _orig_requests_get_environ_proxies is not None:
+        try:
+            import requests.utils
+            requests.utils.get_environ_proxies = _orig_requests_get_environ_proxies  # type: ignore[assignment]
+        except (ImportError, AttributeError):
+            pass
+
+    if _orig_httpx_get_environment_proxies is not None:
+        try:
+            import httpx._utils
+            httpx._utils.get_environment_proxies = _orig_httpx_get_environment_proxies  # type: ignore[assignment]
+        except (ImportError, AttributeError):
+            pass
+
     _hooks_installed = False
     logger.debug("scope_firewall_hooks_uninstalled")
 
 
 # ── OS / Kernel Network Firewall Controller ───────────────────────────────────
+
+def compute_out_of_scope_cidrs(
+    scope_cidrs: list[str],
+    allow_loopback: bool = True,
+) -> list[str]:
+    """Calculate the mathematical complement of in-scope CIDRs in IPv4 address space.
+
+    Returns a minimal list of CIDR blocks covering all of IPv4 (0.0.0.0/0)
+    EXCEPT for the in-scope CIDRs and (optionally) the loopback network (127.0.0.0/8).
+    Applying an explicit BLOCK rule to this complement set enforces an exact deny-by-default
+    allowlist under Windows Defender Firewall without altering global host policy.
+    """
+    all_v4 = [ipaddress.ip_network("0.0.0.0/0")]
+    excluded_nets: list[ipaddress.IPv4Network] = []
+    if allow_loopback:
+        excluded_nets.append(ipaddress.ip_network("127.0.0.0/8"))
+    for c in scope_cidrs:
+        c_str = str(c).strip()
+        if not c_str:
+            continue
+        try:
+            net = ipaddress.ip_network(c_str, strict=False)
+            if isinstance(net, ipaddress.IPv4Network):
+                excluded_nets.append(net)
+        except ValueError:
+            pass
+
+    current_blocks = all_v4
+    for ex in excluded_nets:
+        next_blocks: list[ipaddress.IPv4Network] = []
+        for blk in current_blocks:
+            if blk.overlaps(ex):
+                next_blocks.extend(list(blk.address_exclude(ex)))
+            else:
+                next_blocks.append(blk)
+        current_blocks = next_blocks
+
+    collapsed = list(ipaddress.collapse_addresses(current_blocks))
+    return [str(b) for b in collapsed]
+
 
 class OSFirewallController:
     """Controls OS-level / Kernel network packet filtering boundaries.
@@ -488,13 +578,22 @@ class OSFirewallController:
     Operates in dual mode:
       1. Elevated Mode (Admin/Root): Applies native OS firewall rules restricting
          outbound traffic strictly to authorized campaign scope CIDRs.
+         - Windows: Calculates exact mathematical complement of scope CIDRs (excluding loopback)
+           and applies explicit program-scoped BLOCK rules. Since Windows Firewall evaluates
+           Block before Allow and defaults to outbound Allow, this establishes a true deny-by-default
+           egress boundary for the python process without altering global host firewall policies.
+         - Linux: Installs a 3-rule per-PID chain (lo ACCEPT, scope ACCEPT, and PID DROP)
+           with exact comment tokens for 1:1 transactional teardown.
       2. Unprivileged Mode: Gracefully yields to the In-Process Transport Socket Interceptor
          while recording audit logs, ensuring zero runtime crashes or elevation side-effects.
 
-    Includes fail-safe automatic rule rollback on context exit and process shutdown (`atexit`).
+    Transactional safety:
+      Every sub-rule is recorded. If any rule application fails, all previously applied rules
+      in that transaction are automatically rolled back, leaving zero orphaned rules.
     """
 
     _active_rules: set[str] = set()
+    _rule_cleanups: dict[str, list[list[str]]] = {}
     _lock = threading.Lock()
 
     @classmethod
@@ -548,6 +647,11 @@ class OSFirewallController:
             return []
 
         if not cls.is_elevated():
+            if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
+                raise ScopeFirewallBlockError(
+                    "OS-level firewall enforcement required (ARES_REQUIRE_OS_FIREWALL=1), "
+                    "but current process lacks administrative/root privileges."
+                )
             logger.info(
                 "os_firewall_unprivileged_fallback",
                 platform=sys.platform,
@@ -558,93 +662,154 @@ class OSFirewallController:
         cidrs_str = ",".join(scope_cidrs)
         rule_token = secrets.token_hex(6)
         rule_name = f"ARES_SCOPE_WALL_{rule_token}"
-        applied: list[str] = []
         prog = program or sys.executable
+        sub_rules: list[tuple[list[str], list[str]]] = []
 
-        try:
-            if sys.platform == "win32":
-                cmd = [
+        if sys.platform == "win32":
+            out_of_scope = compute_out_of_scope_cidrs(scope_cidrs, allow_loopback=True)
+            if not out_of_scope:
+                return []
+
+            batch_size = 40
+            for i in range(0, len(out_of_scope), batch_size):
+                batch = out_of_scope[i : i + batch_size]
+                sub_name = f"{rule_name}_blk{i // batch_size}"
+                apply_cmd = [
                     "netsh", "advfirewall", "firewall", "add", "rule",
-                    f"name={rule_name}",
+                    f"name={sub_name}",
                     "dir=out",
-                    "action=allow",
+                    "action=block",
                     f"program={prog}",
-                    f"remoteip={cidrs_str}",
+                    f"remoteip={','.join(batch)}",
                     "enable=yes",
                 ]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                cleanup_cmd = [
+                    "netsh", "advfirewall", "firewall", "delete", "rule",
+                    f"name={sub_name}",
+                ]
+                sub_rules.append((apply_cmd, cleanup_cmd))
+
+        elif sys.platform.startswith("linux"):
+            pid = str(os.getpid())
+            # Rule 1: Allow loopback for this process
+            lo_apply = [
+                "iptables", "-I", "OUTPUT", "1",
+                "-m", "owner", "--pid-owner", pid,
+                "-o", "lo",
+                "-j", "ACCEPT",
+                "-m", "comment", "--comment", f"{rule_name}_lo",
+            ]
+            lo_cleanup = [
+                "iptables", "-D", "OUTPUT",
+                "-m", "comment", "--comment", f"{rule_name}_lo",
+                "-j", "ACCEPT",
+            ]
+            sub_rules.append((lo_apply, lo_cleanup))
+
+            # Rule 2: Allow authorized scope CIDRs for this process
+            scope_apply = [
+                "iptables", "-I", "OUTPUT", "2",
+                "-m", "owner", "--pid-owner", pid,
+                "-d", cidrs_str,
+                "-j", "ACCEPT",
+                "-m", "comment", "--comment", f"{rule_name}_scope",
+            ]
+            scope_cleanup = [
+                "iptables", "-D", "OUTPUT",
+                "-m", "comment", "--comment", f"{rule_name}_scope",
+                "-j", "ACCEPT",
+            ]
+            sub_rules.append((scope_apply, scope_cleanup))
+
+            # Rule 3: DROP all other outbound egress from this process (strict allowlist)
+            drop_apply = [
+                "iptables", "-I", "OUTPUT", "3",
+                "-m", "owner", "--pid-owner", pid,
+                "-j", "DROP",
+                "-m", "comment", "--comment", f"{rule_name}_drop",
+            ]
+            drop_cleanup = [
+                "iptables", "-D", "OUTPUT",
+                "-m", "comment", "--comment", f"{rule_name}_drop",
+                "-j", "DROP",
+            ]
+            sub_rules.append((drop_apply, drop_cleanup))
+
+        applied_cleanups: list[list[str]] = []
+        all_succeeded = True
+
+        for apply_cmd, cleanup_cmd in sub_rules:
+            try:
+                res = subprocess.run(apply_cmd, capture_output=True, text=True, timeout=5)
                 if res.returncode == 0:
-                    applied.append(rule_name)
-                    with cls._lock:
-                        cls._active_rules.add(rule_name)
-                    logger.info("os_firewall_rule_applied", rule=rule_name, cidrs=scope_cidrs, platform="windows")
+                    applied_cleanups.append(cleanup_cmd)
                 else:
-                    logger.warning("os_firewall_rule_failed", rule=rule_name, error=res.stderr.strip() or res.stdout.strip())
+                    all_succeeded = False
+                    logger.warning("os_firewall_subrule_failed", rule=rule_name, cmd=apply_cmd, error=res.stderr.strip() or res.stdout.strip())
+                    break
+            except Exception as exc:
+                all_succeeded = False
+                logger.warning("os_firewall_apply_exception", rule=rule_name, error=str(exc))
+                break
 
-            elif sys.platform.startswith("linux"):
-                pid = str(os.getpid())
-                # Rule 1: Allow loopback for this process
-                cmd_lo = [
-                    "iptables", "-I", "OUTPUT", "1",
-                    "-m", "owner", "--pid-owner", pid,
-                    "-o", "lo",
-                    "-j", "ACCEPT",
-                    "-m", "comment", "--comment", rule_name,
-                ]
-                # Rule 2: Allow authorized scope CIDRs for this process
-                cmd_scope = [
-                    "iptables", "-I", "OUTPUT", "2",
-                    "-m", "owner", "--pid-owner", pid,
-                    "-d", cidrs_str,
-                    "-j", "ACCEPT",
-                    "-m", "comment", "--comment", rule_name,
-                ]
-                # Rule 3: DROP all other outbound egress from this process (strict allowlist)
-                cmd_drop = [
-                    "iptables", "-I", "OUTPUT", "3",
-                    "-m", "owner", "--pid-owner", pid,
-                    "-j", "DROP",
-                    "-m", "comment", "--comment", rule_name,
-                ]
-                subprocess.run(cmd_lo, capture_output=True, text=True, timeout=5)
-                res = subprocess.run(cmd_scope, capture_output=True, text=True, timeout=5)
-                subprocess.run(cmd_drop, capture_output=True, text=True, timeout=5)
-                if res.returncode == 0:
-                    applied.append(rule_name)
-                    with cls._lock:
-                        cls._active_rules.add(rule_name)
-                    logger.info("os_firewall_rule_applied", rule=rule_name, cidrs=scope_cidrs, platform="linux", mode="strict_pid_allowlist")
-                else:
-                    logger.warning("os_firewall_rule_failed", rule=rule_name, error=res.stderr.strip())
+        if not all_succeeded:
+            for cleanup_cmd in reversed(applied_cleanups):
+                try:
+                    subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
+                except Exception:
+                    pass
+            if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
+                raise ScopeFirewallBlockError(
+                    f"[ScopeFirewall] Transactional OS firewall configuration failed for {rule_name}."
+                )
+            return []
 
-        except Exception as exc:
-            logger.warning("os_firewall_apply_exception", error=str(exc))
+        with cls._lock:
+            cls._active_rules.add(rule_name)
+            cls._rule_cleanups[rule_name] = applied_cleanups
 
-        return applied
+        logger.info(
+            "os_firewall_transaction_committed",
+            rule=rule_name,
+            sub_rules_count=len(applied_cleanups),
+            platform=sys.platform,
+        )
+        return [rule_name]
 
     @classmethod
     def remove_rules(cls, rule_ids: list[str]) -> int:
-        """Remove previously created OS firewall rules."""
+        """Remove previously created OS firewall rules using exact recorded cleanups."""
         removed = 0
         for rule_name in rule_ids:
-            try:
-                if sys.platform == "win32":
-                    cmd = ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"]
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    if res.returncode == 0:
-                        removed += 1
-                elif sys.platform.startswith("linux"):
-                    cmd = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", rule_name, "-j", "ACCEPT"]
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                    if res.returncode == 0:
-                        removed += 1
-                    cmd_drop = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", rule_name, "-j", "DROP"]
-                    subprocess.run(cmd_drop, capture_output=True, text=True, timeout=5)
-            except Exception as exc:
-                logger.warning("os_firewall_remove_failed", rule=rule_name, error=str(exc))
-            finally:
-                with cls._lock:
-                    cls._active_rules.discard(rule_name)
+            with cls._lock:
+                cleanups = cls._rule_cleanups.pop(rule_name, None)
+                cls._active_rules.discard(rule_name)
+
+            if cleanups:
+                for cleanup_cmd in reversed(cleanups):
+                    try:
+                        res = subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
+                        if res.returncode == 0:
+                            removed += 1
+                    except Exception as exc:
+                        logger.warning("os_firewall_cleanup_failed", rule=rule_name, cmd=cleanup_cmd, error=str(exc))
+            else:
+                try:
+                    if sys.platform == "win32":
+                        cmd = ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"]
+                        res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                        if res.returncode == 0:
+                            removed += 1
+                    elif sys.platform.startswith("linux"):
+                        for suffix in ("_lo", "_scope", "_drop", ""):
+                            comment = f"{rule_name}{suffix}"
+                            for action in ("ACCEPT", "DROP"):
+                                cmd = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", comment, "-j", action]
+                                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                                if res.returncode == 0:
+                                    removed += 1
+                except Exception as exc:
+                    logger.warning("os_firewall_remove_fallback_failed", rule=rule_name, error=str(exc))
 
         if removed > 0:
             logger.info("os_firewall_rules_removed", count=removed)
@@ -684,7 +849,9 @@ _saved_global_proxies: dict[str, str] = {}
 
 
 def _enter_proxy_neutralization() -> None:
-    """Thread-safe, re-entrant proxy neutralization across concurrent/nested tasks."""
+    """Thread-safe proxy neutralization for optional process-global mode."""
+    if os.environ.get("ARES_GLOBAL_PROXY_NEUTRALIZE") != "1":
+        return
     global _proxy_guard_count
     with _proxy_lock:
         if _proxy_guard_count == 0:
@@ -696,6 +863,8 @@ def _enter_proxy_neutralization() -> None:
 
 def _exit_proxy_neutralization() -> None:
     """Restore proxy environment variables once all active firewall contexts exit."""
+    if os.environ.get("ARES_GLOBAL_PROXY_NEUTRALIZE") != "1":
+        return
     global _proxy_guard_count
     with _proxy_lock:
         _proxy_guard_count = max(0, _proxy_guard_count - 1)

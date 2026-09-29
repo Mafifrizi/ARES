@@ -318,6 +318,7 @@ class TestOSFirewallController:
             assert status["active_rules_count"] == 0
 
     def test_windows_elevated_rule_application_and_cleanup(self, sample_campaign: Campaign):
+        OSFirewallController._active_rules.clear()
         with (
             patch.object(OSFirewallController, "is_elevated", return_value=True),
             patch("sys.platform", "win32"),
@@ -327,20 +328,20 @@ class TestOSFirewallController:
             rules = OSFirewallController.apply_rules(sample_campaign, ["10.0.0.0/24", "192.168.1.0/24"])
             assert len(rules) == 1
             assert rules[0].startswith("ARES_SCOPE_WALL_")
-            assert mock_run.call_count == 1
-            cmd = mock_run.call_args[0][0]
-            assert cmd[0] == "netsh"
-            assert "advfirewall" in cmd
-            assert "remoteip=10.0.0.0/24,192.168.1.0/24" in cmd
+            assert mock_run.call_count >= 1
+            all_cmds = [call[0][0] for call in mock_run.call_args_list]
+            assert any(cmd[0] == "netsh" and "action=block" in cmd for cmd in all_cmds)
 
             # Verify cleanup
+            mock_run.reset_mock()
             removed = OSFirewallController.remove_rules(rules)
-            assert removed == 1
-            del_cmd = mock_run.call_args[0][0]
-            assert del_cmd[0] == "netsh"
-            assert f"name={rules[0]}" in del_cmd
+            assert removed >= 1
+            del_cmds = [call[0][0] for call in mock_run.call_args_list]
+            assert any(cmd[0] == "netsh" and "delete" in cmd for cmd in del_cmds)
+            assert len(OSFirewallController._active_rules) == 0
 
     def test_linux_elevated_rule_application_and_cleanup(self, sample_campaign: Campaign):
+        OSFirewallController._active_rules.clear()
         with (
             patch.object(OSFirewallController, "is_elevated", return_value=True),
             patch("sys.platform", "linux"),
@@ -356,7 +357,8 @@ class TestOSFirewallController:
             assert any(cmd[0] == "iptables" and "-j" in cmd and "DROP" in cmd for cmd in all_cmds)
 
             removed = OSFirewallController.remove_rules(rules)
-            assert removed == 1
+            assert removed == 3
+            assert len(OSFirewallController._active_rules) == 0
 
     def test_scope_firewall_guard_wires_os_firewall(self, sample_campaign: Campaign):
         with (
@@ -392,15 +394,26 @@ class TestOSFirewallController:
         assert fw.is_allowed_address("::ffff:8.8.8.8") is False
         assert fw.is_allowed_address(("::ffff:8.8.8.8", 53)) is False
 
-    def test_proxy_environment_variables_neutralized_during_guard(self, sample_campaign: Campaign):
+    def test_proxy_environment_variables_neutralized_during_guard(self, sample_campaign: Campaign, monkeypatch: pytest.MonkeyPatch):
         import os
         import urllib.request
+        from ares.core.scope_firewall import _firewall_getproxies
         os.environ["HTTP_PROXY"] = "http://127.0.0.1:8080"
         os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8443"
         try:
+            # 1. Task-local isolation mode (default: os.environ is NOT mutated to avoid clobbering concurrent tasks)
             with scope_firewall_sync_guard(sample_campaign) as fw:
                 assert fw is not None
-                # Proxies must be stripped while guard is active
+                # urllib proxy getter hooked to return {} when inside guard
+                assert _firewall_getproxies() == {}
+                assert urllib.request.getproxies() == {}
+                # Unrelated task looking at os.environ directly is not clobbered
+                assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:8080"
+
+            # 2. Process-global mode (opt-in via ARES_GLOBAL_PROXY_NEUTRALIZE=1)
+            monkeypatch.setenv("ARES_GLOBAL_PROXY_NEUTRALIZE", "1")
+            with scope_firewall_sync_guard(sample_campaign) as fw:
+                assert fw is not None
                 assert "HTTP_PROXY" not in os.environ
                 assert "HTTPS_PROXY" not in os.environ
                 assert urllib.request.getproxies() == {}
@@ -410,10 +423,9 @@ class TestOSFirewallController:
                     assert inner_fw is not None
                     assert "HTTP_PROXY" not in os.environ
 
-                # Exiting nested guard must still maintain proxy neutralization while outer guard is alive
                 assert "HTTP_PROXY" not in os.environ
 
-            # Proxies must be safely restored only upon final exit
+            # Restored upon exit of global mode
             assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:8080"
             assert os.environ.get("HTTPS_PROXY") == "http://127.0.0.1:8443"
         finally:
@@ -428,9 +440,65 @@ class TestOSFirewallController:
             raise socket.gaierror(-2, "Name or service not known")
 
         monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
-        # Attempt to resolve an unresolvable hostname
         allowed, pinned = fw.resolve_and_pin_address("unresolvable.in-targets.local")
         assert allowed is False
+
+    def test_compute_out_of_scope_cidrs(self):
+        """Mathematical complement must cover all of IPv4 except scope and loopback."""
+        import ipaddress
+        from ares.core.scope_firewall import compute_out_of_scope_cidrs
+
+        scope = ["10.0.0.0/24"]
+        comp = compute_out_of_scope_cidrs(scope, allow_loopback=True)
+        assert len(comp) > 0
+
+        # In-scope must NOT be in complement
+        in_scope = ipaddress.ip_address("10.0.0.45")
+        assert not any(in_scope in ipaddress.ip_network(c) for c in comp)
+
+        # Loopback must NOT be in complement
+        loopback = ipaddress.ip_address("127.0.0.1")
+        assert not any(loopback in ipaddress.ip_network(c) for c in comp)
+
+        # Out-of-scope MUST be in complement
+        out_scope = ipaddress.ip_address("8.8.8.8")
+        assert any(out_scope in ipaddress.ip_network(c) for c in comp)
+
+    def test_os_firewall_windows_strict_block_complement(self, monkeypatch: pytest.MonkeyPatch):
+        """Windows OS firewall must apply explicit block rules for complement CIDRs."""
+        from ares.core.scope_firewall import OSFirewallController
+        import subprocess
+        import sys
+
+        commands_executed: list[list[str]] = []
+
+        def mock_run(cmd, *args, **kwargs):
+            commands_executed.append(list(cmd))
+            class MockRes:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return MockRes()
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        monkeypatch.setattr(OSFirewallController, "is_elevated", lambda: True)
+        monkeypatch.setattr(sys, "platform", "win32")
+
+        rules = OSFirewallController.apply_rules(None, ["10.0.0.0/24"], program="python.exe")
+        assert len(rules) == 1
+        rule_name = rules[0]
+
+        # Verify that an explicit action=block rule was created for python.exe
+        assert any(
+            "netsh" in cmd and "action=block" in cmd and "program=python.exe" in cmd
+            for cmd in commands_executed
+        )
+
+        # Verify cleanup
+        commands_executed.clear()
+        removed = OSFirewallController.remove_rules([rule_name])
+        assert removed >= 1
+        assert any("delete" in cmd and "rule" in cmd for cmd in commands_executed)
 
     def test_os_firewall_linux_strict_allowlist_commands(self, monkeypatch: pytest.MonkeyPatch):
         """Linux OS firewall must apply lo ACCEPT, scope ACCEPT, and process DROP rules."""
@@ -456,25 +524,68 @@ class TestOSFirewallController:
         assert len(rules) == 1
         rule_name = rules[0]
 
-        # Verify that all 3 rules were applied:
-        # Rule 1: loopback ACCEPT
+        # Verify that all 3 rules were applied with distinct comments:
         assert any(
-            "-o" in cmd and "lo" in cmd and "-j" in cmd and "ACCEPT" in cmd
+            "-o" in cmd and "lo" in cmd and "-j" in cmd and "ACCEPT" in cmd and f"{rule_name}_lo" in cmd
             for cmd in commands_executed
         )
-        # Rule 2: scope ACCEPT
         assert any(
-            "-d" in cmd and "10.0.0.0/24" in cmd and "-j" in cmd and "ACCEPT" in cmd
+            "-d" in cmd and "10.0.0.0/24" in cmd and "-j" in cmd and "ACCEPT" in cmd and f"{rule_name}_scope" in cmd
             for cmd in commands_executed
         )
-        # Rule 3: DROP other outbound packets (strict allowlist)
         assert any(
-            "-j" in cmd and "DROP" in cmd
+            "-j" in cmd and "DROP" in cmd and f"{rule_name}_drop" in cmd
             for cmd in commands_executed
         )
 
-        # Now test remove_rules
+        # Verify exact cleanup
         commands_executed.clear()
         removed = OSFirewallController.remove_rules([rule_name])
-        assert any("iptables" in cmd and "-D" in cmd for cmd in commands_executed)
+        assert removed == 3
+        assert len([c for c in commands_executed if "iptables" in c and "-D" in c]) == 3
+
+    def test_os_firewall_transactional_rollback_on_failure(self, monkeypatch: pytest.MonkeyPatch):
+        """If any sub-rule fails during application, all previously applied sub-rules must roll back."""
+        from ares.core.scope_firewall import OSFirewallController
+        import subprocess
+        import sys
+
+        applied_commands: list[list[str]] = []
+        cleanup_commands: list[list[str]] = []
+
+        def mock_run(cmd, *args, **kwargs):
+            cmd_list = list(cmd)
+            # Fail on the 3rd rule (DROP rule)
+            if "-j" in cmd_list and "DROP" in cmd_list and "-I" in cmd_list:
+                class FailRes:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "iptables: Permission denied on DROP"
+                return FailRes()
+
+            if "-D" in cmd_list:
+                cleanup_commands.append(cmd_list)
+            else:
+                applied_commands.append(cmd_list)
+
+            class OkRes:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return OkRes()
+
+        monkeypatch.setattr(subprocess, "run", mock_run)
+        monkeypatch.setattr(OSFirewallController, "is_elevated", lambda: True)
+        monkeypatch.setattr(sys, "platform", "linux")
+
+        # Before apply: 0 rules
+        assert len(OSFirewallController._active_rules) == 0
+
+        rules = OSFirewallController.apply_rules(None, ["10.0.0.0/24"])
+        # Failed transaction must return empty list
+        assert rules == []
+        # Active rules must remain 0
+        assert len(OSFirewallController._active_rules) == 0
+        # Previously applied sub-rules (lo and scope) must have been rolled back
+        assert len(cleanup_commands) == 2
 

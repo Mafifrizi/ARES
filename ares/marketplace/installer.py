@@ -637,13 +637,25 @@ class ModuleInstaller:
         if not (dest_dir == plugins_base or dest_dir.is_relative_to(plugins_base)):
             raise ValueError(f"Path traversal detected in module destination: {manifest.id!r}")
 
+        if dest_dir.is_symlink():
+            raise ValueError(f"Symlink detected in destination directory: {dest_dir}")
         dest_dir.mkdir(parents=True, exist_ok=True)
         safe_filename = Path(file_path.name).name
         dest_file = (dest_dir / safe_filename).resolve()
         if not (dest_file == dest_dir or dest_file.is_relative_to(dest_dir)):
             raise ValueError(f"Path traversal detected in module filename: {file_path.name!r}")
+        if dest_file.is_symlink():
+            raise ValueError(f"Symlink detected at target file destination: {dest_file}")
 
-        shutil.copy2(file_path, dest_file)
+        # Atomic installation via unique temporary file in the same directory
+        import secrets
+        tmp_dest = dest_dir / f".tmp_{secrets.token_hex(4)}_{safe_filename}"
+        shutil.copy2(file_path, tmp_dest)
+        try:
+            _os.chmod(tmp_dest, 0o600)
+        except OSError:
+            pass
+        _os.replace(tmp_dest, dest_file)
         return self._finalize_install(dest_dir, manifest, force)
 
     def _finalize_install(self, plugin_dir: Path, manifest: ModuleManifest, force: bool) -> ModuleManifest:
