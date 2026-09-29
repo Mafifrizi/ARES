@@ -317,13 +317,16 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
 
     @staticmethod
     async def _run_local(cmd: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "/bin/bash",
-            "-c",
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/bash",
+                "-c",
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, OSError):
+            return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         except asyncio.TimeoutError:
@@ -333,36 +336,142 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         raw_output = (stdout or b"").decode(errors="replace").strip()
         return UntrustedTargetData(raw_output, source="localhost").value
 
-    async def _check_suid(self, run: Callable[[str], Awaitable[str]]) -> list[str]:
-        output = await run("find / -perm -4000 -type f 2>/dev/null")
-        return [line for line in output.splitlines() if line.strip()]
+    def _find_suid_local(self, search_dirs: list[str] | None = None) -> list[str]:
+        """
+        Pure Python SUID file scanner. Discovers files with S_ISUID bit set
+        without spawning /bin/bash or /usr/bin/find. Skips virtual filesystems.
+        """
+        import stat
+        if search_dirs is None:
+            search_dirs = [
+                "/bin", "/sbin", "/usr/bin", "/usr/sbin",
+                "/usr/local/bin", "/usr/local/sbin", "/opt",
+            ]
+        found: list[str] = []
+        for root_dir in search_dirs:
+            if not os.path.exists(root_dir) or not os.path.isdir(root_dir):
+                continue
+            try:
+                for entry in os.scandir(root_dir):
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            mode = os.stat(entry.path).st_mode
+                            if mode & stat.S_ISUID:
+                                found.append(entry.path)
+                    except (OSError, PermissionError):
+                        continue
+            except (OSError, PermissionError):
+                continue
+        return sorted(found)
 
-    async def _check_sudo(self, run: Callable[[str], Awaitable[str]]) -> list[str]:
-        output = await run("sudo -l 2>/dev/null")
-        return [line for line in output.splitlines() if line.strip()]
+    async def _check_suid(self, run: Callable[[str], Awaitable[str]] | None = None) -> list[str]:
+        target_host = getattr(self, "_target_host", None) or "localhost"
+        if target_host == "localhost":
+            suid_files = self._find_suid_local()
+            if suid_files:
+                return suid_files
+        if run is not None:
+            output = await run("find / -perm -4000 -type f 2>/dev/null")
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            if lines:
+                return lines
+        return self._find_suid_local()
 
-    async def _check_cron(self, run: Callable[[str], Awaitable[str]]) -> dict[str, Any]:
+    async def _check_sudo(self, run: Callable[[str], Awaitable[str]] | None = None) -> list[str]:
+        target_host = getattr(self, "_target_host", None) or "localhost"
+        rules: list[str] = []
+        if run is not None:
+            output = await run("sudo -l 2>/dev/null")
+            lines = [line for line in output.splitlines() if line.strip()]
+            if lines:
+                return lines
+        # Pure Python local fallback if readable
+        if target_host == "localhost":
+            for sudoers_path in ["/etc/sudoers", "/etc/sudoers.d"]:
+                if os.path.isfile(sudoers_path) and os.access(sudoers_path, os.R_OK):
+                    try:
+                        with open(sudoers_path, "r", encoding="utf-8", errors="replace") as f:
+                            rules.extend([l.strip() for l in f if l.strip() and not l.strip().startswith("#")])
+                    except OSError:
+                        pass
+                elif os.path.isdir(sudoers_path) and os.access(sudoers_path, os.R_OK):
+                    try:
+                        for entry in os.scandir(sudoers_path):
+                            if entry.is_file() and os.access(entry.path, os.R_OK):
+                                with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                                    rules.extend([l.strip() for l in f if l.strip() and not l.strip().startswith("#")])
+                    except OSError:
+                        pass
+        return rules
+
+    async def _check_cron(self, run: Callable[[str], Awaitable[str]] | None = None) -> dict[str, Any]:
         crontabs: list[str] = []
-        for src in ["crontab -l 2>/dev/null", "cat /etc/crontab 2>/dev/null", "ls /etc/cron.d/ 2>/dev/null"]:
-            out = await run(src)
-            if out and "no crontab" not in out.lower():
-                crontabs.append(out)
+        target_host = getattr(self, "_target_host", None) or "localhost"
+        if run is not None:
+            for src in ["crontab -l 2>/dev/null", "cat /etc/crontab 2>/dev/null", "ls /etc/cron.d/ 2>/dev/null"]:
+                out = await run(src)
+                if out and "no crontab" not in out.lower():
+                    crontabs.append(out)
+        if not crontabs and target_host == "localhost":
+            # Pure Python local inspection
+            if os.path.exists("/etc/crontab") and os.access("/etc/crontab", os.R_OK):
+                try:
+                    with open("/etc/crontab", "r", encoding="utf-8", errors="replace") as f:
+                        crontabs.append(f.read())
+                except OSError:
+                    pass
+            if os.path.isdir("/etc/cron.d") and os.access("/etc/cron.d", os.R_OK):
+                try:
+                    for entry in os.scandir("/etc/cron.d"):
+                        if entry.is_file() and os.access(entry.path, os.R_OK):
+                            with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                                crontabs.append(f.read())
+                except OSError:
+                    pass
         return {"crontabs": crontabs}
 
     async def _check_capabilities(self, run: Callable[[str], Awaitable[str]] | None = None) -> list[str]:
-        if run is None:
-            return []
-        output = await run("getcap -r / 2>/dev/null")
-        return [line for line in output.splitlines() if line.strip()]
+        target_host = getattr(self, "_target_host", None) or "localhost"
+        if run is not None:
+            output = await run("getcap -r / 2>/dev/null")
+            lines = [line for line in output.splitlines() if line.strip()]
+            if lines:
+                return lines
+        # Pure Python local capability decode via LinuxCapParser
+        if target_host == "localhost":
+            from ares.modules.linux._parsers import LinuxCapParser
+            caps_found: list[str] = []
+            for bdir in ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin"]:
+                if not os.path.isdir(bdir):
+                    continue
+                try:
+                    for entry in os.scandir(bdir):
+                        if entry.is_file(follow_symlinks=False):
+                            caps = LinuxCapParser.get_file_capabilities(entry.path)
+                            for c in caps:
+                                caps_found.append(f"{entry.path} = {c}")
+                except (OSError, PermissionError):
+                    continue
+            return caps_found
+        return []
 
     async def _check_writable_path(self, run: Callable[[str], Awaitable[str]] | None = None) -> list[str]:
-        if run is None:
-            return []
-        cmd = 'echo "$PATH" | tr \':\' \'\\n\' | while IFS= read -r d; do [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] && echo "$d"; done'
-        output = await run(cmd)
-        if not output or not isinstance(output, str):
-            return []
-        return [line.strip() for line in output.splitlines() if line.strip()]
+        if run is not None:
+            cmd = 'echo "$PATH" | tr \':\' \'\\n\' | while IFS= read -r d; do [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] && echo "$d"; done'
+            output = await run(cmd)
+            if output and isinstance(output, str):
+                lines = [line.strip() for line in output.splitlines() if line.strip()]
+                if lines:
+                    return lines
+        # Pure Python local PATH check
+        path_env = os.environ.get("PATH", "")
+        writable_dirs: list[str] = []
+        for d in path_env.split(os.pathsep):
+            d = d.strip()
+            if d and os.path.isdir(d) and os.access(d, os.W_OK):
+                if d not in writable_dirs:
+                    writable_dirs.append(d)
+        return writable_dirs
 
     async def _check_world_writable_sensitive(self, run: Any = None) -> list[str]:
         sensitive_paths = [
@@ -374,12 +483,19 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
             "/bin",
         ]
         writable: list[str] = []
-        for path in sensitive_paths:
-            if os.path.exists(path) and os.access(path, os.W_OK):
-                writable.append(path)
+        target_host = getattr(self, "_target_host", None) or "localhost"
+
+        if callable(run) and target_host != "localhost":
+            for path in sensitive_paths:
+                out = await run(f"[ -w '{path}' ] && echo writable")
+                if out and "writable" in str(out):
+                    writable.append(path)
+        else:
+            for path in sensitive_paths:
+                if os.path.exists(path) and os.access(path, os.W_OK):
+                    writable.append(path)
 
         if writable:
-            target_host = getattr(self, "_target_host", None) or "localhost"
             self.finding(
                 title=f"World-writable sensitive files: {', '.join(writable[:3])}",
                 description=f"Found {len(writable)} sensitive path(s) writable: {writable}",

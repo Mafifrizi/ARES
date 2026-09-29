@@ -306,24 +306,28 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
 
         try:
 
-            # ── 1. Collect .service unit files ────────────────────────────────
-            find_cmd = (
-                "find "
-                + " ".join(f"'{d}'" for d in _SYSTEMD_DIRS)
-                + f" -name '*.service' -type f 2>/dev/null | head -{_MAX_SERVICES}"
-            )
-            unit_files_raw = await run_cmd(find_cmd)
-            unit_files_raw = unit_files_raw if isinstance(unit_files_raw, str) else ""
-            unit_files = [u.strip() for u in unit_files_raw.splitlines() if u.strip()]
+            # ── 1. Collect .service unit files & init.d scripts ──────────────
+            if host == "localhost":
+                # Pure Python local collection
+                unit_files = self._collect_unit_files_local()
+                initd_scripts = self._collect_initd_local()
+            else:
+                find_cmd = (
+                    "find "
+                    + " ".join(f"'{d}'" for d in _SYSTEMD_DIRS)
+                    + f" -name '*.service' -type f 2>/dev/null | head -{_MAX_SERVICES}"
+                )
+                unit_files_raw = await run_cmd(find_cmd)
+                unit_files_raw = unit_files_raw if isinstance(unit_files_raw, str) else ""
+                unit_files = [u.strip() for u in unit_files_raw.splitlines() if u.strip()]
 
-            # Also collect init.d scripts
-            initd_raw = await run_cmd("ls /etc/init.d/ 2>/dev/null")
-            initd_raw = initd_raw if isinstance(initd_raw, str) else ""
-            initd_scripts = [
-                f"/etc/init.d/{s.strip()}"
-                for s in initd_raw.splitlines()
-                if s.strip() and not s.strip().startswith(".")
-            ]
+                initd_raw = await run_cmd("ls /etc/init.d/ 2>/dev/null")
+                initd_raw = initd_raw if isinstance(initd_raw, str) else ""
+                initd_scripts = [
+                    f"/etc/init.d/{s.strip()}"
+                    for s in initd_raw.splitlines()
+                    if s.strip() and not s.strip().startswith(".")
+                ]
 
             writable_binaries:   list[dict[str, str]] = []
             writable_unit_files: list[dict[str, str]] = []
@@ -337,16 +341,22 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
                 checked += 1
 
                 # Read unit file content
-                content = await run_cmd(f"cat {shlex.quote(unit_path)} 2>/dev/null")
-                content = content if isinstance(content, str) else ""
+                if host == "localhost":
+                    content = self._read_file_local(unit_path)
+                    unit_writable = "writable" if self._is_writable_local(unit_path) else ""
+                else:
+                    content = await run_cmd(f"cat {shlex.quote(unit_path)} 2>/dev/null")
+                    content = content if isinstance(content, str) else ""
+                    if not content:
+                        continue
+                    unit_writable = await run_cmd(
+                        f"[ -w {shlex.quote(unit_path)} ] && echo writable"
+                    )
+                    unit_writable = unit_writable if isinstance(unit_writable, str) else ""
+
                 if not content:
                     continue
 
-                # Check if the unit file itself is writable
-                unit_writable = await run_cmd(
-                    f"[ -w {shlex.quote(unit_path)} ] && echo writable"
-                )
-                unit_writable = unit_writable if isinstance(unit_writable, str) else ""
                 if "writable" in unit_writable:
                     writable_unit_files.append({
                         "unit": unit_path,
@@ -358,7 +368,6 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
                 for binary in exec_paths:
                     # Check for user-writable temp/home paths
                     if any(binary.startswith(p) for p in _USER_WRITABLE_PATHS):
-                        # Extract User= line to determine service privilege level
                         user_match = re.search(r'^User=(.+)$', content, re.MULTILINE)
                         service_user = user_match.group(1).strip() if user_match else "root"
                         suspicious_paths.append({
@@ -369,10 +378,14 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
                         continue
 
                     # Check if binary is writable
-                    bin_writable = await run_cmd(
-                        f"[ -f {shlex.quote(binary)} ] && [ -w {shlex.quote(binary)} ] && echo writable"
-                    )
-                    bin_writable = bin_writable if isinstance(bin_writable, str) else ""
+                    if host == "localhost":
+                        bin_writable = "writable" if self._is_writable_local(binary) else ""
+                    else:
+                        bin_writable = await run_cmd(
+                            f"[ -f {shlex.quote(binary)} ] && [ -w {shlex.quote(binary)} ] && echo writable"
+                        )
+                        bin_writable = bin_writable if isinstance(bin_writable, str) else ""
+
                     if "writable" in bin_writable:
                         user_match = re.search(r'^User=(.+)$', content, re.MULTILINE)
                         service_user = user_match.group(1).strip() if user_match else "root"
@@ -386,12 +399,16 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             # ── 3. Check init.d scripts for writability ────────────────────────
             writable_initd: list[str] = []
             for script in initd_scripts[:20]:
-                check = await run_cmd(
-                    f"[ -f {shlex.quote(script)} ] && [ -w {shlex.quote(script)} ] && echo writable"
-                )
-                check = check if isinstance(check, str) else ""
-                if "writable" in check:
-                    writable_initd.append(script)
+                if host == "localhost":
+                    if self._is_writable_local(script):
+                        writable_initd.append(script)
+                else:
+                    check = await run_cmd(
+                        f"[ -f {shlex.quote(script)} ] && [ -w {shlex.quote(script)} ] && echo writable"
+                    )
+                    check = check if isinstance(check, str) else ""
+                    if "writable" in check:
+                        writable_initd.append(script)
 
             # ── Generate findings ──────────────────────────────────────────────
 
@@ -585,13 +602,61 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
 
         return conn, ssh_run
 
+    def _collect_unit_files_local(self) -> list[str]:
+        """Collects .service unit files locally in pure Python without find."""
+        files: list[str] = []
+        for d in _SYSTEMD_DIRS:
+            if not os.path.exists(d) or not os.path.isdir(d):
+                continue
+            try:
+                for root, _, filenames in os.walk(d):
+                    for fname in filenames:
+                        if fname.endswith(".service"):
+                            files.append(os.path.join(root, fname))
+                            if len(files) >= _MAX_SERVICES:
+                                return files
+            except (OSError, PermissionError):
+                continue
+        return files
+
+    def _read_file_local(self, path: str) -> str:
+        """Reads file content in pure Python without cat."""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    def _is_writable_local(self, path: str) -> bool:
+        """Checks file writability in pure Python without test -w."""
+        try:
+            return os.path.exists(path) and os.access(path, os.W_OK)
+        except OSError:
+            return False
+
+    def _collect_initd_local(self) -> list[str]:
+        """Collects /etc/init.d scripts locally in pure Python without ls."""
+        scripts: list[str] = []
+        initd_dir = "/etc/init.d"
+        if os.path.isdir(initd_dir):
+            try:
+                for entry in os.scandir(initd_dir):
+                    if entry.is_file(follow_symlinks=False) and not entry.name.startswith("."):
+                        scripts.append(entry.path)
+            except (OSError, PermissionError):
+                pass
+        return scripts
+
     @staticmethod
     async def _run_local(cmd: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-c", cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/bash", "-c", cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, OSError):
+            return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         except asyncio.TimeoutError:
@@ -599,3 +664,4 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             await proc.wait()
             stdout = b""
         return (stdout or b"").decode(errors="replace").strip()
+

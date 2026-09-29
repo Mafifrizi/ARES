@@ -45,6 +45,11 @@ from ares.sdk import (
 
 logger = get_logger("ares.modules.linux.nfs_escape")
 
+# Config and system files (configurable / patchable for testing)
+_EXPORTS_FILE   = "/etc/exports"
+_MOUNTS_FILE    = "/proc/mounts"
+_NFS_CONF_FILE  = "/etc/nfs.conf"
+
 # Dangerous NFS export options
 _DANGEROUS_OPTIONS: list[tuple[str, str, str]] = [
     (
@@ -320,23 +325,50 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
 
         try:
 
-            # Gather NFS data in parallel
-            exports_raw, mounts_raw, showmount_raw, nfs_conf_raw = await asyncio.gather(
-                run_cmd("cat /etc/exports 2>/dev/null"),
-                run_cmd("cat /proc/mounts 2>/dev/null | grep nfs"),
-                run_cmd("showmount -e localhost 2>/dev/null"),
-                run_cmd("cat /etc/nfs.conf 2>/dev/null | head -30"),
-                return_exceptions=True,
-            )
+            if host == "localhost":
+                exports_raw = ""
+                if os.path.isfile(_EXPORTS_FILE):
+                    try:
+                        with open(_EXPORTS_FILE, "r", encoding="utf-8", errors="replace") as f:
+                            exports_raw = f.read()
+                    except OSError:
+                        pass
 
-            # Safely coerce exceptions to empty string
-            def _safe(v: Any) -> str:
-                return v if isinstance(v, str) else ""
+                mounts_raw = ""
+                if os.path.isfile(_MOUNTS_FILE):
+                    try:
+                        with open(_MOUNTS_FILE, "r", encoding="utf-8", errors="replace") as f:
+                            mounts_raw = "\n".join(l.strip() for l in f if "nfs" in l)
+                    except OSError:
+                        pass
 
-            exports_raw  = _safe(exports_raw)
-            mounts_raw   = _safe(mounts_raw)
-            showmount_raw = _safe(showmount_raw)
-            nfs_conf_raw = _safe(nfs_conf_raw)
+                nfs_conf_raw = ""
+                if os.path.isfile(_NFS_CONF_FILE):
+                    try:
+                        with open(_NFS_CONF_FILE, "r", encoding="utf-8", errors="replace") as f:
+                            nfs_conf_raw = f.read()
+                    except OSError:
+                        pass
+
+                showmount_raw = ""
+            else:
+                # Gather NFS data in parallel from remote target
+                exports_raw, mounts_raw, showmount_raw, nfs_conf_raw = await asyncio.gather(
+                    run_cmd(f"cat {_EXPORTS_FILE} 2>/dev/null"),
+                    run_cmd(f"cat {_MOUNTS_FILE} 2>/dev/null | grep nfs"),
+                    run_cmd("showmount -e localhost 2>/dev/null"),
+                    run_cmd(f"cat {_NFS_CONF_FILE} 2>/dev/null | head -30"),
+                    return_exceptions=True,
+                )
+
+                # Safely coerce exceptions to empty string
+                def _safe(v: Any) -> str:
+                    return v if isinstance(v, str) else ""
+
+                exports_raw  = _safe(exports_raw)
+                mounts_raw   = _safe(mounts_raw)
+                showmount_raw = _safe(showmount_raw)
+                nfs_conf_raw = _safe(nfs_conf_raw)
 
             entries = _parse_exports(exports_raw)
 
@@ -501,11 +533,14 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
 
     @staticmethod
     async def _run_local(cmd: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-c", cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/bash", "-c", cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, OSError):
+            return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         except asyncio.TimeoutError:
@@ -513,3 +548,4 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             await proc.wait()
             stdout = b""
         return (stdout or b"").decode(errors="replace").strip()
+

@@ -1025,3 +1025,334 @@ def compute_ntlm_hash(password: str) -> str:
     """
     return pure_md4(password.encode("utf-16le")).hex()
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Pure-Python ELF Binary Parser (RPATH / RUNPATH Extraction)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ELFParser:
+    """
+    Pure Python parser for ELF binaries (32-bit and 64-bit, Little & Big Endian).
+    Extracts DT_RPATH and DT_RUNPATH without spawning /usr/bin/readelf or ldd.
+    """
+
+    @classmethod
+    def parse_rpath_file(cls, path: str) -> list[str]:
+        """Reads file header and dynamic section to find RPATH/RUNPATH directories."""
+        try:
+            with open(path, "rb") as f:
+                data = f.read(1024 * 1024)  # Read first 1MB (covers headers & dynamic table)
+            return cls.parse_rpath_bytes(data)
+        except Exception:
+            return []
+
+    @classmethod
+    def parse_rpath_bytes(cls, data: bytes) -> list[str]:
+        """
+        Parses ELF bytes, discovers PT_DYNAMIC segment and SHT_STRTAB / DT_STRTAB,
+        and returns list of RPATH / RUNPATH directory strings.
+        """
+        if len(data) < 52 or not data.startswith(b"\x7fELF"):
+            return []
+
+        ei_class = data[4]   # 1 = 32-bit, 2 = 64-bit
+        ei_data = data[5]    # 1 = Little Endian, 2 = Big Endian
+        endian = "<" if ei_data == 1 else ">"
+
+        if ei_class not in (1, 2):
+            return []
+
+        is_64 = (ei_class == 2)
+        try:
+            if is_64:
+                if len(data) < 64:
+                    return []
+                # Elf64_Ehdr
+                _, _, _, _, _, e_phoff, e_shoff, _, _, e_phentsize, e_phnum, e_shentsize, e_shnum, _ = struct.unpack(
+                    f"{endian}16sHHIQQQIHHHHHH", data[:64]
+                )
+            else:
+                # Elf32_Ehdr
+                _, _, _, _, _, e_phoff, e_shoff, _, _, e_phentsize, e_phnum, e_shentsize, e_shnum, _ = struct.unpack(
+                    f"{endian}16sHHIIIIIHHHHHH", data[:52]
+                )
+        except struct.error:
+            return []
+
+        # Find PT_DYNAMIC (p_type == 2) and PT_LOAD headers
+        dyn_offset = 0
+        dyn_size = 0
+        dyn_vaddr = 0
+        load_segments: list[tuple[int, int, int]] = []  # (vaddr, offset, filesz)
+
+        for i in range(e_phnum):
+            ph_start = e_phoff + i * e_phentsize
+            if is_64:
+                if ph_start + 56 > len(data):
+                    break
+                p_type, _, p_offset, p_vaddr, _, p_filesz, _, _ = struct.unpack(
+                    f"{endian}IIQQQQQQ", data[ph_start : ph_start + 56]
+                )
+            else:
+                if ph_start + 32 > len(data):
+                    break
+                p_type, p_offset, p_vaddr, _, p_filesz, _, _, _ = struct.unpack(
+                    f"{endian}IIIIIIII", data[ph_start : ph_start + 32]
+                )
+
+            if p_type == 1:  # PT_LOAD
+                load_segments.append((p_vaddr, p_offset, p_filesz))
+            elif p_type == 2:  # PT_DYNAMIC
+                dyn_offset = p_offset
+                dyn_size = p_filesz
+                dyn_vaddr = p_vaddr
+
+        if not dyn_offset or dyn_offset >= len(data):
+            return []
+
+        # Parse Elf_Dyn entries in PT_DYNAMIC
+        dyn_bytes = data[dyn_offset : dyn_offset + dyn_size]
+        strtab_val = 0
+        rpath_offsets: list[int] = []
+
+        entry_size = 16 if is_64 else 8
+        fmt = f"{endian}QQ" if is_64 else f"{endian}II"
+
+        for i in range(0, len(dyn_bytes) - entry_size + 1, entry_size):
+            try:
+                d_tag, d_val = struct.unpack(fmt, dyn_bytes[i : i + entry_size])
+            except struct.error:
+                break
+            if d_tag == 0:  # DT_NULL
+                break
+            elif d_tag == 5:  # DT_STRTAB
+                strtab_val = d_val
+            elif d_tag in (15, 29):  # DT_RPATH (15) or DT_RUNPATH (29)
+                rpath_offsets.append(d_val)
+
+        if not rpath_offsets:
+            return []
+
+        # Resolve strtab offset in binary data
+        strtab_offset = 0
+
+        # Method A: Direct address check in binary
+        if 0 < strtab_val < len(data):
+            # Check if strtab_val is directly a file offset
+            strtab_offset = strtab_val
+
+        # Method B: Map virtual address via PT_LOAD
+        if not strtab_offset:
+            for vaddr, offset, filesz in load_segments:
+                if vaddr <= strtab_val < vaddr + filesz:
+                    strtab_offset = offset + (strtab_val - vaddr)
+                    break
+
+        # Method C: Check section headers for SHT_DYNAMIC (sh_type == 6) and its sh_link
+        if not strtab_offset and e_shoff > 0 and e_shnum > 0:
+            sh_entry_size = e_shentsize
+            dyn_sh_link = -1
+            for s in range(e_shnum):
+                sh_start = e_shoff + s * sh_entry_size
+                if is_64:
+                    if sh_start + 64 > len(data):
+                        break
+                    _, sh_type, _, _, _, _, sh_link, _, _, _ = struct.unpack(
+                        f"{endian}IIQQQQIIQQ", data[sh_start : sh_start + 64]
+                    )
+                else:
+                    if sh_start + 40 > len(data):
+                        break
+                    _, sh_type, _, _, _, _, sh_link, _, _, _ = struct.unpack(
+                        f"{endian}IIIIIIIIII", data[sh_start : sh_start + 40]
+                    )
+                if sh_type == 6:  # SHT_DYNAMIC
+                    dyn_sh_link = sh_link
+                    break
+
+            if 0 <= dyn_sh_link < e_shnum:
+                strtab_sh_start = e_shoff + dyn_sh_link * sh_entry_size
+                if is_64 and strtab_sh_start + 64 <= len(data):
+                    _, _, _, _, sh_offset, _, _, _, _, _ = struct.unpack(
+                        f"{endian}IIQQQQIIQQ", data[strtab_sh_start : strtab_sh_start + 64]
+                    )
+                    strtab_offset = sh_offset
+                elif not is_64 and strtab_sh_start + 40 <= len(data):
+                    _, _, _, _, sh_offset, _, _, _, _, _ = struct.unpack(
+                        f"{endian}IIIIIIIIII", data[strtab_sh_start : strtab_sh_start + 40]
+                    )
+                    strtab_offset = sh_offset
+
+        if not strtab_offset or strtab_offset >= len(data):
+            return []
+
+        # Extract RPATH strings from strtab
+        result: list[str] = []
+        for r_off in rpath_offsets:
+            abs_str_offset = strtab_offset + r_off
+            if abs_str_offset >= len(data):
+                continue
+            null_pos = data.find(b"\x00", abs_str_offset)
+            if null_pos != -1:
+                rpath_str = data[abs_str_offset:null_pos].decode("utf-8", errors="replace").strip()
+            else:
+                rpath_str = data[abs_str_offset:abs_str_offset + 512].decode("utf-8", errors="replace").strip()
+            if rpath_str:
+                for part in rpath_str.split(":"):
+                    p = part.strip()
+                    if p and p not in result:
+                        result.append(p)
+
+        return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Pure-Python Linux Capability Decoder (security.capability / vfs_cap_data)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LINUX_CAP_NAMES: dict[int, str] = {
+    0: "cap_chown",
+    1: "cap_dac_override",
+    2: "cap_dac_read_search",
+    3: "cap_fowner",
+    4: "cap_fsetid",
+    5: "cap_kill",
+    6: "cap_setgid",
+    7: "cap_setuid",
+    8: "cap_setpcap",
+    9: "cap_linux_immutable",
+    10: "cap_net_bind_service",
+    11: "cap_net_broadcast",
+    12: "cap_net_admin",
+    13: "cap_net_raw",
+    14: "cap_ipc_lock",
+    15: "cap_ipc_owner",
+    16: "cap_sys_module",
+    17: "cap_sys_rawio",
+    18: "cap_sys_chroot",
+    19: "cap_sys_ptrace",
+    20: "cap_sys_pacct",
+    21: "cap_sys_admin",
+    22: "cap_sys_boot",
+    23: "cap_sys_nice",
+    24: "cap_sys_resource",
+    25: "cap_sys_time",
+    26: "cap_sys_tty_config",
+    27: "cap_mknod",
+    28: "cap_lease",
+    29: "cap_audit_write",
+    30: "cap_audit_control",
+    31: "cap_setfcap",
+    32: "cap_mac_override",
+    33: "cap_mac_admin",
+    34: "cap_syslog",
+    35: "cap_wake_alarm",
+    36: "cap_block_suspend",
+    37: "cap_audit_read",
+    38: "cap_perfmon",
+    39: "cap_bpf",
+    40: "cap_checkpoint_restore",
+}
+
+
+class LinuxCapParser:
+    """
+    Pure Python decoder for Linux security.capability xattr structures (vfs_cap_data).
+    Decodes effective/permitted capabilities without invoking /sbin/getcap.
+    """
+
+    @classmethod
+    def get_file_capabilities(cls, path: str) -> list[str]:
+        """Reads security.capability extended attribute via os.getxattr if supported."""
+        if not hasattr(os, "getxattr"):
+            return []
+        try:
+            cap_data = os.getxattr(path, "security.capability")  # type: ignore[attr-defined]
+            return cls.decode_capability_bytes(cap_data)
+        except (OSError, ValueError):
+            return []
+
+    @classmethod
+    def decode_capability_bytes(cls, data: bytes) -> list[str]:
+        """
+        Decodes raw bytes of Linux vfs_cap_data / vfs_ns_cap_data structure.
+        Supports VFS_CAP_REVISION_1 (32-bit), VFS_CAP_REVISION_2 (64-bit), and VFS_CAP_REVISION_3.
+        """
+        if len(data) < 12:
+            return []
+
+        # Determine endianness from magic
+        # Magic is stored in lower/upper byte of magic_etc
+        endian = "<"  # Linux xattrs on disk are little-endian
+        try:
+            magic_etc = struct.unpack(f"{endian}I", data[:4])[0]
+        except struct.error:
+            return []
+
+        rev = magic_etc & 0xFF000000
+        permitted_64 = 0
+
+        if rev in (0x02000000, 0x03000000) and len(data) >= 20:
+            # VFS_CAP_REVISION_2 or 3: 2 uint32 pairs (permitted, inheritable)
+            try:
+                _, p0, _, p1, _ = struct.unpack(f"{endian}5I", data[:20])
+                permitted_64 = (p0 & 0xFFFFFFFF) | ((p1 & 0xFFFFFFFF) << 32)
+            except struct.error:
+                return []
+        elif rev == 0x01000000 and len(data) >= 12:
+            # VFS_CAP_REVISION_1: 1 uint32 pair (permitted, inheritable)
+            try:
+                _, p0, _ = struct.unpack(f"{endian}3I", data[:12])
+                permitted_64 = p0 & 0xFFFFFFFF
+            except struct.error:
+                return []
+        else:
+            # Fallback: try reading first 2 words
+            try:
+                _, p0 = struct.unpack(f"{endian}2I", data[:8])
+                permitted_64 = p0 & 0xFFFFFFFF
+            except struct.error:
+                return []
+
+        found: list[str] = []
+        for bit_idx, cap_name in _LINUX_CAP_NAMES.items():
+            if (permitted_64 & (1 << bit_idx)) != 0:
+                found.append(cap_name)
+
+        return found
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Pure-Python Local SUID / SGID Scanner
+# ─────────────────────────────────────────────────────────────────────────────
+
+def find_suid_binaries_local(search_dirs: list[str] | None = None) -> list[str]:
+    """
+    Scans common binary directories or custom directories for S_ISUID files
+    in pure Python without invoking /usr/bin/find or /bin/bash.
+    """
+    import stat
+    if search_dirs is None:
+        search_dirs = [
+            "/bin", "/sbin", "/usr/bin", "/usr/sbin",
+            "/usr/local/bin", "/usr/local/sbin", "/opt",
+        ]
+    found: list[str] = []
+    for root_dir in search_dirs:
+        if not os.path.exists(root_dir) or not os.path.isdir(root_dir):
+            continue
+        try:
+            for entry in os.scandir(root_dir):
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        mode = os.stat(entry.path).st_mode
+                        if mode & stat.S_ISUID:
+                            found.append(entry.path)
+                except (OSError, PermissionError):
+                    continue
+        except (OSError, PermissionError):
+            continue
+    return sorted(found)
+
+
+

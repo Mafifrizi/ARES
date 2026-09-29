@@ -48,16 +48,21 @@ logger = get_logger("ares.modules.linux.ld_preload")
 # SUID binaries worth checking for writable RPATH
 _RPATH_CHECK_DEPTH = 20    # max SUID binaries to check RPATH on
 
-# Commands used for detection
+# Config file locations (configurable / patchable for tests)
+_LD_PRELOAD_FILE = "/etc/ld.so.preload"
+_LD_CONF_FILE    = "/etc/ld.so.conf"
+_LD_CONF_DIR     = "/etc/ld.so.conf.d"
+
+# Commands used for remote detection
 _CMD_SUDOERS_LDPRELOAD = (
     "sudo -l 2>/dev/null | grep -i 'LD_PRELOAD\\|env_keep'"
 )
 _CMD_LD_PRELOAD_FILE = (
-    "ls -la /etc/ld.so.preload 2>/dev/null && cat /etc/ld.so.preload 2>/dev/null"
+    f"ls -la {_LD_PRELOAD_FILE} 2>/dev/null && cat {_LD_PRELOAD_FILE} 2>/dev/null"
 )
 _CMD_LD_CONF_PATHS = (
-    "cat /etc/ld.so.conf 2>/dev/null; "
-    "cat /etc/ld.so.conf.d/*.conf 2>/dev/null"
+    f"cat {_LD_CONF_FILE} 2>/dev/null; "
+    f"cat {_LD_CONF_DIR}/*.conf 2>/dev/null"
 )
 _CMD_SUID_BINS = (
     "find / -perm -4000 -type f 2>/dev/null | head -30"
@@ -266,27 +271,61 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
 
         try:
 
-            # Run checks in parallel
-            (
-                sudoers_out,
-                preload_file_out,
-                ld_conf_out,
-                suid_bins_out,
-            ) = await asyncio.gather(
-                run_cmd(_CMD_SUDOERS_LDPRELOAD),
-                run_cmd(_CMD_LD_PRELOAD_FILE),
-                run_cmd(_CMD_LD_CONF_PATHS),
-                run_cmd(_CMD_SUID_BINS),
-                return_exceptions=True,
-            )
+            if host == "localhost":
+                # Pure Python local data collection
+                sudoers_out = await run_cmd(_CMD_SUDOERS_LDPRELOAD) if run_cmd else ""
+                sudoers_out = sudoers_out if isinstance(sudoers_out, str) else ""
 
-            def _safe(v: Any) -> str:
-                return v if isinstance(v, str) else ""
+                preload_file_out = ""
+                if os.path.isfile(_LD_PRELOAD_FILE):
+                    try:
+                        with open(_LD_PRELOAD_FILE, "r", encoding="utf-8", errors="replace") as f:
+                            preload_file_out = f.read()
+                    except OSError:
+                        pass
 
-            sudoers_out      = _safe(sudoers_out)
-            preload_file_out = _safe(preload_file_out)
-            ld_conf_out      = _safe(ld_conf_out)
-            suid_bins_out    = _safe(suid_bins_out)
+                ld_conf_parts: list[str] = []
+                if os.path.isfile(_LD_CONF_FILE):
+                    try:
+                        with open(_LD_CONF_FILE, "r", encoding="utf-8", errors="replace") as f:
+                            ld_conf_parts.append(f.read())
+                    except OSError:
+                        pass
+                if os.path.isdir(_LD_CONF_DIR):
+                    try:
+                        for entry in os.scandir(_LD_CONF_DIR):
+                            if entry.is_file() and entry.name.endswith(".conf"):
+                                with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                                    ld_conf_parts.append(f.read())
+                    except OSError:
+                        pass
+                ld_conf_out = "\n".join(ld_conf_parts)
+
+                from ares.modules.linux._parsers import find_suid_binaries_local
+                suid_bins = find_suid_binaries_local()
+                suid_bins_out = "\n".join(suid_bins)
+            else:
+                # Run checks in parallel on remote target
+                (
+                    sudoers_out,
+                    preload_file_out,
+                    ld_conf_out,
+                    suid_bins_out,
+                ) = await asyncio.gather(
+                    run_cmd(_CMD_SUDOERS_LDPRELOAD),
+                    run_cmd(_CMD_LD_PRELOAD_FILE),
+                    run_cmd(_CMD_LD_CONF_PATHS),
+                    run_cmd(_CMD_SUID_BINS),
+                    return_exceptions=True,
+                )
+
+                def _safe(v: Any) -> str:
+                    return v if isinstance(v, str) else ""
+
+                sudoers_out      = _safe(sudoers_out)
+                preload_file_out = _safe(preload_file_out)
+                ld_conf_out      = _safe(ld_conf_out)
+                suid_bins_out    = _safe(suid_bins_out)
 
             # ── Check 1: LD_PRELOAD in sudoers env_keep ────────────────────────
             if sudoers_out and "ld_preload" in sudoers_out.lower():
@@ -323,11 +362,13 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
 
             # ── Check 2: Writable /etc/ld.so.preload ──────────────────────────
             if preload_file_out:
-                # File exists - check if writable by current user
-                writable_preload = await run_cmd(
-                    "[ -w /etc/ld.so.preload ] && echo writable || echo readonly"
-                ) if not isinstance(preload_file_out, Exception) else ""
-                writable_preload = writable_preload if isinstance(writable_preload, str) else ""
+                if host == "localhost":
+                    writable_preload = "writable" if os.access(_LD_PRELOAD_FILE, os.W_OK) else "readonly"
+                else:
+                    writable_preload = await run_cmd(
+                        f"[ -w {_LD_PRELOAD_FILE} ] && echo writable || echo readonly"
+                    ) if not isinstance(preload_file_out, Exception) else ""
+                    writable_preload = writable_preload if isinstance(writable_preload, str) else ""
 
                 if "writable" in writable_preload:
                     self.finding(
@@ -368,17 +409,21 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                 lib_dirs: list[str] = []
                 for line in ld_conf_out.splitlines():
                     line = line.strip()
-                    if line and not line.startswith("#") and line.startswith("/"):
+                    if line and not line.startswith("#") and (line.startswith("/") or os.path.isabs(line)):
                         lib_dirs.append(line)
 
                 writable_lib_dirs: list[str] = []
                 for ldir in lib_dirs[:20]:   # check first 20
-                    check = await run_cmd(
-                        f"[ -d {shlex.quote(ldir)} ] && [ -w {shlex.quote(ldir)} ] && echo writable"
-                    )
-                    check = check if isinstance(check, str) else ""
-                    if "writable" in check:
-                        writable_lib_dirs.append(ldir)
+                    if host == "localhost":
+                        if os.path.isdir(ldir) and os.access(ldir, os.W_OK):
+                            writable_lib_dirs.append(ldir)
+                    else:
+                        check = await run_cmd(
+                            f"[ -d {shlex.quote(ldir)} ] && [ -w {shlex.quote(ldir)} ] && echo writable"
+                        )
+                        check = check if isinstance(check, str) else ""
+                        if "writable" in check:
+                            writable_lib_dirs.append(ldir)
 
                 if writable_lib_dirs:
                     self.finding(
@@ -418,34 +463,43 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             writable_rpath_bins: list[dict[str, str]] = []
 
             for binary in suid_bins[:_RPATH_CHECK_DEPTH]:
-                # Read RPATH/RUNPATH from the binary
-                rpath_out = await run_cmd(
-                    f"readelf -d {shlex.quote(binary)} 2>/dev/null | "
-                    "grep -E '(RPATH|RUNPATH)'"
-                )
-                rpath_out = rpath_out if isinstance(rpath_out, str) else ""
-                if not rpath_out:
-                    continue
-
-                # Extract paths from RPATH output
-                # Typical: 0x000000000000000f (RPATH) Library rpath: [/opt/lib:/usr/local/lib]
-                import re
-                match = re.search(r'\[(.+?)\]', rpath_out)
-                if not match:
-                    continue
-                rpath_dirs = [d.strip() for d in match.group(1).split(":") if d.strip()]
+                rpath_dirs: list[str] = []
+                if host == "localhost":
+                    # Pure Python ELF RPATH parsing
+                    from ares.modules.linux._parsers import ELFParser
+                    rpath_dirs = ELFParser.parse_rpath_file(binary)
+                else:
+                    # Read RPATH/RUNPATH from the binary on remote host
+                    rpath_out = await run_cmd(
+                        f"readelf -d {shlex.quote(binary)} 2>/dev/null | "
+                        "grep -E '(RPATH|RUNPATH)'"
+                    )
+                    rpath_out = rpath_out if isinstance(rpath_out, str) else ""
+                    if rpath_out:
+                        import re
+                        match = re.search(r'\[(.+?)\]', rpath_out)
+                        if match:
+                            rpath_dirs = [d.strip() for d in match.group(1).split(":") if d.strip()]
 
                 for rdir in rpath_dirs:
-                    writable = await run_cmd(
-                        f"[ -d {shlex.quote(rdir)} ] && [ -w {shlex.quote(rdir)} ] && echo writable"
-                    )
-                    writable = writable if isinstance(writable, str) else ""
-                    if "writable" in writable:
-                        writable_rpath_bins.append({
-                            "binary":       binary,
-                            "rpath":        match.group(1),
-                            "writable_dir": rdir,
-                        })
+                    if host == "localhost":
+                        if os.path.isdir(rdir) and os.access(rdir, os.W_OK):
+                            writable_rpath_bins.append({
+                                "binary":       binary,
+                                "rpath":        ":".join(rpath_dirs),
+                                "writable_dir": rdir,
+                            })
+                    else:
+                        writable = await run_cmd(
+                            f"[ -d {shlex.quote(rdir)} ] && [ -w {shlex.quote(rdir)} ] && echo writable"
+                        )
+                        writable = writable if isinstance(writable, str) else ""
+                        if "writable" in writable:
+                            writable_rpath_bins.append({
+                                "binary":       binary,
+                                "rpath":        ":".join(rpath_dirs),
+                                "writable_dir": rdir,
+                            })
 
             if writable_rpath_bins:
                 self.finding(
@@ -551,11 +605,14 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
 
     @staticmethod
     async def _run_local(cmd: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "/bin/bash", "-c", cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "/bin/bash", "-c", cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, OSError):
+            return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
         except asyncio.TimeoutError:
@@ -563,3 +620,4 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             await proc.wait()
             stdout = b""
         return (stdout or b"").decode(errors="replace").strip()
+
