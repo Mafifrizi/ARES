@@ -1,18 +1,22 @@
 """
 ARES Plugin Sandbox - Restricted Module Execution
-Prevents third-party modules from damaging the core engine.
+Provides defense-in-depth isolation tiers to protect engine integrity during module execution.
 
-Isolation tiers:
-  TIER_0  NONE       - core modules, run in-process (trusted)
-  TIER_1  SUBPROCESS - separate process, resource limits (default)
-  TIER_2  SECCOMP    - subprocess + seccomp syscall filter (Linux)
-  TIER_3  DOCKER     - fully isolated container (maximum isolation)
-
-Resource limits (TIER_1+):
-  - CPU:    30 seconds max
-  - Memory: 256 MB
-  - Files:  no write outside /tmp/ares-sandbox-*
-  - Net:    allowed (modules need network), but audited
+Isolation tiers & security boundaries:
+  TIER_0 NONE       - trusted core modules only, run in-process under ScopeFirewall.
+  TIER_1 SUBPROCESS - separate Python process:
+                      * Network: allow_network=False enforces Linux network namespace (CLONE_NEWNET)
+                        fail-closed, or deny-all ScopeFirewall socket interception.
+                        allow_network=True enforces ScopeFirewall egress boundary.
+                      * Filesystem: working directory locked to ephemeral temporary directory;
+                        Unix RLIMIT_FSIZE=(0,0) inhibits file enlargement; application-level
+                        open/write hooks provide defense-in-depth within Python. Note: Subprocess
+                        tier does not provide complete OS-level mount namespace isolation.
+                      * Privileges: drop_privileges=True drops root (EUID 0) to 'nobody' on Linux
+                        fail-closed; unsupported on Windows while elevated (aborts execution).
+  TIER_2 SECCOMP    - Linux SUBPROCESS + PR_SET_NO_NEW_PRIVS + BPF syscall allowlist filter.
+  TIER_3 DOCKER     - Complete OS container isolation: read-only root filesystem (allow_write=False),
+                      network namespace isolation ('none' or 'bridge'), CPU & memory cgroups.
 
 Usage:
     sandbox = SandboxRunner(tier=IsolationTier.TIER_1)
@@ -72,16 +76,31 @@ class IsolationTier(str, Enum):
 
 @dataclass
 class SandboxPolicy:
-    """Security policy applied to sandboxed module execution."""
+    """Security policy applied to sandboxed module execution.
+
+    Semantic definitions by isolation tier:
+      allow_network:
+        - Linux SUBPROCESS: Mandatory network namespace isolation via unshare(CLONE_NEWNET).
+        - Windows SUBPROCESS: Mandatory deny-all egress via ScopeFirewall socket hooks.
+        - DOCKER: Container network mode 'none' (kernel namespace isolation).
+      allow_write:
+        - DOCKER: Read-only container rootfs (read_only=True via container mount options).
+        - SUBPROCESS: Ephemeral sandbox working directory, RLIMIT_FSIZE=(0,0) on Unix, and
+          application-level open/write hooks within Python. NOTE: For complete OS filesystem
+          isolation, IsolationTier.DOCKER is required.
+      drop_privileges:
+        - Linux SUBPROCESS: Drops root (EUID 0) to 'nobody' and verifies non-root UID (mandatory).
+        - Windows SUBPROCESS: Privilege dropping from Administrator is unsupported; execution aborts if elevated.
+    """
     tier:            IsolationTier = IsolationTier.SUBPROCESS
-    cpu_time_s:      int   = 30        # max CPU seconds (RLIMIT_CPU)
-    memory_mb:       int   = 256       # max virtual memory
+    cpu_time_s:      int   = 30        # max CPU seconds (RLIMIT_CPU, best-effort)
+    memory_mb:       int   = 256       # max virtual memory (RLIMIT_AS, best-effort)
     timeout_s:       int   = 300       # wall-clock timeout
-    allow_network:   bool  = True      # allow outbound connections
-    allow_write:     bool  = False     # allow filesystem writes (outside /tmp)
-    drop_privileges: bool  = True      # drop to nobody on Linux
+    allow_network:   bool  = True      # outbound network allowed within campaign scope
+    allow_write:     bool  = False     # allow filesystem writes
+    drop_privileges: bool  = True      # drop root privileges to nobody on Linux
     docker_image:    str   = "python:3.11-slim"
-    docker_network:  str   = "bridge"  # "none" for no network
+    docker_network:  str   = "bridge"  # container network mode when allow_network=True
 
     # Modules trusted to bypass sandboxing
     trusted_prefixes: list[str] = field(default_factory=lambda: ["ares.core", "ares.db"])
@@ -255,6 +274,16 @@ class SandboxRunner:
                     ]
             except Exception:
                 pass  # fallback handled in wrapper - fails closed
+            if os.name == "nt" and self.policy.drop_privileges:
+                from ares.core.scope_firewall import OSFirewallController
+                if OSFirewallController.is_elevated():
+                    return SandboxResult(
+                        module_id=module_id,
+                        sandbox_tier=IsolationTier.SUBPROCESS,
+                        success=False,
+                        error="Privilege dropping (drop_privileges=True) is unsupported on Windows while running as Administrator; execution aborted to prevent unconfined privileged execution.",
+                    )
+
             payload = json.dumps({
                 "module_id":     module_id,
                 "params":        params,
@@ -263,6 +292,7 @@ class SandboxRunner:
                 "tmpdir":        tmpdir,
                 "scope_cidrs":   _scope_cidrs,
                 "allow_network": self.policy.allow_network,
+                "allow_write":   self.policy.allow_write,
             })
 
             wrapper = self._build_wrapper_script(use_seccomp)
@@ -397,41 +427,64 @@ class SandboxRunner:
 
     def _make_preexec_fn(self):
         """
-        Return preexec_fn that applies resource limits and security privileges in child process.
+        Return preexec_fn that applies resource limits and mandatory security privileges.
+        Executed in the child process immediately after fork() and before exec().
         Only called on Unix systems.
         """
         cpu_limit = self.policy.cpu_time_s
         mem_bytes = self.policy.memory_mb * 1024 * 1024
+        allow_network = self.policy.allow_network
+        drop_privileges = self.policy.drop_privileges
+        allow_write = self.policy.allow_write
 
         def _limits():
-            try:
-                resource.setrlimit(resource.RLIMIT_CPU,   (cpu_limit, cpu_limit))
-                resource.setrlimit(resource.RLIMIT_AS,    (mem_bytes, mem_bytes))
-                resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
-                resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
-                if not self.policy.allow_write:
-                    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-            except (OSError, ValueError, AttributeError):
-                pass  # best-effort - don't fail the child
-
-            if not self.policy.allow_network:
+            # 1. Best-effort resource limits
+            if resource is not None:
                 try:
-                    import ctypes
-                    # CLONE_NEWNET = 0x40000000
-                    _libc = ctypes.CDLL(None)
-                    _libc.unshare(0x40000000)
-                except Exception:
-                    pass
+                    resource.setrlimit(resource.RLIMIT_CPU,   (cpu_limit, cpu_limit))
+                    resource.setrlimit(resource.RLIMIT_AS,    (mem_bytes, mem_bytes))
+                    resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+                    resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
+                    if not allow_write:
+                        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+                except (OSError, ValueError, AttributeError):
+                    pass  # best-effort resource limits
 
-            if self.policy.drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
+            # 2. MANDATORY SECURITY CONTROL: Network isolation (fail-closed)
+            if not allow_network:
+                import ctypes
+                import ctypes.util
+                libc_name = ctypes.util.find_library("c") or "libc.so.6"
+                try:
+                    _libc = ctypes.CDLL(libc_name, use_errno=True)
+                    # CLONE_NEWNET = 0x40000000
+                    ret = _libc.unshare(0x40000000)
+                    if ret != 0:
+                        errno_val = ctypes.get_errno()
+                        raise RuntimeError(
+                            f"unshare(CLONE_NEWNET) returned {ret} (errno={errno_val})"
+                        )
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Mandatory security control failed: allow_network=False requires network namespace isolation: {exc}"
+                    )
+
+            # 3. MANDATORY SECURITY CONTROL: Privilege dropping (fail-closed)
+            if drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
                 try:
                     import pwd
                     nobody = pwd.getpwnam("nobody")
                     os.setgroups([])
                     os.setgid(nobody.pw_gid)
                     os.setuid(nobody.pw_uid)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Mandatory security control failed: drop_privileges=True failed to drop root to nobody: {exc}"
+                    )
+                if getattr(os, "geteuid", lambda: -1)() == 0 or getattr(os, "getuid", lambda: -1)() == 0:
+                    raise RuntimeError(
+                        "Mandatory security control failed: process retains root privileges (uid/euid == 0) after drop"
+                    )
 
         return _limits
 
@@ -474,11 +527,48 @@ class SandboxRunner:
 
         body = (
             seccomp_preamble
-            + "\nimport sys, json, asyncio\n\n"
+            + "\nimport sys, json, asyncio, os\n\n"
             "payload = json.loads(sys.stdin.read())\n"
             "module_id   = payload[\"module_id\"]\n"
             "params      = payload[\"params\"]\n"
             "campaign_id = payload.get(\"campaign_id\", \"\")\n"
+            "\n# ── Defense-in-depth: Python-level write hooks (when allow_write=False) ──\n"
+            "_allow_write = payload.get(\"allow_write\", False)\n"
+            "_tmpdir = payload.get(\"tmpdir\", \"\")\n"
+            "if not _allow_write and _tmpdir:\n"
+            "    import builtins\n"
+            "    _orig_open = builtins.open\n"
+            "    _tmpdir_abs = os.path.abspath(_tmpdir)\n"
+            "    def _sandboxed_open(file, mode=\"r\", *args, **kwargs):\n"
+            "        if any(m in mode for m in (\"w\", \"a\", \"+\", \"x\")):\n"
+            "            try:\n"
+            "                target_path = os.path.abspath(str(file))\n"
+            "                if not target_path.startswith(_tmpdir_abs):\n"
+            "                    raise PermissionError(f\"[Sandbox] Write prohibited outside sandbox directory: {file}\")\n"
+            "            except (TypeError, ValueError):\n"
+            "                pass\n"
+            "        return _orig_open(file, mode, *args, **kwargs)\n"
+            "    builtins.open = _sandboxed_open\n"
+            "\n"
+            "    _orig_os_open = os.open\n"
+            "    def _sandboxed_os_open(path, flags, *args, **kwargs):\n"
+            "        write_flags = (\n"
+            "            getattr(os, \"O_WRONLY\", 1) |\n"
+            "            getattr(os, \"O_RDWR\", 2) |\n"
+            "            getattr(os, \"O_CREAT\", 64) |\n"
+            "            getattr(os, \"O_TRUNC\", 512) |\n"
+            "            getattr(os, \"O_APPEND\", 1024)\n"
+            "        )\n"
+            "        if flags & write_flags:\n"
+            "            try:\n"
+            "                target_path = os.path.abspath(str(path))\n"
+            "                if not target_path.startswith(_tmpdir_abs):\n"
+            "                    raise PermissionError(f\"[Sandbox] os.open write prohibited outside sandbox directory: {path}\")\n"
+            "            except (TypeError, ValueError):\n"
+            "                pass\n"
+            "        return _orig_os_open(path, flags, *args, **kwargs)\n"
+            "    os.open = _sandboxed_os_open\n"
+            "\n"
             "\nasync def run():\n"
             "    try:\n"
             "        from ares.core.config import AresSettings\n"
@@ -517,7 +607,8 @@ class SandboxRunner:
             "        noise    = NoiseController(campaign)\n"
             "        module   = module_cls(settings=settings, campaign=campaign, noise=noise)\n"
             "        from ares.core.scope_firewall import scope_firewall_guard\n"
-            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id):\n"
+            "        _current_uid = getattr(os, 'getuid', lambda: None)()\n"
+            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id, uid_owner=_current_uid):\n"
             "            findings, extra = await module.run(**params)\n"
             "        return {\n"
             "            \"success\":  True,\n"

@@ -934,7 +934,7 @@ class TestSandboxAndFirewallHardening:
 
         wrapper_source = SandboxRunner._build_wrapper_script(use_seccomp=False)
         assert "from ares.core.scope_firewall import scope_firewall_guard" in wrapper_source
-        assert "async with scope_firewall_guard(campaign=campaign, module_id=module_id):" in wrapper_source
+        assert "scope_firewall_guard(campaign=campaign, module_id=module_id" in wrapper_source
 
     def test_seccomp_tier_is_fail_closed(self):
         """
@@ -1018,6 +1018,420 @@ class TestSandboxAndFirewallHardening:
 
         ext_v6 = ipaddress.ip_address("2606:4700:4700::1111")
         assert any(ext_v6 in ipaddress.ip_network(c) for c in v6_cidrs), "Cloudflare IPv6 must be in out-of-scope complement"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADVANCED BOUNDARY HARDENING & LIFECYCLE CORRECTNESS TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSecurityBoundariesAndLifecycle:
+    """
+    Validates fail-closed semantics for:
+    - allow_network=False network namespace isolation
+    - drop_privileges=True root privilege drop
+    - scope=[] empty scope deny-all semantics & loopback
+    - ContextVar nested context restoration & setup failure cleanup
+    - uid_owner parameter forwarding & UID-wide boundary semantics
+    - OSFirewallController transactional state machine & rollback
+    - Defense-in-depth write barrier in subprocess wrapper
+    """
+
+    def test_subprocess_allow_network_false_fails_closed(self, monkeypatch):
+        """
+        FINDING A: allow_network=False must fail-closed if unshare(CLONE_NEWNET) fails.
+        """
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(allow_network=False)
+        runner = SandboxRunner(policy=policy)
+        preexec = runner._make_preexec_fn()
+        assert preexec is not None
+
+        # Simulate unshare returning failure (-1)
+        mock_libc = MagicMock()
+        mock_libc.unshare.return_value = -1
+
+        mock_cdll = MagicMock(return_value=mock_libc)
+        monkeypatch.setattr("ctypes.CDLL", mock_cdll)
+        monkeypatch.setattr("ctypes.get_errno", lambda: 1)  # EPERM
+
+        with pytest.raises(RuntimeError, match="allow_network=False requires network namespace isolation"):
+            preexec()
+
+        # Simulate unshare raising an exception
+        mock_libc.unshare.side_effect = OSError("Permission denied")
+        with pytest.raises(RuntimeError, match="allow_network=False requires network namespace isolation"):
+            preexec()
+
+        # Simulate unshare succeeding (0)
+        mock_libc.unshare.side_effect = None
+        mock_libc.unshare.return_value = 0
+        preexec()  # Must not raise
+
+    def test_subprocess_allow_network_true_does_not_unshare(self, monkeypatch):
+        """
+        allow_network=True must not attempt unshare(CLONE_NEWNET).
+        """
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(allow_network=True)
+        runner = SandboxRunner(policy=policy)
+        preexec = runner._make_preexec_fn()
+
+        mock_libc = MagicMock()
+        mock_cdll = MagicMock(return_value=mock_libc)
+        monkeypatch.setattr("ctypes.CDLL", mock_cdll)
+
+        preexec()
+        mock_libc.unshare.assert_not_called()
+
+    def test_subprocess_drop_privileges_fails_closed(self, monkeypatch):
+        """
+        FINDING B: drop_privileges=True must abort execution if root fails to drop privileges.
+        """
+        import types
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(drop_privileges=True)
+        runner = SandboxRunner(policy=policy)
+        preexec = runner._make_preexec_fn()
+
+        # Simulate running as root (euid == 0)
+        monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
+
+        # Mock pwd
+        mock_nobody = types.SimpleNamespace(pw_uid=65534, pw_gid=65534)
+        mock_pwd = types.ModuleType("pwd")
+        mock_pwd.getpwnam = lambda name: mock_nobody
+        monkeypatch.setattr("sys.modules", {**sys.modules, "pwd": mock_pwd})
+
+        # Failure 1: setuid raises PermissionError
+        monkeypatch.setattr(os, "setgroups", lambda g: None, raising=False)
+        monkeypatch.setattr(os, "setgid", lambda g: None, raising=False)
+
+        def mock_failing_setuid(uid):
+            raise PermissionError("Operation not permitted")
+
+        monkeypatch.setattr(os, "setuid", mock_failing_setuid, raising=False)
+
+        with pytest.raises(RuntimeError, match="drop_privileges=True failed to drop root to nobody"):
+            preexec()
+
+        # Failure 2: setuid returns but geteuid still returns 0 (post-drop verification failure)
+        monkeypatch.setattr(os, "setuid", lambda uid: None, raising=False)
+        with pytest.raises(RuntimeError, match="process retains root privileges"):
+            preexec()
+
+        # Success: setuid succeeds and geteuid returns 65534
+        euid_state = [0]
+        monkeypatch.setattr(os, "geteuid", lambda: euid_state[0], raising=False)
+        monkeypatch.setattr(os, "getuid", lambda: euid_state[0], raising=False)
+
+        def mock_working_setuid(uid):
+            euid_state[0] = uid
+
+        monkeypatch.setattr(os, "setuid", mock_working_setuid, raising=False)
+        preexec()  # Must succeed
+
+    def test_subprocess_drop_privileges_non_root_is_safe(self, monkeypatch):
+        """
+        When running as non-root (euid != 0), drop_privileges=True is safe and no-op.
+        """
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        policy = SandboxPolicy(drop_privileges=True)
+        runner = SandboxRunner(policy=policy)
+        preexec = runner._make_preexec_fn()
+
+        monkeypatch.setattr(os, "geteuid", lambda: 1000, raising=False)
+        preexec()  # Must not raise
+
+    def test_windows_elevated_drop_privileges_aborts_execution(self, monkeypatch):
+        """
+        On Windows, if running elevated (Admin) with drop_privileges=True,
+        execution must be aborted fail-closed rather than silently ignored.
+        """
+        import asyncio
+        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.scope_firewall import OSFirewallController
+
+        policy = SandboxPolicy(drop_privileges=True)
+        runner = SandboxRunner(policy=policy)
+
+        monkeypatch.setattr("os.name", "nt")
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+
+        res = asyncio.run(runner._run_subprocess("test.module", {}, "camp-123"))
+        assert res.success is False
+        assert "drop_privileges=True" in res.error
+        assert "unsupported on Windows" in res.error
+
+    def test_empty_scope_denies_external_network(self):
+        """
+        FINDING D: scope=[] must actively install firewall and block all external destinations.
+        """
+        from ares.core.campaign import Campaign, NoiseProfile
+        from ares.core.scope_firewall import ScopeFirewall, ScopeFirewallBlockError
+
+        # Explicit empty scope (deny-all)
+        campaign = Campaign(name="test-empty", scope=[], noise_profile=NoiseProfile.NORMAL)
+        fw = ScopeFirewall(campaign=campaign)
+
+        # External IPv4 must be blocked
+        with pytest.raises(ScopeFirewallBlockError, match="(?i)BLOCKED"):
+            fw.assert_allowed_address(("8.8.8.8", 443))
+
+        with pytest.raises(ScopeFirewallBlockError, match="(?i)BLOCKED"):
+            fw.assert_allowed_address(("1.1.1.1", 53))
+
+        # External IPv6 must be blocked
+        with pytest.raises(ScopeFirewallBlockError, match="(?i)BLOCKED"):
+            fw.assert_allowed_address(("2001:4860:4860::8888", 53))
+
+    def test_empty_scope_loopback_semantics(self):
+        """
+        scope=[] preserves internal loopback IPC when allow_loopback_ipc=True,
+        and blocks loopback if allow_loopback_ipc=False.
+        """
+        from ares.core.campaign import Campaign, NoiseProfile
+        from ares.core.scope_firewall import ScopeFirewall, ScopeFirewallBlockError
+
+        campaign = Campaign(name="test-empty", scope=[], noise_profile=NoiseProfile.NORMAL)
+        fw = ScopeFirewall(campaign=campaign, allow_loopback_ipc=True)
+
+        # Loopback IPv4 is allowed
+        assert fw.assert_allowed_address(("127.0.0.1", 8080)) is not None
+        assert fw.assert_allowed_address(("localhost", 8080)) is not None
+
+        # Loopback IPv6 is allowed
+        assert fw.assert_allowed_address(("::1", 8080)) is not None
+
+        # When loopback is disabled, even loopback is blocked
+        fw_no_lo = ScopeFirewall(campaign=campaign, allow_loopback_ipc=False)
+        with pytest.raises(ScopeFirewallBlockError, match="(?i)BLOCKED"):
+            fw_no_lo.assert_allowed_address(("127.0.0.1", 8080))
+
+    def test_scope_guard_restores_context_on_setup_failure(self, monkeypatch):
+        """
+        FINDING E: If OS firewall or setup raises an exception, _current_firewall
+        must be reset back to its previous value (None).
+        """
+        import asyncio
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import (
+            scope_firewall_guard,
+            _current_firewall,
+            OSFirewallController,
+            ScopeFirewallBlockError,
+        )
+
+        campaign = Campaign(name="test-camp", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+
+        # Simulate OS firewall failure
+        monkeypatch.setattr(
+            OSFirewallController,
+            "apply_rules",
+            classmethod(lambda cls, *args, **kwargs: (_ for _ in ()).throw(ScopeFirewallBlockError("Setup failed"))),
+        )
+
+        async def _run():
+            with pytest.raises(ScopeFirewallBlockError, match="Setup failed"):
+                async with scope_firewall_guard(campaign=campaign, enable_os_firewall=True):
+                    pass
+
+        asyncio.run(_run())
+
+        # CRITICAL ASSERTION: context must not leak
+        assert _current_firewall.get() is None, "ContextVar leaked after setup failure!"
+
+    def test_scope_guard_restores_nested_parent_context(self, monkeypatch):
+        """
+        CRITICAL NESTED-CONTEXT TEST: When inner guard setup fails,
+        _current_firewall must restore the OUTER guard's context, not None!
+        """
+        import asyncio
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import (
+            scope_firewall_guard,
+            _current_firewall,
+            OSFirewallController,
+            ScopeFirewallBlockError,
+        )
+
+        outer_campaign = Campaign(name="outer", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        inner_campaign = Campaign(name="inner", scope=[ScopeEntry(cidr="192.168.1.0/24")])
+
+        async def _run():
+            async with scope_firewall_guard(campaign=outer_campaign, enable_os_firewall=False) as outer_fw:
+                assert _current_firewall.get() is outer_fw, "Outer context not set"
+
+                # Simulate inner guard setup failure
+                def mock_failing_apply(*args, **kwargs):
+                    raise ScopeFirewallBlockError("Inner OS firewall failed")
+
+                monkeypatch.setattr(OSFirewallController, "apply_rules", classmethod(mock_failing_apply))
+
+                with pytest.raises(ScopeFirewallBlockError, match="Inner OS firewall failed"):
+                    async with scope_firewall_guard(campaign=inner_campaign, enable_os_firewall=True):
+                        pass
+
+                # INVARIANT: Must restore outer_fw, NOT None!
+                assert _current_firewall.get() is outer_fw, \
+                    f"Expected outer context {outer_fw}, got {_current_firewall.get()}"
+
+            # Outside outer guard, must be None
+            assert _current_firewall.get() is None
+
+        asyncio.run(_run())
+
+    def test_sync_scope_guard_restores_nested_parent_context(self, monkeypatch):
+        """
+        Sync scope firewall guard must also restore previous outer context on failure.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import (
+            scope_firewall_sync_guard,
+            _current_firewall,
+            OSFirewallController,
+            ScopeFirewallBlockError,
+        )
+
+        outer_campaign = Campaign(name="outer-sync", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        inner_campaign = Campaign(name="inner-sync", scope=[ScopeEntry(cidr="192.168.1.0/24")])
+
+        with scope_firewall_sync_guard(campaign=outer_campaign, enable_os_firewall=False) as outer_fw:
+            assert _current_firewall.get() is outer_fw
+
+            monkeypatch.setattr(
+                OSFirewallController,
+                "apply_rules",
+                classmethod(lambda cls, *args, **kwargs: (_ for _ in ()).throw(ScopeFirewallBlockError("Inner fail"))),
+            )
+
+            with pytest.raises(ScopeFirewallBlockError):
+                with scope_firewall_sync_guard(campaign=inner_campaign, enable_os_firewall=True):
+                    pass
+
+            assert _current_firewall.get() is outer_fw
+
+        assert _current_firewall.get() is None
+
+    def test_uid_owner_is_forwarded_to_os_firewall(self, monkeypatch):
+        """
+        FINDING F: uid_owner parameter must be forwarded through scope_firewall_guard
+        down to OSFirewallController.apply_rules.
+        """
+        import asyncio
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import scope_firewall_guard, OSFirewallController
+
+        campaign = Campaign(name="test-uid", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+
+        recorded_uid = []
+        def mock_apply(cls, camp, cidrs, program=None, uid_owner=None):
+            recorded_uid.append(uid_owner)
+            return ["TEST_RULE"]
+
+        monkeypatch.setattr(OSFirewallController, "apply_rules", classmethod(mock_apply))
+        monkeypatch.setattr(OSFirewallController, "remove_rules", classmethod(lambda cls, rules: len(rules)))
+
+        async def _run():
+            async with scope_firewall_guard(campaign=campaign, enable_os_firewall=True, uid_owner=65534):
+                pass
+
+        asyncio.run(_run())
+        assert recorded_uid == [65534], f"uid_owner not forwarded correctly: {recorded_uid}"
+
+    def test_os_firewall_transactional_state_and_rollback(self, monkeypatch):
+        """
+        FINDING G: OSFirewallController state must transition through APPLYING
+        and VERIFIED_ACTIVE. If a subrule fails, it must rollback and set INACTIVE.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import OSFirewallController, OSFirewallState
+
+        campaign = Campaign(name="test-tx", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+        monkeypatch.setattr("sys.platform", "linux")
+
+        executed_cleanups = []
+        call_count = [0]
+
+        def mock_subprocess_run(cmd, *args, **kwargs):
+            call_count[0] += 1
+            cmd_str = " ".join(cmd)
+            # Second apply command fails
+            if "-I" in cmd and call_count[0] == 2:
+                res = MagicMock()
+                res.returncode = 1
+                res.stderr = "iptables: rule insertion failed"
+                res.stdout = ""
+                return res
+            if "-D" in cmd:
+                executed_cleanups.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_subprocess_run)
+
+        # Clear any prior state
+        OSFirewallController._active_rules.clear()
+        OSFirewallController._state = OSFirewallState.UNINITIALIZED
+
+        rules = OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
+        assert rules == [], "Failed transaction must return empty list"
+        assert len(executed_cleanups) > 0, "Rollback cleanups must be executed"
+        assert OSFirewallController._state == OSFirewallState.INACTIVE
+        assert len(OSFirewallController._active_rules) == 0
+
+    def test_os_firewall_verified_active_when_all_succeed(self, monkeypatch):
+        """
+        When all subrules succeed, state becomes VERIFIED_ACTIVE and rules are tracked.
+        """
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.scope_firewall import OSFirewallController, OSFirewallState
+
+        campaign = Campaign(name="test-ok", scope=[ScopeEntry(cidr="10.0.0.0/8")])
+        monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
+        monkeypatch.setattr("sys.platform", "linux")
+
+        cleanups_recorded = []
+        def mock_subprocess_run(cmd, *args, **kwargs):
+            if "-D" in cmd:
+                cleanups_recorded.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        monkeypatch.setattr("subprocess.run", mock_subprocess_run)
+
+        OSFirewallController._active_rules.clear()
+        rules = OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
+        assert len(rules) == 1
+        assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
+        assert OSFirewallController.get_status()["os_level_active"] is True
+
+        # Now remove rules
+        removed = OSFirewallController.remove_rules(rules)
+        assert removed > 0
+        assert OSFirewallController._state == OSFirewallState.INACTIVE
+        assert len(cleanups_recorded) > 0
+
+    def test_allow_write_false_wrapper_defense_in_depth(self):
+        """
+        FINDING C & 5: Wrapper script installs defense-in-depth open/write hooks
+        prohibiting writes outside the dedicated temporary sandbox directory.
+        """
+        from ares.core.sandbox import SandboxRunner
+
+        source = SandboxRunner._build_wrapper_script(use_seccomp=False)
+        assert "_sandboxed_open" in source
+        assert "_sandboxed_os_open" in source
+        assert "Write prohibited outside sandbox directory" in source
+        assert "builtins.open = _sandboxed_open" in source
+        assert "os.open = _sandboxed_os_open" in source
+
 
 
 

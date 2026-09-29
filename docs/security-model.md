@@ -315,15 +315,26 @@ Strict-Transport-Security: max-age=31536000
 
 ARES deploys a strict dual-layer **Scope Firewall** (`ares.core.scope_firewall.ScopeFirewall` and `OSFirewallController`) to enforce fail-closed scope boundaries:
 1. **OS / Kernel-Level Packet Filtering (Elevated Mode)**:
-   - When running with administrative privileges (Windows Administrator / Linux root), `OSFirewallController` interacts directly with OS network packet filtering (`netsh advfirewall` on Windows, `iptables` on Linux), establishing outbound firewall rules that physically block network egress outside campaign scope CIDRs.
-   - Includes automatic fail-safe rule teardown on context completion and process shutdown (`atexit`).
+   - When running with administrative privileges (Windows Administrator / Linux root), `OSFirewallController` interacts directly with OS network packet filtering (`netsh advfirewall` on Windows, `iptables` / `ip6tables` on Linux), establishing outbound firewall rules that physically block network egress outside campaign scope CIDRs.
+   - **Windows Executable-Path Matching (`program=<sys.executable>`)**: Windows Defender Firewall CLI lacks per-PID packet filtering. Rules are applied using executable-path matching (`program=<sys.executable>`) combined with mathematical complement CIDR block rules. Because rules match the binary path, any concurrent process executing that exact `python.exe` executable during the rule's active lifetime is subject to the egress block rules. Strict transactional lifecycle guarantees (`finally` blocks and `atexit` emergency cleanup) ensure rules are removed immediately upon task completion.
+   - **Linux UID-Based Matching (`--uid-owner`)**: Linux Netfilter rules match packets using `-m owner --uid-owner <uid>` when executing unprivileged sandboxes (e.g. `nobody`), or `--pid-owner <pid>`. Operators should note that `--uid-owner` is a UID-wide boundary affecting all processes running under that UID, rather than isolated process-tree filtering.
+   - **Linux Network Namespace Isolation (`CLONE_NEWNET`)**: When `allow_network=False` is requested in subprocess sandboxes, ARES executes `unshare(CLONE_NEWNET)` fail-closed, creating an isolated network namespace with zero external interfaces that inherently confines the child process and all its descendants.
+   - **Transactional State Machine**: State transitions strictly follow `UNINITIALIZED -> APPLYING -> VERIFIED_ACTIVE -> INACTIVE`. Every subrule application is tracked, and if any rule fails or verification mismatches, all applied rules are immediately rolled back in reverse order, preventing partial or orphaned firewall state.
 2. **In-Process Transport Socket Interceptor (Process Mode)**:
-   - Hooks low-level socket and event loop connections (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) in Python user space, ensuring fail-closed scope enforcement even when running unprivileged without OS admin rights.
+   - Hooks low-level socket and event loop connections (`socket.connect`, `socket.sendto`, `socket.sendmsg`, `asyncio.create_connection`) in Python user space, ensuring fail-closed scope enforcement even when running unprivileged without OS admin rights.
    - **Fail-Closed Egress Blocking**: Any out-of-scope connection attempt is instantly aborted with `ScopeFirewallBlockError` (status 403 Forbidden) and recorded in security audit logs.
-   - **ContextVar Task Isolation**: Active exclusively within the attack module execution coroutine. Database pools, API requests, and telemetry tasks bypass the firewall in `< 0.00001ms`.
+   - **Explicit Empty Scope Semantics (`scope=[]` vs `scope=None`)**: `scope=None` represents unconfigured scope; `scope=[]` explicitly activates fail-closed deny-all egress blocking, rejecting all external IPv4 and IPv6 network access while preserving internal loopback IPC.
+   - **ContextVar Task Isolation & Guaranteed Context Restoration**: Active exclusively within the attack module execution coroutine. Structured nested `try...finally` blocks guarantee that the `_current_firewall` ContextVar always restores the exact previous context token (including nested outer guards and setup failures), preventing state leaks across async tasks.
    - **DNS Re-entrancy & Rebinding Defense**: Non-blocking hostname resolution checks resolved IPs against scope CIDRs, with an internal lock preventing recursive interception.
    - **Loopback & Proactor IPC Safety**: Exempts internal loopback (`127.0.0.1`, `::1`) and Windows Proactor event loop named pipes.
    - **Cloud Category Allowlist**: Cloud modules (`MODULE_CATEGORY == "cloud"`) are permitted to access official provider endpoints (`*.microsoftonline.com`, `*.amazonaws.com`, etc.) while blocking untrusted egress.
+
+### Sandbox Execution & Filesystem Isolation Semantics
+
+ARES provides four isolation tiers (`IsolationTier` in `ares.core.sandbox`) with explicit boundary definitions:
+- **`DOCKER` (Tier 3)**: Full OS container isolation. When `allow_write=False`, the root filesystem is mounted strictly read-only (`read_only=True`). When `allow_network=False`, container network mode is set to `'none'`. CPU and memory quotas are enforced by kernel cgroups.
+- **`SUBPROCESS` (Tier 1 & 2)**: Separate child Python process. Working directory is locked to an ephemeral `ares-sandbox-*` temporary directory. On Unix, `RLIMIT_FSIZE=(0,0)` is applied to inhibit file enlargement, and Python-level `builtins.open` / `os.open` write hooks provide defense-in-depth within the Python runtime. Note: Subprocess tier does not provide complete OS mount namespace isolation; operations like metadata modification or native extensions can bypass Python-level hooks if not running in Docker.
+- **Privilege Dropping (`drop_privileges=True`)**: On Linux, child processes starting as root (`EUID 0`) drop privileges to `nobody` fail-closed (`setgroups([])`, `setgid`, `setuid`), verifying non-root UID before payload execution. On Windows, privilege dropping from Administrator is unsupported and execution is rejected fail-closed to prevent unconfined privileged execution.
 
 ### CampaignGuardrail & Pre-Flight Scope Enforcement
 

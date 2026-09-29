@@ -29,6 +29,7 @@ import sys
 import threading
 import urllib.request
 from contextvars import ContextVar
+from enum import Enum
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Generator
 
 from ares.core.errors import ScopeFirewallBlockError
@@ -590,32 +591,40 @@ def compute_out_of_scope_cidrs(
 
 
 
+class OSFirewallState(str, Enum):
+    UNINITIALIZED = "UNINITIALIZED"
+    APPLYING = "APPLYING"
+    VERIFIED_ACTIVE = "VERIFIED_ACTIVE"
+    INACTIVE = "INACTIVE"
+
+
 class OSFirewallController:
     """Controls OS-level / Kernel network packet filtering boundaries.
 
     Interacts directly with native OS packet filtering facilities:
       - Windows: Windows Defender Firewall (`netsh advfirewall firewall`)
-      - Linux: Netfilter (`iptables`)
+      - Linux: Netfilter (`iptables` / `ip6tables`)
 
-    Operates in dual mode:
-      1. Elevated Mode (Admin/Root): Applies native OS firewall rules restricting
-         outbound traffic strictly to authorized campaign scope CIDRs.
-         - Windows: Calculates exact mathematical complement of scope CIDRs (excluding loopback)
-           and applies explicit program-scoped BLOCK rules. Since Windows Firewall evaluates
-           Block before Allow and defaults to outbound Allow, this establishes a true deny-by-default
-           egress boundary for the python process without altering global host firewall policies.
-         - Linux: Installs a 3-rule per-PID chain (lo ACCEPT, scope ACCEPT, and PID DROP)
-           with exact comment tokens for 1:1 transactional teardown.
-      2. Unprivileged Mode: Gracefully yields to the In-Process Transport Socket Interceptor
-         while recording audit logs, ensuring zero runtime crashes or elevation side-effects.
-
-    Transactional safety:
-      Every sub-rule is recorded. If any rule application fails, all previously applied rules
-      in that transaction are automatically rolled back, leaving zero orphaned rules.
+    Architectural & Operational Scope:
+      1. Windows Executable-Path Matching:
+         Windows Defender Firewall rules are applied via `program=<sys.executable>` and remote IP
+         complements. Because Windows Firewall CLI does not support per-PID matching, rules apply
+         to any process executing that exact Python executable during the rule's active lifetime.
+         Transactional teardown (`finally` and `atexit`) ensures zero orphaned rules.
+      2. Linux UID-Based Matching:
+         Linux rules use `-m owner --uid-owner <uid>` when `uid_owner` is provided (e.g. unprivileged
+         module execution as 'nobody'), or fallback to `-m owner --pid-owner <pid>`.
+         NOTE: `--uid-owner` is a UID-wide firewall boundary affecting all processes sharing that UID,
+         not process-tree or namespace isolation.
+      3. Transactional Safety & State Machine:
+         Transitions: UNINITIALIZED -> APPLYING -> VERIFIED_ACTIVE -> INACTIVE.
+         If any subrule in a transaction fails, all created rules in that transaction are rolled back
+         immediately in reverse order, leaving zero lingering or partial firewall state.
     """
 
     _active_rules: set[str] = set()
     _rule_cleanups: dict[str, list[list[str]]] = {}
+    _state: OSFirewallState = OSFirewallState.UNINITIALIZED
     _lock = threading.Lock()
 
     @classmethod
@@ -638,6 +647,7 @@ class OSFirewallController:
         with cls._lock:
             active_count = len(cls._active_rules)
             rule_list = sorted(list(cls._active_rules))
+            state_val = cls._state.value
 
         engine = (
             "Windows Defender Firewall (netsh)"
@@ -648,7 +658,8 @@ class OSFirewallController:
             "platform": sys.platform,
             "engine": engine,
             "elevated": elevated,
-            "os_level_active": elevated and active_count > 0,
+            "state": state_val,
+            "os_level_active": elevated and active_count > 0 and cls._state == OSFirewallState.VERIFIED_ACTIVE,
             "active_rules_count": active_count,
             "active_rules": rule_list,
             "fallback_mode": "In-Process Transport Socket Interception",
@@ -664,9 +675,12 @@ class OSFirewallController:
     ) -> list[str]:
         """Apply OS-level firewall rules restricting outbound egress to scope_cidrs.
 
+        If campaign is None with no scope_cidrs, or campaign.scope is unconfigured (None), returns empty list.
         If process is not elevated, logs an audit notice and returns an empty list (safe fallback).
         """
-        if not scope_cidrs:
+        if campaign is not None and getattr(campaign, "scope", None) is None:
+            return []
+        if campaign is None and not scope_cidrs:
             return []
 
         if not cls.is_elevated():
@@ -682,6 +696,9 @@ class OSFirewallController:
             )
             return []
 
+        with cls._lock:
+            cls._state = OSFirewallState.APPLYING
+
         rule_token = secrets.token_hex(6)
         rule_name = f"ARES_SCOPE_WALL_{rule_token}"
         prog = program or sys.executable
@@ -690,6 +707,8 @@ class OSFirewallController:
         if sys.platform == "win32":
             out_of_scope = compute_out_of_scope_cidrs(scope_cidrs, allow_loopback=True, include_ipv6=True)
             if not out_of_scope:
+                with cls._lock:
+                    cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
                 return []
 
             v4_out = [c for c in out_of_scope if ":" not in c]
@@ -739,7 +758,7 @@ class OSFirewallController:
             v4_scope = [c for c in scope_cidrs if ":" not in c]
             v6_scope = [c for c in scope_cidrs if ":" in c]
 
-            # IPv4 Netfilter rules
+            # IPv4 Netfilter rules: allow loopback, allow scope if any, drop all other from this identity
             lo_apply = ["iptables", "-I", "OUTPUT", "1"] + owner_match + ["-o", "lo", "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_lo"]
             lo_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_lo", "-j", "ACCEPT"]
             sub_rules.append((lo_apply, lo_cleanup))
@@ -749,21 +768,24 @@ class OSFirewallController:
                 scope_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_scope", "-j", "ACCEPT"]
                 sub_rules.append((scope_apply, scope_cleanup))
 
-            drop_apply = ["iptables", "-I", "OUTPUT", "3"] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop"]
+            drop_pos = "3" if v4_scope else "2"
+            drop_apply = ["iptables", "-I", "OUTPUT", drop_pos] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop"]
             drop_cleanup = ["iptables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_drop", "-j", "DROP"]
             sub_rules.append((drop_apply, drop_cleanup))
 
-            # IPv6 Netfilter rules
-            if v6_scope:
+            # IPv6 Netfilter rules: only install if v6_scope is provided or if scope_cidrs is explicitly empty (deny-all)
+            if v6_scope or (campaign is not None and not scope_cidrs):
                 lo6_apply = ["ip6tables", "-I", "OUTPUT", "1"] + owner_match + ["-o", "lo", "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_lo6"]
                 lo6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_lo6", "-j", "ACCEPT"]
                 sub_rules.append((lo6_apply, lo6_cleanup))
 
-                scope6_apply = ["ip6tables", "-I", "OUTPUT", "2"] + owner_match + ["-d", ",".join(v6_scope), "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_scope6"]
-                scope6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_scope6", "-j", "ACCEPT"]
-                sub_rules.append((scope6_apply, scope6_cleanup))
+                if v6_scope:
+                    scope6_apply = ["ip6tables", "-I", "OUTPUT", "2"] + owner_match + ["-d", ",".join(v6_scope), "-j", "ACCEPT", "-m", "comment", "--comment", f"{rule_name}_scope6"]
+                    scope6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_scope6", "-j", "ACCEPT"]
+                    sub_rules.append((scope6_apply, scope6_cleanup))
 
-                drop6_apply = ["ip6tables", "-I", "OUTPUT", "3"] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop6"]
+                drop6_pos = "3" if v6_scope else "2"
+                drop6_apply = ["ip6tables", "-I", "OUTPUT", drop6_pos] + owner_match + ["-j", "DROP", "-m", "comment", "--comment", f"{rule_name}_drop6"]
                 drop6_cleanup = ["ip6tables", "-D", "OUTPUT", "-m", "comment", "--comment", f"{rule_name}_drop6", "-j", "DROP"]
                 sub_rules.append((drop6_apply, drop6_cleanup))
 
@@ -784,12 +806,14 @@ class OSFirewallController:
                 logger.warning("os_firewall_apply_exception", rule=rule_name, error=str(exc))
                 break
 
-        if not all_succeeded:
+        if not all_succeeded or len(applied_cleanups) != len(sub_rules):
             for cleanup_cmd in reversed(applied_cleanups):
                 try:
                     subprocess.run(cleanup_cmd, capture_output=True, text=True, timeout=5)
                 except Exception:
                     pass
+            with cls._lock:
+                cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
             if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
                 raise ScopeFirewallBlockError(
                     f"[ScopeFirewall] Transactional OS firewall configuration failed for {rule_name}."
@@ -799,6 +823,7 @@ class OSFirewallController:
         with cls._lock:
             cls._active_rules.add(rule_name)
             cls._rule_cleanups[rule_name] = applied_cleanups
+            cls._state = OSFirewallState.VERIFIED_ACTIVE
 
         logger.info(
             "os_firewall_transaction_committed",
@@ -816,6 +841,8 @@ class OSFirewallController:
             with cls._lock:
                 cleanups = cls._rule_cleanups.pop(rule_name, None)
                 cls._active_rules.discard(rule_name)
+                if not cls._active_rules:
+                    cls._state = OSFirewallState.INACTIVE
 
             if cleanups:
                 for cleanup_cmd in reversed(cleanups):
@@ -913,6 +940,7 @@ async def scope_firewall_guard(
     module_category: str = "",
     enabled: bool | None = None,
     enable_os_firewall: bool | None = None,
+    uid_owner: int | str | None = None,
 ) -> AsyncGenerator[ScopeFirewall | None, None]:
     """Async context manager activating dual-layer scope firewall."""
     if enabled is None:
@@ -922,7 +950,10 @@ async def scope_firewall_guard(
             "no",
         )
 
-    if not enabled or campaign is None or not getattr(campaign, "scope", None):
+    # Distinguish campaign is None vs campaign.scope is None vs campaign.scope == []
+    # If campaign is None or campaign.scope is None: no scope configured -> yield None
+    # If campaign.scope == []: explicit empty scope -> MUST deny all external destinations (fail-closed)
+    if not enabled or campaign is None or getattr(campaign, "scope", None) is None:
         yield None
         return
 
@@ -941,19 +972,26 @@ async def scope_firewall_guard(
     )
     token = _current_firewall.set(fw)
     os_rules: list[str] = []
-    if enable_os_firewall:
-        os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
-
-    # Neutralize proxy environment variables that could route traffic out-of-scope
-    _enter_proxy_neutralization()
-
+    proxy_entered = False
     try:
-        yield fw
+        try:
+            if enable_os_firewall:
+                os_rules = OSFirewallController.apply_rules(
+                    campaign, fw.scope_cidrs, uid_owner=uid_owner
+                )
+            # Neutralize proxy environment variables that could route traffic out-of-scope
+            _enter_proxy_neutralization()
+            proxy_entered = True
+            yield fw
+        finally:
+            try:
+                if proxy_entered:
+                    _exit_proxy_neutralization()
+            finally:
+                if os_rules:
+                    OSFirewallController.remove_rules(os_rules)
     finally:
         _current_firewall.reset(token)
-        if os_rules:
-            OSFirewallController.remove_rules(os_rules)
-        _exit_proxy_neutralization()
 
 
 @contextlib.contextmanager
@@ -963,6 +1001,7 @@ def scope_firewall_sync_guard(
     module_category: str = "",
     enabled: bool | None = None,
     enable_os_firewall: bool | None = None,
+    uid_owner: int | str | None = None,
 ) -> Generator[ScopeFirewall | None, None, None]:
     """Sync context manager activating dual-layer scope firewall."""
     if enabled is None:
@@ -972,7 +1011,7 @@ def scope_firewall_sync_guard(
             "no",
         )
 
-    if not enabled or campaign is None or not getattr(campaign, "scope", None):
+    if not enabled or campaign is None or getattr(campaign, "scope", None) is None:
         yield None
         return
 
@@ -991,16 +1030,23 @@ def scope_firewall_sync_guard(
     )
     token = _current_firewall.set(fw)
     os_rules: list[str] = []
-    if enable_os_firewall:
-        os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
-
-    # Neutralize proxy environment variables that could route traffic out-of-scope
-    _enter_proxy_neutralization()
-
+    proxy_entered = False
     try:
-        yield fw
+        try:
+            if enable_os_firewall:
+                os_rules = OSFirewallController.apply_rules(
+                    campaign, fw.scope_cidrs, uid_owner=uid_owner
+                )
+            # Neutralize proxy environment variables that could route traffic out-of-scope
+            _enter_proxy_neutralization()
+            proxy_entered = True
+            yield fw
+        finally:
+            try:
+                if proxy_entered:
+                    _exit_proxy_neutralization()
+            finally:
+                if os_rules:
+                    OSFirewallController.remove_rules(os_rules)
     finally:
         _current_firewall.reset(token)
-        if os_rules:
-            OSFirewallController.remove_rules(os_rules)
-        _exit_proxy_neutralization()
