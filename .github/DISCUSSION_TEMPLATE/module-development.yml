@@ -1,0 +1,128 @@
+title: "[Module] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🔬 Module Development Discussion
+
+        Use this template to discuss module implementation, research tradecraft, MITRE technique coverage, and integration patterns.
+
+        **Before starting:**
+        - Read the [CONTRIBUTING guide](https://github.com/Mafifrizi/ARES/blob/main/CONTRIBUTING.md), especially the "Writing a New Module" section.
+        - Check [MODULE_AUDIT_INVENTORY.md](https://github.com/Mafifrizi/ARES/blob/main/MODULE_AUDIT_INVENTORY.md) to see existing modules.
+        - Review [KEY_CONVENTION_STANDARD.md](https://github.com/Mafifrizi/ARES/blob/main/KEY_CONVENTION_STANDARD.md) for output key conventions.
+        - For Linux AD modules, see the [RFC: Linux AD Tradecraft](https://github.com/Mafifrizi/ARES/blob/main/docs/research/linux-active-directory-tradecraft.md).
+
+  - type: input
+    id: module-id
+    attributes:
+      label: Module ID
+      description: "Proposed MODULE_ID in `category.module_name` format."
+      placeholder: "e.g., ad.delegation_abuse, linux.sssd_harvest, cloud.azure_token_theft"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Module Category
+      options:
+        - ad (Active Directory)
+        - credential (Credential Access)
+        - lateral (Lateral Movement)
+        - windows (Windows Post-Exploitation)
+        - linux (Linux Post-Exploitation)
+        - cloud (Cloud Security)
+        - network (Network Operations)
+        - recon (Reconnaissance)
+        - exfil (Data Exfiltration)
+        - persistence (Persistence)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: mitre-technique
+    attributes:
+      label: MITRE ATT&CK Technique(s)
+      description: "Technique IDs this module maps to."
+      placeholder: "e.g., T1558.003, T1003.006"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: opsec-level
+    attributes:
+      label: OPSEC Level
+      description: "Expected noise level of this module."
+      options:
+        - STEALTH (passive / no network artifacts)
+        - LOW (minimal footprint)
+        - MEDIUM (moderate detection risk)
+        - HIGH_NOISE (high detection risk, blocked in STEALTH mode)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Module Description
+      description: "What does this module do? What attack technique does it implement?"
+      placeholder: |
+        This module implements [technique] against [target type].
+
+        It works by:
+        1. [Step 1]
+        2. [Step 2]
+        3. [Step 3]
+
+        Prerequisites: [what access/credentials are needed]
+        Output: [what artifacts/findings it produces]
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-approach
+    attributes:
+      label: Technical Approach
+      description: "How will this be implemented? Include libraries, protocols, and relevant code references."
+      placeholder: |
+        ## Implementation Plan
+        - Use [library] for [protocol] communication
+        - Parse [data format] from [source]
+        - Follow BaseModule contract with validate() → execute() → run()
+
+        ## Dependencies
+        - [New dependency if needed, with justification]
+
+        ## Key Considerations
+        - [Error handling approach]
+        - [Cleanup / teardown requirements]
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References & Prior Art
+      description: "Link to research papers, blog posts, existing tools, or CVEs that inform this module."
+      placeholder: |
+        - [Tool/Blog name](https://example.com) — description
+        - [Research paper](https://example.com) — key findings
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have read CONTRIBUTING.md and understand the module contract
+          required: true
+        - label: I have checked MODULE_AUDIT_INVENTORY.md for existing coverage
+          required: true
+        - label: This module does NOT duplicate existing functionality
+          required: true
+        - label: I am willing to implement this module and submit a PR
+          required: false

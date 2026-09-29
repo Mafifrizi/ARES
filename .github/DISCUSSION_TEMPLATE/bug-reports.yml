@@ -1,0 +1,128 @@
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Bug Report
+
+        Use this template to report bugs, unexpected behavior, or regressions.
+
+        > **⚠️ Security Vulnerabilities**: If this bug has security implications (auth bypass, credential exposure, scope guard bypass, injection), **DO NOT** report it here. Follow [SECURITY.md](https://github.com/Mafifrizi/ARES/blob/main/SECURITY.md) for responsible disclosure.
+
+        > **⚠️ Redaction Reminder**: Remove ALL real credentials, tokens, API keys, target hostnames, and IP addresses from your report. Use `[REDACTED]` placeholders.
+
+  - type: input
+    id: ares-version
+    attributes:
+      label: ARES Version
+      description: "Run `ares --version` or `pip show ares-redteam`"
+      placeholder: "e.g., 6.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: "Run `python --version`"
+      placeholder: "e.g., 3.12.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10/11
+        - Ubuntu / Debian
+        - Kali Linux
+        - Fedora / RHEL / CentOS
+        - macOS
+        - Docker container
+        - WSL2
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: "Which part of ARES is affected?"
+      options:
+        - Module execution
+        - CLI (`ares` command)
+        - API / Backend
+        - Frontend / Dashboard
+        - Campaign management
+        - Scope Guard / Firewall
+        - Vault / Encryption
+        - Reporting / PDF generation
+        - MCP Server
+        - Installation / Setup
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: "Clear, concise description of the bug."
+      placeholder: "When I run [command/action], I expect [expected behavior], but instead [actual behavior]."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: "Minimal steps to reproduce the bug."
+      placeholder: |
+        1. Install ARES v6.x with `pip install -e ".[dev]"`
+        2. Run `ares campaign create --name test --targets 10.0.0.0/24`
+        3. Run `ares module run ad.enum_users --target [REDACTED]`
+        4. Observe error: [error message]
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: "What should have happened?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: "What actually happened? Include the full error message if applicable."
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Stack Trace
+      description: "Paste relevant logs or stack traces. Run with `--verbose` for detailed output. **Redact all sensitive data.**"
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: This is NOT a security vulnerability (those go to SECURITY.md)
+          required: true
+        - label: I have searched existing issues and discussions for duplicates
+          required: true
+        - label: I have redacted all sensitive information from this report
+          required: true
+        - label: I can reproduce this bug consistently
+          required: false

@@ -7,14 +7,40 @@ to get started - from dev environment setup to submitting a pull request.
 
 ## Table of Contents
 
-1. [Development Environment](#development-environment)
-2. [Branching Strategy](#branching-strategy)
-3. [Commit Conventions](#commit-conventions)
-4. [Priority Research Track: Linux Active Directory](#priority-research-track-linux-active-directory)
-5. [Writing a New Module](#writing-a-new-module)
-6. [Testing Requirements](#testing-requirements)
-7. [Pull Request Process](#pull-request-process)
-8. [Code Guidelines & Conventions](#code-guidelines--conventions)
+1. [Community & Discussions](#community--discussions)
+2. [Development Environment](#development-environment)
+3. [Branching Strategy](#branching-strategy)
+4. [Commit Conventions](#commit-conventions)
+5. [Priority Research Track: Linux Active Directory](#priority-research-track-linux-active-directory)
+6. [Writing a New Module](#writing-a-new-module)
+7. [Testing Requirements](#testing-requirements)
+8. [Pull Request Process](#pull-request-process)
+9. [Code Guidelines & Conventions](#code-guidelines--conventions)
+
+---
+
+## Community & Discussions
+
+ARES uses [GitHub Discussions](https://github.com/Mafifrizi/ARES/discussions) for community interaction. Before opening a new issue or PR, consider whether a Discussion is more appropriate:
+
+| Channel | Use for |
+|---------|---------|
+| **[Discussions → Q&A](https://github.com/Mafifrizi/ARES/discussions/categories/q-a)** | Help with installation, configuration, module usage, troubleshooting |
+| **[Discussions → Ideas & Proposals](https://github.com/Mafifrizi/ARES/discussions/categories/ideas-proposals)** | Feature requests, new module ideas, architectural suggestions |
+| **[Discussions → Bug Reports](https://github.com/Mafifrizi/ARES/discussions/categories/bug-reports)** | Bug reports that need discussion before becoming issues |
+| **[Discussions → Module Development](https://github.com/Mafifrizi/ARES/discussions/categories/module-development)** | Module design, research tradecraft, MITRE technique coverage |
+| **GitHub Issues** | Confirmed bugs, tracked tasks, accepted feature work |
+| **Pull Requests** | Code contributions ready for review |
+| **[SECURITY.md](SECURITY.md)** | Security vulnerabilities — **never** in public Discussions or Issues |
+
+### Code of Conduct
+
+All participants must follow our [Code of Conduct](CODE_OF_CONDUCT.md). In particular:
+
+- **DO NOT** post real credentials, hashes, tokens, or target data in any public channel
+- **DO NOT** disclose security vulnerabilities publicly — use [SECURITY.md](SECURITY.md)
+- **DO** redact all sensitive data from logs, screenshots, and code snippets
+- **DO** be respectful, constructive, and technically honest
 
 ---
 
@@ -282,4 +308,4 @@ pytest tests/unit/ --cov=ares --cov-fail-under=82 -v  # with coverage
 - **ruff** for linting (replaces flake8, isort, pyupgrade)
 - **No hardcoded secrets** - everything via `.env` or env vars
 
-Questions? Open an issue or ping `@ares-framework/maintainers` on GitHub.
+Questions? Start a [Discussion](https://github.com/Mafifrizi/ARES/discussions) or open an issue on GitHub.

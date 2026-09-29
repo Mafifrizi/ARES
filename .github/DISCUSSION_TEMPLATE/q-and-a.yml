@@ -1,0 +1,95 @@
+title: "[Q&A] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🔍 Before You Ask
+
+        - Search [existing discussions](https://github.com/Mafifrizi/ARES/discussions/categories/q-a) — your question may already be answered.
+        - Check the [QUICKSTART guide](https://github.com/Mafifrizi/ARES/blob/main/QUICKSTART.md) and [documentation](https://github.com/Mafifrizi/ARES/tree/main/docs).
+        - **DO NOT** post security vulnerabilities here. Use [SECURITY.md](https://github.com/Mafifrizi/ARES/blob/main/SECURITY.md) for responsible disclosure.
+
+  - type: input
+    id: ares-version
+    attributes:
+      label: ARES Version
+      description: "Run `ares --version` or `pip show ares-redteam`"
+      placeholder: "e.g., 6.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: "Run `python --version`"
+      placeholder: "e.g., 3.12.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10/11
+        - Ubuntu / Debian
+        - Kali Linux
+        - Fedora / RHEL / CentOS
+        - macOS
+        - Docker container
+        - WSL2
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: "Describe your question clearly. Include context about what you're trying to achieve."
+      placeholder: |
+        I'm trying to [goal] using [module/feature].
+
+        I expected [expected behavior], but [what actually happened].
+
+        Here's the relevant configuration / command I'm running:
+        ```
+        ares campaign run ...
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-tried
+    attributes:
+      label: What I Already Tried
+      description: "List what you've already attempted. This helps us avoid suggesting things you've already done."
+      placeholder: |
+        1. Checked the docs at [link]
+        2. Tried running with --verbose flag
+        3. Searched discussions for [keywords]
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Output
+      description: "Paste any relevant logs or error output. **Redact all credentials, tokens, and target information.**"
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing discussions and did not find an answer
+          required: true
+        - label: I have checked the documentation (QUICKSTART.md, docs/)
+          required: true
+        - label: I have redacted all sensitive information (credentials, tokens, real target IPs/hostnames)
+          required: true

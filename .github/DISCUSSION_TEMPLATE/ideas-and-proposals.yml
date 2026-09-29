@@ -1,0 +1,91 @@
+title: "[Proposal] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 💡 Feature Proposals & Ideas
+
+        Use this template to propose new features, modules, architectural improvements, or integration ideas for ARES.
+
+        Before submitting, please:
+        - Search [existing proposals](https://github.com/Mafifrizi/ARES/discussions/categories/ideas-proposals) to avoid duplicates.
+        - Check the [CONTRIBUTING guide](https://github.com/Mafifrizi/ARES/blob/main/CONTRIBUTING.md) for the module development process.
+        - For new module ideas, also check the [RFC: Linux AD Tradecraft](https://github.com/Mafifrizi/ARES/blob/main/docs/research/linux-active-directory-tradecraft.md) for already-planned modules.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Proposal Summary
+      description: "One-paragraph summary of what you're proposing."
+      placeholder: "I propose adding [feature/module] that would allow operators to [capability]."
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: "What problem does this solve? What gap does it fill? Why is this needed?"
+      placeholder: |
+        Currently, ARES cannot [limitation].
+        This is a problem because [impact on operators/engagements].
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: "Describe your proposed solution in detail. Include technical approach, MITRE ATT&CK mapping (if applicable), and any relevant references."
+      placeholder: |
+        ## Technical Approach
+        - Implement a new module `category.module_name` that...
+
+        ## MITRE ATT&CK
+        - T1234 — Technique Name
+
+        ## References
+        - [Blog post / research paper / tool that inspired this]
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: "What other approaches did you consider? Why is your proposal better?"
+      placeholder: |
+        1. Alternative A: [description] — rejected because [reason]
+        2. Alternative B: [description] — partially viable but [limitation]
+    validations:
+      required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: "What area of ARES does this proposal affect?"
+      options:
+        - New Module
+        - Core Engine
+        - API / Backend
+        - Frontend / Dashboard
+        - CLI
+        - Documentation
+        - DevOps / CI/CD
+        - Security Model
+        - MCP / Integration
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: implementation
+    attributes:
+      label: Implementation
+      options:
+        - label: I am willing to implement this proposal and submit a PR
+          required: false
+        - label: I have read the CONTRIBUTING.md guide
+          required: true
