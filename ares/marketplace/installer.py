@@ -627,9 +627,24 @@ class ModuleInstaller:
 
     def _install_single_file(self, file_path: Path, source_url: str, force: bool) -> ModuleManifest:
         manifest = self._infer_manifest_from_file(file_path, source_url)
-        dest_dir = PLUGINS_DIR / manifest.id.replace(".", "_")
+        # Prevent path traversal in manifest.id and file_path.name
+        if any(sep in manifest.id for sep in ("/", "\\", "..")):
+            raise ValueError(f"Invalid or unsafe module ID: {manifest.id!r}")
+        safe_id = manifest.id.replace(".", "_").strip()
+        if not safe_id:
+            raise ValueError(f"Invalid or empty module ID: {manifest.id!r}")
+        dest_dir = (PLUGINS_DIR / safe_id).resolve()
+        plugins_base = PLUGINS_DIR.resolve()
+        if not (dest_dir == plugins_base or dest_dir.is_relative_to(plugins_base)):
+            raise ValueError(f"Path traversal detected in module destination: {manifest.id!r}")
+
         dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(file_path, dest_dir / file_path.name)
+        safe_filename = Path(file_path.name).name
+        dest_file = (dest_dir / safe_filename).resolve()
+        if not (dest_file == dest_dir or dest_file.is_relative_to(dest_dir)):
+            raise ValueError(f"Path traversal detected in module filename: {file_path.name!r}")
+
+        shutil.copy2(file_path, dest_file)
         return self._finalize_install(dest_dir, manifest, force)
 
     def _finalize_install(self, plugin_dir: Path, manifest: ModuleManifest, force: bool) -> ModuleManifest:

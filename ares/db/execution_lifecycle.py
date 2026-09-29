@@ -3610,7 +3610,22 @@ class ExecutionLifecycleStore:
             else:
                 # Dynamic / plugin modules without formal Phase 5C descriptor (e.g. RFC-001 modules)
                 values = {key: intent.raw_parameters[key] for key in sorted(intent.raw_parameters)}
-                destination_refs = ()
+                extracted_dest_list: list[tuple[str, str]] = []
+                for d_key in ("target", "targets", "host", "hosts", "rhost", "rhosts", "dc", "server"):
+                    if d_key in intent.raw_parameters:
+                        v = intent.raw_parameters[d_key]
+                        if isinstance(v, (list, tuple)):
+                            for item in v:
+                                if isinstance(item, str) and item.strip():
+                                    extracted_dest_list.append(("host", item.strip().lower()))
+                        elif isinstance(v, str) and v.strip():
+                            extracted_dest_list.append(("host", v.strip().lower()))
+                for d_key in ("domain", "realm"):
+                    if d_key in intent.raw_parameters:
+                        v = intent.raw_parameters[d_key]
+                        if isinstance(v, str) and v.strip():
+                            extracted_dest_list.append(("domain", v.strip().lower()))
+                destination_refs = tuple(sorted(set(extracted_dest_list)))
             canonical_json = json.dumps(
                 values,
                 sort_keys=True,

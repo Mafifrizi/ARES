@@ -368,3 +368,45 @@ class TestOSFirewallController:
                 assert fw is not None
                 mock_apply.assert_called_once()
             mock_remove.assert_called_once_with(["ARES_SCOPE_WALL_test"])
+
+    def test_bracketed_ipv6_and_zone_id_parsing(self, sample_campaign: Campaign):
+        fw = ScopeFirewall(campaign=sample_campaign, module_id="test.ipv6", allow_loopback_ipc=True)
+        # Bracketed loopback
+        assert fw.is_allowed_address("[::1]") is True
+        assert fw.is_allowed_address(("[::1]", 8080)) is True
+        assert fw.is_allowed_address("[::1]:8080") is True
+
+        # Zone index stripping
+        assert fw.is_allowed_address("[::1%eth0]:9000") is True
+
+        # Bracketed out-of-scope IPv6
+        assert fw.is_allowed_address("[2001:db8::1]") is False
+        assert fw.is_allowed_address(("[2001:db8::1]", 443)) is False
+
+    def test_ipv4_mapped_ipv6_scope_enforcement(self, sample_campaign: Campaign):
+        fw = ScopeFirewall(campaign=sample_campaign, module_id="test.ipv4_mapped")
+        # In-scope: 10.0.0.5 is in 10.0.0.0/24
+        assert fw.is_allowed_address("::ffff:10.0.0.5") is True
+        assert fw.is_allowed_address(("::ffff:10.0.0.5", 445)) is True
+
+        # Out-of-scope: 8.8.8.8 is outside 10.0.0.0/24 and 192.168.1.0/24
+        assert fw.is_allowed_address("::ffff:8.8.8.8") is False
+        assert fw.is_allowed_address(("::ffff:8.8.8.8", 53)) is False
+
+    def test_proxy_environment_variables_neutralized_during_guard(self, sample_campaign: Campaign):
+        import os
+        os.environ["HTTP_PROXY"] = "http://127.0.0.1:8080"
+        os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8443"
+        try:
+            with scope_firewall_sync_guard(sample_campaign) as fw:
+                assert fw is not None
+                # Proxies must be stripped while guard is active
+                assert "HTTP_PROXY" not in os.environ
+                assert "HTTPS_PROXY" not in os.environ
+            # Proxies must be safely restored upon exit
+            assert os.environ.get("HTTP_PROXY") == "http://127.0.0.1:8080"
+            assert os.environ.get("HTTPS_PROXY") == "http://127.0.0.1:8443"
+        finally:
+            os.environ.pop("HTTP_PROXY", None)
+            os.environ.pop("HTTPS_PROXY", None)
+

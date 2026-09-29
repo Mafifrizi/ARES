@@ -140,7 +140,32 @@ class ScopeFirewall:
         if isinstance(host, bytes):
             host = host.decode("utf-8", errors="ignore")
 
-        return str(host).strip(), port
+        host_str = str(host).strip()
+        port_val = port
+
+        # Handle string forms such as "[::1]:8080" or "10.0.0.1:445"
+        if port_val is None and ":" in host_str:
+            if host_str.startswith("[") and "]" in host_str:
+                parts = host_str.split("]")
+                host_str = parts[0][1:]
+                after = parts[1]
+                if after.startswith(":") and after[1:].isdigit():
+                    port_val = int(after[1:])
+            elif host_str.count(":") == 1:
+                h, p = host_str.split(":")
+                if p.isdigit():
+                    host_str = h
+                    port_val = int(p)
+
+        # Strip remaining bracketed IPv6 syntax: "[::1]" -> "::1"
+        if host_str.startswith("[") and host_str.endswith("]"):
+            host_str = host_str[1:-1]
+
+        # Strip zone identifier: "fe80::1%eth0" -> "fe80::1"
+        if "%" in host_str:
+            host_str = host_str.split("%")[0]
+
+        return host_str.strip(), port_val
 
     def _is_cloud_allowed(self, host: str) -> bool:
         """Verify if host matches trusted cloud endpoints for cloud modules."""
@@ -169,14 +194,19 @@ class ScopeFirewall:
         if self._is_cloud_allowed(lowered_host):
             return True, address
 
-        # 3. Check if host is an IP literal
+        # 3. Check if host is an IP literal (including IPv4, IPv6, and IPv4-mapped IPv6)
         try:
             addr = ipaddress.ip_address(lowered_host)
-            if self.allow_loopback_ipc and addr.is_loopback:
+            effective_addr = getattr(addr, "ipv4_mapped", None) or addr
+            if self.allow_loopback_ipc and (addr.is_loopback or effective_addr.is_loopback):
                 self._ip_cache[lowered_host] = True
                 return True, address
 
-            in_scope = any(addr in net for net in self._networks)
+            in_scope = any(
+                (effective_addr in net if effective_addr.version == net.version else False)
+                or (addr in net if addr.version == net.version else False)
+                for net in self._networks
+            )
             if len(self._ip_cache) < 1024:
                 self._ip_cache[lowered_host] = in_scope
             return in_scope, address
@@ -217,7 +247,13 @@ class ScopeFirewall:
                 raw_ip = res[4][0]
                 try:
                     ip_obj = ipaddress.ip_address(raw_ip)
-                    if any(ip_obj in net for net in self._networks):
+                    effective_ip = getattr(ip_obj, "ipv4_mapped", None) or ip_obj
+                    in_scope = any(
+                        (effective_ip in net if effective_ip.version == net.version else False)
+                        or (ip_obj in net if ip_obj.version == net.version else False)
+                        for net in self._networks
+                    )
+                    if in_scope:
                         if pinned_ip is None:
                             pinned_ip = raw_ip
                     else:
@@ -604,6 +640,16 @@ def get_os_firewall_status() -> dict[str, Any]:
 
 # ── Context Managers ─────────────────────────────────────────────────────────
 
+_PROXY_KEYS: tuple[str, ...] = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+
 @contextlib.asynccontextmanager
 async def scope_firewall_guard(
     campaign: Campaign | None,
@@ -642,12 +688,16 @@ async def scope_firewall_guard(
     if enable_os_firewall:
         os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
 
+    # Neutralize proxy environment variables that could route traffic out-of-scope
+    saved_proxies = {k: os.environ.pop(k) for k in _PROXY_KEYS if k in os.environ}
+
     try:
         yield fw
     finally:
         _current_firewall.reset(token)
         if os_rules:
             OSFirewallController.remove_rules(os_rules)
+        os.environ.update(saved_proxies)
 
 
 @contextlib.contextmanager
@@ -688,9 +738,13 @@ def scope_firewall_sync_guard(
     if enable_os_firewall:
         os_rules = OSFirewallController.apply_rules(campaign, fw.scope_cidrs)
 
+    # Neutralize proxy environment variables that could route traffic out-of-scope
+    saved_proxies = {k: os.environ.pop(k) for k in _PROXY_KEYS if k in os.environ}
+
     try:
         yield fw
     finally:
         _current_firewall.reset(token)
         if os_rules:
             OSFirewallController.remove_rules(os_rules)
+        os.environ.update(saved_proxies)

@@ -737,3 +737,47 @@ class TestMarketplaceAndCrackerHardening:
         assert worker_custom.tmpdir == custom_dir
         assert worker_custom.tmpdir.exists()
 
+    def test_marketplace_path_traversal_rejected(self, tmp_path, monkeypatch):
+        """Path traversal in manifest module_id or file path must be rejected."""
+        from ares.marketplace.installer import ModuleInstaller, ModuleManifest
+        installer = ModuleInstaller()
+        fake_file = tmp_path / "test.py"
+        fake_file.write_text("print('test')")
+
+        monkeypatch.setattr(
+            installer,
+            "_infer_manifest_from_file",
+            lambda f, url: ModuleManifest(id="../../evil_module"),
+        )
+        with pytest.raises(ValueError, match="Path traversal detected|Invalid or unsafe module ID"):
+            installer._install_single_file(fake_file, source_url="https://example.com/test.py", force=True)
+
+    def test_dynamic_module_destination_extracted_in_lifecycle_admission(self):
+        """Lifecycle admission must extract target/host for dynamic modules without static descriptors."""
+        import uuid
+
+        from ares.db.execution_lifecycle import AdmissionIntentV3, ExecutionLifecycleStore
+
+        intent = AdmissionIntentV3(
+            logical_execution_id=str(uuid.uuid4()),
+            submission_id=str(uuid.uuid4()),
+            attempt_id=str(uuid.uuid4()),
+            outbox_id=None,
+            publication_key=None,
+            campaign_id=str(uuid.uuid4()),
+            module_id="custom.dynamic_scanner",
+            ingress_code="direct_engine",
+            operation_id=str(uuid.uuid4()),
+            evaluation_mode="live",
+            raw_parameters={"target": "192.168.1.50", "port": 80, "domain": "corp.local"},
+            credential_ids=(),
+            approval_ref=None,
+            noise_units=1,
+            exfiltration_units=0,
+        )
+        prepared = ExecutionLifecycleStore._prepared_admission(intent)
+        assert prepared is not None
+        assert ("host", "192.168.1.50") in prepared.destination_refs
+        assert ("domain", "corp.local") in prepared.destination_refs
+
+
