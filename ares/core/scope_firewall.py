@@ -880,13 +880,16 @@ class OSFirewallController:
                 except Exception:
                     failed_rollbacks.append(cleanup_cmd)
             with cls._lock:
-                cls._state = OSFirewallState.VERIFICATION_FAILED
                 if failed_rollbacks:
                     cls._rule_cleanups[rule_name] = failed_rollbacks
                     cls._active_rules.add(rule_name)
                     cls._state = OSFirewallState.CLEANUP_PENDING
                 else:
-                    cls._state = OSFirewallState.INACTIVE if not cls._active_rules else OSFirewallState.VERIFIED_ACTIVE
+                    cls._state = (
+                        OSFirewallState.VERIFICATION_FAILED
+                        if not cls._active_rules
+                        else OSFirewallState.VERIFIED_ACTIVE
+                    )
             if os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1":
                 raise ScopeFirewallBlockError(
                     f"[ScopeFirewall] OS firewall verification failed for {rule_name}; rolled back."
@@ -989,6 +992,10 @@ class OSFirewallController:
             rules_to_clean = list(cls._active_rules)
         if rules_to_clean:
             cls.remove_rules(rules_to_clean)
+        else:
+            with cls._lock:
+                if cls._state != OSFirewallState.CLEANUP_PENDING:
+                    cls._state = OSFirewallState.INACTIVE
 
 
 atexit.register(OSFirewallController.cleanup_all)

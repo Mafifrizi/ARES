@@ -102,31 +102,42 @@ class SandboxPolicy:
     docker_image:    str   = "python:3.11-slim"
     docker_network:  str   = "bridge"  # container network mode when allow_network=True
 
+    # Strict mode & tier integrity controls
+    strict_mode:                      bool = True        # enforce fail-closed security invariants across all tiers
+    allow_tier_downgrade:             bool = False       # reject silent fallback from DOCKER to SUBPROCESS when Docker is unavailable
+    allow_unconfined_docker_binaries: bool = False       # in strict mode, reject DOCKER allow_network=True unless explicitly allowed
+    sandbox_uid:                      int | None = None  # dedicated sandbox UID for Linux parent firewall & child privilege drop
+
     # Modules trusted to bypass sandboxing
     trusted_prefixes: list[str] = field(default_factory=lambda: ["ares.core", "ares.db"])
 
 
 @dataclass
 class SandboxResult:
-    module_id:    str
-    sandbox_tier: IsolationTier
-    success:      bool
-    findings:     list[dict[str, Any]] = field(default_factory=list)
-    extra:        dict[str, Any]       = field(default_factory=dict)
-    stdout:       str = ""
-    stderr:       str = ""
-    exit_code:    int = 0
-    cpu_time_s:   float = 0.0
-    wall_time_s:  float = 0.0
-    memory_peak_kb: int = 0
-    error:        str = ""
-    sandbox_id:   str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    module_id:       str
+    sandbox_tier:    IsolationTier
+    success:         bool
+    findings:        list[dict[str, Any]] = field(default_factory=list)
+    extra:           dict[str, Any]       = field(default_factory=dict)
+    stdout:          str = ""
+    stderr:          str = ""
+    exit_code:       int = 0
+    cpu_time_s:      float = 0.0
+    wall_time_s:     float = 0.0
+    memory_peak_kb:  int = 0
+    error:           str = ""
+    sandbox_id:      str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    requested_tier:  IsolationTier = IsolationTier.SUBPROCESS
+    effective_tier:  IsolationTier = IsolationTier.SUBPROCESS
+    downgraded:      bool = False
+    downgrade_reason: str = ""
+    guarantees_lost: list[str] = field(default_factory=list)
 
 
 class SandboxRunner:
     """
     Executes ARES modules inside an isolation tier.
-    Auto-falls-back to lower tier on unavailability.
+    In strict mode (allow_tier_downgrade=False), fails closed if the requested tier is unavailable.
     """
 
     def __init__(self, policy: SandboxPolicy | None = None) -> None:
@@ -141,9 +152,10 @@ class SandboxRunner:
     ) -> SandboxResult:
         """
         Run module_id with params inside the configured isolation tier.
-        Falls back to SUBPROCESS if requested tier unavailable.
+        In strict mode (allow_tier_downgrade=False), fails closed if requested tier is unavailable.
         """
-        effective_tier = tier or self.policy.tier
+        requested_tier = tier or self.policy.tier
+        effective_tier = requested_tier
         t0 = time.monotonic()
 
         # Core modules always run in-process
@@ -151,31 +163,43 @@ class SandboxRunner:
             effective_tier = IsolationTier.NONE
 
         audit("sandbox_run_start", actor="engine",
-              module=module_id, tier=effective_tier.value, campaign=campaign_id)
+              module=module_id, requested_tier=requested_tier.value,
+              tier=effective_tier.value, campaign=campaign_id)
 
         try:
             if effective_tier == IsolationTier.NONE:
                 result = await self._run_inprocess(module_id, params, campaign_id)
             elif effective_tier == IsolationTier.DOCKER:
-                result = await self._run_docker(module_id, params, campaign_id)
+                result = await self._run_docker(
+                    module_id, params, campaign_id, requested_tier=requested_tier
+                )
             else:
                 # SUBPROCESS or SECCOMP (seccomp applied inside child)
                 result = await self._run_subprocess(
                     module_id, params, campaign_id,
                     use_seccomp=(effective_tier == IsolationTier.SECCOMP),
+                    requested_tier=requested_tier,
                 )
         except Exception as exc:
             result = SandboxResult(
                 module_id=module_id, sandbox_tier=effective_tier,
+                requested_tier=requested_tier, effective_tier=effective_tier,
                 success=False, error=str(exc)[:500],
             )
 
-        result.wall_time_s  = round(time.monotonic() - t0, 3)
-        result.sandbox_tier = effective_tier
+        result.wall_time_s = round(time.monotonic() - t0, 3)
+        if not getattr(result, "requested_tier", None):
+            result.requested_tier = requested_tier
+        if not getattr(result, "effective_tier", None):
+            result.effective_tier = effective_tier
+        result.sandbox_tier = result.effective_tier
 
         audit("sandbox_run_complete", actor="engine",
               module=module_id, success=result.success,
-              tier=effective_tier.value, wall_time_s=result.wall_time_s)
+              requested_tier=result.requested_tier.value,
+              effective_tier=result.effective_tier.value,
+              downgraded=result.downgraded,
+              tier=result.sandbox_tier.value, wall_time_s=result.wall_time_s)
 
         return result
 
@@ -239,7 +263,11 @@ class SandboxRunner:
         async with scope_firewall_guard(campaign=campaign, module_id=module_id):
             findings, extra = await module.run(**params)
         return SandboxResult(
-            module_id=module_id, sandbox_tier=IsolationTier.NONE, success=True,
+            module_id=module_id,
+            sandbox_tier=IsolationTier.NONE,
+            requested_tier=IsolationTier.NONE,
+            effective_tier=IsolationTier.NONE,
+            success=True,
             findings=[f.to_dict() if hasattr(f, "to_dict") else {} for f in findings],
             extra=extra,
         )
@@ -250,11 +278,13 @@ class SandboxRunner:
         params:    dict[str, Any],
         campaign_id: str,
         use_seccomp: bool = False,
+        requested_tier: IsolationTier = IsolationTier.SUBPROCESS,
     ) -> SandboxResult:
         """
         Run module in isolated subprocess with resource limits.
         Communicates via stdin/stdout JSON (same protocol as worker/isolation.py).
         """
+        sub_tier = IsolationTier.SECCOMP if use_seccomp else IsolationTier.SUBPROCESS
         with tempfile.TemporaryDirectory(prefix="ares-sandbox-") as tmpdir:
             # Pass real campaign scope so child process respects it
             _scope_cidrs: list[str] = []
@@ -279,7 +309,9 @@ class SandboxRunner:
                 if OSFirewallController.is_elevated():
                     return SandboxResult(
                         module_id=module_id,
-                        sandbox_tier=IsolationTier.SUBPROCESS,
+                        sandbox_tier=sub_tier,
+                        requested_tier=requested_tier,
+                        effective_tier=sub_tier,
                         success=False,
                         error="Privilege dropping (drop_privileges=True) is unsupported on Windows while running as Administrator; execution aborted to prevent unconfined privileged execution.",
                     )
@@ -307,11 +339,14 @@ class SandboxRunner:
             # ensuring that the child is restricted by Netfilter the instant it drops privileges.
             parent_uid_firewall = None
             if os.name != "nt" and self.policy.drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
-                try:
-                    import pwd
-                    parent_uid_firewall = pwd.getpwnam("nobody").pw_uid
-                except Exception:
-                    parent_uid_firewall = 65534
+                if self.policy.sandbox_uid is not None:
+                    parent_uid_firewall = self.policy.sandbox_uid
+                else:
+                    try:
+                        import pwd
+                        parent_uid_firewall = pwd.getpwnam("nobody").pw_uid
+                    except Exception:
+                        parent_uid_firewall = 65534
 
             from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
             from ares.core.scope_firewall import scope_firewall_guard
@@ -347,8 +382,12 @@ class SandboxRunner:
                     proc.kill()
                     await proc.wait()
                     return SandboxResult(
-                        module_id=module_id, sandbox_tier=IsolationTier.SUBPROCESS,
-                        success=False, error=f"Sandbox timeout ({self.policy.timeout_s}s)",
+                        module_id=module_id,
+                        sandbox_tier=sub_tier,
+                        requested_tier=requested_tier,
+                        effective_tier=sub_tier,
+                        success=False,
+                        error=f"Sandbox timeout ({self.policy.timeout_s}s)",
                     )
 
             stdout = stdout_b.decode(errors="replace")
@@ -357,20 +396,27 @@ class SandboxRunner:
             try:
                 data = json.loads(stdout)
                 return SandboxResult(
-                    module_id  = module_id,
-                    sandbox_tier = IsolationTier.SUBPROCESS,
-                    success    = data.get("success", False),
-                    findings   = data.get("findings", []),
-                    extra      = data.get("extra", {}),
-                    stdout     = stdout[:2000],
-                    stderr     = stderr[:500],
-                    exit_code  = proc.returncode or 0,
+                    module_id    = module_id,
+                    sandbox_tier = sub_tier,
+                    requested_tier = requested_tier,
+                    effective_tier = sub_tier,
+                    success      = data.get("success", False),
+                    findings     = data.get("findings", []),
+                    extra        = data.get("extra", {}),
+                    stdout       = stdout[:2000],
+                    stderr       = stderr[:500],
+                    exit_code    = proc.returncode or 0,
                 )
             except json.JSONDecodeError:
                 return SandboxResult(
-                    module_id=module_id, sandbox_tier=IsolationTier.SUBPROCESS,
-                    success=False, error="Invalid JSON from sandbox",
-                    stdout=stdout[:500], stderr=stderr[:500],
+                    module_id=module_id,
+                    sandbox_tier=sub_tier,
+                    requested_tier=requested_tier,
+                    effective_tier=sub_tier,
+                    success=False,
+                    error="Invalid JSON from sandbox",
+                    stdout=stdout[:500],
+                    stderr=stderr[:500],
                 )
 
     async def _run_docker(
@@ -378,16 +424,117 @@ class SandboxRunner:
         module_id: str,
         params:    dict[str, Any],
         campaign_id: str,
+        requested_tier: IsolationTier = IsolationTier.DOCKER,
     ) -> SandboxResult:
         """
         Run module inside an ephemeral Docker container.
         Requires Docker daemon on host.
         """
+        # 1. Strict mode online network limitation for external binaries
+        if self.policy.strict_mode and self.policy.allow_network:
+            if not self.policy.allow_unconfined_docker_binaries:
+                return SandboxResult(
+                    module_id=module_id,
+                    sandbox_tier=IsolationTier.DOCKER,
+                    requested_tier=requested_tier,
+                    effective_tier=IsolationTier.DOCKER,
+                    success=False,
+                    error=(
+                        "Docker online mode cannot guarantee scope containment for external binaries inside the container. "
+                        "In strict mode, use allow_network=False (network_mode='none') for kernel network namespace isolation, "
+                        "or explicitly set allow_unconfined_docker_binaries=True."
+                    ),
+                )
+
+        # 2. Check docker availability & client connection
         try:
             import docker  # type: ignore[import-untyped]
         except ImportError:
-            logger.warning("docker_not_available_fallback_subprocess")
-            return await self._run_subprocess(module_id, params, campaign_id)
+            docker = None
+
+        if docker is None:
+            if not self.policy.allow_tier_downgrade:
+                audit(
+                    "sandbox_tier_downgrade_rejected",
+                    actor="engine",
+                    requested_tier=requested_tier.value,
+                    reason="docker_package_not_installed",
+                )
+                return SandboxResult(
+                    module_id=module_id,
+                    sandbox_tier=IsolationTier.DOCKER,
+                    requested_tier=requested_tier,
+                    effective_tier=IsolationTier.DOCKER,
+                    success=False,
+                    error="Security tier downgrade from DOCKER to SUBPROCESS rejected (allow_tier_downgrade=False): 'docker' package not installed.",
+                )
+            lost_guarantees = [
+                "read_only_rootfs_mount_namespace",
+                "container_cgroups",
+                "network_namespace_isolation",
+            ]
+            audit(
+                "sandbox_tier_downgrade",
+                actor="engine",
+                requested_tier=requested_tier.value,
+                effective_tier=IsolationTier.SUBPROCESS.value,
+                reason="docker_package_not_installed",
+                guarantees_lost=lost_guarantees,
+            )
+            sub_res = await self._run_subprocess(
+                module_id, params, campaign_id, requested_tier=requested_tier
+            )
+            sub_res.requested_tier = requested_tier
+            sub_res.effective_tier = IsolationTier.SUBPROCESS
+            sub_res.sandbox_tier = IsolationTier.SUBPROCESS
+            sub_res.downgraded = True
+            sub_res.downgrade_reason = "docker_package_not_installed"
+            sub_res.guarantees_lost = lost_guarantees
+            return sub_res
+
+        try:
+            client = docker.from_env()
+            if hasattr(client, "ping"):
+                client.ping()
+        except Exception as exc:
+            if not self.policy.allow_tier_downgrade:
+                audit(
+                    "sandbox_tier_downgrade_rejected",
+                    actor="engine",
+                    requested_tier=requested_tier.value,
+                    reason=f"docker_daemon_unavailable: {exc}",
+                )
+                return SandboxResult(
+                    module_id=module_id,
+                    sandbox_tier=IsolationTier.DOCKER,
+                    requested_tier=requested_tier,
+                    effective_tier=IsolationTier.DOCKER,
+                    success=False,
+                    error=f"Security tier downgrade from DOCKER to SUBPROCESS rejected (allow_tier_downgrade=False): Docker daemon unavailable ({exc}).",
+                )
+            lost_guarantees = [
+                "read_only_rootfs_mount_namespace",
+                "container_cgroups",
+                "network_namespace_isolation",
+            ]
+            audit(
+                "sandbox_tier_downgrade",
+                actor="engine",
+                requested_tier=requested_tier.value,
+                effective_tier=IsolationTier.SUBPROCESS.value,
+                reason=f"docker_daemon_unavailable: {exc}",
+                guarantees_lost=lost_guarantees,
+            )
+            sub_res = await self._run_subprocess(
+                module_id, params, campaign_id, requested_tier=requested_tier
+            )
+            sub_res.requested_tier = requested_tier
+            sub_res.effective_tier = IsolationTier.SUBPROCESS
+            sub_res.sandbox_tier = IsolationTier.SUBPROCESS
+            sub_res.downgraded = True
+            sub_res.downgrade_reason = f"docker_daemon_unavailable: {exc}"
+            sub_res.guarantees_lost = lost_guarantees
+            return sub_res
 
         # Fetch real scope for Docker container (same as subprocess)
         _docker_scope: list[str] = []
@@ -419,7 +566,6 @@ class SandboxRunner:
         read_only = not self.policy.allow_write
         mem_limit = f"{self.policy.memory_mb}m"
 
-        client = docker.from_env()
         try:
             container = client.containers.run(
                 image,
@@ -439,15 +585,22 @@ class SandboxRunner:
             output = container.decode() if isinstance(container, bytes) else str(container)
             data   = json.loads(output)
             return SandboxResult(
-                module_id=module_id, sandbox_tier=IsolationTier.DOCKER,
+                module_id=module_id,
+                sandbox_tier=IsolationTier.DOCKER,
+                requested_tier=requested_tier,
+                effective_tier=IsolationTier.DOCKER,
                 success=data.get("success", False),
                 findings=data.get("findings", []),
                 extra=data.get("extra", {}),
             )
         except Exception as exc:
             return SandboxResult(
-                module_id=module_id, sandbox_tier=IsolationTier.DOCKER,
-                success=False, error=str(exc)[:300],
+                module_id=module_id,
+                sandbox_tier=IsolationTier.DOCKER,
+                requested_tier=requested_tier,
+                effective_tier=IsolationTier.DOCKER,
+                success=False,
+                error=str(exc)[:300],
             )
 
     # ── Helpers ────────────────────────────────────────────────────────────
@@ -463,6 +616,7 @@ class SandboxRunner:
         allow_network = self.policy.allow_network
         drop_privileges = self.policy.drop_privileges
         allow_write = self.policy.allow_write
+        target_uid = self.policy.sandbox_uid
 
         def _limits():
             # 1. Best-effort resource limits
@@ -499,14 +653,21 @@ class SandboxRunner:
             # 3. MANDATORY SECURITY CONTROL: Privilege dropping (fail-closed)
             if drop_privileges and getattr(os, "geteuid", lambda: -1)() == 0:
                 try:
-                    import pwd
-                    nobody = pwd.getpwnam("nobody")
+                    if target_uid is not None:
+                        drop_uid = target_uid
+                        drop_gid = target_uid
+                    else:
+                        import pwd
+                        nobody = pwd.getpwnam("nobody")
+                        drop_uid = nobody.pw_uid
+                        drop_gid = nobody.pw_gid
                     os.setgroups([])
-                    os.setgid(nobody.pw_gid)
-                    os.setuid(nobody.pw_uid)
+                    os.setgid(drop_gid)
+                    os.setuid(drop_uid)
                 except Exception as exc:
+                    target_label = "nobody" if target_uid is None else str(target_uid)
                     raise RuntimeError(
-                        f"Mandatory security control failed: drop_privileges=True failed to drop root to nobody: {exc}"
+                        f"Mandatory security control failed: drop_privileges=True failed to drop root to {target_label}: {exc}"
                     )
                 if getattr(os, "geteuid", lambda: -1)() == 0 or getattr(os, "getuid", lambda: -1)() == 0:
                     raise RuntimeError(
@@ -568,13 +729,13 @@ class SandboxRunner:
             "    import builtins\n"
             "    def _is_contained_in_sandbox(target_path, sandbox_dir):\n"
             "        try:\n"
-            "            real_sandbox = os.path.realpath(sandbox_dir)\n"
+            "            real_sandbox = os.path.normcase(os.path.realpath(sandbox_dir))\n"
             "            target_str = str(target_path)\n"
             "            if not os.path.exists(target_str):\n"
             "                parent = os.path.dirname(target_str) or \".\"\n"
-            "                real_target = os.path.join(os.path.realpath(parent), os.path.basename(target_str))\n"
+            "                real_target = os.path.normcase(os.path.join(os.path.realpath(parent), os.path.basename(target_str)))\n"
             "            else:\n"
-            "                real_target = os.path.realpath(target_str)\n"
+            "                real_target = os.path.normcase(os.path.realpath(target_str))\n"
             "            return os.path.commonpath([real_sandbox, real_target]) == real_sandbox\n"
             "        except (ValueError, OSError, TypeError):\n"
             "            return False\n"
