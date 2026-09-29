@@ -1,11 +1,11 @@
 # [RFC] Cross-Platform Linux Active Directory Post-Exploitation & Credential Harvesting Architecture
 
-> **Notice**: This is a ready-to-post template for a GitHub Discussion (under "Ideas" or "RFCs") or a GitHub Issue (labeled `rfc`, `research`, `help wanted`) on the ARES repository.
+> **Notice**: RFC 001 has been fully implemented in ARES v6.0 (`linux.sssd_harvest`, `linux.ccache_hunt`, `linux.keytab_abuse`, `linux.samba_secrets`, and `credential.ticket_converter`). This document is preserved as an archived reference template demonstrating how to structure research track RFCs in GitHub Discussions.
 
 ---
 
 ### Title:
-`[RFC 001] Cross-Platform Linux Active Directory Post-Exploitation & Credential Harvesting Architecture`
+`[RFC 001 - COMPLETED] Cross-Platform Linux Active Directory Post-Exploitation & Credential Harvesting Architecture`
 
 ### Body:
 
@@ -16,7 +16,7 @@ Modern enterprise hybrid networks increasingly deploy Linux hosts (CI/CD build n
 
 We have published a formal technical specification: **[RFC 001: Linux Active Directory Tradecraft](https://github.com/Mafifrizi/ARES/blob/main/docs/research/linux-active-directory-tradecraft.md)**, establishing an open architecture for native, high-performance, non-destructive post-exploitation modules in ARES.
 
-We are opening this RFC to gather technical feedback, coordinate module implementations, and invite researchers and practitioners specializing in Linux offensive tradecraft and Active Directory internals to collaborate.
+All 5 modules specified below have been completed, verified, and shipped in ARES v6.0.
 
 ---
 
@@ -32,9 +32,9 @@ ARES provides an asynchronous, type-safe execution engine (`BaseModule`), fail-c
 
 ---
 
-### Prioritized Module Wishlist (MITRE ATT&CK Mapped)
+### Implemented Module Contracts (MITRE ATT&CK Mapped)
 
-We are seeking collaboration and PRs for the following prioritized module contracts:
+The following module contracts are implemented and production-ready:
 
 | Module Identifier | Target Subsystem | MITRE ATT&CK | OPSEC Profile |
 | :--- | :--- | :--- | :--- |

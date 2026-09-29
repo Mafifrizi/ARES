@@ -103,10 +103,12 @@ class SandboxPolicy:
     docker_network:  str   = "bridge"  # container network mode when allow_network=True
 
     # Strict mode & tier integrity controls
-    strict_mode:                      bool = True        # enforce fail-closed security invariants across all tiers
-    allow_tier_downgrade:             bool = False       # reject silent fallback from DOCKER to SUBPROCESS when Docker is unavailable
-    allow_unconfined_docker_binaries: bool = False       # in strict mode, reject DOCKER allow_network=True unless explicitly allowed
-    sandbox_uid:                      int | None = None  # dedicated sandbox UID for Linux parent firewall & child privilege drop
+    strict_mode:                          bool = True        # enforce fail-closed security invariants across all tiers
+    allow_tier_downgrade:                 bool = False       # reject silent fallback from DOCKER to SUBPROCESS when Docker is unavailable
+    allow_unconfined_docker_binaries:     bool = False       # in strict mode, reject DOCKER allow_network=True unless explicitly allowed
+    allow_unconfined_subprocess_binaries: bool = False       # in strict mode, reject SUBPROCESS allow_network=True without OS boundary
+    sandbox_uid:                          int | None = None  # dedicated sandbox UID for Linux parent firewall & child privilege drop
+    sandbox_gid:                          int | None = None  # primary GID for sandbox identity (defaults to primary GID of sandbox_uid)
 
     # Modules trusted to bypass sandboxing
     trusted_prefixes: list[str] = field(default_factory=lambda: ["ares.core", "ares.db"])
@@ -132,6 +134,22 @@ class SandboxResult:
     downgraded:      bool = False
     downgrade_reason: str = ""
     guarantees_lost: list[str] = field(default_factory=list)
+    security_mode:   str = "strict"
+    active_boundary: str = ""
+
+
+@dataclass
+class PolicyDecision:
+    """Canonical security policy decision outcome."""
+    allowed: bool
+    effective_tier: IsolationTier
+    requested_tier: IsolationTier
+    downgraded: bool = False
+    downgrade_reason: str = ""
+    guarantees_lost: list[str] = field(default_factory=list)
+    active_boundary: str = ""
+    security_mode: str = "strict"
+    rejection_reason: str = ""
 
 
 class SandboxRunner:
@@ -142,6 +160,161 @@ class SandboxRunner:
 
     def __init__(self, policy: SandboxPolicy | None = None) -> None:
         self.policy = policy or SandboxPolicy()
+
+    def evaluate_policy(
+        self,
+        module_id: str,
+        tier: IsolationTier | None = None,
+        has_external_binary: bool = False,
+        docker_available: bool = True,
+        has_os_boundary: bool | None = None,
+    ) -> PolicyDecision:
+        """
+        Evaluate canonical security policy decision matrix according to:
+        requested_tier, network policy, external binary capability, OS boundary, and strict mode.
+        """
+        requested = tier or self.policy.tier
+        strict = self.policy.strict_mode
+        sec_mode = "strict" if strict else "compat"
+        is_trusted = self.is_trusted_module(module_id)
+
+        # 1. Trusted core modules
+        if is_trusted:
+            if requested == IsolationTier.NONE:
+                return PolicyDecision(
+                    allowed=True,
+                    effective_tier=IsolationTier.NONE,
+                    requested_tier=requested,
+                    active_boundary="transport_hook",
+                    security_mode=sec_mode,
+                )
+            elif strict and not self.policy.allow_tier_downgrade:
+                effective = requested
+            else:
+                return PolicyDecision(
+                    allowed=True,
+                    effective_tier=IsolationTier.NONE,
+                    requested_tier=requested,
+                    downgraded=True,
+                    downgrade_reason="trusted_core_module_runs_in_process",
+                    guarantees_lost=[
+                        "process_isolation",
+                        "filesystem_isolation",
+                        "network_namespace_isolation",
+                    ],
+                    active_boundary="transport_hook",
+                    security_mode=sec_mode,
+                )
+        else:
+            effective = requested
+
+        # 2. DOCKER tier
+        if effective == IsolationTier.DOCKER:
+            docker_downgraded = False
+            docker_downgrade_reason = ""
+            docker_guarantees_lost: list[str] = []
+            if not docker_available:
+                if strict and not self.policy.allow_tier_downgrade:
+                    return PolicyDecision(
+                        allowed=False,
+                        effective_tier=IsolationTier.DOCKER,
+                        requested_tier=requested,
+                        security_mode=sec_mode,
+                        active_boundary="none",
+                        rejection_reason="Security tier downgrade from DOCKER rejected (allow_tier_downgrade=False): Docker unavailable.",
+                    )
+                else:
+                    effective = IsolationTier.SUBPROCESS
+                    docker_downgraded = True
+                    docker_downgrade_reason = "docker_unavailable"
+                    docker_guarantees_lost = [
+                        "read_only_rootfs_mount_namespace",
+                        "container_cgroups",
+                        "network_namespace_isolation",
+                    ]
+
+            if effective == IsolationTier.DOCKER:
+                if not self.policy.allow_network:
+                    return PolicyDecision(
+                        allowed=True,
+                        effective_tier=IsolationTier.DOCKER,
+                        requested_tier=requested,
+                        active_boundary="container_network_none",
+                        security_mode=sec_mode,
+                    )
+                else:
+                    if has_external_binary and strict and not self.policy.allow_unconfined_docker_binaries:
+                        return PolicyDecision(
+                            allowed=False,
+                            effective_tier=IsolationTier.DOCKER,
+                            requested_tier=requested,
+                            security_mode=sec_mode,
+                            active_boundary="none",
+                            rejection_reason="Docker online mode cannot guarantee scope containment for external binaries in strict mode.",
+                        )
+                    return PolicyDecision(
+                        allowed=True,
+                        effective_tier=IsolationTier.DOCKER,
+                        requested_tier=requested,
+                        active_boundary="container_bridge",
+                        security_mode=sec_mode,
+                    )
+
+        # 3. SUBPROCESS / SECCOMP tiers
+        if effective in (IsolationTier.SUBPROCESS, IsolationTier.SECCOMP):
+            sub_name = "seccomp_bpf+" if effective == IsolationTier.SECCOMP else ""
+            if not self.policy.allow_network:
+                return PolicyDecision(
+                    allowed=True,
+                    effective_tier=effective,
+                    requested_tier=requested,
+                    downgraded=locals().get("docker_downgraded", False),
+                    downgrade_reason=locals().get("docker_downgrade_reason", ""),
+                    guarantees_lost=locals().get("docker_guarantees_lost", []),
+                    active_boundary=f"{sub_name}network_namespace",
+                    security_mode=sec_mode,
+                )
+            else:
+                if has_os_boundary is None:
+                    has_os_boundary = (
+                        os.name != "nt"
+                        and self.policy.drop_privileges
+                        and getattr(os, "geteuid", lambda: -1)() == 0
+                    )
+
+                if has_external_binary and strict and not has_os_boundary and not self.policy.allow_unconfined_subprocess_binaries:
+                    return PolicyDecision(
+                        allowed=False,
+                        effective_tier=effective,
+                        requested_tier=requested,
+                        downgraded=locals().get("docker_downgraded", False),
+                        downgrade_reason=locals().get("docker_downgrade_reason", ""),
+                        guarantees_lost=locals().get("docker_guarantees_lost", []),
+                        security_mode=sec_mode,
+                        active_boundary="none",
+                        rejection_reason="Subprocess online mode cannot guarantee scope containment for external binaries without an OS-level boundary.",
+                    )
+
+                active_b = f"{sub_name}os_firewall_uid" if has_os_boundary else f"{sub_name}transport_hook"
+                return PolicyDecision(
+                    allowed=True,
+                    effective_tier=effective,
+                    requested_tier=requested,
+                    downgraded=locals().get("docker_downgraded", False),
+                    downgrade_reason=locals().get("docker_downgrade_reason", ""),
+                    guarantees_lost=locals().get("docker_guarantees_lost", []),
+                    active_boundary=active_b,
+                    security_mode=sec_mode,
+                )
+
+        # 4. NONE tier
+        return PolicyDecision(
+            allowed=True,
+            effective_tier=IsolationTier.NONE,
+            requested_tier=requested,
+            active_boundary="transport_hook",
+            security_mode=sec_mode,
+        )
 
     async def run_module(
         self,
@@ -156,19 +329,45 @@ class SandboxRunner:
         """
         requested_tier = tier or self.policy.tier
         effective_tier = requested_tier
+        is_trusted = self.is_trusted_module(module_id)
+        downgraded = False
+        downgrade_reason = ""
+        guarantees_lost: list[str] = []
         t0 = time.monotonic()
 
-        # Core modules always run in-process
-        if self.is_trusted_module(module_id):
-            effective_tier = IsolationTier.NONE
+        # Core modules handling (Finding C: Truthful tier accounting)
+        if is_trusted:
+            if requested_tier == IsolationTier.NONE:
+                effective_tier = IsolationTier.NONE
+            elif self.policy.strict_mode and not self.policy.allow_tier_downgrade:
+                # In strict mode without downgrade permission, honor the requested sandboxed tier
+                effective_tier = requested_tier
+            else:
+                # Permitted downgrade with truthful accounting
+                effective_tier = IsolationTier.NONE
+                downgraded = True
+                downgrade_reason = "trusted_core_module_runs_in_process"
+                guarantees_lost = [
+                    "process_isolation",
+                    "filesystem_isolation",
+                    "network_namespace_isolation",
+                ]
 
-        audit("sandbox_run_start", actor="engine",
-              module=module_id, requested_tier=requested_tier.value,
-              tier=effective_tier.value, campaign=campaign_id)
+        audit(
+            "sandbox_run_start",
+            actor="engine",
+            module=module_id,
+            requested_tier=requested_tier.value,
+            tier=effective_tier.value,
+            strict_mode=self.policy.strict_mode,
+            campaign=campaign_id,
+        )
 
         try:
             if effective_tier == IsolationTier.NONE:
-                result = await self._run_inprocess(module_id, params, campaign_id)
+                result = await self._run_inprocess(
+                    module_id, params, campaign_id, requested_tier=requested_tier
+                )
             elif effective_tier == IsolationTier.DOCKER:
                 result = await self._run_docker(
                     module_id, params, campaign_id, requested_tier=requested_tier
@@ -184,6 +383,7 @@ class SandboxRunner:
             result = SandboxResult(
                 module_id=module_id, sandbox_tier=effective_tier,
                 requested_tier=requested_tier, effective_tier=effective_tier,
+                security_mode="strict" if self.policy.strict_mode else "compat",
                 success=False, error=str(exc)[:500],
             )
 
@@ -192,21 +392,43 @@ class SandboxRunner:
             result.requested_tier = requested_tier
         if not getattr(result, "effective_tier", None):
             result.effective_tier = effective_tier
+        if downgraded and not result.downgraded:
+            result.downgraded = True
+            result.downgrade_reason = downgrade_reason
+            result.guarantees_lost = guarantees_lost
         result.sandbox_tier = result.effective_tier
+        if not getattr(result, "security_mode", None):
+            result.security_mode = "strict" if self.policy.strict_mode else "compat"
 
-        audit("sandbox_run_complete", actor="engine",
-              module=module_id, success=result.success,
-              requested_tier=result.requested_tier.value,
-              effective_tier=result.effective_tier.value,
-              downgraded=result.downgraded,
-              tier=result.sandbox_tier.value, wall_time_s=result.wall_time_s)
+        audit(
+            "sandbox_run_complete",
+            actor="engine",
+            module=module_id,
+            success=result.success,
+            requested_tier=result.requested_tier.value,
+            effective_tier=result.effective_tier.value,
+            strict_mode=self.policy.strict_mode,
+            network_policy=self.policy.allow_network,
+            filesystem_policy=self.policy.allow_write,
+            privilege_policy=self.policy.drop_privileges,
+            security_boundary=result.active_boundary,
+            downgraded=result.downgraded,
+            downgrade_reason=result.downgrade_reason,
+            guarantees_lost=result.guarantees_lost,
+            tier=result.sandbox_tier.value,
+            wall_time_s=result.wall_time_s,
+        )
 
         return result
 
     # ── Tier implementations ───────────────────────────────────────────────
 
     async def _run_inprocess(
-        self, module_id: str, params: dict[str, Any], campaign_id: str
+        self,
+        module_id: str,
+        params: dict[str, Any],
+        campaign_id: str,
+        requested_tier: IsolationTier = IsolationTier.NONE,
     ) -> SandboxResult:
         """Direct in-process execution. For trusted core modules only."""
         from ares.core.config import AresSettings
@@ -260,13 +482,19 @@ class SandboxRunner:
         settings = AresSettings()
         noise    = NoiseController(campaign)
         module   = module_cls(settings=settings, campaign=campaign, noise=noise)
-        async with scope_firewall_guard(campaign=campaign, module_id=module_id):
+        async with scope_firewall_guard(
+            campaign=campaign,
+            module_id=module_id,
+            strict_mode=self.policy.strict_mode,
+        ):
             findings, extra = await module.run(**params)
         return SandboxResult(
             module_id=module_id,
             sandbox_tier=IsolationTier.NONE,
-            requested_tier=IsolationTier.NONE,
+            requested_tier=requested_tier,
             effective_tier=IsolationTier.NONE,
+            security_mode="strict" if self.policy.strict_mode else "compat",
+            active_boundary="transport_hook",
             success=True,
             findings=[f.to_dict() if hasattr(f, "to_dict") else {} for f in findings],
             extra=extra,
@@ -325,6 +553,7 @@ class SandboxRunner:
                 "scope_cidrs":   _scope_cidrs,
                 "allow_network": self.policy.allow_network,
                 "allow_write":   self.policy.allow_write,
+                "strict_mode":   self.policy.strict_mode,
             })
 
             wrapper = self._build_wrapper_script(use_seccomp)
@@ -348,6 +577,39 @@ class SandboxRunner:
                     except Exception:
                         parent_uid_firewall = 65534
 
+            # Strict mode online network limitation for subprocess external binaries without OS boundary
+            if self.policy.strict_mode and self.policy.allow_network:
+                if parent_uid_firewall is None and not self.policy.allow_unconfined_subprocess_binaries:
+                    return SandboxResult(
+                        module_id=module_id,
+                        sandbox_tier=sub_tier,
+                        requested_tier=requested_tier,
+                        effective_tier=sub_tier,
+                        security_mode="strict",
+                        active_boundary="none",
+                        success=False,
+                        error=(
+                            "Subprocess online mode cannot guarantee scope containment for external binaries without an OS-level boundary. "
+                            "In strict mode, run as root with drop_privileges=True (UID-based OS firewall), use allow_network=False, "
+                            "or explicitly set allow_unconfined_subprocess_binaries=True."
+                        ),
+                    )
+
+            if use_seccomp:
+                if not self.policy.allow_network:
+                    active_boundary = "seccomp_bpf+network_namespace"
+                elif parent_uid_firewall is not None:
+                    active_boundary = "seccomp_bpf+os_firewall_uid"
+                else:
+                    active_boundary = "seccomp_bpf+transport_hook"
+            else:
+                if not self.policy.allow_network:
+                    active_boundary = "network_namespace"
+                elif parent_uid_firewall is not None:
+                    active_boundary = "os_firewall_uid"
+                else:
+                    active_boundary = "transport_hook"
+
             from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
             from ares.core.scope_firewall import scope_firewall_guard
 
@@ -363,6 +625,7 @@ class SandboxRunner:
                 campaign=parent_campaign,
                 enable_os_firewall=(parent_uid_firewall is not None),
                 uid_owner=parent_uid_firewall,
+                strict_mode=self.policy.strict_mode,
             ):
                 proc = await asyncio.create_subprocess_exec(
                     sys.executable, script_path,
@@ -386,6 +649,8 @@ class SandboxRunner:
                         sandbox_tier=sub_tier,
                         requested_tier=requested_tier,
                         effective_tier=sub_tier,
+                        security_mode="strict" if self.policy.strict_mode else "compat",
+                        active_boundary=active_boundary,
                         success=False,
                         error=f"Sandbox timeout ({self.policy.timeout_s}s)",
                     )
@@ -400,6 +665,8 @@ class SandboxRunner:
                     sandbox_tier = sub_tier,
                     requested_tier = requested_tier,
                     effective_tier = sub_tier,
+                    security_mode = "strict" if self.policy.strict_mode else "compat",
+                    active_boundary = active_boundary,
                     success      = data.get("success", False),
                     findings     = data.get("findings", []),
                     extra        = data.get("extra", {}),
@@ -413,6 +680,8 @@ class SandboxRunner:
                     sandbox_tier=sub_tier,
                     requested_tier=requested_tier,
                     effective_tier=sub_tier,
+                    security_mode="strict" if self.policy.strict_mode else "compat",
+                    active_boundary=active_boundary,
                     success=False,
                     error="Invalid JSON from sandbox",
                     stdout=stdout[:500],
@@ -438,6 +707,8 @@ class SandboxRunner:
                     sandbox_tier=IsolationTier.DOCKER,
                     requested_tier=requested_tier,
                     effective_tier=IsolationTier.DOCKER,
+                    security_mode="strict",
+                    active_boundary="none",
                     success=False,
                     error=(
                         "Docker online mode cannot guarantee scope containment for external binaries inside the container. "
@@ -465,6 +736,8 @@ class SandboxRunner:
                     sandbox_tier=IsolationTier.DOCKER,
                     requested_tier=requested_tier,
                     effective_tier=IsolationTier.DOCKER,
+                    security_mode="strict" if self.policy.strict_mode else "compat",
+                    active_boundary="none",
                     success=False,
                     error="Security tier downgrade from DOCKER to SUBPROCESS rejected (allow_tier_downgrade=False): 'docker' package not installed.",
                 )
@@ -509,6 +782,8 @@ class SandboxRunner:
                     sandbox_tier=IsolationTier.DOCKER,
                     requested_tier=requested_tier,
                     effective_tier=IsolationTier.DOCKER,
+                    security_mode="strict" if self.policy.strict_mode else "compat",
+                    active_boundary="none",
                     success=False,
                     error=f"Security tier downgrade from DOCKER to SUBPROCESS rejected (allow_tier_downgrade=False): Docker daemon unavailable ({exc}).",
                 )
@@ -560,11 +835,13 @@ class SandboxRunner:
             "campaign_id":   campaign_id,
             "scope_cidrs":   _docker_scope,
             "allow_network": self.policy.allow_network,
+            "strict_mode":   self.policy.strict_mode,
         })
         image    = self.policy.docker_image
         network  = "none" if not self.policy.allow_network else self.policy.docker_network
         read_only = not self.policy.allow_write
         mem_limit = f"{self.policy.memory_mb}m"
+        active_boundary = "container_network_none" if not self.policy.allow_network else "container_bridge"
 
         try:
             container = client.containers.run(
@@ -589,6 +866,8 @@ class SandboxRunner:
                 sandbox_tier=IsolationTier.DOCKER,
                 requested_tier=requested_tier,
                 effective_tier=IsolationTier.DOCKER,
+                security_mode="strict" if self.policy.strict_mode else "compat",
+                active_boundary=active_boundary,
                 success=data.get("success", False),
                 findings=data.get("findings", []),
                 extra=data.get("extra", {}),
@@ -599,6 +878,8 @@ class SandboxRunner:
                 sandbox_tier=IsolationTier.DOCKER,
                 requested_tier=requested_tier,
                 effective_tier=IsolationTier.DOCKER,
+                security_mode="strict" if self.policy.strict_mode else "compat",
+                active_boundary=active_boundary,
                 success=False,
                 error=str(exc)[:300],
             )
@@ -617,6 +898,8 @@ class SandboxRunner:
         drop_privileges = self.policy.drop_privileges
         allow_write = self.policy.allow_write
         target_uid = self.policy.sandbox_uid
+        target_gid = self.policy.sandbox_gid
+        strict_mode = self.policy.strict_mode
         _parent_pid = os.getpid()
 
         def _limits():
@@ -657,12 +940,23 @@ class SandboxRunner:
                 try:
                     if target_uid is not None:
                         drop_uid = target_uid
-                        drop_gid = target_uid
+                        if target_gid is not None:
+                            drop_gid = target_gid
+                        else:
+                            try:
+                                import pwd
+                                drop_gid = pwd.getpwuid(target_uid).pw_gid
+                            except Exception as e:
+                                if strict_mode:
+                                    raise RuntimeError(
+                                        f"Cannot resolve primary GID for UID {target_uid} in strict mode; specify sandbox_gid explicitly: {e}"
+                                    )
+                                drop_gid = target_uid
                     else:
                         import pwd
                         nobody = pwd.getpwnam("nobody")
                         drop_uid = nobody.pw_uid
-                        drop_gid = nobody.pw_gid
+                        drop_gid = target_gid if target_gid is not None else nobody.pw_gid
                     os.setgroups([])
                     os.setgid(drop_gid)
                     os.setuid(drop_uid)
@@ -780,6 +1074,7 @@ class SandboxRunner:
             "\n"
             "        _allow_net   = payload.get(\"allow_network\", True)\n"
             "        _scope_cidrs = payload.get(\"scope_cidrs\", [])\n"
+            "        _strict_mode = payload.get(\"strict_mode\", False)\n"
             "        if not _allow_net:\n"
             "            campaign = Campaign(\n"
             "                id=campaign_id or str(uuid.uuid4()),\n"
@@ -804,7 +1099,7 @@ class SandboxRunner:
             "        module   = module_cls(settings=settings, campaign=campaign, noise=noise)\n"
             "        from ares.core.scope_firewall import scope_firewall_guard\n"
             "        _current_uid = getattr(os, 'getuid', lambda: None)()\n"
-            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id, enable_os_firewall=False, uid_owner=_current_uid):\n"
+            "        async with scope_firewall_guard(campaign=campaign, module_id=module_id, enable_os_firewall=False, uid_owner=_current_uid, strict_mode=_strict_mode):\n"
             "            findings, extra = await module.run(**params)\n"
             "        return {\n"
             "            \"success\":  True,\n"
@@ -848,6 +1143,7 @@ class SandboxRunner:
             '                    "findings": [], "extra": {}}\n'
             '        _allow_net   = payload.get("allow_network", True)\n'
             '        _scope_cidrs = payload.get("scope_cidrs", [])\n'
+            '        _strict_mode = payload.get("strict_mode", False)\n'
             '        if not _allow_net:\n'
             '            campaign = Campaign(\n'
             '                id=campaign_id or str(uuid.uuid4()),\n'

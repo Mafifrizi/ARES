@@ -91,37 +91,72 @@ To eliminate documentation/implementation mismatch and anti-hype over-claiming:
    - They **do not** intercept external binaries, compiled extensions issuing direct kernel syscalls, or subprocesses spawned without explicit firewall inheritance.
    - True OS/kernel-level egress filtering requires `OSFirewallController` (`netsh advfirewall` on Windows or `iptables` on Linux) running with administrative/root privileges.
 
-2. **Docker Bridge Isolation ≠ Scope-Restricted Network Egress for External Binaries**:
-   - Inside a Docker container running on `docker_network="bridge"`, Python socket hooks intercept Python sockets only. Any external binary executed inside the container (e.g. `curl`, `nmap`, `nc`, or spawned scripts) communicates directly with the container's network namespace via host NAT egress.
+2. **Ambient Environment Flags Cannot Weaken Strict Mode (`strict_mode=True`)**:
+   - In strict mode (`SandboxPolicy.strict_mode=True`), security-critical controls cannot be silently disabled, weakened, or bypassed by ambient environment variables.
+   - `ARES_SCOPE_FIREWALL_ENABLED=0` is strictly ignored when `strict_mode=True`; scope enforcement remains mandatory.
+   - `ARES_OS_FIREWALL_ENABLED=0` cannot disable a required OS firewall (e.g. when `uid_owner` is configured or `enable_os_firewall=True`); attempting to do so raises `ScopeFirewallBlockError` fail-closed.
+   - Environment variables may configure debug or permissive behaviors only when `strict_mode=False`.
+
+3. **Subprocess Online External-Binary Egress Containment**:
+   - In `SUBPROCESS` tier with `allow_network=True`, Python transport hooks only contain Python stdlib sockets. External binaries (e.g. `curl`, `nmap`, `nc`) bypass Python hooks unless constrained by an active OS-level boundary.
+   - On Linux, an OS-level boundary is established when the parent process is root (`geteuid() == 0`) with `drop_privileges=True`, installing parent Netfilter `--uid-owner` rules on the child's UID before fork/exec.
+   - In strict mode (`strict_mode=True`), if an OS boundary is absent (non-root on Linux, Windows, or `drop_privileges=False`), requesting `allow_network=True` is **rejected fail-closed** unless the caller explicitly configures `allow_unconfined_subprocess_binaries=True`.
+
+4. **Docker Bridge Isolation ≠ Scope-Restricted Network Egress for External Binaries**:
+   - Inside a Docker container running on `docker_network="bridge"`, Python socket hooks intercept Python sockets only. Any external binary executed inside the container communicates directly with the container's network namespace via host NAT egress.
    - **Enforcement Policy**: In strict mode (`strict_mode=True`), requesting `IsolationTier.DOCKER` with `allow_network=True` is **rejected fail-closed** unless the caller explicitly configures `allow_unconfined_docker_binaries=True`. For strict scoped execution without unconfined external binaries, `allow_network=False` (`network_mode="none"`) provides complete kernel network namespace isolation.
 
-3. **UID-Based Firewall ≠ Process-Tree Isolation**:
+5. **Sandbox Identity Must Not Assume UID == GID**:
+   - `SandboxPolicy` exposes explicit `sandbox_uid: int | None` and `sandbox_gid: int | None` fields.
+   - If `sandbox_gid` is omitted, primary GID is resolved dynamically via `pwd.getpwuid(sandbox_uid).pw_gid`.
+   - In strict mode, if the primary GID cannot be resolved from the system account database, execution **aborts fail-closed** with `RuntimeError` rather than assuming `UID == GID`.
+
+6. **UID-Based Firewall ≠ Process-Tree Isolation**:
    - Linux Netfilter `-m owner --uid-owner <uid>` filters egress host-wide for **all** processes running under that UID.
    - If multiple concurrent sandboxes run under the shared system account `nobody` (UID 65534), rules applied to one execution impose collateral scope filtering on other processes sharing that UID on the host.
-   - `SandboxPolicy` supports `sandbox_uid: int | None = None` to assign a dedicated sandbox identity per execution.
+   - `SandboxPolicy` supports `sandbox_uid` to assign a dedicated sandbox identity per execution.
 
-4. **Read-Only Rootfs (`read_only=True`) ≠ All Possible Writable Volumes**:
+7. **Read-Only Rootfs (`read_only=True`) ≠ All Possible Writable Volumes**:
    - Docker's `read_only=True` parameter mounts the container root filesystem as read-only.
    - However, if the base image contains `VOLUME` declarations in its Dockerfile (e.g. `/tmp` or `/var/log`), Docker automatically mounts anonymous read-write volumes at those locations unless explicitly masked or overridden. The default image `python:3.11-slim` contains no `VOLUME` instructions.
 
-5. **Mock Command Verification ≠ Actual Kernel Runtime Verification**:
+8. **Mock Command Verification ≠ Actual Kernel Runtime Verification**:
    - Unit tests executing with mocked `subprocess.run` verify command construction, argument parsing, error handling, and state machine transitions.
-   - They **do not** prove physical packet filtering by the Linux Netfilter subsystem or Windows Defender Firewall. Real kernel filtering requires elevated execution on a live kernel.
+   - They **do not** prove physical packet filtering by the Linux Netfilter subsystem or Windows Defender Firewall. Real kernel filtering requires elevated execution on a live kernel. Tests executing in unprivileged environments must be explicitly marked `NOT VERIFIED` for kernel-level filtering.
 
 ---
 
 ### Strict Security Mode & Tier Integrity Policy
 
 To prevent silent security degradation:
+- **`strict_mode: bool = True` (Default)**: Guarantees that security-critical controls cannot be silently disabled, weakened, or bypassed through ambient environment flags or alternate execution paths.
 - **`allow_tier_downgrade: bool = False` (Default)**: If `IsolationTier.DOCKER` is requested and Docker is unavailable (missing library or daemon unreachable), execution **aborts fail-closed**. Silent fallback to `SUBPROCESS` is prohibited.
+- **Truthful Trusted Module Tier Requests**: Modules matching `trusted_prefixes` (`ares.core.*`, `ares.db.*`) run in-process only when explicitly requested (`tier=IsolationTier.NONE`). If an isolated tier (`DOCKER`, `SUBPROCESS`, `SECCOMP`) is requested in strict mode without downgrade permission, the runner honors the requested tier or fails closed.
 - **Auditable Downgrade**: If `allow_tier_downgrade=True` is explicitly configured:
-  - `SandboxResult.requested_tier` reports `IsolationTier.DOCKER`.
-  - `SandboxResult.effective_tier` reports `IsolationTier.SUBPROCESS`.
+  - `SandboxResult.requested_tier` reports the caller's requested tier.
+  - `SandboxResult.effective_tier` reports the actual executed tier.
+  - `SandboxResult.security_mode` reports `"strict"` or `"compat"`.
+  - `SandboxResult.active_boundary` reports the real boundary (`"transport_hook"`, `"network_namespace"`, `"os_firewall_uid"`, `"container_network_none"`, `"container_bridge"`, or `"none"`).
   - `SandboxResult.downgraded` is `True`.
-  - `SandboxResult.downgrade_reason` records the failure reason.
-  - `SandboxResult.guarantees_lost` explicitly records lost protections:
-    `["read_only_rootfs_mount_namespace", "container_cgroups", "network_namespace_isolation"]`.
+  - `SandboxResult.downgrade_reason` records the failure or bypass reason.
+  - `SandboxResult.guarantees_lost` explicitly records lost protections.
   - An audit event `sandbox_tier_downgrade` is recorded in the security audit log.
+
+---
+
+### Canonical Policy Decision Matrix
+
+| Requested Tier | Network Policy | External Binary | OS Boundary | Strict Mode | Decision Result | Active Boundary |
+|---|---|---|---|---|---|---|
+| `SUBPROCESS` | `allow_network=False` | Any | `CLONE_NEWNET` namespace | Yes | Run | `network_namespace` |
+| `SUBPROCESS` | `allow_network=True` | Python only | Python transport hook | Yes | Run (if Python-only guarantee documented) | `transport_hook` |
+| `SUBPROCESS` | `allow_network=True` | External binary | No OS boundary | Yes | **Reject fail-closed** (unless `allow_unconfined_subprocess_binaries=True`) | `none` |
+| `SUBPROCESS` | `allow_network=True` | External binary | Parent Netfilter `--uid-owner` | Yes | Run | `os_firewall_uid` |
+| `DOCKER` | `allow_network=False` | Any | `network_mode="none"` | Yes | Run | `container_network_none` |
+| `DOCKER` | `allow_network=True` | External binary | Container bridge | Yes | **Reject fail-closed** (unless `allow_unconfined_docker_binaries=True`) | `none` |
+| `DOCKER` unavailable | Any | Any | None | Yes (`allow_tier_downgrade=False`) | **Reject fail-closed** | `none` |
+| `DOCKER` unavailable | Any | Any | Fallback allowed | No / Compat (`allow_tier_downgrade=True`) | Downgrade to `SUBPROCESS` + audit guarantees lost | Subprocess active boundary |
+| `NONE` (trusted) | Any | Python only | Python transport hook | Any (`tier=NONE` requested) | Run in-process | `transport_hook` |
 
 ---
 
@@ -129,13 +164,15 @@ To prevent silent security degradation:
 
 | Component | Unit Test | Integration Test | Actual Runtime Verified | Exact Limitation |
 |---|---|---|---|---|
-| **Python Transport Socket Interceptor** | `VERIFIED` (`test_scope_firewall.py`) | `VERIFIED` (Local TCP client/server fixture) | `VERIFIED` | Intercepts Python stdlib sockets only; bypassable by C extensions issuing direct raw syscalls. |
+| **Python Transport Socket Interceptor** | `VERIFIED` (`test_scope_firewall.py`) | `VERIFIED` (Local TCP client/server fixture) | `VERIFIED` | Intercepts Python stdlib sockets only; bypassable by C extensions or external binaries issuing direct raw syscalls. |
+| **Environment Variable Immunity** | `VERIFIED` (`test_strict_mode_ignores_scope_firewall_disable`) | `VERIFIED` | `VERIFIED` | In strict mode, `ARES_SCOPE_FIREWALL_ENABLED=0` and `ARES_OS_FIREWALL_ENABLED=0` cannot weaken required controls. |
+| **Subprocess External-Binary Containment** | `VERIFIED` (`test_subprocess_external_binary_strict_mode_without_os_boundary_rejected`) | `VERIFIED` | `VERIFIED` | Rejects online subprocess without OS boundary in strict mode; prevents silent unconfined binary egress. |
 | **Linux OS Netfilter Firewall (`--uid-owner`)** | `VERIFIED` (`test_hardening.py` CLI & state machine mocks) | `PARTIALLY VERIFIED` (Parent-managed child lifecycle fixture) | `NOT VERIFIED` (Requires root/`CAP_NET_ADMIN` in live kernel) | UID-wide filtering; collateral scope affects other processes sharing the same UID. |
 | **Windows Defender Firewall (`program=<exe>`)** | `VERIFIED` (`test_scope_firewall.py` netsh rule generation) | `PARTIALLY VERIFIED` (show/add/delete rule mocked) | `NOT VERIFIED` (Requires elevated Administrator console) | Scoped to `program=<sys.executable>`. External binaries (e.g. `curl.exe`) are not filtered. |
 | **Docker Offline (`network_mode="none"`)** | `VERIFIED` (`test_sandbox_policy_enforcement_docker_options`) | `PARTIALLY VERIFIED` (Docker client mocked) | `VERIFIED` (When Docker daemon is active) | Complete network isolation; zero outbound or inbound traffic permitted. |
 | **Docker Online (`docker_network="bridge"`)** | `VERIFIED` (`test_docker_online_external_binary_cannot_escape_scope`) | `PARTIALLY VERIFIED` | `UNSUPPORTED` (Kernel-level external binary filtering in bridge mode) | External binaries inside container can reach out-of-scope destinations; rejected in strict mode. |
 | **Subprocess Network Namespace (`CLONE_NEWNET`)** | `VERIFIED` (`test_subprocess_network_isolation_fails_closed`) | `PARTIALLY VERIFIED` (Linux libc unshare mock) | `NOT VERIFIED` (Requires Linux kernel with user namespace or root) | Linux-only; unsupported on Windows. Child aborts fail-closed if unshare fails. |
-| **Subprocess Privilege Dropping (`nobody`)** | `VERIFIED` (`test_subprocess_drop_privileges_fails_closed`) | `PARTIALLY VERIFIED` (POSIX setuid/setgid mock) | `NOT VERIFIED` (Requires initial root EUID 0) | POSIX-only; unsupported on Windows while elevated (aborts execution). |
+| **Subprocess Privilege Dropping & GID Resolution** | `VERIFIED` (`test_sandbox_uid_primary_gid_resolution`) | `PARTIALLY VERIFIED` (POSIX setuid/setgid mock) | `NOT VERIFIED` (Requires initial root EUID 0) | Resolves primary GID from `pwd`; POSIX-only; unsupported on Windows while elevated (aborts execution). |
 | **Sandbox Path Containment (Python hooks)** | `VERIFIED` (`test_canonical_path_containment_edge_cases`) | `VERIFIED` (Tempfile directory harness) | `VERIFIED` | Application-level defense-in-depth; does not provide OS mount namespace isolation. |
 
 ---

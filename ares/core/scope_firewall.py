@@ -1056,14 +1056,25 @@ async def scope_firewall_guard(
     enabled: bool | None = None,
     enable_os_firewall: bool | None = None,
     uid_owner: int | str | None = None,
+    strict_mode: bool = False,
 ) -> AsyncGenerator[ScopeFirewall | None, None]:
     """Async context manager activating dual-layer scope firewall."""
+    scope_env_disabled = os.environ.get("ARES_SCOPE_FIREWALL_ENABLED", "1").lower() in (
+        "0",
+        "false",
+        "no",
+    )
     if enabled is None:
-        enabled = os.environ.get("ARES_SCOPE_FIREWALL_ENABLED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
-        )
+        if strict_mode:
+            # In strict mode, ARES_SCOPE_FIREWALL_ENABLED=0 cannot disable required scope enforcement
+            enabled = True
+        else:
+            enabled = not scope_env_disabled
+    elif not enabled and strict_mode:
+        if campaign is not None and getattr(campaign, "scope", None) is not None:
+            raise ScopeFirewallBlockError(
+                "[ScopeFirewall] Cannot disable scope enforcement in strict mode when campaign scope is configured."
+            )
 
     # Distinguish campaign is None vs campaign.scope is None vs campaign.scope == []
     # If campaign is None or campaign.scope is None: no scope configured -> yield None
@@ -1072,12 +1083,26 @@ async def scope_firewall_guard(
         yield None
         return
 
+    os_env_disabled = os.environ.get("ARES_OS_FIREWALL_ENABLED", "1").lower() in (
+        "0",
+        "false",
+        "no",
+    )
     if enable_os_firewall is None:
-        enable_os_firewall = os.environ.get("ARES_OS_FIREWALL_ENABLED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
-        )
+        if strict_mode:
+            required_os = (uid_owner is not None) or (os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1")
+            if required_os and os_env_disabled:
+                raise ScopeFirewallBlockError(
+                    "[ScopeFirewall] ARES_OS_FIREWALL_ENABLED=0 cannot disable required OS firewall in strict mode."
+                )
+            enable_os_firewall = not os_env_disabled
+        else:
+            enable_os_firewall = not os_env_disabled
+    else:
+        if strict_mode and enable_os_firewall and os_env_disabled:
+            raise ScopeFirewallBlockError(
+                "[ScopeFirewall] ARES_OS_FIREWALL_ENABLED=0 cannot disable required OS firewall in strict mode."
+            )
 
     install_hooks()
     fw = ScopeFirewall(
@@ -1117,25 +1142,49 @@ def scope_firewall_sync_guard(
     enabled: bool | None = None,
     enable_os_firewall: bool | None = None,
     uid_owner: int | str | None = None,
+    strict_mode: bool = False,
 ) -> Generator[ScopeFirewall | None, None, None]:
     """Sync context manager activating dual-layer scope firewall."""
+    scope_env_disabled = os.environ.get("ARES_SCOPE_FIREWALL_ENABLED", "1").lower() in (
+        "0",
+        "false",
+        "no",
+    )
     if enabled is None:
-        enabled = os.environ.get("ARES_SCOPE_FIREWALL_ENABLED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
-        )
+        if strict_mode:
+            enabled = True
+        else:
+            enabled = not scope_env_disabled
+    elif not enabled and strict_mode:
+        if campaign is not None and getattr(campaign, "scope", None) is not None:
+            raise ScopeFirewallBlockError(
+                "[ScopeFirewall] Cannot disable scope enforcement in strict mode when campaign scope is configured."
+            )
 
     if not enabled or campaign is None or getattr(campaign, "scope", None) is None:
         yield None
         return
 
+    os_env_disabled = os.environ.get("ARES_OS_FIREWALL_ENABLED", "1").lower() in (
+        "0",
+        "false",
+        "no",
+    )
     if enable_os_firewall is None:
-        enable_os_firewall = os.environ.get("ARES_OS_FIREWALL_ENABLED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
-        )
+        if strict_mode:
+            required_os = (uid_owner is not None) or (os.environ.get("ARES_REQUIRE_OS_FIREWALL") == "1")
+            if required_os and os_env_disabled:
+                raise ScopeFirewallBlockError(
+                    "[ScopeFirewall] ARES_OS_FIREWALL_ENABLED=0 cannot disable required OS firewall in strict mode."
+                )
+            enable_os_firewall = not os_env_disabled
+        else:
+            enable_os_firewall = not os_env_disabled
+    else:
+        if strict_mode and enable_os_firewall and os_env_disabled:
+            raise ScopeFirewallBlockError(
+                "[ScopeFirewall] ARES_OS_FIREWALL_ENABLED=0 cannot disable required OS firewall in strict mode."
+            )
 
     install_hooks()
     fw = ScopeFirewall(

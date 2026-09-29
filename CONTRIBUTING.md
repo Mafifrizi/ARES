@@ -11,7 +11,7 @@ to get started - from dev environment setup to submitting a pull request.
 2. [Development Environment](#development-environment)
 3. [Branching Strategy](#branching-strategy)
 4. [Commit Conventions](#commit-conventions)
-5. [Priority Research Track: Linux Active Directory](#priority-research-track-linux-active-directory)
+5. [Research Tracks](#research-tracks)
 6. [Writing a New Module](#writing-a-new-module)
 7. [Testing Requirements](#testing-requirements)
 8. [Pull Request Process](#pull-request-process)
@@ -128,19 +128,26 @@ git commit -m "security: narrow DataEncryptor exception catch-all"
 
 ---
 
-## Priority Research Track: Linux Active Directory
+## Research Tracks
 
-We are actively calling for offensive security researchers and contributors to build cross-platform Active Directory post-exploitation modules targeting Linux domain members (SSSD, Winbind, Kerberos keyrings, and ccache ticket extraction).
+ARES uses formal RFCs to design and coordinate multi-module research efforts.
 
-See the full technical specification and module contracts:
+### RFC 001: Linux Active Directory Tradecraft ✅ Completed
+
+All 5 modules from the Linux AD post-exploitation research track are fully
+implemented and production-ready in ARES v6.0:
+
+- `linux.sssd_harvest` — SSSD LDB database extraction
+- `linux.ccache_hunt` — Kerberos ticket cache hunting (file + Kernel Keyring)
+- `linux.keytab_abuse` — Machine keytab parsing & Silver Ticket generation
+- `linux.samba_secrets` — Samba/Winbind machine password extraction
+- `credential.ticket_converter` — Bi-directional ccache ↔ kirbi conversion
+
+See the full technical specification:
 👉 **[RFC 001: Linux Active Directory Tradecraft](docs/research/linux-active-directory-tradecraft.md)**
 
-Prioritized modules open for PRs:
-- `linux.sssd_harvest`: SSSD LDB database extraction (`/var/lib/sss/db/`)
-- `linux.ccache_hunt`: Kerberos ticket cache hunter (`/tmp/krb5cc_*`, Kernel Keyring)
-- `linux.keytab_abuse`: Computer account keytab harvesting & Silver Ticket generation
-- `linux.samba_secrets`: Samba/Winbind machine password extraction (`secrets.tdb`)
-- `credential.ticket_converter`: In-memory ccache $\leftrightarrow$ kirbi bidirectional converter
+**Want to propose a new research track?** Open a
+[Module Development discussion](https://github.com/Mafifrizi/ARES/discussions/categories/module-development).
 
 ---
 
