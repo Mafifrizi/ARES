@@ -3,7 +3,6 @@ Security test for AUD-001: Verification of authentication enforcement on POST /m
 Ensures zero loopback bypass and strict operator RBAC.
 """
 
-import sys
 from starlette.testclient import TestClient
 
 from ares.api.server import app
@@ -38,23 +37,28 @@ def test_modules_reload_loopback_unauthenticated_rejected_401():
 
 def test_modules_reload_operator_authenticated_succeeds_200():
     """Request dengan token valid operator -> 200 OK."""
-    saved_modules = dict(sys.modules)
+    from unittest.mock import MagicMock
+    from ares.api.server import get_engine
+    from ares.core.engine import AresEngine
+
+    mock_engine = MagicMock(spec=AresEngine)
+    mock_engine.load_modules.return_value = 15
+
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        username="ops_lead", role="operator"
+    )
+    app.dependency_overrides[get_engine] = lambda: mock_engine
     try:
-        app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-            username="ops_lead", role="operator"
-        )
         with TestClient(app, base_url="http://127.0.0.1") as client:
             resp = client.post("/modules/reload")
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "ok"
             assert data["reloaded"] is True
-            assert "module_count" in data
-            assert data["module_count"] >= 1
+            assert data["module_count"] == 15
+            mock_engine.load_modules.assert_called_once()
     finally:
         app.dependency_overrides.clear()
-        sys.modules.clear()
-        sys.modules.update(saved_modules)
 
 
 def test_modules_reload_insufficient_role_rejected_403():
