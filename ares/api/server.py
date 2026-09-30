@@ -781,11 +781,14 @@ app.add_middleware(
 
 
 async def _require_campaign_access(
-    campaign: dict,
+    campaign: Any,
     actor: AuthenticatedUser,
 ) -> None:
     """Raise 404 (not 403) if actor cannot access campaign - avoids campaign enumeration."""
-    if actor.role != "team_lead" and campaign.get("operator") != actor.username:
+    if actor.role == "team_lead":
+        return
+    operator = campaign.get("operator") if isinstance(campaign, dict) else getattr(campaign, "operator", None)
+    if operator != actor.username:
         raise HTTPException(404, "Campaign not found")
 
 
@@ -1449,6 +1452,19 @@ async def create_api_key(
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, str]:
     """Create API key for CI/CD automation. Key is shown ONCE - save it."""
+    # Privilege escalation defense: callers cannot mint API keys with scopes exceeding their role
+    allowed_scopes = {"read"}
+    if actor.role in ("operator", "team_lead"):
+        allowed_scopes.add("write")
+    if actor.role == "team_lead":
+        allowed_scopes.add("admin")
+
+    if body.scopes not in allowed_scopes:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Role '{actor.role}' is not authorized to create API keys with '{body.scopes}' scope.",
+        )
+
     user = await db.get_user(actor.username)
     if not user:
         raise HTTPException(404, "User not found")
@@ -2836,6 +2852,7 @@ async def assess_module_feasibility_endpoint(
     campaign = await db.get_campaign(body.campaign_id)
     if not campaign:
         raise HTTPException(404, "Campaign not found")
+    await _require_campaign_access(campaign, actor)
 
     params = dict(body.params)
     if body.target and not params.get("target"):

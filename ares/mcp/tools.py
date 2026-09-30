@@ -267,11 +267,36 @@ class McpToolRegistry:
         if self.db and hasattr(self.db, "get_campaign"):
             try:
                 camp = await self.db.get_campaign(campaign_id)
-                if camp and "scope" in camp:
-                    return camp["scope"]
+                if not camp:
+                    raise McpSecurityViolation(f"Campaign '{campaign_id}' not found in database.")
+
+                raw_scope = camp.get("scope_json") or camp.get("scope")
+                if raw_scope:
+                    parsed = json.loads(raw_scope) if isinstance(raw_scope, str) else raw_scope
+                    if isinstance(parsed, list):
+                        extracted_rules = []
+                        for item in parsed:
+                            if isinstance(item, str):
+                                extracted_rules.append(item)
+                            elif isinstance(item, dict) and "cidr" in item:
+                                extracted_rules.append(item["cidr"])
+                        if extracted_rules:
+                            return extracted_rules
+
+                raw_targets = camp.get("targets_json") or camp.get("targets")
+                if raw_targets:
+                    parsed_tgt = json.loads(raw_targets) if isinstance(raw_targets, str) else raw_targets
+                    if isinstance(parsed_tgt, list) and parsed_tgt:
+                        return [t for t in parsed_tgt if isinstance(t, str)]
+
+                return []  # Fail-closed: campaign exists but has zero authorized scope
+            except McpSecurityViolation:
+                raise
             except Exception as exc:
                 logger.warning("mcp_fetch_campaign_scope_failed", campaign_id=campaign_id, error=str(exc))
-        # Default safety fallback: internal lab subnets only
+                raise McpSecurityViolation(f"Failed to resolve scope for campaign '{campaign_id}': {exc}")
+
+        # Default fallback only when DB is not bound (standalone mock/demo mode)
         return ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "*.corp.local", "*.lab.local", "localhost", "127.0.0.1"]
 
     async def _handle_list_campaigns(self, args: dict[str, Any]) -> CallToolResult:
@@ -285,18 +310,30 @@ class McpToolRegistry:
                 for c in raw_campaigns[:limit]:
                     c_status = c.get("status", "active")
                     if status_filter == "all" or c_status == status_filter:
+                        scope = c.get("scope")
+                        if not scope and c.get("scope_json"):
+                            try:
+                                scope = json.loads(str(c["scope_json"]))
+                            except Exception:
+                                scope = []
+                        targets = c.get("targets")
+                        if not targets and c.get("targets_json"):
+                            try:
+                                targets = json.loads(str(c["targets_json"]))
+                            except Exception:
+                                targets = []
                         items.append({
                             "id": c.get("id"),
                             "name": c.get("name"),
                             "client": c.get("client"),
                             "status": c_status,
-                            "scope": c.get("scope", []),
-                            "targets_count": len(c.get("targets", [])),
+                            "scope": scope or [],
+                            "targets_count": len(targets or []),
                         })
             except Exception as e:
                 logger.warning("DB query failed: %s", e)
 
-        if not items:
+        if not items and not self.db:
             items = [{
                 "id": "camp_default_01",
                 "name": "Enterprise Internal Purple-Team Engagement",
@@ -313,12 +350,13 @@ class McpToolRegistry:
 
     async def _handle_get_campaign_status(self, args: dict[str, Any]) -> CallToolResult:
         campaign_id = args["campaign_id"]
+        scope = await self._get_campaign_scope(campaign_id)
         status_data = {
             "campaign_id": campaign_id,
             "status": "active",
             "findings_summary": {"critical": 2, "high": 5, "medium": 8, "low": 12, "info": 4},
             "active_phase": "Lateral Movement & Domain Enumeration",
-            "scope": await self._get_campaign_scope(campaign_id),
+            "scope": scope,
             "circuit_breaker_state": self.circuit_breaker.state.value,
         }
         clean_data = McpTaintSanitizer.sanitize(status_data)
@@ -331,37 +369,47 @@ class McpToolRegistry:
         min_severity = args.get("min_severity", "info").lower()
         host_filter = args.get("host")
 
-        sample_findings = [
-            {
-                "id": "find_kerb_01",
-                "campaign_id": campaign_id,
-                "title": "Service Principal Name (SPN) Accounts Vulnerable to Kerberoasting",
-                "severity": "high",
-                "cvss_score": 7.5,
-                "host": "dc01.corp.local",
-                "mitre_technique": "T1558.003",
-                "description": "High-privilege service account 'svc_mssql' requested Kerberos ticket with weak RC4 encryption.",
-                "remediation": "Enforce AES-only Kerberos encryption and apply strong 25+ character service account passwords.",
-            },
-            {
-                "id": "find_smb_02",
-                "campaign_id": campaign_id,
-                "title": "SMB Signing Not Required on Domain Controller",
-                "severity": "critical",
-                "cvss_score": 8.8,
-                "host": "dc02.corp.local",
-                "mitre_technique": "T1557.001",
-                "description": "SMB signing is disabled or optional, permitting NTLM relay attacks to escalate to Domain Admin.",
-                "remediation": "Enable and require SMB signing via Group Policy (GPO: Microsoft network server: Digitally sign communications).",
-            },
-        ]
+        findings = []
+        if self.db and hasattr(self.db, "get_findings"):
+            try:
+                raw_findings = await self.db.get_findings(campaign_id)
+                if isinstance(raw_findings, list):
+                    findings = raw_findings
+            except Exception as exc:
+                logger.warning("mcp_fetch_findings_failed", campaign_id=campaign_id, error=str(exc))
+
+        if not findings and not self.db:
+            findings = [
+                {
+                    "id": "find_kerb_01",
+                    "campaign_id": campaign_id,
+                    "title": "Service Principal Name (SPN) Accounts Vulnerable to Kerberoasting",
+                    "severity": "high",
+                    "cvss_score": 7.5,
+                    "host": "dc01.corp.local",
+                    "mitre_technique": "T1558.003",
+                    "description": "High-privilege service account 'svc_mssql' requested Kerberos ticket with weak RC4 encryption.",
+                    "remediation": "Enforce AES-only Kerberos encryption and apply strong 25+ character service account passwords.",
+                },
+                {
+                    "id": "find_smb_02",
+                    "campaign_id": campaign_id,
+                    "title": "SMB Signing Not Required on Domain Controller",
+                    "severity": "critical",
+                    "cvss_score": 8.8,
+                    "host": "dc02.corp.local",
+                    "mitre_technique": "T1557.001",
+                    "description": "SMB signing is disabled or optional, permitting NTLM relay attacks to escalate to Domain Admin.",
+                    "remediation": "Enable and require SMB signing via Group Policy (GPO: Microsoft network server: Digitally sign communications).",
+                },
+            ]
 
         severity_ranks = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
         min_rank = severity_ranks.get(min_severity, 0)
 
         filtered = [
-            f for f in sample_findings
-            if severity_ranks.get(f["severity"].lower(), 0) >= min_rank
+            f for f in findings
+            if severity_ranks.get(str(f.get("severity", "")).lower(), 0) >= min_rank
             and (not host_filter or f.get("host") == host_filter)
         ]
 

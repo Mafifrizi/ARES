@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
+import pathlib
 from typing import Any
 
 from ares.core.errors import AresError
@@ -51,6 +52,13 @@ class NetworkPermission(SecurityPermission):
 
     def validate_request(self, params: dict[str, Any], context: Any) -> None:
         port = params.get("port")
+        if port is None:
+            target = params.get("target") or (getattr(context, "target", "") if context else "")
+            if isinstance(target, str) and ":" in target and not target.startswith("["):
+                parts = target.split(":")
+                if len(parts) == 2 and parts[1].isdigit():
+                    port = int(parts[1])
+
         if port is not None and self.ports:
             try:
                 port_int = int(port)
@@ -62,6 +70,17 @@ class NetworkPermission(SecurityPermission):
                     )
             except ValueError:
                 pass
+
+        proto = params.get("protocol")
+        if proto is not None and self.protocols:
+            proto_str = str(proto).strip().lower()
+            allowed = [p.strip().lower() for p in self.protocols]
+            if proto_str not in allowed:
+                raise SecurityCapabilityViolation(
+                    f"Protocol '{proto_str}' is not authorized for module (Allowed: {self.protocols})",
+                    capability=self.name,
+                    details={"requested_protocol": proto_str, "allowed_protocols": self.protocols},
+                )
 
 
 @dataclass
@@ -76,13 +95,22 @@ class VaultPermission(SecurityPermission):
         return "vault"
 
     def validate_request(self, params: dict[str, Any], context: Any) -> None:
-        requested_type = params.get("cred_type")
-        if requested_type and self.write_types:
+        requested_type = params.get("cred_type") or params.get("write_cred_type")
+        if requested_type is not None:
             if requested_type not in self.write_types:
                 raise SecurityCapabilityViolation(
                     f"Credential type '{requested_type}' not authorized for storage (Allowed: {self.write_types})",
                     capability=self.name,
                     details={"requested_type": requested_type, "allowed_types": self.write_types},
+                )
+
+        read_type = params.get("read_cred_type") or params.get("read_type")
+        if read_type is not None:
+            if read_type not in self.read_types:
+                raise SecurityCapabilityViolation(
+                    f"Credential read type '{read_type}' not authorized (Allowed: {self.read_types})",
+                    capability=self.name,
+                    details={"requested_read_type": read_type, "allowed_read_types": self.read_types},
                 )
 
 
@@ -98,10 +126,34 @@ class FilesystemPermission(SecurityPermission):
         return "filesystem"
 
     def validate_request(self, params: dict[str, Any], context: Any) -> None:
-        output_path = params.get("output_path") or params.get("file_path")
+        output_path = params.get("output_path") or params.get("write_path") or params.get("outfile") or params.get("dest_file") or params.get("dest_path")
+        is_write = bool(output_path) or bool(params.get("write_file", False))
+
+        if is_write and self.read_only:
+            raise SecurityCapabilityViolation(
+                f"Filesystem write operation prohibited: module is configured as read-only",
+                capability=self.name,
+                details={"read_only": True, "attempted_path": str(output_path) if output_path else None},
+            )
+
         if output_path and not self.read_only:
-            # Enforce path containment
-            pass
+            norm_str = str(output_path).replace("\\", "/")
+            parts = [p for p in norm_str.split("/") if p]
+            if ".." in parts:
+                raise SecurityCapabilityViolation(
+                    f"Directory traversal detected in path '{output_path}'",
+                    capability=self.name,
+                    details={"attempted_path": output_path},
+                )
+            if self.allowed_subdirs:
+                allowed = [s.strip().lower().strip("/\\") for s in self.allowed_subdirs if s.strip()]
+                match = any(part.lower() in allowed for part in parts)
+                if not match:
+                    raise SecurityCapabilityViolation(
+                        f"Filesystem path '{output_path}' is outside of authorized subdirs: {self.allowed_subdirs}",
+                        capability=self.name,
+                        details={"attempted_path": output_path, "allowed_subdirs": self.allowed_subdirs},
+                    )
 
 
 @dataclass
@@ -116,11 +168,24 @@ class ProcessPermission(SecurityPermission):
         return "process"
 
     def validate_request(self, params: dict[str, Any], context: Any) -> None:
-        if not self.allow_subprocesses and params.get("spawn_process", False):
+        spawns = params.get("spawn_process", False) or params.get("binary") or params.get("command")
+        if not self.allow_subprocesses and spawns:
             raise SecurityCapabilityViolation(
                 "Subprocess execution is strictly prohibited for this module",
                 capability=self.name,
             )
+
+        if self.allow_subprocesses and self.allowed_binaries:
+            binary = params.get("binary") or params.get("command")
+            if binary:
+                base = pathlib.Path(str(binary).strip().split()[0]).name.lower()
+                allowed_lower = [pathlib.Path(b).name.lower() for b in self.allowed_binaries]
+                if base not in allowed_lower:
+                    raise SecurityCapabilityViolation(
+                        f"Binary '{base}' is not authorized for subprocess execution (Allowed: {self.allowed_binaries})",
+                        capability=self.name,
+                        details={"requested_binary": base, "allowed_binaries": self.allowed_binaries},
+                    )
 
 
 class CapabilitySandbox:

@@ -699,6 +699,9 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                     locked_accounts.append(user)
                     lockout_detected = True
                     logger.warning("pass_spray_lockout", user=user, target=target)
+                    cb = getattr(self, "CIRCUIT_BREAKER", None)
+                    if cb is not None and isinstance(cb, LockoutCircuitBreaker):
+                        cb._trip_for_account(user, "Account lockout detected during password spray")
                     break
                 elif result in ("success", "must_change"):
                     valid_creds.append({

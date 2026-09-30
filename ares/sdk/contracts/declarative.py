@@ -80,7 +80,15 @@ def module_contract(
                     try:
                         res = await original_execute(self, c)
                         if cb is not None:
-                            cb.record_success()
+                            from ares.sdk.resilience.circuit_breaker import LockoutCircuitBreaker, CircuitBreakerState
+                            if isinstance(cb, LockoutCircuitBreaker):
+                                raw_res = getattr(res, "raw", {}) or {}
+                                for acc in raw_res.get("locked_accounts", []):
+                                    cb._trip_for_account(acc, "Module result reported account lockout")
+                                if raw_res.get("lockout_detected") and cb.state != CircuitBreakerState.OPEN:
+                                    cb._trip_for_account("unknown", "Module result reported lockout detected")
+                            if cb.state != CircuitBreakerState.OPEN:
+                                cb.record_success()
                         return res
                     except Exception as exc:
                         if cb is not None:

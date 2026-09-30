@@ -561,7 +561,12 @@ def test_python_setup_windows_skips_bash_and_uses_valid_paths(monkeypatch, tmp_p
 
     monkeypatch.setattr(os, "execv", forbidden_execv)
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     output = capsys.readouterr().out
     assert "ARES Setup" in output
@@ -582,7 +587,12 @@ def test_python_setup_posix_keeps_shell_helper_optional(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    _run_python_setup(root=tmp_path, platform_name="linux", os_name="posix")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="linux",
+        os_name="posix",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     output = capsys.readouterr().out
     assert "Linux" in output
@@ -625,7 +635,12 @@ def test_python_setup_replaces_change_me_placeholders_in_existing_env(tmp_path, 
         encoding="utf-8",
     )
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     output = capsys.readouterr().out
     assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
@@ -648,7 +663,12 @@ def test_python_setup_replaces_new_256bit_placeholder_in_existing_env(tmp_path, 
         encoding="utf-8",
     )
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     output = capsys.readouterr().out
     assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
@@ -670,7 +690,12 @@ def test_python_setup_leaves_configured_env_unchanged(tmp_path, capsys):
     )
     (tmp_path / ".env").write_text(original, encoding="utf-8")
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     output = capsys.readouterr().out
     assert ".env already exists; leaving it unchanged" in output
@@ -690,7 +715,13 @@ def test_python_setup_force_regenerates_existing_env(tmp_path, capsys):
     )
     (tmp_path / ".env").write_text(original, encoding="utf-8")
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt", force=True)
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+        force=True,
+    )
 
     output = capsys.readouterr().out
     assert ".env regenerated with fresh secure keys (--force)" in output
@@ -737,7 +768,12 @@ def test_python_setup_cleans_invalid_browser_origin_placeholder(tmp_path, capsys
         encoding="utf-8",
     )
 
-    _run_python_setup(root=tmp_path, platform_name="win32", os_name="nt")
+    _run_python_setup(
+        root=tmp_path,
+        platform_name="win32",
+        os_name="nt",
+        version_info=VersionInfo(3, 12, 0, "final", 0),
+    )
 
     content = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "example.invalid" not in content

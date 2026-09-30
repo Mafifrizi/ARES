@@ -140,33 +140,46 @@ class McpScopeGate:
         if not target or not scope_rules:
             return False
 
+        # Extract host if target includes port notation (e.g. "10.0.0.1:445" or "dc01.corp.local:88")
+        target_host = target
+        if ":" in target and not target.startswith("["):
+            parts = target.split(":")
+            if len(parts) == 2:
+                target_host = parts[0].strip()
+
         for rule in scope_rules:
             rule = rule.strip().lower()
             if not rule:
                 continue
 
             # Exact match (hostname or IP)
-            if target == rule:
+            if target == rule or target_host == rule:
                 return True
 
             # CIDR Subnet Match
             if "/" in rule:
                 try:
                     net = ipaddress.ip_network(rule, strict=False)
-                    tgt_ip = ipaddress.ip_address(target)
-                    if tgt_ip in net:
-                        return True
+                    for candidate in (target, target_host):
+                        try:
+                            tgt_ip = ipaddress.ip_address(candidate)
+                            if tgt_ip in net:
+                                return True
+                        except ValueError:
+                            pass
                 except ValueError:
                     pass
 
-            # Wildcard or Domain Suffix Match (*.corp.local or corp.local)
+            # Wildcard or Domain Suffix Match (*.corp.local, .corp.local, or corp.local)
             if rule.startswith("*."):
                 domain_suffix = rule[2:]
-                if target == domain_suffix or target.endswith("." + domain_suffix):
-                    return True
             elif rule.startswith("."):
                 domain_suffix = rule[1:]
-                if target == domain_suffix or target.endswith(rule):
+            else:
+                domain_suffix = rule
+
+            for candidate in (target, target_host):
+                if candidate == domain_suffix or candidate.endswith("." + domain_suffix):
                     return True
 
         return False
@@ -228,9 +241,18 @@ class SecretMasker:
         "credential", "creds", "session_key", "masterkey", "privatekey",
     }
 
+    _PRIVATE_KEY_BLOCK_REGEX = re.compile(
+        r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
+    )
+
     @classmethod
     def mask(cls, data: Any) -> Any:
-        """Recursively mask sensitive values in dictionaries and structures."""
+        """Recursively mask sensitive values in dictionaries, strings, and structures."""
+        if isinstance(data, str):
+            if "-----BEGIN " in data and "PRIVATE KEY-----" in data:
+                return cls._PRIVATE_KEY_BLOCK_REGEX.sub("[REDACTED_PRIVATE_KEY_BLOCK]", data)
+            return data
+
         if isinstance(data, dict):
             masked: dict[str, Any] = {}
             for k, v in data.items():

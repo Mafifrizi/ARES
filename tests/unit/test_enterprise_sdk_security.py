@@ -279,3 +279,109 @@ async def test_module_contract_enforces_permissions_and_generates_provenance():
     module = DemoContractModule(settings=harness.settings, campaign=harness.campaign, noise=harness.noise)
     with pytest.raises(SecurityCapabilityViolation):
         await module.execute(ctx_bad)
+
+
+def test_filesystem_permission_enforcement():
+    # Read-only blocks write attempts
+    ro_perm = FilesystemPermission(read_only=True)
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        ro_perm.validate_request({"output_path": "loot/file.txt"}, None)
+    assert "configured as read-only" in str(exc_info.value)
+
+    with pytest.raises(SecurityCapabilityViolation):
+        ro_perm.validate_request({"write_file": True}, None)
+
+    # Read-only permits read parameters
+    ro_perm.validate_request({"file_path": "certs/ca.crt"}, None)
+
+    # Read-write checks directory traversal
+    rw_perm = FilesystemPermission(allowed_subdirs=["loot", "artifacts"], read_only=False)
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        rw_perm.validate_request({"output_path": "../../etc/shadow"}, None)
+    assert "Directory traversal" in str(exc_info.value)
+
+    # Read-write checks authorized subdirectories
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        rw_perm.validate_request({"output_path": "system32/cmd.exe"}, None)
+    assert "outside of authorized subdirs" in str(exc_info.value)
+
+    # Valid path inside allowed subdirs
+    rw_perm.validate_request({"output_path": "loot/tickets/golden.kirbi"}, None)
+
+
+def test_vault_permission_strict_boundaries():
+    # Empty write_types blocks any writes
+    ro_vault = VaultPermission(read_types=["domain_creds"], write_types=[])
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        ro_vault.validate_request({"cred_type": "ntlm_hash"}, None)
+    assert "not authorized for storage" in str(exc_info.value)
+
+    # Valid read type allowed
+    ro_vault.validate_request({"read_type": "domain_creds"}, None)
+
+    # Invalid read type rejected
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        ro_vault.validate_request({"read_type": "aws_key"}, None)
+    assert "read type 'aws_key' not authorized" in str(exc_info.value)
+
+
+def test_process_permission_binary_whitelist():
+    proc_perm = ProcessPermission(allow_subprocesses=True, allowed_binaries=["smbclient", "rpcclient"])
+
+    # Allowed binary
+    proc_perm.validate_request({"binary": "/usr/bin/smbclient -L //10.0.0.1"}, None)
+
+    # Prohibited binary
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        proc_perm.validate_request({"binary": "/bin/bash -c id"}, None)
+    assert "Binary 'bash' is not authorized" in str(exc_info.value)
+
+
+def test_network_permission_protocol_and_host_port():
+    net_perm = NetworkPermission(protocols=["tcp"], ports=[88, 389])
+
+    # Extract port from target string
+    net_perm.validate_request({"target": "10.0.0.1:88"}, None)
+
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        net_perm.validate_request({"target": "10.0.0.1:22"}, None)
+    assert "Port 22 is not authorized" in str(exc_info.value)
+
+    # Protocol validation
+    with pytest.raises(SecurityCapabilityViolation) as exc_info:
+        net_perm.validate_request({"port": 88, "protocol": "udp"}, None)
+    assert "Protocol 'udp' is not authorized" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_module_contract_trips_lockout_circuit_breaker_on_module_result():
+    from ares.sdk import module_contract, LockoutCircuitBreaker, CircuitBreakerTripped, ModuleParams
+
+    lockout_cb = LockoutCircuitBreaker()
+
+    @module_contract(
+        circuit_breaker=lockout_cb,
+    )
+    class LockoutReportingModule(BaseModule[ModuleParams, ModuleResult]):
+        MODULE_ID = "test.lockout_reporter"
+
+        async def execute(self, ctx: ExecutionContext) -> ModuleResult:
+            return ModuleResult(
+                status="partial",
+                module_id=self.MODULE_ID,
+                raw={"locked_accounts": ["admin_ad"], "lockout_detected": True},
+            )
+
+    harness = ModuleTestHarness(LockoutReportingModule)
+    mod = LockoutReportingModule(settings=harness.settings, campaign=harness.campaign, noise=harness.noise)
+    ctx = harness.make_context()
+    await mod.execute(ctx)
+
+    # Breaker should now be OPEN
+    assert lockout_cb.state == CircuitBreakerState.OPEN
+    assert "admin_ad" in lockout_cb.locked_accounts
+
+    # Next execution must be blocked by circuit breaker
+    with pytest.raises(CircuitBreakerTripped):
+        await mod.execute(ctx)
+

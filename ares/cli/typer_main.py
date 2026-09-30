@@ -3424,16 +3424,32 @@ def mcp_stdio_cmd() -> None:
 
 @mcp_app.command("sse")
 def mcp_sse_cmd(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host address to bind"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind (default: 127.0.0.1)"),
     port: int = typer.Option(8001, "--port", "-p", help="Port to listen on"),
     api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="Optional Bearer API Key for network authentication"),
 ) -> None:
     """Run the ARES MCP Server over HTTP with Server-Sent Events (SSE)."""
+    import secrets
     import uvicorn
     from ares.cli.mcp_cli_utils import warn_cli_secret_exposure
     from ares.mcp import AresMcpServer, create_sse_app
 
-    if api_key:
+    is_loopback = host in ("127.0.0.1", "localhost", "::1")
+    if not is_loopback and not api_key:
+        api_key = secrets.token_urlsafe(32)
+        console.print(
+            Panel(
+                f"[bold red]SECURITY NOTICE:[/] Binding MCP SSE server to external interface [yellow]{host}[/] "
+                f"without an explicit --api-key.\n"
+                f"Generated ephemeral API key:\n\n"
+                f"  [bold green]{api_key}[/]\n\n"
+                f"Clients must provide this key via 'Authorization: Bearer <key>' or 'x-ares-api-key' header.",
+                title="[bold yellow]MCP Network Authentication Generated[/]",
+                border_style="yellow",
+                box=box.ROUNDED,
+            )
+        )
+    elif api_key:
         warn_cli_secret_exposure()
 
     server = AresMcpServer()
@@ -3441,7 +3457,7 @@ def mcp_sse_cmd(
     console.print(Panel(
         f"[bold green]ARES MCP Server (SSE Mode)[/]\n\n"
         f"  [cyan]Endpoint:[/]  http://{host}:{port}/sse\n"
-        f"  [cyan]Auth:[/]      {'Protected by API Key' if api_key else 'Open / Localhost Only'}\n"
+        f"  [cyan]Auth:[/]      {'Protected by API Key' if api_key else 'Loopback Only (127.0.0.1)'}\n"
         f"  [cyan]Clients:[/]   Open-WebUI, LibreChat, Remote Agents, Docker\n\n"
         f"Press [yellow]Ctrl+C[/] to stop the server.",
         title="ares mcp sse",

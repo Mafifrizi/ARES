@@ -30,6 +30,11 @@ class SseSession:
         self.created_at = asyncio.get_event_loop().time()
 
 
+from urllib.parse import urlparse
+
+_ALLOWED_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "testclient"})
+
+
 def create_sse_app(
     server: AresMcpServer,
     api_key: str | None = None,
@@ -39,8 +44,43 @@ def create_sse_app(
     sessions: dict[str, SseSession] = {}
 
     def _verify_auth(request: Request) -> bool:
+        # Cross-Origin Drive-by Protection:
+        # Browser-initiated cross-site requests are strictly rejected
+        sec_fetch_site = request.headers.get("sec-fetch-site", "").strip().lower()
+        if sec_fetch_site == "cross-site":
+            return False
+
         if not api_key:
+            # 1. Network Layer: Only loopback clients (localhost / 127.0.0.1 / ::1 / testclient) are allowed
+            client_host = request.client.host if request.client else ""
+            if client_host not in _ALLOWED_LOOPBACK_HOSTS:
+                return False
+
+            # 2. Anti-DNS Rebinding: Host header must match loopback
+            host_header = request.headers.get("host", "").strip()
+            if host_header:
+                if host_header.startswith("["):
+                    host_name = host_header.split("]")[0].lstrip("[").lower()
+                else:
+                    host_name = host_header.split(":")[0].strip().lower()
+                if host_name not in _ALLOWED_LOOPBACK_HOSTS:
+                    return False
+
+            # 3. Anti-CSRF / Drive-By Cross-Origin Protection:
+            # If Origin header is present, verify it is strictly loopback
+            origin = request.headers.get("origin")
+            if origin:
+                try:
+                    parsed = urlparse(origin)
+                    origin_host = (parsed.hostname or "").lower()
+                    if origin_host not in _ALLOWED_LOOPBACK_HOSTS:
+                        return False
+                except Exception:
+                    return False
+
             return True
+
+        # When api_key is configured:
         # Check Authorization: Bearer <token> or X-ARES-API-Key or query param
         auth_header = request.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
