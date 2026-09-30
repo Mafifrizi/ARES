@@ -13,8 +13,10 @@ import type {
   MonthlyFindingStats,
   ReportItem,
   TemplateMeta,
+  TemplatePlanResult,
   TokenResponse,
   UserProfile,
+  VaultRestoreResult,
   WebSocketTicketResponse
 } from "./types";
 import {
@@ -201,15 +203,15 @@ export const api = {
   findings: (id: string) => apiRequest<Finding[]>(`/campaigns/${encodeURIComponent(id)}/findings`),
   cvss: (id: string) => apiRequest<Record<string, unknown>>(`/campaigns/${encodeURIComponent(id)}/cvss`),
   restoreVault: (id: string) =>
-    apiRequest<Record<string, unknown>>(`/campaigns/${encodeURIComponent(id)}/restore-vault`, { method: "POST" }),
+    apiRequest<VaultRestoreResult>(`/campaigns/${encodeURIComponent(id)}/restore-vault`, { method: "POST" }),
   runCampaign: (
     id: string,
     body: Record<string, unknown>,
     options: LiveSubmissionOptions = {}
-  ) => {
+  ): Promise<TemplatePlanResult | LiveExecutionResponse> => {
     const path = `/campaigns/${encodeURIComponent(id)}/run`;
     return body.dry_run === true
-      ? apiRequest<Record<string, unknown>>(path, {
+      ? apiRequest<TemplatePlanResult>(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body)

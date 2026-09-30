@@ -229,3 +229,41 @@ export interface FeasibilityResponse {
   report: FeasibilityReportData;
 }
 
+export interface LiveWebSocketEvent {
+  id?: string;
+  campaign_id?: string;
+  timestamp?: number;
+  event?: string;
+  type?: string;
+  module_id?: string;
+  status?: string;
+  detail?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface VaultRestoreResult {
+  restored: number;
+  campaign_id?: string;
+  message?: string;
+  status?: string;
+  total_credentials?: number;
+}
+
+export interface TemplatePlanSummary {
+  ready_to_run?: boolean;
+  total_stages?: number;
+  total_modules?: number;
+  estimated_duration_sec?: number;
+}
+
+export interface TemplatePlanResult {
+  plan?: unknown[];
+  summary?: TemplatePlanSummary;
+}
+
+export interface ApiErrorPayload {
+  detail?: string;
+  message?: string;
+}
+
