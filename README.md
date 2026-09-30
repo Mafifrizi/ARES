@@ -19,7 +19,11 @@
 [![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
 [![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
 
-<br>
+<br><br>
+
+<a href="https://trendshift.io/repositories/244958?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-244958" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/244958" alt="Mafifrizi%2FARES | Trendshift" width="250" height="55"/></a>
+
+<br><br>
 
 [**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Credits**](#credits) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
 
