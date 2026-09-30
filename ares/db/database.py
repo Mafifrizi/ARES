@@ -1304,18 +1304,26 @@ class AresDatabase:
         async with self._conn.execute("SELECT * FROM campaigns ORDER BY created_at DESC") as cur:
             campaigns = [dict(r) for r in await cur.fetchall()]
 
+        async with self._conn.execute("SELECT * FROM findings ORDER BY discovered_at DESC") as cur:
+            all_findings = [dict(r) for r in await cur.fetchall()]
+
+        async with self._conn.execute("SELECT * FROM hosts ORDER BY first_seen") as cur:
+            all_hosts = [dict(r) for r in await cur.fetchall()]
+
+        from collections import defaultdict
+
+        findings_by_campaign = defaultdict(list)
+        for f in all_findings:
+            findings_by_campaign[f.get("campaign_id")].append(f)
+
+        hosts_by_campaign = defaultdict(list)
+        for h in all_hosts:
+            hosts_by_campaign[h.get("campaign_id")].append(h)
+
         for campaign in campaigns:
             cid = campaign["id"]
-            async with self._conn.execute(
-                "SELECT * FROM findings WHERE campaign_id=? ORDER BY discovered_at DESC",
-                (cid,),
-            ) as cur:
-                campaign["_findings"] = [dict(r) for r in await cur.fetchall()]
-            async with self._conn.execute(
-                "SELECT * FROM hosts WHERE campaign_id=? ORDER BY first_seen",
-                (cid,),
-            ) as cur:
-                campaign["_hosts"] = [dict(r) for r in await cur.fetchall()]
+            campaign["_findings"] = findings_by_campaign.get(cid, [])
+            campaign["_hosts"] = hosts_by_campaign.get(cid, [])
 
         export = {
             "export_version": "1.0",
@@ -1328,6 +1336,9 @@ class AresDatabase:
 
         logger.info("db_export_complete", path=output_path, campaigns=len(campaigns))
         return output_path
+
+    # Alias for export_json
+    export_backup = export_json
 
     async def close(self) -> None:
         async with self._lifecycle_lock:
