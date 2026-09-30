@@ -168,7 +168,7 @@ class ProcessPermission(SecurityPermission):
         return "process"
 
     def validate_request(self, params: dict[str, Any], context: Any) -> None:
-        spawns = params.get("spawn_process", False) or params.get("binary") or params.get("command")
+        spawns = bool(params.get("spawn_process", False)) or bool(params.get("spawn_subprocess", False))
         if not self.allow_subprocesses and spawns:
             raise SecurityCapabilityViolation(
                 "Subprocess execution is strictly prohibited for this module",
@@ -176,7 +176,7 @@ class ProcessPermission(SecurityPermission):
             )
 
         if self.allow_subprocesses and self.allowed_binaries:
-            binary = params.get("binary") or params.get("command")
+            binary = params.get("binary") or params.get("subprocess_binary")
             if binary:
                 base = pathlib.Path(str(binary).strip().split()[0]).name.lower()
                 allowed_lower = [pathlib.Path(b).name.lower() for b in self.allowed_binaries]
