@@ -152,7 +152,7 @@ Control and automate ARES from external Python scripts, SOAR playbooks, or CI/CD
 ```python
 from ares.sdk import AresClient
 
-async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_pat_...") as client:
+async with AresClient(base_url="http://127.0.0.1:8080", api_key="ares_pat_...") as client:
     campaign = await client.campaigns.create(name="Op-Titan", scope=["10.10.0.0/24"])
     print(f"Created Campaign: {campaign['id']}")
 

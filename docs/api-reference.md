@@ -362,27 +362,119 @@ cleanup or removing test campaigns from the dashboard.
 
 ### `GET /campaigns/{id}/findings`
 
-Get confirmed findings for a campaign.  
-Optional filters: `?severity=critical&page=1&per_page=50`
+Get confirmed findings for a campaign with pagination and filtering.
 
-Campaign finding metadata remains available, but `evidence_json` is redacted for
-every caller and contains the JSON-encoded string `{"redacted":true}`. This
-endpoint does not provide raw evidence access. The policy applies only to the
-API response; it does not delete or rewrite evidence stored for authorized
-internal forensic consumers.
+**Authentication:** JWT Bearer token or `X-API-Key` with `read` scope. Requires campaign access.
+
+**Parameters:**
+- `page` (query, integer, default `1`, minimum `1`): Page number.
+- `per_page` (query, integer, default `50`, range `1-500`): Items per page.
+- `severity` (query, string, optional): Filter by severity (`critical`, `high`, `medium`, `low`, `info`).
+- `false_positive` (query, boolean, optional): Filter false positives (`true` or `false`).
+
+**Response Headers:**
+- `X-Total-Count`: Total number of matching findings.
+- `X-Page`: Current page number.
+- `X-Per-Page`: Current per-page limit.
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": "fnd_12345",
+    "campaign_id": "abc12345",
+    "module_id": "ad.kerberoast",
+    "title": "Kerberoastable Service Account Found",
+    "severity": "high",
+    "confidence": "confirmed",
+    "mitre_technique": "T1558.003",
+    "evidence_json": "{\"redacted\":true}",
+    "cvss_score": 7.5,
+    "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+    "false_positive": false,
+    "discovered_at": "2026-09-30T00:00:00Z"
+  }
+]
+```
+
+> **Forensic Redaction Policy:** Campaign finding metadata remains available, but `evidence_json` is redacted for every caller and contains `{"redacted":true}`. This endpoint does not provide raw evidence access over HTTP; raw evidence is stored for authorized internal consumers only.
 
 ---
 
 ### `GET /campaigns/{id}/cvss`
 
-Get CVSS score distribution for a campaign.
+Get CVSS v3.1 score distribution and summary for a campaign, suitable for compliance reports (PCI-DSS, ISO 27001).
+
+**Authentication:** JWT Bearer token or `X-API-Key` with `read` scope. Requires campaign access.
+
+**Response:** `200 OK`
+```json
+{
+  "campaign_id": "abc12345",
+  "cvss_summary": {
+    "total_findings": 10,
+    "mean_score": 6.8,
+    "max_score": 9.8,
+    "critical_count": 2,
+    "high_count": 4,
+    "medium_count": 3,
+    "low_count": 1
+  },
+  "findings_with_scores": [
+    {
+      "id": "fnd_12345",
+      "title": "Kerberoastable Service Account Found",
+      "cvss_score": 7.5,
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+      "severity": "high",
+      "mitre": "T1558.003"
+    }
+  ]
+}
+```
 
 ---
 
 ### `GET /campaigns/{id}/diff/{other_id}`
 
-Compare two campaigns - shows new findings, fixed findings, and severity changes.
-Useful for verifying remediation between assessments.
+Generate a delta report comparing two campaigns (`campaign_id` vs `other_id`). Compares findings matched by normalized title (case-insensitive) to verify remediation progress between assessments.
+
+**Authentication:** JWT Bearer token or `X-API-Key`. Caller must have authorized access to both campaigns.
+
+**Response:** `200 OK`
+```json
+{
+  "new_findings": [
+    {
+      "id": "fnd_67890",
+      "title": "Unquoted Service Path",
+      "severity": "medium",
+      "cvss_score": 6.5,
+      "cvss_vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "mitre": "T1574.009"
+    }
+  ],
+  "fixed_findings": [
+    {
+      "id": "fnd_12345",
+      "title": "Kerberoastable Service Account Found",
+      "severity": "high",
+      "cvss_score": 7.5,
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+      "mitre": "T1558.003"
+    }
+  ],
+  "severity_changed": [],
+  "summary": {
+    "current_campaign_id": "abc12345",
+    "base_campaign_id": "prev67890",
+    "new_count": 1,
+    "fixed_count": 1,
+    "net_change": 0,
+    "risk_improved": true
+  }
+}
+```
 
 ---
 
@@ -416,11 +508,17 @@ durably terminal:
 
 ### `POST /campaigns/{id}/restore-vault`
 
-Re-hydrate the campaign's `CredentialVault` from persisted database records. Loads encrypted credentials at rest (`AES-256-GCM` v2 / transparent legacy Fernet fallback) into the active campaign memory session.
+Re-hydrate the campaign's `CredentialVault` from persisted database records into the active runtime engine state. Loads encrypted credentials at rest (`AES-256-GCM` AEAD or transparent legacy fallback) into the active campaign memory session after a server restart.
+
+**Authentication:** Requires `operator` or `team_lead` role. Rate-limited per IP (`vault_restore` limit).
 
 **Response:** `200 OK`
 ```json
-{ "status": "restored", "credentials_loaded": 5 }
+{
+  "restored": 5,
+  "campaign_id": "abc12345",
+  "message": "Vault restored into the active campaign runtime state"
+}
 ```
 
 ---
@@ -757,6 +855,33 @@ Return historical bypass outcome statistics.
 
 Record the outcome of an existing technique. This stores telemetry only; it
 does not add bypass logic.
+
+---
+
+## Telemetry & Statistics
+
+### `GET /stats/monthly`
+
+Return confirmed findings aggregated by day for the current calendar month (UTC). Used for dashboard metric cards, burn-down charts, and velocity tracking.
+
+**Authentication:** JWT Bearer token or `X-API-Key` with `read` scope.
+
+**Parameters:**
+- `campaign_id` (query, string, optional): Filter aggregation to a specific campaign. If omitted, aggregates across all campaigns accessible to the caller.
+
+**Response:** `200 OK`
+```json
+{
+  "period": "2026-09",
+  "label": "Security signals this cycle",
+  "total": 12,
+  "confirmed_findings": 12,
+  "series": [
+    { "date": "2026-09-01", "count": 3 },
+    { "date": "2026-09-02", "count": 9 }
+  ]
+}
+```
 
 ---
 

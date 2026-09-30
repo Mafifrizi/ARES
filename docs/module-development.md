@@ -453,7 +453,7 @@ Automate engagements, module runs, and telemetry streams from Python scripts or 
 from ares.sdk import AresClient
 
 async def main():
-    async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_key_...") as ares:
+    async with AresClient(base_url="http://127.0.0.1:8080", api_key="ares_key_...") as ares:
         # Create campaign with approved scope
         campaign = await ares.campaigns.create(
             name="Op-Nightshade",

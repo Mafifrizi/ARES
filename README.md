@@ -694,7 +694,7 @@ Automate engagements, dispatch modules, and stream real-time WebSocket telemetry
 ```python
 from ares.sdk import AresClient
 
-async with AresClient(base_url="http://127.0.0.1:8000", api_key="ares_key_...") as ares:
+async with AresClient(base_url="http://127.0.0.1:8080", api_key="ares_key_...") as ares:
     campaign = await ares.campaigns.create(name="Op-Titan", scope=["10.0.0.0/24"])
     job = await ares.modules.run("ad.kerberoast", target="dc01.corp.local", campaign_id=campaign["id"])
     findings = await ares.campaigns.findings(campaign["id"])
