@@ -2267,8 +2267,17 @@ async def reload_modules(
     import importlib
     import sys
 
+    _protected_core_modules = {
+        "ares.modules.base",
+        "ares.modules.descriptors",
+        "ares.modules.params",
+        "ares.modules.runner",
+        "ares.modules.exceptions",
+    }
     for mod_name in list(sys.modules.keys()):
-        if mod_name.startswith("ares.modules.") and not mod_name.endswith(".base"):
+        if mod_name.startswith("ares.modules.") and not any(
+            mod_name == p or mod_name.startswith(p + ".") for p in _protected_core_modules
+        ):
             sys.modules.pop(mod_name, None)
 
     importlib.invalidate_caches()
