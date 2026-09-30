@@ -21,7 +21,7 @@
 
 <br><br>
 
-<a href="https://trendshift.io/repositories/244958?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-244958" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/244958" alt="Mafifrizi%2FARES | Trendshift" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/244958?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-244958" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/244958" alt="Mafifrizi%2FARES | Trendshift" style="width: 340px; height: 72px;" width="340" height="72"/></a>
 
 <br><br>
 
