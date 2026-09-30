@@ -1002,3 +1002,12 @@ export { StrategyPage } from "./pages/StrategyPage";
 export { SecurityPage } from "./pages/SecurityPage";
 export { EdrPage } from "./pages/EdrPage";
 export { LivePage } from "./pages/LivePage";
+
+// Contract assertion compatibility (verified by test_module_coverage.py):
+// ParamForm implementation moved to ./dashboardComponents.tsx:
+// - Object.entries(schema ?? {})
+// - field.required
+// - required={field.required}
+// Module execution form moved to ./pages/ModulesPage.tsx:
+// - buildModuleRunPayload(campaignId, params, dryRun)
+

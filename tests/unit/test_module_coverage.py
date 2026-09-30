@@ -517,7 +517,13 @@ class TestDashboardModuleSchemaContracts:
 
         from ares.modules.params import MODULE_PARAMS
 
-        frontend = Path("frontend/src/features/dashboard/DashboardPages.tsx").read_text(encoding="utf-8")
+        dashboard_dir = Path("frontend/src/features/dashboard")
+        sources = [
+            dashboard_dir / "DashboardPages.tsx",
+            dashboard_dir / "dashboardComponents.tsx",
+            dashboard_dir / "pages" / "ModulesPage.tsx",
+        ]
+        frontend = "\n".join(p.read_text(encoding="utf-8") for p in sources if p.exists())
         assert "Object.entries(schema ?? {})" in frontend
         assert "field.required" in frontend
         assert "required={field.required}" in frontend
