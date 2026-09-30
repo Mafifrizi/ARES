@@ -243,6 +243,7 @@ async def test_mssql_linked_and_listener_scope_enforcement():
 async def test_pivot_reachable_subnets_scope_enforcement():
     """MOD-017: network.pivot filters out-of-scope reachable_subnets."""
     from ares.pivot.infrastructure import TunnelState
+    from ares.modules.network.pivot import PivotModule, _PIVOT_MANAGERS
     settings, campaign, noise = _make_fixture("10.0.0.0/16")
     mod = PivotModule(settings=settings, campaign=campaign, noise=noise)
 
@@ -256,7 +257,7 @@ async def test_pivot_reachable_subnets_scope_enforcement():
     mock_pm.establish_socks5 = AsyncMock(return_value=mock_tunnel)
     mock_pm.generate_proxychains_config.return_value = ""
 
-    with patch.dict("ares.modules.network.pivot._PIVOT_MANAGERS", {"test-camp": mock_pm}):
+    with patch.dict(_PIVOT_MANAGERS, {"test-camp": mock_pm}):
         # 10.0.1.0/24 is in-scope, 192.168.1.0/24 is out-of-scope
         findings, raw = await mod.run(
             target="10.0.0.50",
