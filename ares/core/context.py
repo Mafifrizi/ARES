@@ -34,6 +34,9 @@ from dataclasses import dataclass, field
 from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 from ares.core.errors import InvalidContext
+from ares.core.logger import get_logger
+
+logger = get_logger("ares.core.context")
 
 P = TypeVar("P")
 T = TypeVar("T")
@@ -188,10 +191,21 @@ class ExecutionContext(Generic[P]):
         if self.runtime_state and hasattr(self.runtime_state, "record_finding"):
             try:
                 self.runtime_state.record_finding(finding)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(
+                    "runtime_state_record_finding_failed",
+                    finding_id=finding.id,
+                    title=finding.title,
+                    module_id=self.module_id,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                return False
         self.findings.append(finding)
         return finding
+
+    # Alias for API consistency and backwards compatibility
+    record_finding = emit_finding
 
     def store_artifact(self, artifact: Any) -> Any:
         """Store an artifact in the execution context's artifact store if available."""
@@ -224,8 +238,7 @@ class ExecutionContext(Generic[P]):
             )
         )
         if not has_io:
-            from ares.core.logger import get_logger
-            get_logger("ares.core.context").warning(
+            logger.warning(
                 "vault_write_blocked_zero_io",
                 username=username,
                 cred_type=cred_type,
@@ -250,8 +263,16 @@ class ExecutionContext(Generic[P]):
                     ctx=self,
                     **kwargs,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(
+                    "vault_record_credential_failed",
+                    username=username,
+                    cred_type=str(cred_type),
+                    module_id=self.module_id,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                return False
         return None
 
     def record_loot(
