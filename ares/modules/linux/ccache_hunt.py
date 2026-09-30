@@ -411,14 +411,8 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             if os.path.exists("/proc/keys") or proc_keys_path.exists():
                 try:
                     # Native Python file read without spawning shell/subprocess
-                    try:
-                        with open(proc_keys_path, "r", errors="replace") as f:
-                            raw_content = f.read()
-                    except Exception as err:
-                        if isinstance(err, PermissionError):
-                            raise
-                        raw_content = proc_keys_path.read_text(errors="replace")
-
+                    with open("/proc/keys", "r", errors="replace") as f:
+                        raw_content = f.read()
                     proc_keys_content = "\n".join(
                         line for line in raw_content.splitlines()
                         if any(k in line for k in ("krb_ccache:", "krb5cc", "krb5"))

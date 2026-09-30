@@ -90,8 +90,8 @@ async def test_proc_keys_permission_denied_handled_gracefully_native():
     """When /proc/keys throws PermissionError on native read, module must handle gracefully."""
     mod = _make_module()
 
-    with patch.object(Path, "exists", return_value=True), \
-         patch.object(Path, "read_text", side_effect=PermissionError("Permission denied")), \
+    with patch("os.path.exists", return_value=True), \
+         patch("builtins.open", side_effect=PermissionError("Permission denied")), \
          patch.object(mod, "before_request"):
 
         findings, raw = await mod.run(
