@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 import time
 from typing import Any
 
@@ -307,22 +308,56 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             "evidence_integrity": [e.record_hash for e in evidence_chain],
         }
 
-    def _execute_command(self, cmd: str, runner: Any = None) -> str:
-        """Execute command locally or via remote command runner."""
+    @staticmethod
+    def _validate_key_id(key_id: Any) -> str:
+        """
+        Validate that key_id is a valid integer (decimal or hex) and non-negative.
+        Returns the sanitized string representation.
+        Raises ValueError if invalid or negative.
+        """
+        if isinstance(key_id, int):
+            if key_id < 0:
+                raise ValueError(f"key_id must be a non-negative integer, got: {key_id}")
+            return str(key_id)
+
+        s = str(key_id).strip()
+        if not s:
+            raise ValueError("key_id cannot be empty")
+
+        try:
+            val = int(s, 10)
+        except ValueError:
+            try:
+                val = int(s, 16)
+            except ValueError:
+                raise ValueError(f"key_id must be a valid integer, got: {key_id!r}")
+
+        if val < 0:
+            raise ValueError(f"key_id must be a non-negative integer, got: {key_id}")
+        return s
+
+    def _execute_command(self, cmd: list[str] | str, runner: Any = None) -> str:
+        """Execute command locally with shell=False or via remote command runner."""
         if runner is not None:
+            cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
             if callable(runner):
-                out = runner(cmd)
+                out = runner(cmd_str)
                 if isinstance(out, tuple):
                     return str(out[0])
                 return str(out)
             if hasattr(runner, "run"):
-                out = runner.run(cmd)
+                out = runner.run(cmd_str)
                 if isinstance(out, tuple):
                     return str(out[0])
                 return str(out)
         import subprocess
         try:
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+            if isinstance(cmd, str):
+                import shlex
+                args = shlex.split(cmd)
+            else:
+                args = [str(x) for x in cmd]
+            res = subprocess.run(args, shell=False, capture_output=True, text=True, timeout=5)
             return res.stdout
         except Exception:
             return ""
@@ -372,10 +407,22 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
         if scan_keyring:
             proc_keys_content = ""
             permission_denied = False
-            if os.path.exists("/proc/keys"):
+            proc_keys_path = Path("/proc/keys")
+            if os.path.exists("/proc/keys") or proc_keys_path.exists():
                 try:
-                    with open("/proc/keys", "r", errors="replace") as f:
-                        proc_keys_content = f.read()
+                    # Native Python file read without spawning shell/subprocess
+                    try:
+                        with open(proc_keys_path, "r", errors="replace") as f:
+                            raw_content = f.read()
+                    except Exception as err:
+                        if isinstance(err, PermissionError):
+                            raise
+                        raw_content = proc_keys_path.read_text(errors="replace")
+
+                    proc_keys_content = "\n".join(
+                        line for line in raw_content.splitlines()
+                        if any(k in line for k in ("krb_ccache:", "krb5cc", "krb5"))
+                    )
                 except PermissionError:
                     permission_denied = True
                 except OSError:
@@ -383,11 +430,14 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
 
             if not proc_keys_content and not permission_denied and runner:
                 try:
-                    raw_out = self._execute_command("cat /proc/keys | grep krb5", runner)
+                    raw_out = self._execute_command(["cat", "/proc/keys"], runner)
                     if "permission denied" in raw_out.lower():
                         permission_denied = True
                     elif raw_out:
-                        proc_keys_content = raw_out
+                        proc_keys_content = "\n".join(
+                            line for line in raw_out.splitlines()
+                            if any(k in line for k in ("krb_ccache:", "krb5cc", "krb5"))
+                        )
                 except Exception:
                     pass
 
@@ -413,14 +463,18 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
                     if "krb_ccache:" in line or "krb5cc" in line or "krb5" in line:
                         parts = line.strip().split()
                         if len(parts) >= 9:
-                            key_id = parts[0]
+                            raw_key_id = parts[0]
                             desc = " ".join(parts[8:])
+                            try:
+                                key_id = self._validate_key_id(raw_key_id)
+                            except (ValueError, TypeError):
+                                continue
+
                             key_payload = ""
-                            if runner:
-                                try:
-                                    key_payload = self._execute_command(f"keyctl print {key_id}", runner)
-                                except Exception:
-                                    pass
+                            try:
+                                key_payload = self._execute_command(["keyctl", "print", str(key_id)], runner)
+                            except Exception:
+                                pass
 
                             has_real_key = bool(
                                 key_payload
