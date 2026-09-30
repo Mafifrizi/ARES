@@ -2617,6 +2617,9 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         monkeypatch.setattr("os.setuid", mock_setuid, raising=False)
         monkeypatch.setattr("os.geteuid", lambda: current_id[0], raising=False)
         monkeypatch.setattr("os.getuid", lambda: current_id[0], raising=False)
+        # Mock sandbox.resource to prevent rlimit mutation in simulated child execution
+        mock_resource = MagicMock()
+        monkeypatch.setattr("ares.core.sandbox.resource", mock_resource)
 
         # Mock pwd account where UID 1001 != primary GID 2002
         fake_pw = MagicMock()

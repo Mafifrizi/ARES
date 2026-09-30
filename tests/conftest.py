@@ -59,6 +59,19 @@ def set_test_env():
 # ── Temporary directories ─────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
+def protect_runner_rlimits(monkeypatch: pytest.MonkeyPatch):
+    """Ensure in-process unit tests on Linux never mutate pytest runner's own OS rlimits."""
+    if sys.platform != "win32":
+        try:
+            import ares.core.sandbox
+            if getattr(ares.core.sandbox, "resource", None) is not None:
+                mock_resource = MagicMock()
+                monkeypatch.setattr("ares.core.sandbox.resource", mock_resource)
+        except (ImportError, AttributeError):
+            pass
+
+
+@pytest.fixture(autouse=True)
 def forbid_unmocked_pdf_browser_launch(monkeypatch: pytest.MonkeyPatch):
     """Unit tests must mock PDF browser execution instead of launching Chrome/Edge."""
     from ares.modules.reporting.report_gen import ReportGenerator

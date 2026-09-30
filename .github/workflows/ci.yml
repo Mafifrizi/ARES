@@ -19,6 +19,7 @@ jobs:
   backend:
     name: Backend Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,6 +34,7 @@ jobs:
   postgres:
     name: PostgreSQL Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -69,6 +71,7 @@ jobs:
   frontend:
     name: Frontend Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
