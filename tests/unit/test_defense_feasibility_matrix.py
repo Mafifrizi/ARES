@@ -623,7 +623,7 @@ class TestModuleFeasibilityEndpoint:
         from ares.api.rbac import AuthenticatedUser
         from ares.modules.base import FeasibilityReport
 
-        mock_user = AuthenticatedUser(username="operator1", role="operator")
+        mock_user = AuthenticatedUser(username=getattr(test_campaign, "operator", "lead_operator"), role="operator")
         mock_db = MagicMock()
         mock_db.get_campaign = AsyncMock(return_value=test_campaign)
         mock_engine = MagicMock(spec=AresEngine)
