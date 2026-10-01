@@ -336,9 +336,9 @@ class AttackPlanner:
                     if module_id == "ad.dcsync":
                         defense_multiplier *= 0.1
                         defense_note = "Target DC has MDI / DRSUAPI monitoring: DCSync penalized"
-                    elif module_id in ("ad.adcs", "ad.kerberoast"):
+                    elif module_id in ("ad.adcs", "ad.shadow_credentials", "ad.kerberoast"):
                         defense_multiplier *= 1.3
-                        defense_note = "Target DC has MDI: ADCS / Kerberoasting boosted as evasion route"
+                        defense_note = "Target DC has MDI: ADCS / Shadow Credentials / Kerberoasting boosted as evasion route"
                 # 4. Service Creation Monitoring / EDR on lateral movement
                 if host_state.has_defense("service_creation_monitoring") or host_state.has_defense("edr"):
                     if module_id == "lateral.psexec":

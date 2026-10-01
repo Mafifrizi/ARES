@@ -87,7 +87,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
             score = 0.05
             risk = "critical_alarm"
             recommendations.append("ad.adcs")
-            recommendations.append("ad.kerberoast")
+            recommendations.append("ad.shadow_credentials")
 
         session = getattr(ctx, "session", None)
         if session and hasattr(session, "get_host") and target_host:
@@ -97,7 +97,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
                     risk = "critical_alarm"
                     score -= 0.4
                     recommendations.append("ad.adcs")
-                    recommendations.append("ad.kerberoast")
+                    recommendations.append("ad.shadow_credentials")
 
         feasible = len(blockers) == 0 and score >= 0.4
         return FeasibilityReport(
@@ -106,7 +106,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
             risk_level=risk,
             blockers=blockers,
             recommended_alternatives=recommendations,
-            opsec_tuning={"suggested_alternatives": ["ad.adcs", "ad.kerberoast"] if risk == "critical_alarm" else []},
+            opsec_tuning={"suggested_alternatives": ["ad.adcs", "ad.shadow_credentials"] if risk == "critical_alarm" else []},
             details={"target_user": getattr(ctx, "params", {}).get("target_user", "krbtgt")},
         )
 

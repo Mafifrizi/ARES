@@ -101,7 +101,7 @@ class LSASecretsModule(BaseModule):
             blockers.append("Blocked in STEALTH profile: remote registry SAM/LSA hive dumping generates Sysmon Event 12/13 alerts")
             score = 0.1
             risk = "critical_alarm"
-            recommendations.extend(["ad.dcsync", "ad.kerberoast"])
+            recommendations.extend(["windows.dpapi", "ad.dcsync"])
 
         session = getattr(ctx, "session", None)
         if session and hasattr(session, "get_host") and target:
@@ -110,7 +110,7 @@ class LSASecretsModule(BaseModule):
                 if host_state.has_defense("registry_auditing") or host_state.has_defense("sysmon_id12"):
                     risk = "critical_alarm"
                     score -= 0.3
-                    recommendations.append("ad.dcsync")
+                    recommendations.append("windows.dpapi")
                 is_dc = (
                     getattr(host_state, "is_dc", False)
                     or getattr(host_state, "domain_role", "") == "domain_controller"

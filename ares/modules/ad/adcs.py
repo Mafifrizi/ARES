@@ -151,7 +151,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                     recommendations.append("ad.enum_spn")
                 if host_state.has_defense("edr_active") or host_state.has_defense("crowdstrike"):
                     risk = "medium"
-                    recommendations.append("ad.kerberoast")
+                    recommendations.append("ad.shadow_credentials")
 
         exploit_esc1 = getattr(ctx, "params", {}).get("exploit_esc1", False)
         if exploit_esc1:
