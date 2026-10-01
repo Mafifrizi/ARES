@@ -4,7 +4,7 @@
 
 ### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
 
-**The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with zero collateral risk.**
+**The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with deterministic scope enforcement and fail-closed isolation controls.**
 
 <br>
 
@@ -15,7 +15,7 @@
 [![MITRE](https://img.shields.io/badge/Coverage-MITRE%20ATT%26CK-FF6F00?style=for-the-badge)](docs/modules.md)
 [![Security](https://img.shields.io/badge/Security-Zero--Trust%20Enclave-22C55E?style=for-the-badge)](docs/security-model.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Tests Suite](https://img.shields.io/badge/Tests-4%2C625%20Passing-22C55E?style=for-the-badge)](tests/)
+[![Tests Suite](https://img.shields.io/badge/Tests-5%2C074%20Passing-22C55E?style=for-the-badge)](tests/)
 [![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
 [![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
 
@@ -522,7 +522,26 @@ $env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedg
 
 Open your browser to **`http://127.0.0.1:5173/dashboard/`**.
 - **Initial Operator**: `admin`
-- **Initial Password**: Configured via `ARES_DEFAULT_ADMIN_PASSWORD` in `.env` (default: `Admin123456!`)
+- **Initial Password**: Configured via `ARES_DEFAULT_ADMIN_PASSWORD` in `.env` (mandatory; minimum 12 characters; no hardcoded default).
+
+### Verification & Testing Architecture
+
+ARES maintains a comprehensive test suite of **5,074 automated tests** covering core orchestration, cryptography, scope firewalls, Active Directory tradecraft, API security policies, and PostgreSQL database migrations:
+
+- **Fast Unit Tests (Recommended for local dev & PR gates)**:
+  ```powershell
+  pytest tests/unit -q
+  ```
+- **Parallel Execution (Multi-core acceleration)**:
+  ```powershell
+  pytest tests/unit -n auto -q
+  ```
+- **PostgreSQL Integration Tests (Requires running database)**:
+  ```powershell
+  pytest tests/integration/test_postgres_*.py -q
+  ```
+- **Full Monolithic Suite Notice**:
+  Executing all 5,074 unit, integration, and simulation tests sequentially on a single thread requires approximately 45–65 minutes. Automated testing harnesses or CI pipelines should enforce partitioned or parallel execution (`tests/unit`) rather than imposing short timeouts on the monolithic suite.
 
 ### Seamless Platform Updates & In-Place Upgrades (`ares update` & `ares upgrade`)
 
@@ -783,6 +802,6 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 <div align="center">
 
 **ARES - Modern Red Team Engagement & Continuous Security Validation System.**  
-*Continuous Security Validation. Zero Collateral Risk.*
+*Continuous Security Validation. Deterministic Scope Containment.*
 
 </div>
