@@ -309,18 +309,11 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                 host = dc, confidence = 0.95,
             )
         else:
-            self.finding(
-                title       = f"Coercion Attempted on {dc} - No Confirmation",
-                description = (
-                    "Authentication coercion RPC call sent but no confirmation received. "
-                    "Check lateral.smb_relay for captured credentials."
-                ),
-                severity    = Severity.MEDIUM,
-                mitre_technique = "T1187",
-                mitre_tactic    = "Credential Access",
-                evidence    = {"target": dc, "listener": listener_ip, "error": result.get("error")},
-                remediation = "Monitor DC event logs for MS-EFSRPC/MS-RPRN calls.",
-                host = dc, confidence = 0.5,
+            logger.warning(
+                "coercion_all_methods_failed",
+                target=dc,
+                listener=listener_ip,
+                last_error=result.get("error"),
             )
 
         raw = {

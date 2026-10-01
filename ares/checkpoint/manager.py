@@ -143,7 +143,9 @@ class CheckpointManager:
         from cryptography.hazmat.primitives import hashes as _hashes
 
         # Normalise to bytes
-        if isinstance(encryption_key, str):
+        if hasattr(encryption_key, "get_secret_value"):
+            key_bytes = encryption_key.get_secret_value().encode()
+        elif isinstance(encryption_key, str):
             key_bytes = encryption_key.encode()
         elif isinstance(encryption_key, (bytes, bytearray)):
             key_bytes = bytes(encryption_key)

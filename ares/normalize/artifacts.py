@@ -930,9 +930,16 @@ class ArtifactNormalizer:
         count = 0
         for t in tickets:
             if isinstance(t, str):
+                user = (
+                    raw.get("forged_as")
+                    or raw.get("impersonated")
+                    or raw.get("username")
+                    or "unknown"
+                )
+                dom = raw.get("domain") or ""
                 artifact = CredentialArtifact(
-                    username  = "unknown",
-                    domain    = "",
+                    username  = user,
+                    domain    = dom,
                     cred_type = "kerberos_ticket",
                     secret    = t,
                 )

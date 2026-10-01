@@ -242,11 +242,21 @@ class ServiceIntelEngine:
         host:  str,
         ports: list[int] | None = None,
         jitter_ms: int = 0,
+        scope_guard: Any | None = None,
     ) -> PortScanResult:
         """
         Async TCP connect scan. Fast, no root required.
         Set jitter_ms > 0 for stealth.
+        Validates target against scope_guard if provided.
         """
+        if scope_guard is not None:
+            if hasattr(scope_guard, "assert_in_scope"):
+                scope_guard.assert_in_scope(host, action="service_intel.scan_host")
+            elif hasattr(scope_guard, "validate"):
+                scope_guard.validate(host)
+            elif callable(scope_guard):
+                scope_guard(host)
+
         ports = ports or self.DEFAULT_PORTS
         result = PortScanResult(host=host)
         sem    = asyncio.Semaphore(self.max_parallel)
@@ -296,13 +306,14 @@ class ServiceIntelEngine:
         hosts:     list[str],
         ports:     list[int] | None = None,
         max_hosts: int = 20,
+        scope_guard: Any | None = None,
     ) -> list[PortScanResult]:
-        """Scan multiple hosts in parallel."""
+        """Scan multiple hosts in parallel with scope enforcement."""
         sem = asyncio.Semaphore(max_hosts)
 
         async def scan_one(host: str) -> PortScanResult:
             async with sem:
-                return await self.scan_host(host, ports)
+                return await self.scan_host(host, ports, scope_guard=scope_guard)
 
         return await asyncio.gather(*[scan_one(h) for h in hosts])
 

@@ -320,24 +320,25 @@ class AttackPlanner:
                     if module_id == "windows.lsass_dump":
                         defense_multiplier *= 0.05
                         defense_note = "Target enforces Credential Guard: LSASS memory dump penalized"
-                    elif module_id == "windows.dpapi":
-                        defense_multiplier *= 1.35
-                        defense_note = "Target enforces Credential Guard: DPAPI boosted as primary bypass"
+                    elif module_id == "windows.lsa_secrets":
+                        defense_multiplier *= 1.2
+                        defense_note = "Target enforces Credential Guard: LSA secrets boosted as bypass"
                 # 2. LSA Protection (PPL)
                 if host_state.has_defense("lsa_protection") or host_state.has_defense("ppl"):
                     if module_id == "windows.lsass_dump":
                         defense_multiplier *= 0.15
                         defense_note = "Target enforces LSA Protection: LSASS dump penalized"
-                    elif module_id in ("windows.dpapi", "windows.token_impersonation"):
+                    elif module_id == "windows.lsa_secrets":
                         defense_multiplier *= 1.25
+                        defense_note = "Target enforces LSA Protection: alternative credential extraction boosted"
                 # 3. Microsoft Defender for Identity / DRSUAPI monitoring
                 if host_state.has_defense("mde_identity") or host_state.has_defense("drsuapi_monitoring"):
                     if module_id == "ad.dcsync":
                         defense_multiplier *= 0.1
                         defense_note = "Target DC has MDI / DRSUAPI monitoring: DCSync penalized"
-                    elif module_id in ("ad.adcs", "ad.shadow_credentials"):
+                    elif module_id in ("ad.adcs", "ad.kerberoast"):
                         defense_multiplier *= 1.3
-                        defense_note = "Target DC has MDI: ADCS / Shadow Credentials boosted as evasion route"
+                        defense_note = "Target DC has MDI: ADCS / Kerberoasting boosted as evasion route"
                 # 4. Service Creation Monitoring / EDR on lateral movement
                 if host_state.has_defense("service_creation_monitoring") or host_state.has_defense("edr"):
                     if module_id == "lateral.psexec":

@@ -174,10 +174,10 @@ _BUNDLED_INDEX: "dict" = {
          "opsec": "low",    "requires": [],                "outputs": ["snmp_findings","system_info"],
          "mitre": ["T1046","T1590"], "builtin": True},
         # ── Windows modules ──
-        {"id": "windows.token_impersonation","name": "Token Impersonation","category": "windows",
-         "description": "Detect SeImpersonatePrivilege - prerequisite for Potato-family LPE",
-         "opsec": "medium", "requires": ["lateral_session"], "outputs": ["privesc_vectors"],
-         "mitre": ["T1134.001", "T1134.002"], "builtin": True},
+        {"id": "windows.lsass_dump",    "name": "LSASS Memory Dump",      "category": "windows",
+         "description": "Dump LSASS memory for credentials via procdump, comsvcs, or nanodump",
+         "opsec": "high_noise", "requires": ["local_admin_creds"], "outputs": ["ntlm_hashes", "kerberos_tickets"],
+         "mitre": ["T1003.001"], "builtin": True},
         {"id": "windows.lsa_secrets",   "name": "LSA Secrets & SAM Dump", "category": "windows",
          "description": "Extract local account hashes (SAM) and LSA secrets via impacket secretsdump",
          "opsec": "high_noise", "requires": ["local_admin_creds"], "outputs": ["ntlm_hashes", "lsa_secrets"],
@@ -725,7 +725,7 @@ class ModuleInstaller:
         mod = importlib.util.module_from_spec(spec)
         try:
             spec.loader.exec_module(mod)  # type: ignore[attr-defined]
-        except (ImportError, AttributeError, OSError):
+        except Exception:
             return ModuleManifest(id=path.stem, name=path.stem, description="", source_url=source_url)
 
         from ares.modules.base import BaseModule

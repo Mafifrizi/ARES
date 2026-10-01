@@ -62,11 +62,17 @@ def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
     except ValueError:
         pass
 
-    if is_private_ip:
+    _INTERNAL_TLDS = (
+        ".local", ".internal", ".corp", ".lan", ".home",
+        ".lab", ".test", ".priv", ".intranet", ".arpa", ".domain",
+    )
+    is_internal_name = any(clean_target.endswith(tld) for tld in _INTERNAL_TLDS) or "." not in clean_target
+
+    if is_private_ip or is_internal_name:
         probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
     elif "microsoftonline.com" in clean_target:
         probe_urls.append(f"https://{clean_target}/common/oauth2/v2.0/devicecode")
-    elif "." in clean_target:
+    elif clean_target.endswith(".onmicrosoft.com"):
         probe_urls.append(f"https://login.microsoftonline.com/{clean_target}/oauth2/v2.0/devicecode")
         probe_urls.append(f"https://{clean_target}/oauth2/v2.0/devicecode")
     else:

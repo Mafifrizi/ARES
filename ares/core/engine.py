@@ -1859,7 +1859,7 @@ CAMPAIGN_TEMPLATES: dict[str, dict] = {
                 "name": "post_exploit",
                 "modules": [
                     "windows.lsass_dump",
-                    "windows.dpapi",
+                    "windows.lsa_secrets",
                     "exfil.smb_shares",
                     "exfil.secrets_scan",
                 ],

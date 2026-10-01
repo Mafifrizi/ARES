@@ -180,6 +180,37 @@ class TestRemoteExecutor:
 
         assert code == 1
 
+    @pytest.mark.asyncio
+    async def test_run_lateral_inherits_campaign(self):
+        from ares.execution.executor import RemoteExecutor
+        from ares.core.campaign import Campaign
+
+        mock_campaign = Campaign(name="ScopedCampaign", operator="test_op")
+        ex = RemoteExecutor(operator="test_op", campaign=mock_campaign)
+
+        mock_psexec = MagicMock()
+        mock_psexec.execute = AsyncMock(return_value=MagicMock(stdout="ok", stderr="", success=True))
+
+        mock_winrm = MagicMock()
+        mock_winrm.move = AsyncMock(return_value=MagicMock(output="ok", error="", success=True))
+
+        mock_wmiexec = MagicMock()
+        mock_wmiexec.execute = AsyncMock(return_value=MagicMock(stdout="ok", stderr="", success=True))
+
+        with patch("ares.modules.lateral.modules.PsExecLateral", return_value=mock_psexec) as mock_psexec_cls, \
+             patch("ares.modules.lateral.modules.WinRMLateral", return_value=mock_winrm) as mock_winrm_cls, \
+             patch("ares.modules.lateral.modules.WMIExecLateral", return_value=mock_wmiexec) as mock_wmiexec_cls, \
+             patch.dict("sys.modules", {"impacket": MagicMock(), "winrm": MagicMock()}):
+            
+            await ex._run_psexec("10.0.0.1", "whoami", "admin", "CORP", "pass")
+            assert mock_psexec_cls.call_args[1]["campaign"] == mock_campaign
+
+            await ex._run_winrm("10.0.0.1", "whoami", "admin", "CORP", "pass")
+            assert mock_winrm_cls.call_args[1]["campaign"] == mock_campaign
+
+            await ex._run_wmiexec("10.0.0.1", "whoami", "admin", "CORP", "pass")
+            assert mock_wmiexec_cls.call_args[1]["campaign"] == mock_campaign
+
     def test_execution_result_defaults(self):
         from ares.execution.executor import ExecutionResult, ExecutionMethod, PayloadType
         r = ExecutionResult(target="10.0.0.1", method=ExecutionMethod.SSH)
@@ -461,6 +492,27 @@ class TestNetworkModel:
         d = topo.to_dict()
         assert "campaign_id" in d
         assert "hosts" in d
+
+    def test_pivot_route_requires_intermediate_pivots(self):
+        from ares.network.model import NetworkModel
+        model = NetworkModel(name="Test Network")
+        s1 = model.add_subnet("10.0.0.0/24", "Subnet 1")
+        s2 = model.add_subnet("10.1.0.0/24", "Subnet 2")
+
+        h_source = s1.add_host("10.0.0.10", hostname="attacker")
+        h_inter = s1.add_host("10.0.0.20", hostname="dual_homed")
+        h_inter.reachable.append("10.1.0.50")
+        h_target = s2.add_host("10.1.0.50", hostname="internal_dc")
+
+        # When dual_homed is NOT a pivot, route must NOT traverse it
+        route_unowned = model.pivot_route("10.0.0.10", "10.1.0.50")
+        assert route_unowned is None
+
+        # When dual_homed is compromised / marked as pivot, route succeeds
+        h_inter.is_pivot = True
+        route_owned = model.pivot_route("10.0.0.10", "10.1.0.50")
+        assert route_owned == ["10.0.0.10", "10.0.0.20", "10.1.0.50"]
+
 
 
 # ── credential/reuse.py - WinRM validator ────────────────────────────────────

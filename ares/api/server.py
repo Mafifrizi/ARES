@@ -2724,7 +2724,7 @@ async def run_module(
 
                 # Check privilege escalation and foothold status
                 is_privesc_escalated = (
-                    module_id in ("linux.privesc", "windows.token_impersonation")
+                    module_id in ("linux.privesc", "windows.lsa_secrets")
                     or bool(raw.get("escalated"))
                     or bool(raw.get("root_access"))
                     or raw.get("privilege") == "root"
@@ -3923,6 +3923,63 @@ async def campaign_attack_paths(
             "source": source,
             "target": target,
             "path": graph.path_to_report(path),
+        }
+
+    # Query paths starting from a specific source node
+    if source and not target:
+        da_report = graph.shortest_path_to_da(source)
+        if da_report:
+            return {
+                "campaign_id": campaign_id,
+                "source": source,
+                "target": da_report.get("end", "Domain Admin"),
+                "path": da_report,
+            }
+        return {
+            "campaign_id": campaign_id,
+            "source": source,
+            "target": None,
+            "path": None,
+            "message": f"No attack path found originating from '{source}'",
+        }
+
+    # Query paths leading to a specific target node
+    if target and not source:
+        tgt_id = graph._find_node_by_label(target)
+        if not tgt_id:
+            return {
+                "campaign_id": campaign_id,
+                "source": None,
+                "target": target,
+                "path": None,
+                "message": f"Target '{target}' not found in attack graph",
+            }
+        import networkx as _nx
+        best_path = None
+        best_cost = float("inf")
+        for src_node, data in graph._g.nodes(data=True):
+            if src_node == tgt_id or data.get("is_target"):
+                continue
+            try:
+                cost = _nx.shortest_path_length(graph._g, src_node, tgt_id, weight="weight")
+                if cost < best_cost:
+                    best_cost = cost
+                    best_path = _nx.shortest_path(graph._g, src_node, tgt_id, weight="weight")
+            except (_nx.NetworkXNoPath, _nx.NodeNotFound):
+                continue
+        if best_path:
+            return {
+                "campaign_id": campaign_id,
+                "source": graph._nodes[best_path[0]].label if best_path[0] in graph._nodes else best_path[0],
+                "target": target,
+                "path": graph.path_to_report(best_path),
+            }
+        return {
+            "campaign_id": campaign_id,
+            "source": None,
+            "target": target,
+            "path": None,
+            "message": f"No attack path found leading to '{target}'",
         }
 
     # Top-N paths to high-value nodes

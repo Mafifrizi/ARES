@@ -104,15 +104,22 @@ class ClusterTask:
     timeout_s: int = 300  # 5 min default task timeout
 
     def to_json(self) -> str:
-        """Serialize to JSON - redacts sensitive credential params before writing to Redis."""
+        """Serialize task to JSON for wire transport."""
+        return json.dumps(asdict(self), default=str)
+
+    def to_safe_dict(self) -> dict[str, Any]:
+        """Return task dict with sensitive credential params redacted for logging/display."""
         d = asdict(self)
-        # Redact sensitive values - never store plaintext credentials in Redis
         if d.get("params"):
             d["params"] = {
                 k: "<REDACTED>" if k in _SENSITIVE_PARAM_KEYS else v
                 for k, v in d["params"].items()
             }
-        return json.dumps(d, default=str)
+        return d
+
+    def to_safe_json(self) -> str:
+        """Serialize to JSON with sensitive credentials redacted for audit/UI display."""
+        return json.dumps(self.to_safe_dict(), default=str)
 
     @classmethod
     def from_json(cls, data: str) -> ClusterTask:

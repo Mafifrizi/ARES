@@ -164,18 +164,37 @@ class CampaignReplay:
         """Build ordered event timeline from history + findings."""
         events: list[ReplayEvent] = []
 
-        # Build finding lookup by module_id
-        finding_map: dict[str, Any] = {}
+        # Index findings by (module_id, host) and (module_id, "") for unassigned findings
+        finding_map: dict[tuple[str, str], list[Any]] = {}
+        unassigned_map: dict[str, list[Any]] = {}
         for f in self.findings:
-            fid = getattr(f, "module_id", "")
-            finding_map.setdefault(fid, []).append(f)
+            fid = str(getattr(f, "module_id", "") or "")
+            fhost = str(getattr(f, "host", "") or "").strip().lower()
+            if fhost:
+                finding_map.setdefault((fid, fhost), []).append(f)
+            else:
+                unassigned_map.setdefault(fid, []).append(f)
+
+        # Track which unassigned findings have been attached to an entry to prevent duplicate fan-out
+        consumed_unassigned: set[str] = set()
 
         for entry in self.history:
-            related_findings = finding_map.get(entry.module_id, [])
+            entry_host = str(entry.target_host or "").strip().lower()
+            related_findings = list(finding_map.get((entry.module_id, entry_host), []))
+
+            # Attach unassigned findings for this module_id on the first matching entry
+            if entry.module_id in unassigned_map:
+                for uf in unassigned_map[entry.module_id]:
+                    uf_id = str(getattr(uf, "id", "") or id(uf))
+                    if uf_id not in consumed_unassigned:
+                        consumed_unassigned.add(uf_id)
+                        related_findings.append(uf)
 
             if related_findings:
                 # One event per finding
                 for finding in related_findings:
+                    f_sev = getattr(finding, "severity", None)
+                    sev_val = f_sev.value if hasattr(f_sev, "value") else str(f_sev or "")
                     events.append(ReplayEvent(
                         timestamp    = entry.timestamp,
                         module_id    = entry.module_id,
@@ -186,7 +205,7 @@ class CampaignReplay:
                         finding_title = getattr(finding, "title", ""),
                         description  = getattr(finding, "description", ""),
                         mitre        = getattr(finding, "mitre_technique", "") or "",
-                        severity     = getattr(getattr(finding, "severity", None), "value", ""),
+                        severity     = sev_val,
                     ))
             else:
                 # Module ran but no findings

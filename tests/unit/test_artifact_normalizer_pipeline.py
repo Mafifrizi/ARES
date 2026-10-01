@@ -523,6 +523,25 @@ def test_kerberos_ticket_string_path(normalizer: ArtifactNormalizer, store: Arti
     assert len(creds) == 1
     assert creds[0].secret == "/tmp/golden.ccache"
     assert creds[0].cred_type == "kerberos_ticket"
+    assert creds[0].username == "unknown"
+
+
+def test_kerberos_ticket_string_path_with_metadata(normalizer: ArtifactNormalizer, store: ArtifactStore):
+    """Verify that forged_as and domain are preserved when kerberos_ticket is a string path."""
+    raw = {
+        "kerberos_ticket": "/tmp/golden.ccache",
+        "forged_as": "Administrator",
+        "domain": "CORP.LOCAL",
+    }
+    added = normalizer.normalize("credential.golden_ticket", ["kerberos_ticket"], raw, store)
+    assert added == 1
+    creds = store.credentials()
+    matching = [c for c in creds if c.secret == "/tmp/golden.ccache"]
+    assert len(matching) >= 1
+    assert matching[-1].username == "Administrator"
+    assert matching[-1].domain == "CORP.LOCAL"
+    assert matching[-1].cred_type == "kerberos_ticket"
+
 
 
 def test_acl_findings_permissions_pipeline(normalizer: ArtifactNormalizer, store: ArtifactStore):

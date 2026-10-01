@@ -433,22 +433,26 @@ class ScheduledTaskPersistence(BaseModule):
         except Exception as exc:
             raise self._classify_error(exc) from exc
         finally:
-            try:
-                await _loop.run_in_executor(
-                    None,
-                    lambda: _tsch_delete_sync(
-                        target, username, password, domain,
-                        lmhash, nthash, task_name,
-                    ),
-                )
-                logger.info("scheduled_task_teardown_complete", target=target, task=task_name)
-            except Exception as _teardown_exc:
-                logger.warning(
-                    "scheduled_task_teardown_failed",
-                    target=target,
-                    task=task_name,
-                    error=str(_teardown_exc)[:100],
-                )
+            should_cleanup = not ctx.get("persist", False) and ctx.get("cleanup", True)
+            if should_cleanup:
+                try:
+                    await _loop.run_in_executor(
+                        None,
+                        lambda: _tsch_delete_sync(
+                            target, username, password, domain,
+                            lmhash, nthash, task_name,
+                        ),
+                    )
+                    logger.info("scheduled_task_teardown_complete", target=target, task=task_name)
+                except Exception as _teardown_exc:
+                    logger.warning(
+                        "scheduled_task_teardown_failed",
+                        target=target,
+                        task=task_name,
+                        error=str(_teardown_exc)[:100],
+                    )
+            else:
+                logger.info("scheduled_task_retained_for_persistence", target=target, task=task_name)
 
     async def teardown(self, target: str = "", username: str = "", password: str = "",
                        domain: str = "", lmhash: str = "", nthash: str = "",

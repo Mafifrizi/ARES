@@ -106,6 +106,13 @@ class CloudIdentityFederationModule(BaseModule):
                 module_id=self.MODULE_ID, field="credentials",
             )
 
+        if pdict.get("tenant_id"):
+            self.validate_cloud_scope(pdict.get("tenant_id"), "azure_ad")
+        if pdict.get("project_id"):
+            self.validate_cloud_scope(pdict.get("project_id"), "gcp")
+        if pdict.get("account_id"):
+            self.validate_cloud_scope(pdict.get("account_id"), "aws")
+
     async def execute(self, ctx: "Any") -> ModuleResult:
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
@@ -267,6 +274,13 @@ class CloudIdentityFederationModule(BaseModule):
         audit("cloud_federation_abuse", actor="operator",
               technique="T1606.002", source="operator", target="cloud_federation",
               detail=f"mode={mode} tenant={tenant_id[:8] + '...' if tenant_id else 'none'}")
+
+        if tenant_id:
+            self.validate_cloud_scope(tenant_id, "azure_ad")
+        if kwargs.get("project_id"):
+            self.validate_cloud_scope(kwargs.get("project_id"), "gcp")
+        if kwargs.get("account_id"):
+            self.validate_cloud_scope(kwargs.get("account_id"), "aws")
 
         logger.info("federation_abuse_start", mode=mode, has_azure=bool(tenant_id),
                     has_aws=bool(access_key), has_ad=bool(adfs_url or krbtgt_hash))

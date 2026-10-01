@@ -725,28 +725,31 @@ class AttackGraph:
                 elabel = data.get("label", "").replace('"', '\\"')
                 lines.append(f'  "{src}" -> "{tgt}" [label="{elabel}"];')
             lines.append("}")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
         logger.info("graph_exported_dot", path=path)
 
     # ── Bloodhound JSON Ingest ────────────────────────────────────────────────
 
+    # ── Bloodhound Ingest Pipeline (Two-Pass Architecture) ────────────────────
+
     def ingest_bloodhound(self, json_path: str) -> dict[str, int]:
         """
-        Import BloodHound/SharpHound JSON collection into the ARES attack graph.
+        Import BloodHound/SharpHound collection into the ARES attack graph.
 
-        Supports BloodHound CE (v5+) and legacy (v4) JSON formats.
-        Parses: computers, users, groups, domains, sessions, ACLs.
-        After ingest, use find_path() / top_paths() to compute attack paths.
+        Supports BloodHound CE (v5+), legacy (v4) JSON formats, and SharpHound .zip archives.
+        Parses: computers, users, groups, domains, sessions, LocalAdmins, and ACLs/ACEs.
+        Uses a two-pass resolution pipeline to prevent SID vs. Name split-brain disconnection.
+        After ingest, use find_path() / top_paths() / shortest_path_to_da() to compute attack paths.
 
         Args:
-            json_path: Path to BloodHound JSON file (computers.json, users.json, etc.)
-                       or a directory containing multiple .json files.
+            json_path: Path to BloodHound JSON file, .zip archive, or directory containing JSON files.
 
         Returns:
             dict with counts: {"nodes_added": N, "edges_added": N, "file_count": N}
         """
         import json as _json
+        import zipfile
         from pathlib import Path
 
         if not _NX_AVAILABLE:
@@ -754,136 +757,215 @@ class AttackGraph:
             return {"nodes_added": 0, "edges_added": 0, "error": "networkx not installed"}
 
         p = Path(json_path)
-        files: list[Path] = []
-        if p.is_dir():
-            files = sorted(p.glob("*.json"))
+        raw_payloads: list[tuple[str, dict]] = []
+
+        if p.is_file() and (p.suffix.lower() == ".zip" or zipfile.is_zipfile(p)):
+            try:
+                with zipfile.ZipFile(p, "r") as zf:
+                    for name in sorted(zf.namelist()):
+                        if name.lower().endswith(".json") and not name.startswith("__MACOSX"):
+                            try:
+                                with zf.open(name) as fh:
+                                    data = _json.loads(fh.read().decode("utf-8", errors="replace"))
+                                    raw_payloads.append((name, data))
+                            except Exception as exc:
+                                logger.warning("bloodhound_zip_member_error", member=name, error=str(exc)[:100])
+            except Exception as exc:
+                logger.warning("bloodhound_zip_read_error", file=str(p), error=str(exc)[:100])
+                return {"nodes_added": 0, "edges_added": 0, "error": f"Failed to read zip archive: {str(exc)[:100]}"}
+
+        elif p.is_dir():
+            for fp in sorted(p.glob("*.json")):
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                        raw_payloads.append((fp.name, _json.load(fh)))
+                except Exception as exc:
+                    logger.warning("bloodhound_parse_error", file=str(fp), error=str(exc)[:100])
+
         elif p.is_file():
-            files = [p]
+            try:
+                with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                    raw_payloads.append((p.name, _json.load(fh)))
+            except Exception as exc:
+                logger.warning("bloodhound_parse_error", file=str(p), error=str(exc)[:100])
+                return {"nodes_added": 0, "edges_added": 0, "error": f"Failed to parse JSON file: {str(exc)[:100]}"}
+
         else:
             return {"nodes_added": 0, "edges_added": 0, "error": f"Path not found: {json_path}"}
+
+        if not raw_payloads:
+            return {"nodes_added": 0, "edges_added": 0, "file_count": 0}
 
         nodes_before = self._g.number_of_nodes()
         edges_before = self._g.number_of_edges()
 
-        for fp in files:
-            try:
-                with open(fp) as fh:
-                    data = _json.load(fh)
-                self._parse_bloodhound_json(data)
-            except Exception as exc:
-                logger.warning("bloodhound_parse_error", file=str(fp), error=str(exc)[:100])
+        # Two-pass parsing across all collected payloads
+        self._parse_bloodhound_datasets(raw_payloads)
 
         nodes_added = self._g.number_of_nodes() - nodes_before
         edges_added = self._g.number_of_edges() - edges_before
-        logger.info("bloodhound_ingest_complete",
-                     nodes=nodes_added, edges=edges_added, files=len(files))
-        return {"nodes_added": nodes_added, "edges_added": edges_added,
-                "file_count": len(files)}
+        logger.info(
+            "bloodhound_ingest_complete",
+            nodes=nodes_added,
+            edges=edges_added,
+            files=len(raw_payloads),
+        )
+        return {
+            "nodes_added": nodes_added,
+            "edges_added": edges_added,
+            "file_count": len(raw_payloads),
+        }
 
     def _parse_bloodhound_json(self, data: dict) -> None:
-        """Parse a single BloodHound JSON file (computers, users, groups, etc.)."""
-        # BloodHound CE format: {"data": [...], "meta": {"type": "computers"}}
-        # Legacy format: {"computers": [...]} or {"users": [...]}
-        meta = data.get("meta", {})
-        bh_type = meta.get("type", "").lower()
-        items = data.get("data", [])
+        """Backward-compatible single-payload ingest helper."""
+        self._parse_bloodhound_datasets([("data.json", data)])
 
-        # Legacy fallback: detect type from top-level keys
-        if not items:
-            for key in ("computers", "users", "groups", "domains", "sessions", "ous", "gpos"):
-                if key in data:
-                    items = data[key]
-                    bh_type = key
-                    break
+    def _parse_bloodhound_datasets(self, raw_payloads: list[tuple[str, dict]]) -> None:
+        """Two-pass ingestion of BloodHound datasets to eliminate SID vs. Name split-brain."""
+        sid_to_id: dict[str, str] = {}
+        name_to_id: dict[str, str] = {}
+        normalized_items: list[tuple[str, dict]] = []
 
-        if not items:
-            return
+        # ── PASS 1: Identify all entities, index SIDs and canonical Names ───────────
+        for _fname, data in raw_payloads:
+            if not isinstance(data, dict):
+                continue
+            meta = data.get("meta") or {}
+            bh_type = str(meta.get("type") or "").strip().lower()
+            items = data.get("data")
 
-        for item in items:
-            props = item.get("Properties", item.get("properties", {}))
-            aces  = item.get("Aces", item.get("aces", []))
-            members = item.get("Members", item.get("members", []))
+            # Legacy fallback: top-level key detection
+            if items is None:
+                for key in ("computers", "users", "groups", "domains", "sessions", "ous", "gpos"):
+                    if key in data and isinstance(data[key], list):
+                        items = data[key]
+                        bh_type = key
+                        break
 
-            if bh_type in ("computers", "computer"):
-                self._bh_add_computer(props, aces)
-            elif bh_type in ("users", "user"):
-                self._bh_add_user(props, aces)
-            elif bh_type in ("groups", "group"):
-                self._bh_add_group(props, aces, members)
-            elif bh_type in ("domains", "domain"):
-                self._bh_add_domain(props, aces)
+            if not items or not isinstance(items, list):
+                continue
 
-    def _bh_add_computer(self, props: dict, aces: list) -> None:
-        name = props.get("name", "").upper()
-        if not name:
-            return
-        node_id = f"computer:{name}"
-        is_dc = props.get("isdc", props.get("isDC", False))
-        self._g.add_node(node_id, label=name, node_type="host",
-                          is_target=is_dc,
-                          os=props.get("operatingsystem", ""),
-                          enabled=props.get("enabled", True))
-        # Domain membership
-        domain = props.get("domain", "")
-        if domain:
-            dom_id = f"domain:{domain.upper()}"
-            self._g.add_node(dom_id, label=domain.upper(), node_type="domain",
-                              is_target=True)
-            self._g.add_edge(dom_id, node_id, label="has_host", weight=0.1)
-        self._bh_process_aces(node_id, aces)
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                normalized_items.append((bh_type, item))
+                props = item.get("Properties") or item.get("properties") or {}
+                raw_name = str(props.get("name") or item.get("name") or "").strip()
+                name = raw_name.upper()
 
-    def _bh_add_user(self, props: dict, aces: list) -> None:
-        name = props.get("name", "").upper()
-        if not name:
-            return
-        node_id = f"user:{name}"
-        is_admin = props.get("admincount", False)
-        self._g.add_node(node_id, label=name, node_type="user",
-                          is_target=is_admin,
-                          enabled=props.get("enabled", True),
-                          has_spn=props.get("hasspn", False),
-                          no_preauth=props.get("dontreqpreauth", False))
-        # Mark kerberoastable users
-        if props.get("hasspn", False):
-            self._g.add_edge(node_id, f"technique:kerberoast:{name}",
-                              label="kerberoastable", weight=0.3)
-        if props.get("dontreqpreauth", False):
-            self._g.add_edge(node_id, f"technique:asreproast:{name}",
-                              label="asreproastable", weight=0.2)
-        domain = props.get("domain", "")
-        if domain:
-            dom_id = f"domain:{domain.upper()}"
-            self._g.add_edge(dom_id, node_id, label="has_user", weight=0.1)
-        self._bh_process_aces(node_id, aces)
+                # Extract SIDs / ObjectIdentifiers
+                oid = str(
+                    item.get("ObjectIdentifier")
+                    or props.get("objectid")
+                    or props.get("domainsid")
+                    or ""
+                ).strip().upper()
 
-    def _bh_add_group(self, props: dict, aces: list, members: list) -> None:
-        name = props.get("name", "").upper()
-        if not name:
-            return
-        node_id = f"group:{name}"
-        is_da = "DOMAIN ADMINS" in name or "ENTERPRISE ADMINS" in name
-        self._g.add_node(node_id, label=name, node_type="group",
-                          is_target=is_da)
-        for member in members:
-            mid = member.get("MemberId", member.get("ObjectIdentifier", ""))
-            mtype = member.get("MemberType", member.get("ObjectType", "")).lower()
-            if mid:
-                member_node = f"{mtype}:{mid}" if ":" not in mid else mid
-                self._g.add_edge(member_node, node_id, label="member_of",
-                                  weight=0.1)
-        self._bh_process_aces(node_id, aces)
+                # Normalize category
+                entity_type = "object"
+                if bh_type in ("computers", "computer"):
+                    entity_type = "computer"
+                elif bh_type in ("users", "user"):
+                    entity_type = "user"
+                elif bh_type in ("groups", "group"):
+                    entity_type = "group"
+                elif bh_type in ("domains", "domain"):
+                    entity_type = "domain"
+                elif bh_type in ("ous", "ou"):
+                    entity_type = "ou"
+                elif bh_type in ("gpos", "gpo"):
+                    entity_type = "gpo"
+                elif bh_type in ("sessions", "session"):
+                    continue
 
-    def _bh_add_domain(self, props: dict, aces: list) -> None:
-        name = props.get("name", "").upper()
-        if not name:
-            return
-        node_id = f"domain:{name}"
-        self._g.add_node(node_id, label=name, node_type="domain",
-                          is_target=True)
-        self._bh_process_aces(node_id, aces)
+                canonical_id = f"{entity_type}:{name}" if name else (f"{entity_type}:{oid}" if oid else "")
+                if not canonical_id:
+                    continue
 
-    def _bh_process_aces(self, target_id: str, aces: list) -> None:
-        """Convert BloodHound ACEs to graph edges."""
+                if oid:
+                    sid_to_id[oid] = canonical_id
+                    sid_to_id[f"{entity_type}:{oid}"] = canonical_id
+                if name:
+                    name_to_id[name] = canonical_id
+                    name_to_id[f"{entity_type}:{name}"] = canonical_id
+                    if "@" in name:
+                        name_to_id[name.split("@")[0]] = canonical_id
+                    if "." in name:
+                        name_to_id[name.split(".")[0]] = canonical_id
+
+                # Register canonical node in GraphNode dictionary and NetworkX
+                is_target = False
+                label = raw_name or oid
+                node_type = entity_type
+
+                if entity_type == "computer":
+                    is_dc = bool(props.get("isdc", props.get("isDC", False)))
+                    node_type = "domain_controller" if is_dc else "host"
+                    is_target = is_dc
+                elif entity_type == "user":
+                    is_admin = bool(props.get("admincount", False))
+                    is_target = is_admin or ("ADMIN" in name)
+                elif entity_type == "group":
+                    is_da = "DOMAIN ADMINS" in name or "ENTERPRISE ADMINS" in name or "ADMINISTRATORS" in name
+                    is_target = is_da
+                elif entity_type == "domain":
+                    is_target = True
+
+                self._add_node(GraphNode(
+                    node_id=canonical_id,
+                    label=label,
+                    node_type=node_type,
+                    properties={
+                        "name": raw_name,
+                        "sid": oid,
+                        "domain": str(props.get("domain") or "").upper(),
+                        "enabled": props.get("enabled", True),
+                        "has_spn": props.get("hasspn", False),
+                        "no_preauth": props.get("dontreqpreauth", False),
+                        "os": props.get("operatingsystem", ""),
+                    },
+                    risk_score=5.0 if is_target else 1.0,
+                    is_target=is_target,
+                ))
+
+        # Helper to resolve any SID, Name, or typed reference to canonical node ID
+        def _resolve_node(ref: Any, default_type: str = "object") -> str:
+            if not ref or not isinstance(ref, (str, int)):
+                return ""
+            r_str = str(ref).strip()
+            r_upper = r_str.upper()
+
+            if r_upper in sid_to_id:
+                return sid_to_id[r_upper]
+            if r_upper in name_to_id:
+                return name_to_id[r_upper]
+
+            if ":" in r_str:
+                _pfx, rest = r_str.split(":", 1)
+                rest_upper = rest.strip().upper()
+                if rest_upper in sid_to_id:
+                    return sid_to_id[rest_upper]
+                if rest_upper in name_to_id:
+                    return name_to_id[rest_upper]
+            else:
+                for pfx in ("user", "computer", "group", "domain"):
+                    pfx_key = f"{pfx}:{r_upper}"
+                    if pfx_key in sid_to_id:
+                        return sid_to_id[pfx_key]
+                    if pfx_key in name_to_id:
+                        return name_to_id[pfx_key]
+
+            # If not in registry, create dummy canonical node to preserve graph connectivity
+            fallback_id = r_str.lower() if ":" in r_str else f"{default_type}:{r_str}".lower()
+            if fallback_id not in self._nodes and fallback_id not in self._g:
+                self._add_node(GraphNode(
+                    node_id=fallback_id,
+                    label=r_str,
+                    node_type=default_type or "object",
+                    is_target=False,
+                ))
+            return fallback_id
+
         _DANGEROUS_RIGHTS = {
             "GenericAll", "GenericWrite", "WriteOwner", "WriteDacl",
             "AllExtendedRights", "ForceChangePassword", "AddMember",
@@ -891,62 +973,205 @@ class AttackGraph:
             "Owns", "AddSelf", "AddAllowedToAct",
         }
         _RIGHT_WEIGHTS = {
-            "GenericAll": 0.9, "WriteOwner": 0.8, "WriteDacl": 0.8,
-            "DCSync": 1.0, "ForceChangePassword": 0.7, "AddMember": 0.6,
-            "ReadLAPSPassword": 0.5, "ReadGMSAPassword": 0.5,
-            "AddAllowedToAct": 0.7, "Owns": 0.8,
+            "DCSync": 0.1,
+            "GenericAll": 0.15,
+            "WriteOwner": 0.2,
+            "WriteDacl": 0.2,
+            "Owns": 0.2,
+            "ForceChangePassword": 0.25,
+            "AddMember": 0.25,
+            "AllExtendedRights": 0.3,
+            "ReadLAPSPassword": 0.35,
+            "ReadGMSAPassword": 0.35,
+            "GenericWrite": 0.4,
+            "AddSelf": 0.4,
+            "AddAllowedToAct": 0.45,
         }
-        for ace in aces:
-            right = ace.get("RightName", ace.get("rightname", ""))
-            principal = ace.get("PrincipalSID", ace.get("principalsid", ""))
-            ptype = ace.get("PrincipalType", ace.get("principaltype", "")).lower()
-            if right in _DANGEROUS_RIGHTS and principal:
-                src = f"{ptype}:{principal}" if ":" not in principal else principal
-                w = _RIGHT_WEIGHTS.get(right, 0.5)
-                self._g.add_edge(src, target_id, label=right.lower(),
-                                  weight=w,
-                                  properties={"right": right, "inherited": ace.get("IsInherited", False)})
 
-    def shortest_path_to_da(self, start_node: str | None = None) -> list[dict]:
+        # ── PASS 2: Stitch all edges across resolved canonical nodes ────────────────
+        for bh_type, item in normalized_items:
+            props = item.get("Properties") or item.get("properties") or {}
+            raw_name = str(props.get("name") or item.get("name") or "").strip()
+            name = raw_name.upper()
+            oid = str(item.get("ObjectIdentifier") or props.get("objectid") or "").strip().upper()
+
+            entity_type = "computer" if bh_type in ("computers", "computer") else (
+                "user" if bh_type in ("users", "user") else (
+                    "group" if bh_type in ("groups", "group") else (
+                        "domain" if bh_type in ("domains", "domain") else "object"
+                    )
+                )
+            )
+            target_node = _resolve_node(oid or name, default_type=entity_type)
+            domain_name = str(props.get("domain") or "").strip().upper()
+            domain_node = _resolve_node(domain_name, default_type="domain") if domain_name else ""
+
+            # Domain hierarchy edges
+            if domain_node and target_node and domain_node != target_node:
+                rel_label = f"has_{entity_type}"
+                self._add_edge(GraphEdge(
+                    source=domain_node,
+                    target=target_node,
+                    edge_type=rel_label,
+                    label=rel_label,
+                    weight=0.1,
+                ))
+
+            # 1. Access Control Entries (ACEs)
+            aces = item.get("Aces") or item.get("aces") or []
+            for ace in aces:
+                if not isinstance(ace, dict):
+                    continue
+                right = ace.get("RightName") or ace.get("rightname") or ""
+                principal_sid = ace.get("PrincipalSID") or ace.get("principalsid") or ""
+                ptype = str(ace.get("PrincipalType") or ace.get("principaltype") or "user").lower()
+
+                if right in _DANGEROUS_RIGHTS and principal_sid:
+                    src_node = _resolve_node(principal_sid, default_type=ptype)
+                    if src_node and target_node and src_node != target_node:
+                        w = _RIGHT_WEIGHTS.get(right, 0.5)
+                        self._add_edge(GraphEdge(
+                            source=src_node,
+                            target=target_node,
+                            edge_type=EdgeType.ACE,
+                            label=right.lower(),
+                            weight=w,
+                            properties={"right": right, "inherited": ace.get("IsInherited", False)},
+                        ))
+
+            # 2. Group Membership
+            if bh_type in ("groups", "group"):
+                members = item.get("Members") or item.get("members") or []
+                for m in members:
+                    if not isinstance(m, dict):
+                        continue
+                    m_ref = m.get("MemberId") or m.get("ObjectIdentifier") or ""
+                    m_type = str(m.get("MemberType") or m.get("ObjectType") or "user").lower()
+                    src_member = _resolve_node(m_ref, default_type=m_type)
+                    if src_member and target_node and src_member != target_node:
+                        self._add_edge(GraphEdge(
+                            source=src_member,
+                            target=target_node,
+                            edge_type=EdgeType.MEMBER_OF,
+                            label="member_of",
+                            weight=0.05,
+                        ))
+
+            # 3. Computer Local Admins & Permissions
+            if bh_type in ("computers", "computer"):
+                def _process_comp_members(data_field: str, rel_type: str, weight: float) -> None:
+                    raw_block = item.get(data_field)
+                    entries = raw_block.get("Results", []) if isinstance(raw_block, dict) else (
+                        raw_block if isinstance(raw_block, list) else []
+                    )
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        e_ref = entry.get("ObjectIdentifier") or entry.get("MemberId") or ""
+                        e_type = str(entry.get("ObjectType") or entry.get("MemberType") or "user").lower()
+                        src = _resolve_node(e_ref, default_type=e_type)
+                        if src and target_node and src != target_node:
+                            self._add_edge(GraphEdge(
+                                source=src,
+                                target=target_node,
+                                edge_type=rel_type,
+                                label=rel_type,
+                                weight=weight,
+                            ))
+
+                _process_comp_members("LocalAdmins", "admin_to", 0.2)
+                _process_comp_members("RemoteDesktopUsers", "can_rdp", 0.4)
+                _process_comp_members("DcomUsers", "execute_dcom", 0.4)
+
+                # Computer Sessions (Inside computer item)
+                raw_sess = item.get("Sessions")
+                sess_entries = raw_sess.get("Results", []) if isinstance(raw_sess, dict) else (
+                    raw_sess if isinstance(raw_sess, list) else []
+                )
+                for s in sess_entries:
+                    if not isinstance(s, dict):
+                        continue
+                    u_ref = s.get("UserId") or s.get("UserName") or ""
+                    user_node = _resolve_node(u_ref, default_type="user")
+                    if target_node and user_node and target_node != user_node:
+                        # Compromising computer yields user credential session
+                        self._add_edge(GraphEdge(
+                            source=target_node,
+                            target=user_node,
+                            edge_type=EdgeType.HAS_SESSION,
+                            label="has_session",
+                            weight=0.3,
+                        ))
+
+            # 4. Standalone Sessions File
+            if bh_type in ("sessions", "session"):
+                c_ref = item.get("ComputerId") or item.get("ComputerName") or ""
+                u_ref = item.get("UserId") or item.get("UserName") or ""
+                c_node = _resolve_node(c_ref, default_type="computer")
+                u_node = _resolve_node(u_ref, default_type="user")
+                if c_node and u_node and c_node != u_node:
+                    self._add_edge(GraphEdge(
+                        source=c_node,
+                        target=u_node,
+                        edge_type=EdgeType.HAS_SESSION,
+                        label="has_session",
+                        weight=0.3,
+                    ))
+
+    def shortest_path_to_da(self, start_node: str | None = None) -> dict[str, Any] | None:
         """
         Compute shortest attack path from start_node (or any user) to Domain Admins group.
 
         Uses Dijkstra with edge weights (lower = easier to exploit).
-        Returns list of steps with edge labels (attack technique at each hop).
+        Returns structured report dict with steps, weights, and techniques, or None if no path exists.
         """
         if not _NX_AVAILABLE or not self._g.nodes:
-            return []
+            return None
 
         # Find DA group node
-        da_nodes = [n for n, d in self._g.nodes(data=True)
-                    if d.get("is_target") and "DOMAIN ADMINS" in d.get("label", "").upper()]
+        da_nodes = [
+            n for n, d in self._g.nodes(data=True)
+            if d.get("is_target") and any(
+                term in d.get("label", "").upper()
+                for term in ("DOMAIN ADMINS", "ENTERPRISE ADMINS", "ADMINISTRATORS")
+            )
+        ]
         if not da_nodes:
-            da_nodes = [n for n in self._g.nodes if "domain admin" in n.lower()]
+            da_nodes = [n for n in self._g.nodes if "domain admin" in str(n).lower()]
         if not da_nodes:
-            return []
+            return None
 
-        da_target = da_nodes[0]
-
-        # If no start specified, try all user nodes and return shortest
+        # If start specified, resolve it via registry or labels
         if start_node:
-            start_nodes = [start_node]
+            resolved_start = start_node
+            if start_node not in self._g:
+                # Try finding by label or suffix
+                for n, d in self._g.nodes(data=True):
+                    if d.get("label") == start_node or str(n).upper() == start_node.upper():
+                        resolved_start = n
+                        break
+            start_nodes = [resolved_start] if resolved_start in self._g else []
         else:
-            start_nodes = [n for n, d in self._g.nodes(data=True)
-                           if d.get("node_type") == "user" and not d.get("is_target")]
+            start_nodes = [
+                n for n, d in self._g.nodes(data=True)
+                if d.get("node_type") == "user" and not d.get("is_target")
+            ]
 
         best_path: list = []
-        best_len = float("inf")
+        best_cost = float("inf")
 
-        for src in start_nodes[:50]:  # cap to avoid excessive computation
-            try:
-                path = nx.shortest_path(self._g, src, da_target, weight="weight")
-                if len(path) < best_len:
-                    best_len = len(path)
-                    best_path = path
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                continue
+        for src in start_nodes[:50]:
+            for da_target in da_nodes:
+                try:
+                    cost = nx.shortest_path_length(self._g, src, da_target, weight="weight")
+                    if cost < best_cost:
+                        path = nx.shortest_path(self._g, src, da_target, weight="weight")
+                        best_cost = cost
+                        best_path = path
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    continue
 
         if not best_path:
-            return []
+            return None
 
         return self.path_to_report(best_path)

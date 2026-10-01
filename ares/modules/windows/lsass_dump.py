@@ -112,14 +112,14 @@ class LsassDumpModule(BaseModule):
         if not username:
             blockers.append("No local administrator credentials provided or found in vault")
             score -= 0.4
-            recommendations.extend(["windows.token_impersonation", "ad.kerberoast"])
+            recommendations.extend(["windows.token_impersonation", "ad.kerberoast", "ad.asreproast"])
 
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
         if noise == NoiseProfile.STEALTH:
             blockers.append("Blocked in STEALTH profile: LSASS process access triggers Sysmon Event ID 10 and EDR process handles")
             score = 0.05
             risk = "critical_alarm"
-            recommendations.extend(["windows.dpapi", "ad.kerberoast"])
+            recommendations.extend(["windows.dpapi", "ad.kerberoast", "windows.lsa_secrets"])
 
         session = getattr(ctx, "session", None)
         if session and hasattr(session, "get_host") and target:
@@ -133,7 +133,7 @@ class LsassDumpModule(BaseModule):
                     )
                     score = min(score, 0.05)
                     risk = "critical_alarm"
-                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast"])
+                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast", "windows.lsa_secrets"])
 
                 # 2. Check LSA Protection (RunAsPPL)
                 if host_state.has_defense("lsa_protection") or host_state.has_defense("ppl"):
@@ -142,7 +142,7 @@ class LsassDumpModule(BaseModule):
                     )
                     score = min(score, 0.15)
                     risk = "critical_alarm"
-                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast"])
+                    recommendations.extend(["windows.dpapi", "windows.token_impersonation", "ad.kerberoast", "windows.lsa_secrets"])
 
                 # 3. Check EDR / Sysmon ID 10
                 edr_detected = host_state.defense_profile.get("edr") or host_state.has_defense("sysmon_id10") or host_state.has_defense("edr")
@@ -387,10 +387,9 @@ class LsassDumpModule(BaseModule):
                 remediation=(
                     "Target is compliant with modern credential protection standards. "
                     "To test alternative attack paths that do not touch LSASS memory: "
-                    "1. Evaluate DPAPI secrets via windows.dpapi. "
-                    "2. Audit token impersonation vectors via windows.token_impersonation. "
-                    "3. Perform offline registry extraction (SAM/SECURITY) via windows.lsa_secrets. "
-                    "4. Execute Kerberoasting via ad.kerberoast."
+                    "1. Perform offline registry extraction (SAM/SECURITY) via windows.lsa_secrets. "
+                    "2. Execute Kerberoasting via ad.kerberoast. "
+                    "3. Perform AS-REP Roasting via ad.asreproast."
                 ),
                 host=target,
                 confidence=1.0,

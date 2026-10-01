@@ -138,17 +138,17 @@ _KB_ENTRIES: list[KBEntry] = [
         severity="critical",
     ),
     KBEntry(
-        entry_id="kb-dpapi",
-        title="DPAPI Protected Credential Extraction",
+        entry_id="kb-lsa-secrets",
+        title="LSA Secrets & SAM Hive Credential Extraction",
         description=(
-            "When user context or NT hash is available, DPAPI blobs can be decrypted "
-            "to recover Chrome/Edge saved passwords, WiFi PSK, Windows Credential Manager "
-            "entries, and RDP saved credentials."
+            "When administrator context or SYSTEM access is available, local SAM hashes "
+            "and LSA secrets (cached domain credentials, service passwords) can be extracted "
+            "via remote registry without requiring an LSASS memory dump."
         ),
         category="credential_access",
-        applies_when=["user_context_windows"],
-        attack_modules=["windows.dpapi"],
-        mitre_ids=["T1555.004", "T1555.003"],
+        applies_when=["local_admin_windows"],
+        attack_modules=["windows.lsa_secrets"],
+        mitre_ids=["T1003.002", "T1003.004"],
         severity="high",
     ),
 ]

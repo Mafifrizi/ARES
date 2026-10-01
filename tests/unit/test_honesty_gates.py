@@ -455,6 +455,15 @@ class TestGate6VaultWriteGuard:
         assert res is not False
         assert len(vault.all()) == 1
 
+    def test_cleartext_password_with_dollar_prefix_allowed(self):
+        vault = CredentialVault(encryption_key=None)
+        valid_password = "$uperSecretPassword2026!"
+        res = vault.add(username="corp_admin", secret=valid_password, cred_type=CredentialType.CLEARTEXT)
+        assert res is not False
+        assert len(vault.all()) == 1
+        cred = vault.all()[0]
+        assert vault.reveal(cred.id) == valid_password
+
     def test_credential_valid_with_io_evidence_allowed(self):
         from ares.core.context import ExecutionContext
         vault = CredentialVault(encryption_key=None)

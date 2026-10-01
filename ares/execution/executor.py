@@ -293,7 +293,7 @@ class RemoteExecutor:
             from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
-            _c = Campaign(name="_exec", operator=self.operator)
+            _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = PsExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.execute(
                 target=target, username=username,
@@ -320,7 +320,7 @@ class RemoteExecutor:
             from ares.core.campaign import Campaign
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
-            _c = Campaign(name="_exec", operator=self.operator)
+            _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = WinRMLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.move(
                 target=target,
@@ -353,7 +353,7 @@ class RemoteExecutor:
             from ares.core.campaign import Campaign
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
-            _c = Campaign(name="_exec", operator=self.operator)
+            _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = WMIExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.execute(
                 target=target, username=username,

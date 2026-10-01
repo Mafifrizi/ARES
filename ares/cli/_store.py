@@ -115,11 +115,21 @@ class CampaignStore:
     # ── Checkpoint management ─────────────────────────────────────────────
 
     def save_checkpoint(self, campaign_partial_id: str, notes: str = "") -> dict | None:
-        """Snapshot a campaign state as a checkpoint. Returns checkpoint meta."""
-        import json, time
+        """Snapshot a campaign state as an AES-256-GCM encrypted checkpoint."""
+        import json, time, os
         c = load_campaign(campaign_partial_id)
         if not c:
             return None
+
+        from ares.core.config import get_settings
+        from ares.checkpoint.manager import CheckpointManager
+
+        settings = get_settings()
+        enc_key = getattr(settings, "ares_encryption_key", "") or getattr(settings, "ares_secret_key", "")
+        if not enc_key:
+            enc_key = "ares-default-local-checkpoint-key-32b"
+
+        mgr = CheckpointManager(enc_key)
 
         cp_dir = campaigns_dir() / "checkpoints" / c["id"]
         cp_dir.mkdir(parents=True, exist_ok=True)
@@ -133,22 +143,30 @@ class CampaignStore:
             "notes":         notes,
             "state":         c,
         }
+        raw_bytes = json.dumps(checkpoint, indent=2, default=str).encode("utf-8")
+        nonce = os.urandom(mgr._GCM_NONCE_LEN)
+        ct = mgr._aesgcm.encrypt(nonce, raw_bytes, None)
+        encrypted = mgr._V2_MAGIC + nonce + ct
+
         cp_path = cp_dir / f"{cp_id}.json"
-        cp_path.write_text(json.dumps(checkpoint, indent=2, default=str), encoding="utf-8")
+        cp_path.write_bytes(encrypted)
 
         # Mark campaign as paused
         for p in campaigns_dir().glob("*.json"):
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if data["id"] == c["id"]:
-                data["status"] = "paused"
-                data["last_checkpoint"] = cp_id
-                p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                break
+            try:
+                data_raw = json.loads(p.read_text(encoding="utf-8"))
+                if data_raw.get("id") == c["id"]:
+                    data_raw["status"] = "paused"
+                    data_raw["last_checkpoint"] = cp_id
+                    p.write_text(json.dumps(data_raw, indent=2), encoding="utf-8")
+                    break
+            except Exception:
+                continue
 
         return {"checkpoint_id": cp_id, "path": str(cp_path), "saved_at": checkpoint["saved_at"]}
 
     def load_checkpoint(self, campaign_partial_id: str, cp_id: str = "latest") -> dict | None:
-        """Load a checkpoint. cp_id='latest' returns the most recent."""
+        """Load an AES-256-GCM encrypted checkpoint. cp_id='latest' returns the most recent."""
         import json
         c = load_campaign(campaign_partial_id)
         if not c:
@@ -168,7 +186,22 @@ class CampaignStore:
             matches = [p for p in checkpoints if cp_id in p.name]
             target = matches[0] if matches else checkpoints[0]
 
-        return json.loads(target.read_text(encoding="utf-8"))
+        data_bytes = target.read_bytes()
+        from ares.core.config import get_settings
+        from ares.checkpoint.manager import CheckpointManager
+
+        settings = get_settings()
+        enc_key = getattr(settings, "ares_encryption_key", "") or getattr(settings, "ares_secret_key", "")
+        if not enc_key:
+            enc_key = "ares-default-local-checkpoint-key-32b"
+
+        mgr = CheckpointManager(enc_key)
+        try:
+            decrypted = mgr._decrypt_checkpoint(data_bytes)
+            return json.loads(decrypted.decode("utf-8"))
+        except Exception:
+            # Fallback: legacy unencrypted JSON
+            return json.loads(data_bytes.decode("utf-8"))
 
     def list_reports(self, campaign_partial_id: str = "") -> list[dict]:
         """List generated report files from ~/.ares/reports/."""

@@ -401,7 +401,12 @@ class CollaborationManager:
             if lock:
                 op = self._operators.get(lock.operator_id)
                 if op and lock.target_host in op.active_targets:
-                    op.active_targets.remove(lock.target_host)
+                    has_other_lock = any(
+                        l.operator_id == lock.operator_id and l.target_host == lock.target_host and not l.is_expired
+                        for l in self._locks.values()
+                    )
+                    if not has_other_lock:
+                        op.active_targets.remove(lock.target_host)
         return bool(to_del)
 
     def _evict_expired_locks(self) -> None:

@@ -101,13 +101,13 @@ _SERVICE_INTELLIGENCE: dict[int, dict[str, Any]] = {
         "description": (
             "LDAP over TLS (LDAPS) is listening on {target}:636. Indicates a Domain Controller supporting "
             "encrypted directory queries and ADCS certificate enrollment. "
-            "Target for AD enumeration (ad.enum_users, ad.enum_computers) and ADCS escalation (ad.adcs, ad.ghost_forge)."
+            "Target for AD enumeration (ad.enum_users, ad.enum_computers) and ADCS escalation (ad.adcs)."
         ),
         "remediation": (
             "Enforce LDAP channel binding (LdapEnforceChannelBinding=2), require LDAP signing, "
             "and restrict LDAPS inbound traffic to authorized administrative jump hosts."
         ),
-        "next_modules": ["ad.enum_users", "ad.adcs", "ad.ghost_forge"],
+        "next_modules": ["ad.enum_users", "ad.enum_computers", "ad.adcs"],
     },
     389: {
         "title": "Active Directory LDAP Directory Service Exposed on Port 389",

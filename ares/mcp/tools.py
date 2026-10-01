@@ -438,6 +438,18 @@ class McpToolRegistry:
     async def _handle_query_attack_graph(self, args: dict[str, Any]) -> CallToolResult:
         campaign_id = args["campaign_id"]
         target_node = args.get("target_node", "Domain Admins")
+
+        if self.db and hasattr(self.db, "get_attack_graph"):
+            try:
+                g = await self.db.get_attack_graph(campaign_id, target_goal=target_node)
+                if g:
+                    clean_data = McpTaintSanitizer.sanitize(g)
+                    return CallToolResult(
+                        content=[TextContent(type="text", text=json.dumps(clean_data, indent=2))]
+                    )
+            except Exception as exc:
+                logger.warning("mcp_query_attack_graph_failed", error=str(exc))
+
         graph_data = {
             "campaign_id": campaign_id,
             "target_goal": target_node,
@@ -445,7 +457,7 @@ class McpToolRegistry:
                 {"step": 1, "node": "WS01.corp.local", "type": "host", "status": "compromised"},
                 {"step": 2, "node": "CORP\\jdoe", "type": "user", "status": "credentials_dumped"},
                 {"step": 3, "node": "Server02.corp.local", "type": "host", "relation": "AdminTo"},
-                {"step": 4, "node": "CORP\\svc_backup", "type": "user", "relation": "TokenImpersonation"},
+                {"step": 4, "node": "CORP\\svc_backup", "type": "user", "relation": "Kerberoast"},
                 {"step": 5, "node": "DC01.corp.local", "type": "host", "relation": "DCSync"},
                 {"step": 6, "node": "Domain Admins", "type": "group", "status": "unlocked"},
             ],

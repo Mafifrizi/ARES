@@ -115,3 +115,37 @@ async def test_scheduled_task_explicit_teardown_method():
     mock_delete.assert_called_once_with(
         "10.0.0.5", "admin", "pass", "corp.local", "", "", "ManualTask"
     )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_retained_when_persist_true():
+    """When persist=True is passed, task is not deleted in finally block."""
+    mod = _make_module()
+
+    mock_register = MagicMock()
+    mock_delete = MagicMock()
+
+    mock_modules = {
+        "impacket": MagicMock(),
+        "impacket.dcerpc": MagicMock(),
+        "impacket.dcerpc.v5": MagicMock(),
+        "impacket.dcerpc.v5.tsch": MagicMock(),
+    }
+
+    with patch.dict("sys.modules", mock_modules), \
+         patch("ares.modules.persistence.scheduled_task._tsch_register_sync", mock_register), \
+         patch("ares.modules.persistence.scheduled_task._tsch_delete_sync", mock_delete):
+        findings, raw = await mod.run(
+            target="10.0.0.5",
+            username="admin",
+            password="pass",
+            domain="corp.local",
+            task_name="PersistentAresTask",
+            command="calc.exe",
+            persist=True,
+        )
+
+    mock_register.assert_called_once()
+    mock_delete.assert_not_called()
+    assert raw["persistence_established"] is True
+

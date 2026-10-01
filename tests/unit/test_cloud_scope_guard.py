@@ -179,3 +179,13 @@ class TestCloudModulesEnforcement:
 
         with pytest.raises(ScopeViolationError):
             await mod.run(project_id="gcp-rogue-project")
+
+    async def test_cloud_identity_federation_scope_enforcement(self, dummy_settings, dummy_noise):
+        from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
+
+        cloud_scope = CloudScope(azure_tenant_ids=["tenant-corp-uuid"])
+        campaign = Campaign(name="Federation Restricted", cloud_scope=cloud_scope)
+        mod = CloudIdentityFederationModule(dummy_settings, campaign, dummy_noise)
+
+        with pytest.raises(ScopeViolationError):
+            await mod.run(tenant_id="tenant-attacker-uuid")

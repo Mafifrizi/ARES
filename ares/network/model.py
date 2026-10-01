@@ -263,6 +263,14 @@ class NetworkModel:
         G = nx.DiGraph()
         for host in self.all_hosts():
             G.add_node(host.ip_address)
+            can_pivot = (
+                host.ip_address == source_ip
+                or host.is_pivot
+                or host.is_router
+                or host.ip_address in self._pivots
+            )
+            if not can_pivot:
+                continue
             for reachable in host.reachable:
                 G.add_edge(host.ip_address, reachable)
             # Same-subnet hosts are mutually reachable
@@ -289,6 +297,9 @@ class NetworkModel:
                 return path
             host = self.get_host(node)
             if not host:
+                continue
+            # Intermediate nodes must be pivots or routers to forward traffic
+            if node != source and not (host.is_pivot or host.is_router or node in self._pivots):
                 continue
             neighbors = list(host.reachable)
             subnet = self.subnet_for(node)

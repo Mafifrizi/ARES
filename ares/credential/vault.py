@@ -257,8 +257,13 @@ def _validate_type_coherence(secret: str, cred_type: CredentialType) -> bool:
             )
         )
     if cred_type == CredentialType.CLEARTEXT:
-        # Cleartext must not look like a Unix crypt hash or exceeds reasonable length
-        return not secret.startswith("$") and len(secret) < 256
+        # Cleartext must not look like a Unix crypt / Kerberos hash prefix or exceed reasonable length
+        _CRYPT_HASH_PREFIXES = (
+            "$6$", "$5$", "$1$", "$2a$", "$2b$", "$2y$", "$y$",
+            "$argon2id$", "$argon2i$", "$apr1$", "$krb5",
+            "$NT$", "$DCC2$", "$MSCACHE2$"
+        )
+        return not secret.startswith(_CRYPT_HASH_PREFIXES) and len(secret) < 256
     if cred_type == CredentialType.NTLM:
         if ":" in secret:
             parts = secret.split(":")
