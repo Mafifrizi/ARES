@@ -45,13 +45,14 @@ def _make_module(cls):
 class TestStagedCollectionSafety:
     """Verifies that staged collection does not leak un-scoped egress or disable SSL validation."""
 
-    def test_staged_collection_params_defaults_lots_egress_to_false(self):
+    def test_staged_collection_params_conforms_to_contract(self):
         params = StagedCollectionParams(
             target="10.0.0.1",
             username="operator",
             destination="/tmp/stage",
         )
-        assert params.audit_lots_egress is False
+        assert params.target == "10.0.0.1"
+        assert not hasattr(params, "audit_lots_egress")
 
     @pytest.mark.asyncio
     async def test_staged_collection_run_skips_lots_egress_by_default(self):

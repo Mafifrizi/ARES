@@ -834,11 +834,6 @@ class StagedCollectionParams(ModuleParams):
     max_files: int = param(
         "Max files to collect", required=False, default=200, ge=1, le=1000
     )
-    audit_lots_egress: bool = param(
-        "Enable Living-off-the-Trusted-Services cloud egress audit",
-        required=False,
-        default=False,
-    )
 
 
 # ── Lateral movement modules ──────────────────────────────────────────────────

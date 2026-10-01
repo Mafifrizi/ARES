@@ -169,14 +169,11 @@ class StagedCollectionModule(BaseModule):
         destination  = pdict.get("destination", "")
         max_files    = int(pdict.get("max_files", 200))
 
-        audit_lots_egress = bool(pdict.get("audit_lots_egress", False))
-
         findings, raw = await self.run(
             target=target, username=username, password=password,
             key_path=key_path, platform=platform,
             search_paths=search_paths, max_files=max_files,
             destination=destination,
-            audit_lots_egress=audit_lots_egress,
         )
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
