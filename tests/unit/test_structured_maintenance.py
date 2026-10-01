@@ -97,13 +97,15 @@ class TestStagedCollectionSafety:
             "checked_endpoints": ["m365_graph", "aws_s3", "azure_blob"],
         }
 
-        with patch("paramiko.SSHClient", return_value=mock_ssh), \
-             patch("ares.modules.exfil.staged_collection._audit_lots_egress_sync", return_value=mock_lots_result) as mock_lots:
+        mock_lots = MagicMock(return_value=mock_lots_result)
+
+        with patch("paramiko.SSHClient", return_value=mock_ssh):
             findings, raw = await mod.run(
                 target="10.0.0.1",
                 username="operator",
                 destination="/tmp/stage",
                 audit_lots_egress=True,
+                lots_audit_func=mock_lots,
             )
             assert mock_lots.called
             assert raw["lots_routes_open"] == ["m365_graph"]
