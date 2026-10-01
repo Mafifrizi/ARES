@@ -465,7 +465,7 @@ def campaign_resume(
     from pathlib import Path
     campaigns_path = Path.home() / ".ares" / "campaigns"
     for p in campaigns_path.glob("*.json"):
-        data = json.loads(p.read_text())
+        data = json.loads(p.read_text(encoding="utf-8"))
         if data["id"].startswith(campaign_id):
             data["status"] = "active"
             p.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -536,7 +536,7 @@ def target_import(
         console.print(f"[red]File not found: {file}[/]")
         raise typer.Exit(1)
 
-    lines = file.read_text().strip().splitlines()
+    lines = file.read_text(encoding="utf-8").strip().splitlines()
     targets = [l.strip() for l in lines if l.strip() and not l.startswith("#")]
     console.print(f"[green][+] Imported {len(targets)} targets[/]")
 
@@ -1014,7 +1014,7 @@ def signing_add_key(
     """Add a trusted public key to the registry."""
     from ares.core.signing import KeyRegistry
     registry = KeyRegistry()
-    pem = pub_key.read_text()
+    pem = pub_key.read_text(encoding="utf-8")
     registry.add_trusted_key(key_id, pem, author, added_by=operator)
     console.print(f"[green][+] Trusted key added:[/] {key_id} ({author})")
 
@@ -1623,7 +1623,7 @@ def doctor(
     # .env
     env_path = Path(".env")
     if env_path.exists():
-        content = env_path.read_text()
+        content = env_path.read_text(encoding="utf-8")
         if "CHANGE_ME" in content:
             check(".env configured", "fail",
                   "CHANGE_ME placeholders found - run: ares-setup to generate secure keys")

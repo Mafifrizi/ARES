@@ -193,7 +193,7 @@ class CrackingWorker:
         """
         hash_file  = self.tmpdir / f"{job.job_id}.hash"
         potfile    = self.tmpdir / f"{job.job_id}.pot"
-        hash_file.write_text(job.hash_value)
+        hash_file.write_text(job.hash_value, encoding="utf-8")
 
         cmd = [
             self._hashcat,
@@ -233,7 +233,7 @@ class CrackingWorker:
 
             # Read cracked plaintext from potfile
             if potfile.exists():
-                content = potfile.read_text().strip()
+                content = potfile.read_text(encoding="utf-8", errors="replace").strip()
                 if content:
                     # Potfile format: hash:plaintext
                     parts = content.split(":", 1)

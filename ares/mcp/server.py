@@ -183,5 +183,8 @@ class AresMcpServer:
             logger.exception("Internal error handling method %s: %s", method, e)
             return JSONRPCResponse(
                 id=req.id,
-                error=JSONRPCError(code=ErrorCode.INTERNAL_ERROR.value, message=f"Internal MCP server error: {e}"),
+                error=JSONRPCError(
+                    code=ErrorCode.INTERNAL_ERROR.value,
+                    message="Internal MCP server error. Consult system audit logs.",
+                ),
             ).model_dump(exclude_none=True)

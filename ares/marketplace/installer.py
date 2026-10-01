@@ -290,7 +290,7 @@ class LocalRegistry:
         reg_path = getattr(_self_module, "INSTALLED_REGISTRY", REGISTRY_FILE)
         try:
             if reg_path.exists():
-                return json.loads(reg_path.read_text())
+                return json.loads(reg_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, AttributeError):
             pass
         return {"plugins": {}}
@@ -455,7 +455,7 @@ class ModuleInstaller:
                 next(path.glob("*.py"), None) or path, source_url=str(path)
             )
         else:
-            manifest = ModuleManifest.from_dict(json.loads(manifest_file.read_text()))
+            manifest = ModuleManifest.from_dict(json.loads(manifest_file.read_text(encoding="utf-8")))
             manifest.source_url = str(path)
 
         return self._finalize_install(path, manifest, force)
@@ -470,7 +470,7 @@ class ModuleInstaller:
             sidecar = path.parent / "manifest.json"
             if sidecar.exists():
                 import json as _json
-                return _json.loads(sidecar.read_text())
+                return _json.loads(sidecar.read_text(encoding="utf-8"))
             # No sidecar - cannot extract sha256 from source alone
             return None
         except Exception:

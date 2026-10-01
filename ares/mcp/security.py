@@ -140,12 +140,12 @@ class McpScopeGate:
         if not target or not scope_rules:
             return False
 
-        # Extract host if target includes port notation (e.g. "10.0.0.1:445" or "dc01.corp.local:88")
+        # Extract host if target includes port notation (e.g. "10.0.0.1:445", "[2001:db8::1]:445", or "dc01.corp.local:88")
         target_host = target
-        if ":" in target and not target.startswith("["):
-            parts = target.split(":")
-            if len(parts) == 2:
-                target_host = parts[0].strip()
+        if target.startswith("[") and "]" in target:
+            target_host = target[1:target.index("]")]
+        elif ":" in target and target.count(":") == 1:
+            target_host = target.split(":")[0].strip()
 
         for rule in scope_rules:
             rule = rule.strip().lower()

@@ -22,7 +22,7 @@ def save_campaign(campaign: Any) -> None:
 
 def load_campaign(partial_id: str) -> dict[str, Any] | None:
     for p in campaigns_dir().glob("*.json"):
-        data: dict[str, Any] = json.loads(p.read_text())
+        data: dict[str, Any] = json.loads(p.read_text(encoding="utf-8"))
         if data["id"].startswith(partial_id):
             return data
     return None
@@ -30,7 +30,7 @@ def load_campaign(partial_id: str) -> dict[str, Any] | None:
 
 def load_all_campaigns() -> list[dict[str, Any]]:
     return [
-        json.loads(p.read_text())
+        json.loads(p.read_text(encoding="utf-8"))
         for p in sorted(
             campaigns_dir().glob("*.json"),
             key=lambda x: x.stat().st_mtime,
@@ -84,7 +84,7 @@ class CampaignStore:
             ip_str = str(target)
 
         for p in campaigns_dir().glob("*.json"):
-            data: dict = json.loads(p.read_text())
+            data: dict = json.loads(p.read_text(encoding="utf-8"))
             if data["id"].startswith(campaign_partial_id):
                 targets = data.get("targets", [])
                 # Avoid duplicate IPs
@@ -138,7 +138,7 @@ class CampaignStore:
 
         # Mark campaign as paused
         for p in campaigns_dir().glob("*.json"):
-            data = json.loads(p.read_text())
+            data = json.loads(p.read_text(encoding="utf-8"))
             if data["id"] == c["id"]:
                 data["status"] = "paused"
                 data["last_checkpoint"] = cp_id
@@ -168,7 +168,7 @@ class CampaignStore:
             matches = [p for p in checkpoints if cp_id in p.name]
             target = matches[0] if matches else checkpoints[0]
 
-        return json.loads(target.read_text())
+        return json.loads(target.read_text(encoding="utf-8"))
 
     def list_reports(self, campaign_partial_id: str = "") -> list[dict]:
         """List generated report files from ~/.ares/reports/."""

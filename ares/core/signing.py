@@ -99,11 +99,11 @@ class ModuleSignature:
 
     def save(self, path: Path) -> None:
         """Write signature to <module_file>.sig"""
-        path.write_text(json.dumps(self.to_dict(), indent=2))
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "ModuleSignature":
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return cls(**data)
 
 
@@ -153,13 +153,13 @@ class KeyRegistry:
 
     def _load(self) -> None:
         if self._path.exists():
-            data = json.loads(self._path.read_text())
+            data = json.loads(self._path.read_text(encoding="utf-8"))
             self._keys    = data.get("trusted_keys", {})
             self._revoked = set(data.get("revoked_keys", []))
 
         rev_path = REVOKED_KEYS_PATH
         if rev_path.exists():
-            data = json.loads(rev_path.read_text())
+            data = json.loads(rev_path.read_text(encoding="utf-8"))
             self._revoked.update(data.get("revoked_keys", []))
 
     def _save(self) -> None:
@@ -168,7 +168,7 @@ class KeyRegistry:
             "trusted_keys":  self._keys,
             "revoked_keys":  list(self._revoked),
             "updated_at":    time.time(),
-        }, indent=2))
+        }, indent=2), encoding="utf-8")
 
     def add_trusted_key(
         self,

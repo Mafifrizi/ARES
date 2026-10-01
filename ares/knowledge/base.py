@@ -385,7 +385,7 @@ class OutcomeTracker:
     def _load(self) -> dict[str, dict[str, int]]:
         try:
             if self._path.exists():
-                return _json.loads(self._path.read_text())
+                return _json.loads(self._path.read_text(encoding="utf-8"))
         except Exception:
             pass
         return {}

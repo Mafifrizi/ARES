@@ -63,8 +63,6 @@ def _audit_lots_egress_sync(target: str) -> dict[str, Any]:
     }
 
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
 
     for service_name, url in cloud_endpoints.items():
         try:
@@ -171,11 +169,14 @@ class StagedCollectionModule(BaseModule):
         destination  = pdict.get("destination", "")
         max_files    = int(pdict.get("max_files", 200))
 
+        audit_lots_egress = bool(pdict.get("audit_lots_egress", False))
+
         findings, raw = await self.run(
             target=target, username=username, password=password,
             key_path=key_path, platform=platform,
             search_paths=search_paths, max_files=max_files,
             destination=destination,
+            audit_lots_egress=audit_lots_egress,
         )
 
         # Cryptographic Evidence Records with SHA-256 Merkle Provenance
@@ -353,8 +354,17 @@ class StagedCollectionModule(BaseModule):
                 host=target, confidence=0.9,
             )
 
-        lots_audit_func = kwargs.get("lots_audit_func") or _audit_lots_egress_sync
-        lots_data = await loop.run_in_executor(None, lots_audit_func, target)
+        audit_lots_egress = kwargs.get("audit_lots_egress", False)
+        lots_audit_func = kwargs.get("lots_audit_func")
+        if lots_audit_func or audit_lots_egress:
+            lots_func = lots_audit_func or _audit_lots_egress_sync
+            lots_data = await loop.run_in_executor(None, lots_func, target)
+        else:
+            lots_data = {
+                "lots_routes_open": [],
+                "tenant_restrictions_enforced": False,
+                "checked_endpoints": [],
+            }
 
         if lots_data.get("lots_routes_open") and not lots_data.get("tenant_restrictions_enforced"):
             self.finding(
