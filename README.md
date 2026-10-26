@@ -18,6 +18,7 @@
 [![Tests Suite](https://img.shields.io/badge/Tests-5%2C074%20Passing-22C55E?style=for-the-badge)](tests/)
 [![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
 [![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/Mafifrizi/badge.svg?style=for-the-badge)](https://hub.xerj.org/contributors/Mafifrizi)
 
 <br><br>
 
