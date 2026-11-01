@@ -608,7 +608,7 @@ class PsExecLateral(BaseLateralModule):
         logger.info("psexec_attempt", target=target, username=username, domain=domain)
 
         try:
-            from impacket.smbconnection import SessionError, SMBConnection
+            from impacket.smbconnection import SessionError, SMBConnection  # noqa: F401
         except ImportError:
             return LateralResult(
                 technique=LateralTechnique.PSEXEC,
@@ -865,7 +865,7 @@ class WmiExecLateral(BaseLateralModule):
         logger.info("wmiexec_attempt", target=target, username=username, domain=domain)
 
         try:
-            from impacket.smbconnection import SessionError, SMBConnection
+            from impacket.smbconnection import SessionError, SMBConnection  # noqa: F401
         except ImportError:
             return LateralResult(
                 technique=LateralTechnique.WMIEXEC,

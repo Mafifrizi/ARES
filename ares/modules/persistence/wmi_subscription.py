@@ -263,7 +263,7 @@ class WMISubscriptionModule(BaseModule):
         await self.before_request(target, "wmi")  # scope check + jitter
 
         try:
-            from impacket.dcerpc.v5 import transport  # type: ignore[import]
+            from impacket.dcerpc.v5 import transport  # type: ignore[import]  # noqa: F401
             from impacket.dcerpc.v5.dcom import wmi  # type: ignore[import]
             from impacket.dcerpc.v5.dcomrt import DCOMConnection  # type: ignore[import]
         except ImportError:

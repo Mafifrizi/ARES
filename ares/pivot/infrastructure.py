@@ -218,7 +218,7 @@ class PivotManager:
                 import shutil
                 import subprocess
 
-                import paramiko
+                import paramiko  # noqa: F401
 
                 if shutil.which("ssh"):
                     # Use system ssh -D (most reliable for SOCKS5)

@@ -241,10 +241,10 @@ class DCOMLateral(BaseLateralModule):
               target=target, technique="T1021.003")
 
         try:
-            from impacket.dcerpc.v5 import dcomrt, transport  # type: ignore[import]
+            from impacket.dcerpc.v5 import dcomrt, transport  # type: ignore[import]  # noqa: F401
             from impacket.dcerpc.v5.dcom import mmc, wmi  # type: ignore[import]
             from impacket.dcerpc.v5.dcom.oaut import (  # type: ignore[import]
-                IDispatch,
+                IDispatch,  # noqa: F401
             )
             from impacket.dcerpc.v5.dcomrt import (  # type: ignore[import]
                 DCOMConnection,

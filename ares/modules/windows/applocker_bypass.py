@@ -264,7 +264,7 @@ class AppLockerBypassModule(BaseModule):
                 DCERPCException,
                 hBaseRegCloseKey,
                 hBaseRegEnumKey,
-                hBaseRegEnumValue,
+                hBaseRegEnumValue,  # noqa: F401
                 hBaseRegOpenKey,
                 hBaseRegQueryInfoKey,
                 hBaseRegQueryValue,

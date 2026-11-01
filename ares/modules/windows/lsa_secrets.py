@@ -293,7 +293,7 @@ class LSASecretsModule(BaseModule):
         try:
             from impacket.examples.secretsdump import (  # type: ignore[import]
                 LSASecrets,
-                NTDSHashes,
+                NTDSHashes,  # noqa: F401
                 RemoteOperations,
                 SAMHashes,
             )

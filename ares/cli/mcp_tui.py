@@ -7,7 +7,7 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Non-blocking keyboard check
 try:

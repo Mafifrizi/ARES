@@ -697,7 +697,7 @@ def build_campaign_graph(
 
     # ── Pivots ─────────────────────────────────────────────────────────────
     try:
-        from ares.pivot.infrastructure import PivotManager
+        from ares.pivot.infrastructure import PivotManager  # noqa: F401
         # Check if campaign has a pivot manager attached
         pm = getattr(campaign, "pivot_manager", None)
         if pm:

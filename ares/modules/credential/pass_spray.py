@@ -545,14 +545,14 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         smb_available = False
         if not use_ldap:
             try:
-                from impacket.smbconnection import SMBConnection  # type: ignore[import]
+                from impacket.smbconnection import SMBConnection  # type: ignore[import]  # noqa: F401
                 smb_available = True
             except ImportError:
                 use_ldap = True   # impacket missing - try ldap3
 
         if use_ldap or not smb_available:
             try:
-                import ldap3 as _ldap3  # type: ignore[import]
+                import ldap3 as _ldap3  # type: ignore[import]  # noqa: F401
                 use_ldap = True
             except ImportError:
                 return [], {"error": "Neither impacket nor ldap3 installed"}

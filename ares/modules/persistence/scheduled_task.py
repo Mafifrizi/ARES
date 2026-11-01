@@ -397,7 +397,7 @@ class ScheduledTaskPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import tsch  # type: ignore[import]
+            from impacket.dcerpc.v5 import tsch  # type: ignore[import]  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 
@@ -672,7 +672,7 @@ class RegistryRunKeyPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import rrp  # type: ignore[import]
+            from impacket.dcerpc.v5 import rrp  # type: ignore[import]  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 

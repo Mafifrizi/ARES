@@ -273,7 +273,7 @@ class GCPModule(BaseModule):
         try:
             import google.auth.transport.requests as _garequests
             from google.cloud import resourcemanager_v3  # type: ignore[import]
-            from google.oauth2 import credentials as _creds_module
+            from google.oauth2 import credentials as _creds_module  # noqa: F401
 
             client = resourcemanager_v3.ProjectsClient(credentials=credentials)
             request = resourcemanager_v3.GetIamPolicyRequest(

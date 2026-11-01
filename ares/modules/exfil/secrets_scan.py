@@ -610,13 +610,13 @@ class SecretsScan(BaseModule):
         try:
             if platform == "windows":
                 try:
-                    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]
+                    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]  # noqa: F401
                 except ImportError:
                     return [], {"error": "impacket_not_installed"}
                 hits = _wmi_scan(target, username, password, domain)
             else:
                 try:
-                    import paramiko  # type: ignore[import]
+                    import paramiko  # type: ignore[import]  # noqa: F401
                 except ImportError:
                     return [], {"error": "paramiko_not_installed"}
                 hits = _ssh_scan(target, username, password, key_path)

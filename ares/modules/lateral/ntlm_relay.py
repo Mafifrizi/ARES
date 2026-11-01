@@ -781,8 +781,8 @@ class NTLMRelayModule(BaseModule):
 
                 # Step 1: Bind via LDAP
                 import ldap3
-                from impacket.ldap import ldap as imp_ldap
-                from impacket.ldap import ldapasn1 as ldapasn1_impacket
+                from impacket.ldap import ldap as imp_ldap  # noqa: F401
+                from impacket.ldap import ldapasn1 as ldapasn1_impacket  # noqa: F401
                 tls = ldap3.Tls(validate=ssl.CERT_NONE)
                 server = ldap3.Server(dc, port=389, connect_timeout=10)
                 conn = ldap3.Connection(

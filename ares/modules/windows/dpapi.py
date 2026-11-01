@@ -458,7 +458,7 @@ class DPAPIModule(BaseModule):
         try:
             import hashlib
 
-            from impacket.dpapi import Credential, MasterKey
+            from impacket.dpapi import Credential, MasterKey  # noqa: F401
 
             # SHA1(NT_HASH) = DPAPI user key derivation
             nt_bytes = bytes.fromhex(nt_hash) if len(nt_hash) == 32 else b""
@@ -498,7 +498,7 @@ class DPAPIModule(BaseModule):
                                   backup_key: str) -> list[dict]:
         """Decrypt DPAPI blobs using domain backup key (from lsa_secrets)."""
         try:
-            from impacket.dpapi import MasterKey
+            from impacket.dpapi import MasterKey  # noqa: F401
             key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
             creds: list[dict] = []
             # Domain backup key decryption logic

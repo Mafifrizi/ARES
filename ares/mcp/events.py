@@ -9,7 +9,7 @@ import json
 import socket
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 DEFAULT_EVENT_PORT = 27890
 DEFAULT_EVENT_HOST = "127.0.0.1"

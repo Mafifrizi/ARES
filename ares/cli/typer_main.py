@@ -39,7 +39,7 @@ import warnings
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request

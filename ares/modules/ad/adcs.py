@@ -1054,12 +1054,12 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         # Generate key pair and CSR with target UPN as SAN
         pfx_path = key_path = csr_path = ""
         try:
-            import datetime
+            import datetime  # noqa: F401
 
             from cryptography import x509
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
-            from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+            from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID  # noqa: F401
 
             # Generate RSA key
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -1277,7 +1277,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                                     "ccache_path": "", "nt_hash": ""}
         try:
             import os
-            import tempfile
+            import tempfile  # noqa: F401
 
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
@@ -1289,11 +1289,11 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 pem_data = f.read()
 
             from cryptography import x509
-            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives import hashes  # noqa: F401
             from cryptography.hazmat.primitives.serialization import (
-                Encoding,
+                Encoding,  # noqa: F401
                 NoEncryption,
-                PrivateFormat,
+                PrivateFormat,  # noqa: F401
                 pkcs12,
             )
 
@@ -1345,7 +1345,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 # Use impacket's PKINIT implementation to get TGT
                 # impacket >= 0.11 has gettgtpkinit support
                 try:
-                    from impacket.krb5 import types as krb_types
+                    from impacket.krb5 import types as krb_types  # noqa: F401
 
                     user_principal = Principal(
                         target_user,
