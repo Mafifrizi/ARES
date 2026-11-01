@@ -493,7 +493,7 @@ async def api_status(_auth: None = Depends(_require_dashboard_auth)) -> dict[str
     return {"status": "online", "version": _ares_version}
 
 
-def _get_db() -> "AresDatabase":
+def _get_db() -> "AresDatabase":  # noqa: F821
     """
     Return the shared AresDatabase from dashboard_app.state.
     Set at startup via: dashboard_app.state.db = <AresDatabase instance>
@@ -563,7 +563,7 @@ async def api_summary(campaign_id: str,
         db = _get_db()
         use_shared = getattr(dashboard_app.state, "db", None) is not None
 
-        async def _fetch(db: "AresDatabase") -> dict[str, Any]:
+        async def _fetch(db: "AresDatabase") -> dict[str, Any]:  # noqa: F821
             summary  = await db.campaign_summary(campaign_id)
             findings, _ = await db.list_findings(campaign_id,
                                                   validated=True, false_positive=False)

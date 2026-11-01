@@ -275,7 +275,7 @@ class DataEncryptor:
             self._fernet_cache[salt] = cipher
         return cipher
 
-    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":
+    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":  # noqa: F821
         """Derive an AES-256-GCM key from salt (600k iterations)."""
         if not hasattr(self, "_gcm_cache"):
             self._gcm_cache = {}

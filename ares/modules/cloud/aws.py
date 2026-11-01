@@ -85,7 +85,7 @@ class AWSEnumModule(BaseModule):
         if pdict.get("account_id"):
             self.validate_cloud_scope(pdict.get("account_id"), "aws")
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+)."""
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):

@@ -66,7 +66,7 @@ class LSASecretsModule(BaseModule):
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth
     PARAMS_MODEL       = LSASecretsParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates registry auditing, local admin access, noise constraints,

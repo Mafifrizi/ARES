@@ -62,7 +62,7 @@ class TokenImpersonationModule(BaseModule):
     ENABLED            = False
     DISABLED_REASON    = "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)"
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """Pre-flight Defense Feasibility Assessment: Disabled under MOD-030."""
         from ares.modules.base import FeasibilityReport
         return FeasibilityReport(

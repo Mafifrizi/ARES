@@ -194,7 +194,7 @@ class BaseLateralModule(BaseModule):
             f"{self.__class__.__name__} must implement move()"
         )
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Default lateral movement feasibility evaluation:
         Checks target reachability, credentials, and noise profile compatibility.
@@ -551,7 +551,7 @@ class PsExecLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1569.002", "T1021.002"]
     PARAMS_MODEL       = PsExecParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         PsExec installs a service (Event ID 7045) which is actively monitored by every
@@ -808,7 +808,7 @@ class WmiExecLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1047", "T1021.002"]
     PARAMS_MODEL       = WmiExecParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates WMI / Win32_Process.Create feasibility and RPC port 135 filtering.
@@ -1043,7 +1043,7 @@ class WinRMLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1021.006", "T1059.001"]
     PARAMS_MODEL       = WinRMParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         WinRM is the standard enterprise management protocol; blends into normal admin traffic.
@@ -1471,7 +1471,7 @@ class RDPLateral(BaseLateralModule):
     MIN_NOISE_PROFILE  = "normal"
     PARAMS_MODEL       = RDPLateralParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         RDP creates interactive logons (Event ID 4624 type 10); high noise and blocked under STEALTH.

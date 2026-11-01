@@ -58,7 +58,7 @@ def _make_module(cls: type, noise_profile: str = "normal") -> tuple:
     return module, campaign
 
 
-def _make_test_ctx(params: dict | None = None, dry_run: bool = False, vault: Any = None) -> ExecutionContext:
+def _make_test_ctx(params: dict | None = None, dry_run: bool = False, vault: Any = None) -> ExecutionContext:  # noqa: F821
     settings = AresSettings(
         ares_secret_key="test-secret-key-32chars-minimum!!",
         ares_encryption_key="test-encryption-key-32chars-min!!",
@@ -109,7 +109,7 @@ def _synthesize_tdb(records: list[tuple[bytes, bytes]]) -> bytes:
     return header + hash_table + bytes(record_bodies)
 
 
-def _synthesize_keytab(entries: list[dict[str, Any]]) -> bytes:
+def _synthesize_keytab(entries: list[dict[str, Any]]) -> bytes:  # noqa: F821
     """Synthesizes a valid Kerberos keytab binary file (format 0x0502)."""
     buf = bytearray(struct.pack(">H", 0x0502))
     for e in entries:

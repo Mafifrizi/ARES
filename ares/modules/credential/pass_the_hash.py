@@ -61,7 +61,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1550.002"]
     PARAMS_MODEL       = PassTheHashParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates NTLM hash presence, target host, and Kerberos-only/NTLM-disabled policies.

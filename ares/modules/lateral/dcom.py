@@ -79,7 +79,7 @@ class DCOMLateral(BaseLateralModule):
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth - creates remote process
     PARAMS_MODEL       = DCOMParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         DCOM (MMC20.Application / ShellWindows) is significantly stealthier than PsExec

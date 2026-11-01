@@ -113,7 +113,7 @@ class AzureModule(BaseModule):
         if pdict.get("tenant_id"):
             self.validate_cloud_scope(pdict.get("tenant_id"), "azure_ad")
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """

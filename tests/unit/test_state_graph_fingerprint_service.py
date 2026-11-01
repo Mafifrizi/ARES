@@ -37,13 +37,13 @@ import pytest
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _session(campaign_id: str = "test-001") -> "OperatorSession":
+def _session(campaign_id: str = "test-001") -> "OperatorSession":  # noqa: F821
     from ares.state.target_state import OperatorSession
     return OperatorSession(campaign_id=campaign_id, operator="tester")
 
 
 def _host(ip: str = "10.0.0.1", hostname: str = "srv01",
-          level: str = "none") -> "HostState":
+          level: str = "none") -> "HostState":  # noqa: F821
     from ares.state.target_state import CompromiseLevel, HostState
     return HostState(
         ip_address       = ip,

@@ -157,7 +157,7 @@ class ScheduledTaskPersistence(BaseModule):
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates task creation risks, Event ID 4698 logging, and noise profile.

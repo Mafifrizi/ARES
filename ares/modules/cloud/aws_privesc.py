@@ -106,7 +106,7 @@ class AWSPrivescModule(BaseModule):
                 module_id=self.MODULE_ID, field="access_key",
             )
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """

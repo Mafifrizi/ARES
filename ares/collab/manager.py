@@ -224,10 +224,10 @@ class CollaborationManager:
         self.campaign_id = campaign_id
         self._operators: dict[str, OperatorProfile] = {}  # operator_id → profile
         self._locks:     dict[str, TargetLock]      = {}  # owner_key   → lock
-        self._lock_mutex: "asyncio.Lock | None"     = None  # init lazily (event loop may not exist yet)
+        self._lock_mutex: "asyncio.Lock | None"     = None  # init lazily (event loop may not exist yet)  # noqa: F821
         self._journal:   list[JournalEntry]          = []
 
-    def _get_mutex(self) -> "asyncio.Lock":
+    def _get_mutex(self) -> "asyncio.Lock":  # noqa: F821
         """Return (or lazily create) the asyncio.Lock protecting _locks dict."""
         import asyncio
         if self._lock_mutex is None:

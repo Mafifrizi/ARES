@@ -738,7 +738,7 @@ class AresDatabase:
         cls,
         db_path: "str | Path" = "ares.db",
         encryption_key: str | None = None,
-    ) -> "AresDatabase | PostgresDatabase":  # type: ignore[return]
+    ) -> "AresDatabase | PostgresDatabase":  # type: ignore[return]  # noqa: F821
         """
         Factory that returns the correct backend based on db_path / DATABASE_URL.
 

@@ -76,7 +76,7 @@ class DPAPIModule(BaseModule):
     ENABLED            = False
     DISABLED_REASON    = "module disabled: DPAPI decryption not implemented, stub only - false credential injection risk (MOD-029)"
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """Pre-flight Defense Feasibility Assessment: Disabled under MOD-029."""
         from ares.modules.base import FeasibilityReport
         return FeasibilityReport(

@@ -321,7 +321,7 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1110.003"]
     PARAMS_MODEL       = PassSprayParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates domain target, user list, and lockout threshold risks.

@@ -80,7 +80,7 @@ class LsassDumpModule(BaseModule):
         super().__init__(*args, **kwargs)
         self._last_kerberos_tickets: list[dict[str, Any]] = []
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates Credential Guard (VBS/LsaIso), LSA Protection (RunAsPPL),

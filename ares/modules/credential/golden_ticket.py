@@ -63,7 +63,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1558.001"]
     PARAMS_MODEL       = GoldenTicketParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates domain SID, krbtgt credentials (AES256 vs RC4), and DC PAC validation.

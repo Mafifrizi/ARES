@@ -60,7 +60,7 @@ class WMISubscriptionModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1546.003"]
     PARAMS_MODEL       = WMISubscriptionParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates WMI event subscription persistence feasibility (survives reboot, stealthy).
