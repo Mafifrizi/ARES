@@ -199,6 +199,28 @@ extend-immutable-calls = [
     "PT006", "PT007", "PT011", "PT012", "PT017", "PT018",
 ]
 
+[tool.bandit]
+# ARES is an offensive security tool. The categories below are intrinsic to its
+# function or verified false positives (reviewed individually — see AUDIT_FINDINGS.md
+# §D). They are skipped so bandit fails CI only on NEW, non-intrinsic findings.
+exclude_dirs = ["tests", ".venv", "build", "dist"]
+skips = [
+    "B101",          # assert — used for internal invariants
+    "B104",          # bind all interfaces — operator-controlled listeners
+    "B105", "B106", "B107",  # hardcoded-password heuristic — FPs (status strings, OAuth URL templates, token file paths)
+    "B108",          # hardcoded tmp path — reviewed
+    "B110", "B112",  # try-except-pass/continue — defensive resilience in the orchestrator
+    "B303", "B324",  # md5/sha1 — NTLM / fingerprint / compat hashing, not a security context
+    "B304", "B305",  # DES/ECB — decrypting targets' own legacy crypto (e.g. VNC's fixed-key DES-ECB)
+    "B310",          # urllib urlopen — fetching operator-specified URLs is the function
+    "B311",          # non-crypto random — jitter/timing/IDs (vault uses os.urandom)
+    "B404", "B603", "B607", "B601",  # subprocess — core to running external offensive tooling
+    "B501",          # request without cert validation — targets self-signed / MITM scenarios
+    "B507", "B508",  # ssh no host key / snmp v1-v2 — lateral movement to unknown hosts
+    "B608",          # SQL string-build — reviewed: parameterized with whitelisted identifiers
+    "B406",          # import xml — parsing offensive-tool output
+]
+
 [tool.mypy]
 python_version         = "3.11"
 strict                 = true

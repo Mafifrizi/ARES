@@ -16,6 +16,22 @@ env:
   ARES_DEFAULT_ADMIN_PASSWORD: "CiAdmin1!-placeholder-secret99"
 
 jobs:
+  lint:
+    name: Lint & Security (ruff + bandit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Ruff (correctness/bug lint)
+        run: ruff check ares tests
+      - name: Bandit (security scan; intrinsic categories skipped in pyproject)
+        run: bandit -c pyproject.toml -r ares -q
+
   backend:
     name: Backend Unit Tests
     runs-on: ubuntu-latest
