@@ -334,7 +334,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             shadow_posture = {"target_user": target_user, "account_found": False, "error": str(shadow_err)}
 
         esc1_vulns = esc_map.get("ESC1", [])
-        esc2_vulns = esc_map.get("ESC2", [])
+        esc2_vulns = esc_map.get("ESC2", [])  # noqa: F841
 
         # Step 4: ESC1 evaluation (Audit Assessment Mode - non-intrusive)
         cert_path = ""
@@ -1065,7 +1065,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
             # Build CSR with SAN = target_user@domain
-            upn = f"{target_user}@{domain.upper()}"
+            upn = f"{target_user}@{domain.upper()}"  # noqa: F841
             csr = (
                 x509.CertificateSigningRequestBuilder()
                 .subject_name(x509.Name([

@@ -1128,7 +1128,7 @@ class WinRMLateral(BaseLateralModule):
                 )
                 r = session.run_cmd(command)
                 stdout = r.std_out.decode("utf-8", errors="replace").strip()
-                stderr = r.std_err.decode("utf-8", errors="replace").strip()
+                stderr = r.std_err.decode("utf-8", errors="replace").strip()  # noqa: F841
                 success = r.status_code == 0
                 priv = "SYSTEM" if "NT AUTHORITY\\SYSTEM" in stdout else (
                     "Administrator" if "Administrators" in stdout else "user"

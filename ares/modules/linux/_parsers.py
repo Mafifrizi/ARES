@@ -1104,7 +1104,7 @@ class ELFParser:
             elif p_type == 2:  # PT_DYNAMIC
                 dyn_offset = p_offset
                 dyn_size = p_filesz
-                dyn_vaddr = p_vaddr
+                dyn_vaddr = p_vaddr  # noqa: F841
 
         if not dyn_offset or dyn_offset >= len(data):
             return []

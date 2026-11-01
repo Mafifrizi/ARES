@@ -629,7 +629,7 @@ class SecretsScan(BaseModule):
             self.finding(
                 title       = f"Secrets found in filesystem on {target}",
                 description = (
-                    f"Found {len(hits)} potential credential(s) in {len(set(h['file'] for h in hits))} file(s):\n"
+                    f"Found {len(hits)} potential credential(s) in {len({h['file'] for h in hits})} file(s):\n"
                     + "\n".join(f"  [{h['pattern']}] {h['file']}:{h['line']}" for h in hits[:20])
                     + (f"\n...and {len(hits)-20} more" if len(hits) > 20 else "")
                 ),

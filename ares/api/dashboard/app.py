@@ -65,7 +65,7 @@ async def _require_dashboard_auth(
                     raise
                 except Exception as exc:
                     logger.warning("dashboard_auth_revocation_check_failed", error=str(exc))
-                    raise HTTPException(
+                    raise HTTPException(  # noqa: B904
                         status_code=503,
                         detail="Authentication service temporarily unavailable: cannot verify token revocation status.",
                     )
@@ -521,7 +521,7 @@ async def api_campaigns(_auth: None = Depends(_require_dashboard_auth)) -> list[
             return rows
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/findings")
@@ -539,7 +539,7 @@ async def api_findings(campaign_id: str, severity: str | None = None,
             return redact_finding_response_rows(rows)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/hosts")
@@ -553,7 +553,7 @@ async def api_hosts(campaign_id: str,
             return await db.get_hosts(campaign_id)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/summary")
@@ -573,8 +573,7 @@ async def api_summary(campaign_id: str,
                 for f in findings
             )
             summary["risk_score"] = round(risk, 1)
-            sev_counts: dict[str, int] = {k: 0 for k in
-                                           ("critical", "high", "medium", "low", "info")}
+            sev_counts: dict[str, int] = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
             for f in findings:
                 sev = f.get("severity", "info")
                 if sev in sev_counts:
@@ -588,7 +587,7 @@ async def api_summary(campaign_id: str,
             return await _fetch(db)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/workers")

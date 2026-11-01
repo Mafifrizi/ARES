@@ -330,7 +330,7 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             try:
                 val = int(s, 16)
             except ValueError:
-                raise ValueError(f"key_id must be a valid integer, got: {key_id!r}")
+                raise ValueError(f"key_id must be a valid integer, got: {key_id!r}")  # noqa: B904
 
         if val < 0:
             raise ValueError(f"key_id must be a non-negative integer, got: {key_id}")

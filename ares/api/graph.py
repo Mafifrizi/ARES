@@ -448,7 +448,7 @@ def build_campaign_graph(
                 "hostname":         tgt,
                 "compromise_level": c_level,
                 "is_dc":            is_dc,
-                "open_ports":       sorted(list(set(open_ports))),
+                "open_ports":       sorted(set(open_ports)),
                 "os_info":          os_detected,
                 "owned":            c_level in ("system", "domain_admin", "local_admin"),
             },

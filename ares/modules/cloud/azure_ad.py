@@ -340,7 +340,7 @@ class AzureADModule(BaseModule):
             )
 
         if sps:
-            expired_sps = [s for s in sps if s.get("has_expired_secret")]
+            expired_sps = [s for s in sps if s.get("has_expired_secret")]  # noqa: F841
             high_priv   = [s for s in sps if s.get("privileged")]
             if high_priv:
                 self.finding(

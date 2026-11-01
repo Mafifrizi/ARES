@@ -28,9 +28,10 @@ import subprocess
 import sys
 import threading
 import urllib.request
+from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Generator
+from typing import TYPE_CHECKING, Any
 
 from ares.core.errors import ScopeFirewallBlockError
 from ares.core.logger import audit, get_logger
@@ -649,7 +650,7 @@ class OSFirewallController:
         elevated = cls.is_elevated()
         with cls._lock:
             active_count = len(cls._active_rules)
-            rule_list = sorted(list(cls._active_rules))
+            rule_list = sorted(cls._active_rules)
             state_val = cls._state.value
             cleanup_pending = cls._state == OSFirewallState.CLEANUP_PENDING
 

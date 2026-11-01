@@ -60,8 +60,8 @@ class TestGate3ValidatorEnforcement:
                 check=AsyncMock(return_value=(True, 0.9, "verified")),
             )
         ])
-        engine = AresEngine(settings=_make_settings(), validator=validator)
-        campaign = _make_campaign()
+        engine = AresEngine(settings=_make_settings(), validator=validator)  # noqa: F841
+        campaign = _make_campaign()  # noqa: F841
 
         finding = Finding(
             title="Verified Vulnerability",
@@ -87,7 +87,7 @@ class TestGate3ValidatorEnforcement:
                 check=AsyncMock(return_value=(False, 0.2, "insufficient evidence")),
             )
         ])
-        engine = AresEngine(settings=_make_settings(), validator=validator)
+        engine = AresEngine(settings=_make_settings(), validator=validator)  # noqa: F841
 
         finding = Finding(
             title="Phantom Exploit Finding",
@@ -106,7 +106,7 @@ class TestGate3ValidatorEnforcement:
     async def test_unregistered_module_finding_passes_with_default_confidence(self):
         """Finding from an unregistered module passes with default 0.6 confidence (0.6 >= 0.4)."""
         validator = FindingValidator()  # empty registry
-        engine = AresEngine(settings=_make_settings(), validator=validator)
+        engine = AresEngine(settings=_make_settings(), validator=validator)  # noqa: F841
 
         finding = Finding(
             title="Unregistered Module Finding",

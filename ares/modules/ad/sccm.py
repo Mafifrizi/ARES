@@ -390,7 +390,7 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
             import ssl
 
             import ldap3
-            tls = ldap3.Tls(validate=ssl.CERT_NONE)
+            tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
             server = ldap3.Server(dc, port=389, connect_timeout=10)
             conn = ldap3.Connection(
                 server, user=f"{domain.upper()}\\{username}",

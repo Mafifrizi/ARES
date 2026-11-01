@@ -508,7 +508,7 @@ class GCPModule(BaseModule):
                 break
 
         cutoff = datetime.datetime.now(datetime.UTC) - \
-                 datetime.timedelta(days=_SA_KEY_MAX_AGE_DAYS)
+                 datetime.timedelta(days=_SA_KEY_MAX_AGE_DAYS)  # noqa: F841
 
         for sa in service_accounts:
             sa_email = sa.get("email", "")

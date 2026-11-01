@@ -297,5 +297,5 @@ class FingerprintModule(BaseModule):
                 host = target, confidence = 0.95,
             )
 
-        raw["fingerprint_result"] = {k: v for k, v in raw.items()}  # OUTPUTS key - shallow copy to avoid circular ref
+        raw["fingerprint_result"] = dict(raw.items())  # OUTPUTS key - shallow copy to avoid circular ref
         return self._findings[:], raw

@@ -2,7 +2,7 @@
 ares/strategy/enforcer.py - ConstitutionEnforcer
 
 Hard Python-layer enforcement between LLM output and engine execution.
-LLM prompt-based constitution can be ignored by hallucinating LLMs  - 
+LLM prompt-based constitution can be ignored by hallucinating LLMs  -
 this layer CANNOT be bypassed by any prompt.
 
 Removes violating modules from plan BEFORE it reaches engine.run_module().

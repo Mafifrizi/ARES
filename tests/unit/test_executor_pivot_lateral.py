@@ -492,10 +492,10 @@ class TestNetworkModel:
         s1 = model.add_subnet("10.0.0.0/24", "Subnet 1")
         s2 = model.add_subnet("10.1.0.0/24", "Subnet 2")
 
-        h_source = s1.add_host("10.0.0.10", hostname="attacker")
+        h_source = s1.add_host("10.0.0.10", hostname="attacker")  # noqa: F841
         h_inter = s1.add_host("10.0.0.20", hostname="dual_homed")
         h_inter.reachable.append("10.1.0.50")
-        h_target = s2.add_host("10.1.0.50", hostname="internal_dc")
+        h_target = s2.add_host("10.1.0.50", hostname="internal_dc")  # noqa: F841
 
         # When dual_homed is NOT a pivot, route must NOT traverse it
         route_unowned = model.pivot_route("10.0.0.10", "10.1.0.50")

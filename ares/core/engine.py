@@ -11,9 +11,10 @@ import re
 import time
 import urllib.parse
 import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 

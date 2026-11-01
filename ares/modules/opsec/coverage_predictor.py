@@ -798,7 +798,7 @@ class CoveragePredictorModule(BaseModule):
                     modules_analyzed=prediction.modules_analyzed)
 
         # Generate findings based on risk level
-        findings = []
+        findings = []  # noqa: F841
         score_pct = int(prediction.overall_score * 100)
 
         if prediction.overall_score >= 0.9:

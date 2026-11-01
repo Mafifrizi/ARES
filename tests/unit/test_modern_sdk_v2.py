@@ -208,7 +208,7 @@ async def test_module_test_harness_catches_validation_failure() -> None:
 async def test_ares_client_rest_operations() -> None:
     # Build a mock transport simulating ARES server endpoints
     async def mock_handler(request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
+        url = str(request.url)  # noqa: F841
         path = request.url.path
 
         if path == "/health":

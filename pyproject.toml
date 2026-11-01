@@ -164,6 +164,17 @@ ignore = [
     "N803",   # argument-name casing — mirrors external protocol field names
     "N815",   # mixedCase class var — mirrors wire/JSON field names
     "N818",   # exception-name suffix — renaming would break the public error API
+    "N802",   # function name casing — a few protocol/compat method names
+    "N805",   # first-arg-name — pydantic/classmethod validators use cls/other
+    "N814", "N817",  # camelCase import aliases for external protocol constants
+    "A001", "A002", "A004",  # builtin shadowing — intentional param/domain names (id, type, format, ModuleNotFoundError domain exc)
+    "B007",   # unused loop var — cosmetic
+    "B027",   # empty method in ABC w/o @abstractmethod — SDK interceptor optional-hook pattern
+    "B024",   # ABC w/o abstract methods — interceptor base defines the contract via hooks
+    "B905",   # zip() without strict= — opt-in rigor; deferred (DEBT: audit for length mismatch)
+    # --- Quality debt: accepted on existing code, still enforced for NEW code via `# noqa` ---
+    # F841 (unused var) and B904 (raise-without-from) are suppressed inline with `# noqa`
+    # at each existing site (NOT globally ignored), so new violations still fail CI.
 ]
 
 [tool.ruff.lint.flake8-bugbear]
@@ -180,8 +191,13 @@ extend-immutable-calls = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests legitimately redefine pytest fixtures and use framework call-in-defaults.
-"tests/**" = ["F811", "B008"]
+# Tests legitimately redefine fixtures, use framework call-in-defaults, and use
+# pytest idioms (broad raises, composite asserts, assert-in-except, type compares)
+# that are fine in test code.
+"tests/**" = [
+    "F811", "B008", "B017", "E721",
+    "PT006", "PT007", "PT011", "PT012", "PT017", "PT018",
+]
 
 [tool.mypy]
 python_version         = "3.11"

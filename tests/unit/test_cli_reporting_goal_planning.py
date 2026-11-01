@@ -319,8 +319,8 @@ class TestReportGenerator:
         from ares.modules.reporting.report_gen import ReportGenerator
         with tempfile.TemporaryDirectory() as tmpdir:
             new_dir = Path(tmpdir) / "reports" / "nested"
-            campaign = _make_campaign()
-            gen = ReportGenerator(output_dir=str(new_dir))
+            campaign = _make_campaign()  # noqa: F841
+            gen = ReportGenerator(output_dir=str(new_dir))  # noqa: F841
             assert new_dir.exists()
 
     def test_report_mitre_tactic_order(self):
@@ -625,7 +625,7 @@ class TestDashboardApp:
 
     def test_api_campaigns_with_db_error_returns_500(self, client):
         """When DB is unavailable, returns 500 gracefully."""
-        with patch("ares.api.dashboard.app.dashboard_app") as mock_app:
+        with patch("ares.api.dashboard.app.dashboard_app") as mock_app:  # noqa: F841
             # Test that the route handles errors correctly
             pass  # Route already has try/except → HTTPException
 
@@ -1211,7 +1211,7 @@ class TestCampaignStore:
 
     def test_list_reports_empty(self, tmp_path):
         from ares.cli._store import CampaignStore
-        reports_dir = tmp_path / "reports"
+        reports_dir = tmp_path / "reports"  # noqa: F841
         with patch("ares.cli._store.campaigns_dir", return_value=tmp_path), \
              patch("pathlib.Path.home", return_value=tmp_path):
             store = CampaignStore()

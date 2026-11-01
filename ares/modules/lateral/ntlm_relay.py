@@ -783,7 +783,7 @@ class NTLMRelayModule(BaseModule):
                 import ldap3
                 from impacket.ldap import ldap as imp_ldap  # noqa: F401
                 from impacket.ldap import ldapasn1 as ldapasn1_impacket  # noqa: F401
-                tls = ldap3.Tls(validate=ssl.CERT_NONE)
+                tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
                 server = ldap3.Server(dc, port=389, connect_timeout=10)
                 conn = ldap3.Connection(
                     server, user=f"{domain.upper()}\\{username}",

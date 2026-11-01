@@ -796,7 +796,7 @@ class EDRAdaptiveBypassModule(BaseModule):
         viable  = result["viable_techniques"]
         byovd   = result.get("byovd_techniques", [])
         blinds  = result.get("blind_spots", [])
-        vendor  = result["vendor"]
+        vendor  = result["vendor"]  # noqa: F841
 
         if not viable:
             self.finding(

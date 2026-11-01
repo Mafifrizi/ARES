@@ -351,7 +351,7 @@ class OpSecProfile:
     def from_noise_profile(cls, profile: NoiseProfile | str) -> "OpSecProfile":
         pname = profile.value if isinstance(profile, NoiseProfile) else profile
 
-        is_stealth    = pname == "stealth"
+        is_stealth    = pname == "stealth"  # noqa: F841
         is_aggressive = pname == "aggressive"
 
         beacon_profile = {

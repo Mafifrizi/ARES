@@ -107,7 +107,7 @@ def _parse_exec_start(unit_content: str) -> list[str]:
 )
 class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
     """
-    linux.service_hijack - Detect systemd/init services with writable binaries or unit files  - 
+    linux.service_hijack - Detect systemd/init services with writable binaries or unit files  -
     replacing the binary escalates privileges at next service restart
 
     OPSEC: LOW
@@ -573,7 +573,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed - pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

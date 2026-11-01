@@ -7,9 +7,10 @@ import hashlib
 import os
 import sqlite3
 import threading
+from collections.abc import AsyncIterator, Awaitable
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable
+from typing import Any
 from unittest.mock import Mock
 
 import aiosqlite

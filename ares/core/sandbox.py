@@ -935,7 +935,7 @@ class SandboxRunner:
                             f"unshare(CLONE_NEWNET) returned {ret} (errno={errno_val})"
                         )
                 except Exception as exc:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Mandatory security control failed: allow_network=False requires network namespace isolation: {exc}"
                     )
 
@@ -952,7 +952,7 @@ class SandboxRunner:
                                 drop_gid = pwd.getpwuid(target_uid).pw_gid
                             except Exception as e:
                                 if strict_mode:
-                                    raise RuntimeError(
+                                    raise RuntimeError(  # noqa: B904
                                         f"Cannot resolve primary GID for UID {target_uid} in strict mode; specify sandbox_gid explicitly: {e}"
                                     )
                                 drop_gid = target_uid
@@ -966,7 +966,7 @@ class SandboxRunner:
                     os.setuid(drop_uid)
                 except Exception as exc:
                     target_label = "nobody" if target_uid is None else str(target_uid)
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Mandatory security control failed: drop_privileges=True failed to drop root to {target_label}: {exc}"
                     )
                 if getattr(os, "geteuid", lambda: -1)() == 0 or getattr(os, "getuid", lambda: -1)() == 0:

@@ -462,7 +462,7 @@ class RegistryEnumModule(BaseModule):
                                     ev   = hBaseRegEnumValue(dce, hkey, i)
                                     vn   = ev["lpValueNameOut"].rstrip("\x00")
                                     vd   = ev["lpData"]
-                                    vt   = ev["lpType"]
+                                    vt   = ev["lpType"]  # noqa: F841
                                     if isinstance(vd, bytes):
                                         try:
                                             vd = vd.rstrip(b"\x00").decode("utf-16-le")

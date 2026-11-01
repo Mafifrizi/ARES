@@ -222,7 +222,7 @@ class TestLSASecretsFeasibility:
     async def test_recommends_dcsync_for_domain_controller(self, dummy_settings, test_campaign, test_noise):
         mod = LSASecretsModule(dummy_settings, test_campaign, test_noise)
         session = OperatorSession(campaign_id="test-camp")
-        host = session.add_host("10.10.10.5", is_dc=True)
+        host = session.add_host("10.10.10.5", is_dc=True)  # noqa: F841
 
         ctx = ExecutionContext.build(
             campaign=test_campaign,

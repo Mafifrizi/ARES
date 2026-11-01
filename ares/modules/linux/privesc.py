@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from ares.core.campaign import Finding, Severity
 from ares.core.errors import (
@@ -296,7 +297,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         try:
             import asyncssh
         except ImportError:
-            raise ModuleError("asyncssh not installed", module_id=self.MODULE_ID)
+            raise ModuleError("asyncssh not installed", module_id=self.MODULE_ID)  # noqa: B904
 
         kw: dict[str, Any] = {"host": host, "port": port, "username": user, "known_hosts": None}
         if key_path and os.path.exists(key_path):

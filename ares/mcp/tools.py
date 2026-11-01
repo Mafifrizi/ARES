@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from ares.mcp.protocol import CallToolResult, TextContent, Tool, ToolInputSchema
 from ares.mcp.security import (
@@ -293,7 +294,7 @@ class McpToolRegistry:
                 raise
             except Exception as exc:
                 logger.warning("mcp_fetch_campaign_scope_failed", campaign_id=campaign_id, error=str(exc))
-                raise McpSecurityViolation(f"Failed to resolve scope for campaign '{campaign_id}': {exc}")
+                raise McpSecurityViolation(f"Failed to resolve scope for campaign '{campaign_id}': {exc}")  # noqa: B904
 
         # Default fallback only when DB is not bound (standalone mock/demo mode)
         return ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "*.corp.local", "*.lab.local", "localhost", "127.0.0.1"]

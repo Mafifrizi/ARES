@@ -531,7 +531,7 @@ class ModuleInstaller:
                         f"expected SHA-256 {expected[:16]}... "
                         f"got {actual_hash[:16]}... File was NOT installed."
                     )
-                is_hash_verified = True
+                is_hash_verified = True  # noqa: F841
 
             # If detached .sig exists, verify authenticity via Ed25519 subsystem
             sig_file = local.with_suffix(local.suffix + ".sig")

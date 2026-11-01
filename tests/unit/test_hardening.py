@@ -1406,7 +1406,7 @@ class TestSecurityBoundariesAndLifecycle:
 
         def mock_subprocess_run(cmd, *args, **kwargs):
             call_count[0] += 1
-            cmd_str = " ".join(cmd)
+            cmd_str = " ".join(cmd)  # noqa: F841
             # Second apply command fails
             if "-I" in cmd and call_count[0] == 2:
                 res = MagicMock()
@@ -2055,7 +2055,7 @@ class TestPostFed3098SecurityBoundaryProof:
 
         OSFirewallController._active_rules.clear()
         rules = OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
-        rule_name = rules[0]
+        rule_name = rules[0]  # noqa: F841
         assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
 
         # Fail cleanup

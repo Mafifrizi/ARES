@@ -362,7 +362,7 @@ def campaign_create(
         ))
     except Exception as exc:
         console.print(f"[bold red]Error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
 
 @campaign_app.command("list")
@@ -696,7 +696,7 @@ def module_install(
             raise typer.Exit(1)
     except (ImportError, AttributeError) as exc:
         console.print(f"[red][-] ModuleInstaller error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
 
 # ── Chain commands ─────────────────────────────────────────────────────────────
@@ -841,7 +841,7 @@ def chain_suggest(
 
     except (ImportError, ValueError) as exc:
         console.print(f"[red]Suggest error:[/] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
 
 # ── Report commands ────────────────────────────────────────────────────────────
@@ -851,7 +851,7 @@ def report_generate(
     campaign_id: str  = typer.Option(..., "--campaign", "-c", help="Campaign ID"),
     format:      str  = typer.Option("html", "--format", "-f",
                                       help="Format: html | pdf | json | md | all"),
-    output:      Path = typer.Option(Path("~/.ares/reports").expanduser(),
+    output:      Path = typer.Option(Path("~/.ares/reports").expanduser(),  # noqa: B008
                                       "--output", "-o", help="Output directory"),
     template:    str  = typer.Option("default", "--template", help="Report template"),
 ) -> None:
@@ -2206,7 +2206,7 @@ def quickstart() -> None:
         cid = campaign.id
     except Exception as exc:
         console.print(f"[red]Failed to create campaign: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
     console.print(f"\n[green][+] Campaign created: {cid}[/green]\n")
     console.print("[bold]Next steps:[/bold]")
@@ -2448,7 +2448,7 @@ def backup(
         console.print(f"[green][+] Backup saved:[/green] {out}")
     except Exception as exc:
         console.print(f"[red][-] Backup failed: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
 
 # ── update command (Additive new modules) ─────────────────────────────────────
@@ -2478,7 +2478,7 @@ def update_cmd(
             check_res = mgr.check_updates()
     except Exception as exc:
         console.print(f"[red][-] Update check failed: {exc}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1)  # noqa: B904
 
     new_mods = check_res.new_modules
     if module:
@@ -2551,7 +2551,7 @@ def upgrade_cmd(
                 chk = mgr.check_system_update()
             except Exception as exc:
                 console.print(f"[red][-] Failed checking for updates: {exc}[/red]")
-                raise typer.Exit(1)
+                raise typer.Exit(1)  # noqa: B904
 
         console.print(f"[bold cyan][INF][/bold cyan] ARES Platform System Status (v{chk.get('version')} on branch: [green]{chk.get('branch')}[/green])")
         console.print(f"[bold cyan][INF][/bold cyan] Local commit: [white]{chk.get('local_commit')}[/white] | Remote commit: [white]{chk.get('remote_commit')}[/white]")
@@ -2654,7 +2654,7 @@ def upgrade_cmd(
                     console.print(f"[dim]Distribution path: {res.get('target_dir')}[/dim]")
             except Exception as exc:
                 console.print(f"[red][-] UI upgrade failed: {exc}[/red]")
-                raise typer.Exit(1)
+                raise typer.Exit(1)  # noqa: B904
         if not modules and not module:
             return
 
@@ -2665,7 +2665,7 @@ def upgrade_cmd(
                 res = mgr.upgrade_modules(module_id=module, dry_run=dry_run)
             except Exception as exc:
                 console.print(f"[red][-] Module upgrade failed: {exc}[/red]")
-                raise typer.Exit(1)
+                raise typer.Exit(1)  # noqa: B904
 
         if dry_run:
             console.print(f"[yellow][*] Dry-run complete. {res.get('upgraded_count', 0)} module(s) eligible for upgrade.[/yellow]")
@@ -3118,7 +3118,7 @@ def mcp_default_callback(ctx: typer.Context) -> None:
                 interactive_console_loop()
             except KeyboardInterrupt:
                 console.print("\n[dim]Cancelled[/dim]")
-                raise typer.Exit(130)
+                raise typer.Exit(130)  # noqa: B904
         else:
             from ares.cli.mcp_commands import get_doctor_diagnostics
             diag = get_doctor_diagnostics()
@@ -3134,7 +3134,7 @@ def mcp_console_cmd() -> None:
         interactive_console_loop()
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled[/dim]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @mcp_app.command("monitor")
@@ -3151,7 +3151,7 @@ def mcp_monitor_cmd(
         raise typer.Exit(code)
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled[/dim]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @app.command("console")
@@ -3162,7 +3162,7 @@ def app_console_cmd() -> None:
         interactive_console_loop()
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled[/dim]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @app.command("monitor")
@@ -3178,7 +3178,7 @@ def app_monitor_cmd(
         raise typer.Exit(code)
     except KeyboardInterrupt:
         console.print("\n[dim]Cancelled[/dim]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @mcp_app.command("doctor")
@@ -3302,7 +3302,7 @@ def mcp_dry_run_cmd(
             raise ValueError()
     except Exception:
         console.print("[red]Invalid --params JSON. Must be a valid JSON dictionary string (e.g. '{\"domain\": \"corp.local\"}').[/]")
-        raise typer.Exit(2)
+        raise typer.Exit(2)  # noqa: B904
 
     data = execute_dry_run(target=target, module_id=module, campaign_id=campaign, params=parsed_params)
     out_console = get_mcp_console(json_mode=json_output)
@@ -3389,7 +3389,7 @@ def mcp_run_tool_cmd(
             raise ValueError()
     except Exception:
         console.print("[red]Invalid --args JSON. Must be a valid JSON dictionary string (e.g. '{\"campaign_id\": \"test\"}').[/]")
-        raise typer.Exit(2)
+        raise typer.Exit(2)  # noqa: B904
 
     server = AresMcpServer()
     tools = {t.name: t for t in server.tool_registry.list_tools()}
@@ -3426,7 +3426,7 @@ def mcp_stdio_cmd() -> None:
         asyncio.run(run_stdio_server())
     except KeyboardInterrupt:
         console.print("\n[dim]Stdio server stopped.[/dim]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @mcp_app.command("sse")
@@ -3477,7 +3477,7 @@ def mcp_sse_cmd(
         uvicorn.run(sse_app, host=host, port=port, log_level="info")
     except KeyboardInterrupt:
         console.print("\n[yellow]SSE server stopped.[/]")
-        raise typer.Exit(130)
+        raise typer.Exit(130)  # noqa: B904
 
 
 @mcp_app.command("config")

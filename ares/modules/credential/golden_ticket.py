@@ -305,7 +305,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
         # Sanitize username before using in path - prevent path traversal in tempdir
         import re as _re_path
         username = _re_path.sub(r"[^\w.-]", "_", username)
-        target      = kwargs.get("target", "")
+        target      = kwargs.get("target", "")  # noqa: F841
         dry_run     = kwargs.get("dry_run", False)
         # Scope + rate-limit check - domain is the "target" for golden ticket
         if domain and not dry_run:

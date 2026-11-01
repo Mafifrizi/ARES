@@ -433,7 +433,7 @@ class MSSQLModule(BaseModule):
         except ImportError:
             # impacket TDS not available - try pymssql fallback
             return self._enum_pymssql(target, username, password, port)
-        except Exception as exc:
+        except Exception as exc:  # noqa: F841
             raise  # propagate to async wrapper for _classify_error
 
     def _enum_pymssql(self, target: str, username: str, password: str,
@@ -458,7 +458,7 @@ class MSSQLModule(BaseModule):
             return info
         except ImportError:
             return {"error": "No MSSQL driver available - pip install pymssql"}
-        except Exception as exc:
+        except Exception as exc:  # noqa: F841
             raise  # propagate to async wrapper for _classify_error
 
     def _xp_cmdshell_sync(self, target: str, username: str, password: str,
@@ -513,7 +513,7 @@ class MSSQLModule(BaseModule):
             parsed = ipaddress.ip_address(ip.strip())
             return str(parsed)
         except ValueError:
-            raise ModuleValidationError(
+            raise ModuleValidationError(  # noqa: B904
                 f"listener_ip must be a valid IP address, got: {ip!r}",
                 module_id=self.MODULE_ID,
                 field="listener_ip",

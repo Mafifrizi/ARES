@@ -30,7 +30,7 @@ class StdioTransport:
         sys.stderr.write("[ARES-MCP] Stdio Transport Initialized. Listening on stdin...\n")
         sys.stderr.flush()
 
-        loop = asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()  # noqa: F841
 
         while self._running:
             try:

@@ -992,7 +992,7 @@ def test_azure_findings_pipeline_mod_066(normalizer: ArtifactNormalizer, store: 
     assert added >= 5
 
     # Cloud resources: storage container + NSG
-    cloud_res = [a for a in store.get(ArtifactType.CLOUD_RESOURCE)]
+    cloud_res = list(store.get(ArtifactType.CLOUD_RESOURCE))
     res_ids = {c.resource_id for c in cloud_res}
     assert "corpbackup/db-dumps" in res_ids
     assert "nsg-prod/Allow-SSH-Internet" in res_ids
@@ -1145,7 +1145,7 @@ def test_identity_federation_pipeline_mod_051(
     )
     assert added >= 7
 
-    cloud_res = [c for c in store.get(ArtifactType.CLOUD_RESOURCE)]
+    cloud_res = list(store.get(ArtifactType.CLOUD_RESOURCE))
     assert any(c.provider == "azure" and c.resource_id == "corp.com" for c in cloud_res)
     assert any(c.provider == "aws" for c in cloud_res)
 

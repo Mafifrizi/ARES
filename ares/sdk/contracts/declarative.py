@@ -6,7 +6,8 @@ invariants in a clean, unified Python decorator (@module_contract).
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from ares.core.context import ExecutionContext
 from ares.modules.base import ModuleResult

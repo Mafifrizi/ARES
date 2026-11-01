@@ -382,7 +382,7 @@ class PivotManager:
                     tunnel.state = TunnelState.ACTIVE
             else:
                 tunnel.state = TunnelState.DEAD
-                raise ModuleExecutionError(
+                raise ModuleExecutionError(  # noqa: B904
                     "No SSH backend available: asyncssh not installed and "
                     "no 'ssh' binary found in PATH. Cannot establish tunnel. "
                     "Install: pip install asyncssh"

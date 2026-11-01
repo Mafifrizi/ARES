@@ -10,7 +10,8 @@ import json
 import secrets
 import time
 import warnings
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx

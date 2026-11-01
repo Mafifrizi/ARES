@@ -11,11 +11,11 @@ import json
 import re
 import secrets
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Awaitable, TypeVar
+from typing import Any, TypeVar
 from urllib.parse import unquote
 
 import aiosqlite
@@ -2092,7 +2092,7 @@ class AresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign from DB as raw dicts.
-        Secrets are returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) - 
+        Secrets are returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) -
         use CredentialVault.restore_from_db_records() to re-hydrate.
         """
         async with self._conn.execute(

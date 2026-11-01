@@ -107,7 +107,7 @@ async def test_websocket_stays_alive_past_bearer_access_token_expiry() -> None:
             (revoked_ts, family_id),
         )
         await db.conn.commit()
-        p_revoked = await db.resolve_websocket_ticket_principal(expired_bearer_handle)
+        p_revoked = await db.resolve_websocket_ticket_principal(expired_bearer_handle)  # noqa: F841
         # Test absolute expiration of family session
         # Reactivate family first
         await db.conn.execute(

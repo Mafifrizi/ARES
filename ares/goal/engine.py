@@ -272,9 +272,7 @@ class CapabilityGraph:
         return {
             "total_capabilities": len(self._producers),
             "total_modules":      len(self._requires),
-            "capabilities":       {
-                cap: mods for cap, mods in sorted(self._producers.items())
-            },
+            "capabilities":       dict(sorted(self._producers.items())),
         }
 
 
@@ -395,7 +393,7 @@ class GoalEngine:
                 try:
                     goal = Goal[goal.upper()]
                 except KeyError:
-                    raise ValueError(f"Unknown goal: {goal!r}")
+                    raise ValueError(f"Unknown goal: {goal!r}")  # noqa: B904
         defn    = GOAL_DEFINITIONS.get(goal)
         if not defn:
             raise ValueError(f"Unknown goal: {goal.value}")

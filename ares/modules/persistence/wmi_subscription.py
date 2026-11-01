@@ -39,7 +39,7 @@ logger = get_logger("ares.modules.persistence.wmi_subscription")
 )
 class WMISubscriptionModule(BaseModule):
     """
-    persistence.wmi_subscription - Create a WMI FilterToConsumerBinding that executes a command on event trigger - highly stealthy 
+    persistence.wmi_subscription - Create a WMI FilterToConsumerBinding that executes a command on event trigger - highly stealthy
 
     OPSEC: MEDIUM
     MITRE: "T1546.003"

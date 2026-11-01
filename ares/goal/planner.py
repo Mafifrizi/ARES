@@ -216,7 +216,7 @@ class AttackPlanner:
 
         for module_cls in candidates:
             for target in ctx.targets:
-                trial_key = f"{module_cls.MODULE_ID}:{target}"
+                trial_key = f"{module_cls.MODULE_ID}:{target}"  # noqa: F841
                 scored = self._score_module(module_cls, target, ctx)
                 if scored is not None:
                     suggestions.append(scored)

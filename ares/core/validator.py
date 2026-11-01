@@ -5,9 +5,10 @@ Prevents false positives before anything hits the report.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from ares.core.logger import get_logger
 
@@ -223,7 +224,7 @@ async def _check_ssh_pivot_evidence(
 ) -> tuple[bool, float, str]:
     """Score SSH lateral movement from session verification evidence."""
     ev = finding.evidence or {}
-    technique = ev.get("technique")
+    technique = ev.get("technique")  # noqa: F841
     user = ev.get("username")
     target = ev.get("target")
     output = ev.get("output", "")
@@ -243,7 +244,7 @@ async def _check_linux_privesc_evidence(
     """Score Linux privilege escalation findings from verified host primitives."""
     title = (finding.title or "").lower()
     desc = (finding.description or "").lower()
-    ev = finding.evidence or {}
+    ev = finding.evidence or {}  # noqa: F841
 
     if any(k in title or k in desc for k in ("suid", "sudo", "capabilities", "path", "cve-", "kernel", "cron")):
         return True, 0.95, f"Verified local Linux privilege escalation primitive ({finding.title})"
@@ -271,7 +272,7 @@ async def _check_lateral_evidence(
     tech = ev.get("technique") or "lateral"
     user = ev.get("username")
     target = ev.get("target") or finding.host or ev.get("relay_candidates") or ev.get("ldap_targets")
-    privilege = ev.get("privilege", "user")
+    privilege = ev.get("privilege", "user")  # noqa: F841
 
     score = 0.0
     notes: list[str] = []

@@ -8,7 +8,7 @@ to NTLM relay attacks (NTLM authentication captured from one host
 can be relayed to authenticate against this host without knowing the password).
 
 This module is DETECTION ONLY.
-It checks the SMB dialect negotiation response to read the signing flags  - 
+It checks the SMB dialect negotiation response to read the signing flags  -
 exactly what tools like nmap (smb-security-mode script) and
 Nessus (plugin 57608) do during a security assessment.
 
@@ -525,5 +525,5 @@ class SMBRelayAuditModule(BaseModule):
             "signing_disabled":  signing_disabled,
             "per_host_results":  results,
         }
-        raw["smb_signing_config"] = {k: v for k, v in raw.items()}  # OUTPUTS key - shallow copy to avoid circular ref
+        raw["smb_signing_config"] = dict(raw.items())  # OUTPUTS key - shallow copy to avoid circular ref
         return self._findings[:], raw

@@ -300,7 +300,7 @@ def generate_smart_wordlist(
 )
 class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
     """
-    credential.pass_spray - Low-and-slow password spray against domain accounts - built-in lockout protection, one password 
+    credential.pass_spray - Low-and-slow password spray against domain accounts - built-in lockout protection, one password
 
     OPSEC: MEDIUM
     MITRE: "T1110.003"

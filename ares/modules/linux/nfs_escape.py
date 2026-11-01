@@ -128,7 +128,7 @@ def _parse_exports(exports_content: str) -> list[dict[str, Any]]:
 )
 class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
     """
-    linux.nfs_escape - Detect NFS exports with no_root_squash - allows root on attacker machine to write SUID binaries 
+    linux.nfs_escape - Detect NFS exports with no_root_squash - allows root on attacker machine to write SUID binaries
 
     OPSEC: LOW
     MITRE: "T1548.001", "T1082"
@@ -381,7 +381,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                     is_writable    = "rw" in opts
                     no_root_squash = "no_root_squash" in opts
                     no_all_squash  = "no_all_squash" in opts
-                    insecure       = "insecure" in opts
+                    insecure       = "insecure" in opts  # noqa: F841
 
                     if no_root_squash:
                         self.finding(
@@ -502,7 +502,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed - pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

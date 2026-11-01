@@ -257,7 +257,7 @@ class StagedCollectionModule(BaseModule):
         username     = kwargs.get("username", "")
         password     = kwargs.get("password", "") or kwargs.get("secret", "")
         key_path     = kwargs.get("key_path", "")
-        platform     = kwargs.get("platform", "linux")
+        platform     = kwargs.get("platform", "linux")  # noqa: F841
         search_paths = kwargs.get("search_paths", ["/home", "/root", "/etc"])
         known_hosts  = kwargs.get("known_hosts_file")
         dry_run      = kwargs.get("dry_run", False)

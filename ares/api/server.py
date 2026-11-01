@@ -1129,7 +1129,7 @@ def _browser_policy(request: Request) -> BrowserSessionPolicy:
         from ares.core.config import get_settings
         return build_browser_session_policy(get_settings())
     except Exception:
-        raise HTTPException(503, "Browser authentication unavailable")
+        raise HTTPException(503, "Browser authentication unavailable")  # noqa: B904
 
 
 def _token_response_content(session: Any, settings: AresSettings) -> dict[str, Any]:
@@ -2674,7 +2674,7 @@ async def run_module(
                     elif isinstance(raw_tags, list):
                         existing_tags = [str(t) for t in raw_tags]
 
-                merged_ports = sorted(list(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()])))
+                merged_ports = sorted(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()]))
                 hostname = match_host.get("hostname") if match_host else (raw.get("hostname") or target_ip)
 
                 # Robust OS classification
@@ -3879,7 +3879,7 @@ async def campaign_attack_paths(
         logger.warning(
             "attack_graph_unavailable", error=str(e), hint="pip install networkx"
         )
-        raise HTTPException(
+        raise HTTPException(  # noqa: B904
             503,
             "Attack graph temporarily unavailable. "
             "Ensure networkx is installed: pip install ares-redteam",
@@ -4470,7 +4470,7 @@ async def ingest_bloodhound(
     try:
         safe_path = sanitize_path(body.json_path)
     except ValueError as exc:
-        raise HTTPException(400, f"Invalid path: {str(exc)[:200]}")
+        raise HTTPException(400, f"Invalid path: {str(exc)[:200]}")  # noqa: B904
 
     try:
         from ares.graph.attack_graph import AttackGraph
@@ -4508,11 +4508,11 @@ async def ingest_bloodhound(
             "graph_stats": graph.stats(),
         }
     except ImportError:
-        raise HTTPException(503, "networkx required - pip install networkx")
+        raise HTTPException(503, "networkx required - pip install networkx")  # noqa: B904
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")
+        raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")  # noqa: B904
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────

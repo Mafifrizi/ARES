@@ -351,7 +351,7 @@ def score_modules_for_profile(
     noise_profile: str = "stealth",
 ) -> dict[str, int]:
     thresholds = {"stealth": 1, "normal": 2, "aggressive": 4}
-    max_score = thresholds.get(noise_profile, 2)
+    max_score = thresholds.get(noise_profile, 2)  # noqa: F841
     result: dict[str, int] = {}
     for mid in module_ids:
         score = NOISE_SCORE.get(mid, 1)

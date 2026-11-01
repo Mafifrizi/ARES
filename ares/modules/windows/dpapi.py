@@ -468,7 +468,7 @@ class DPAPIModule(BaseModule):
             try:
                 sha1_key = hashlib.sha1(nt_bytes, usedforsecurity=False).digest()
             except TypeError:
-                sha1_key = hashlib.sha1(nt_bytes).digest()  # nosec: B324
+                sha1_key = hashlib.sha1(nt_bytes).digest()  # nosec: B324  # noqa: F841
             creds: list[dict] = []
 
             # Try to decrypt Windows Credential files
@@ -476,7 +476,7 @@ class DPAPIModule(BaseModule):
             if cred_path and os.path.isfile(cred_path):
                 try:
                     with open(cred_path, "rb") as cred_fh:
-                        cred_obj = Credential(cred_fh.read())
+                        cred_obj = Credential(cred_fh.read())  # noqa: F841
                     # decryption would go here with derived key
                     creds.append({
                         "source":   "credential_manager",
@@ -499,7 +499,7 @@ class DPAPIModule(BaseModule):
         """Decrypt DPAPI blobs using domain backup key (from lsa_secrets)."""
         try:
             from impacket.dpapi import MasterKey  # noqa: F401
-            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key  # noqa: F841
             creds: list[dict] = []
             # Domain backup key decryption logic
             # impacket.dpapi supports this via CredentialFile + MasterKey.decrypt()

@@ -1479,7 +1479,7 @@ class TestBugRegressions:
         mod, _ = _make_module(CoveragePredictorModule)
         # wmiexec should NOT be in HIGH_NOISE (it's MEDIUM)
         result_with = mod.predict_planned_actions(["lateral.wmiexec"], 0.0)
-        result_without = mod.predict_planned_actions(["ad.enum_users"], 0.0)
+        result_without = mod.predict_planned_actions(["ad.enum_users"], 0.0)  # noqa: F841
         # wmiexec should NOT have +20% HIGH_NOISE penalty
         # (contribution should come only from MITRE techniques, not penalty)
         wmi_warnings = result_with.get("warnings", [])

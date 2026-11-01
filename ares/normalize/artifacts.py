@@ -23,7 +23,7 @@ Artifact taxonomy:
 
 Usage in a module:
     from ares.normalize.artifacts import NormalizedArtifact, User, Host, Credential
-    
+
     # In module.run():
     artifacts = [
         Host(ip="10.0.0.1", hostname="dc01", os="Windows Server 2022", is_dc=True),
@@ -447,7 +447,7 @@ ArtifactNormalizer = ArtifactStore
 
 # ── Artifact Normalizer ───────────────────────────────────────────────────────
 
-class ArtifactNormalizer:
+class ArtifactNormalizer:  # noqa: F811
     """
     Auto-normalizes module raw output into typed ArtifactStore entries.
     Called by AresEngine after each successful module execution.
@@ -989,7 +989,7 @@ class ArtifactNormalizer:
             for k in raw["service_map"]:
                 if str(k).isdigit():
                     ports.append(int(k))
-        ports = sorted(list(set(ports)))
+        ports = sorted(set(ports))
         if not ports:
             return 0
         target = raw.get("target") or raw.get("host", "")
@@ -1001,7 +1001,7 @@ class ArtifactNormalizer:
                     existing_host = h
                     break
         if existing_host:
-            existing_host.open_ports = sorted(list(set(existing_host.open_ports + ports)))
+            existing_host.open_ports = sorted(set(existing_host.open_ports + ports))
             return 1
         artifact = HostArtifact(
             ip_address = target,
@@ -1335,7 +1335,7 @@ class ArtifactNormalizer:
                     services.append(f"{p_str}:{info['service']}")
                 elif isinstance(info, str) and info:
                     services.append(f"{p_str}:{info}")
-        ports = sorted(list(set(ports)))
+        ports = sorted(set(ports))
         vuln_svcs = raw.get("vulnerable_services", [])
         parsed_vulns = []
         if isinstance(vuln_svcs, list):
@@ -1352,9 +1352,9 @@ class ArtifactNormalizer:
                 break
         if existing:
             if ports:
-                existing.open_ports = sorted(list(set(existing.open_ports + ports)))
+                existing.open_ports = sorted(set(existing.open_ports + ports))
             if services:
-                existing.services = sorted(list(set(existing.services + services)))
+                existing.services = sorted(set(existing.services + services))
             if parsed_vulns:
                 existing.vulns.extend(parsed_vulns)
             if raw.get("os") and not existing.os:

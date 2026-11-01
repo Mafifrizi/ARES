@@ -5470,7 +5470,7 @@ class PostgresDatabase:
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
         Load all credentials for a campaign as raw dicts.
-        Secrets returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) - 
+        Secrets returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) -
         use CredentialVault.restore_from_db_records() to re-hydrate.
         Required by server.py POST /campaigns/{id}/restore-vault endpoint.
         """

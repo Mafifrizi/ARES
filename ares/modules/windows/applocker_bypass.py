@@ -90,7 +90,7 @@ _TRUSTED_WRITABLE_CANDIDATES: list[str] = [
 )
 class AppLockerBypassModule(BaseModule):
     """
-    windows.applocker_bypass - Enumerate AppLocker policy from registry, identify enforcement mode, and detect writable trusted 
+    windows.applocker_bypass - Enumerate AppLocker policy from registry, identify enforcement mode, and detect writable trusted
 
     OPSEC: LOW
     MITRE: "T1218", "T1574.001", "T1082"

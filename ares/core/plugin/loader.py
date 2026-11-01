@@ -31,8 +31,9 @@ import importlib.util
 import inspect
 import os as _os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
 

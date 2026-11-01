@@ -259,7 +259,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
         nt_hash  = kwargs.get("nt_hash", "") or kwargs.get("hash", "")
         lm_hash  = kwargs.get("lm_hash", "aad3b435b51404eeaad3b435b51404ee")
         domain   = kwargs.get("domain", "")
-        command  = kwargs.get("command", "whoami /all")
+        command  = kwargs.get("command", "whoami /all")  # noqa: F841
         dry_run  = kwargs.get("dry_run", False)
 
         if not target or not nt_hash:
@@ -294,7 +294,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
               - STATUS_ACCESS_DENIED   → valid hash but no admin access
               - ConnectionError/timeout → host unreachable
             """
-            err_type = ""
+            err_type = ""  # noqa: F841
             try:
                 smb = SMBConnection(target, target, timeout=15)
                 smb.login(username, "", domain, lm_hash, nt_hash)

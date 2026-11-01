@@ -232,7 +232,7 @@ class TokenImpersonationModule(BaseModule):
             password = ""
 
         # Run whoami /priv via WMI to check SeImpersonatePrivilege
-        privs_output = ""
+        privs_output = ""  # noqa: F841
         loop = asyncio.get_running_loop()
         try:
             from impacket.dcerpc.v5 import transport, wmi  # type: ignore[import]
@@ -251,7 +251,7 @@ class TokenImpersonationModule(BaseModule):
                     # Query Win32_Process
                     wmi_iface = wmi.WMIInterface(dce)
                     query     = "SELECT * FROM Win32_Process WHERE Name = 'lsass.exe'"
-                    results   = wmi_iface.ExecQuery(query)
+                    results   = wmi_iface.ExecQuery(query)  # noqa: F841
                     # Just connectivity check - real priv check via WMI is complex
                     return "connected"
                 except Exception as e:

@@ -377,7 +377,7 @@ class TestDatabase:
             os="Windows Server 2022",
             is_dc=True,
         )
-        host_id = await db.upsert_host(host)
+        host_id = await db.upsert_host(host)  # noqa: F841
         hosts = await db.get_hosts(campaign.id)
         assert len(hosts) == 1
         assert hosts[0]["hostname"] == "dc01"

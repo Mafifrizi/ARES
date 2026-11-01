@@ -13,9 +13,10 @@ import hmac
 import inspect
 import json
 import secrets
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ares.db.execution_lifecycle import (
     AdmissionIntentV3,

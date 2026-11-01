@@ -548,6 +548,6 @@ def http_status(error: AresError) -> int:
 
 
 # Backward-compatible public names imported by ares.core.__init__.
-ScopeViolationError = ScopeError
+ScopeViolationError = ScopeError  # noqa: F811
 RateLimitError = RateLimited
 ValidationError = ModuleValidationError

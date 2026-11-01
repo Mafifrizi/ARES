@@ -980,7 +980,7 @@ class PlatformUpdateManager:
                     try:
                         ast.parse(data.decode("utf-8", errors="replace"))
                     except SyntaxError as exc:
-                        raise SecurityViolationError(f"AST syntax validation failed for '{remote_path}': {exc}")
+                        raise SecurityViolationError(f"AST syntax validation failed for '{remote_path}': {exc}")  # noqa: B904
 
                 atomic_write_file(safe_target, data, is_binary=True)
                 updated_count += 1
@@ -1122,7 +1122,7 @@ class PlatformUpdateManager:
         try:
             local_mods = self.get_local_modules()
             count = len(local_mods)
-            unique_files = len(set(item.relative_path for item in local_mods.values()))
+            unique_files = len({item.relative_path for item in local_mods.values()})
             detail_str = f"{count} modules discovered and validated ({unique_files} source files)"
             checks.append({"subsystem": "Attack Modules", "status": "PASS" if count > 0 else "WARN", "detail": detail_str})
         except Exception as exc:

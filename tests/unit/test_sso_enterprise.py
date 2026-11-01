@@ -109,7 +109,7 @@ async def test_database_sso_schema_and_operations(tmp_path, test_settings):
         assert org["slug"] == "default"
 
         # 2. SSO configuration saving & retrieval
-        cert_enc = encrypt_sso_secret("MOCK_CERT", test_settings)
+        cert_enc = encrypt_sso_secret("MOCK_CERT", test_settings)  # noqa: F841
         sec_enc = encrypt_sso_secret("MOCK_SECRET", test_settings)
 
         sso_id = await db.save_sso_config(

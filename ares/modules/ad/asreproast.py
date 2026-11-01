@@ -627,12 +627,12 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
-                conn_kwargs = dict(
-                    user=bind_plan.user,
-                    password=password,
-                    auto_bind=ldap3.AUTO_BIND_NONE,
-                    receive_timeout=30,
-                )
+                conn_kwargs = {
+                    "user": bind_plan.user,
+                    "password": password,
+                    "auto_bind": ldap3.AUTO_BIND_NONE,
+                    "receive_timeout": 30,
+                }
                 if bind_plan.mode == "ntlm":
                     conn_kwargs["authentication"] = ldap3.NTLM
                 conn = Connection(server, **conn_kwargs)
@@ -660,7 +660,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
                     bind_plan=bind_plan,
                 )
                 if isinstance(last_error, ModuleValidationError):
-                    raise last_error
+                    raise last_error  # noqa: B904
                 conn = None
 
         if conn is None:

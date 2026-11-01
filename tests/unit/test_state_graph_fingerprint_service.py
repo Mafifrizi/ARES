@@ -170,7 +170,7 @@ class TestOperatorSession:
 
     def test_domain_controllers_detected(self):
         sess = _session()
-        h = sess.add_host("10.0.0.1", hostname="DC01", os_type="Windows Server",
+        h = sess.add_host("10.0.0.1", hostname="DC01", os_type="Windows Server",  # noqa: F841
                           domain_role="domain_controller")
         controllers = sess.domain_controllers()
         assert len(controllers) == 1
@@ -517,7 +517,7 @@ class TestCollaborationManager:
             module_id   = "ad.kerberoast",
             ttl_seconds = 0,  # already expired
         )
-        import time; time.sleep(0.01)
+        import time; time.sleep(0.01)  # noqa: I001
         assert not lock.is_locked
 
     def test_collab_manager_init(self):
@@ -768,7 +768,7 @@ class TestCheckpointManager:
             data = CheckpointData(campaign_id="camp-003", session={}, vault={})
             for _ in range(7):
                 mgr.save(data)
-            purged = mgr.purge_old("camp-003", keep_last=3)
+            purged = mgr.purge_old("camp-003", keep_last=3)  # noqa: F841
             remaining = mgr.list_checkpoints("camp-003")
             assert len(remaining) <= 3
 

@@ -77,7 +77,7 @@ _CMD_SUID_BINS = (
 )
 class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     """
-    linux.ld_preload - Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths  - 
+    linux.ld_preload - Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths  -
 
     OPSEC: LOW
     MITRE: "T1574.006", "T1082"
@@ -574,7 +574,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             import asyncssh  # type: ignore[import]
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed - pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}

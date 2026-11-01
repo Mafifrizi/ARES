@@ -834,7 +834,7 @@ class TestPluginLoaderSecurity:
         with patch.dict(os.environ, {"ARES_PLUGIN_SIGNING_POLICY": "require_signed"}):
             # Re-import to test env var reading
             import ares.core.plugin.loader as loader_module
-            policy = loader_module._SIGNING_POLICY
+            policy = loader_module._SIGNING_POLICY  # noqa: F841
             # Note: module-level var is set at import time,
             # but we can test the env var is read
             assert "ARES_PLUGIN_SIGNING_POLICY" in os.environ
