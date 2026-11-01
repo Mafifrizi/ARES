@@ -203,7 +203,7 @@ class KeyRegistry:
         if not entry:
             return None
         pem = entry["public_key"].encode()
-        return serialization.load_pem_public_key(pem)  # type: ignore[return-value]
+        return serialization.load_pem_public_key(pem)
 
     def is_trusted(self, key_id: str) -> bool:
         return key_id in self._keys and key_id not in self._revoked
@@ -308,7 +308,7 @@ class ModuleSigner:
         """Load an existing private key from file."""
         pem = path.read_bytes()
         key = serialization.load_pem_private_key(pem, password=password)
-        return cls(key, author)  # type: ignore[arg-type]
+        return cls(key, author)
 
 
 class ModuleVerifier:

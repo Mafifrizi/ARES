@@ -391,7 +391,7 @@ class MSSQLModule(BaseModule):
                            port: int) -> dict:
         """Connect to MSSQL and enumerate server info. Sync - runs in executor."""
         try:
-            import impacket.tds as tds  # type: ignore[import]
+            import impacket.tds as tds
 
             ms = tds.MSSQL(target, port)
             ms.connect()
@@ -440,7 +440,7 @@ class MSSQLModule(BaseModule):
                        port: int) -> dict:
         """Fallback using pymssql if impacket TDS unavailable."""
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=10)
             cur  = conn.cursor()
             info: dict = {"linked_servers": [], "databases": []}
@@ -466,7 +466,7 @@ class MSSQLModule(BaseModule):
         """Enable xp_cmdshell, execute command, and safely teardown in finally."""
         conn = None
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
             cur  = conn.cursor()
             # Enable advanced options + xp_cmdshell
@@ -545,7 +545,7 @@ class MSSQLModule(BaseModule):
         """Execute command via linked server xp_cmdshell."""
         safe_linked = self._validate_linked_server(linked)
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
             cur  = conn.cursor()
             safe_cmd = command.replace("'", "''")   # SQL-escape
@@ -563,7 +563,7 @@ class MSSQLModule(BaseModule):
         """Coerce NTLM auth from SQL server to listener via xp_dirtree."""
         valid_ip = self._validate_listener_ip(listener_ip)
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=10)
             cur  = conn.cursor()
             try:

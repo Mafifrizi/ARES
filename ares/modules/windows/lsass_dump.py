@@ -20,6 +20,12 @@ OPSEC: HIGH - EDR monitors OpenProcess to LSASS (Sysmon Event ID 10).
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import os
 from typing import Any
@@ -829,7 +835,7 @@ class LsassDumpModule(BaseModule):
         hashes: list[dict] = []
         kerberos_tickets: list[dict] = []
         try:
-            from pypykatz.pypykatz import pypykatz  # type: ignore[import]
+            from pypykatz.pypykatz import pypykatz
             mimi = pypykatz.parse_minidump_file(dump_file)
             for luid in mimi.logon_sessions.values():
                 # Extract MSV (NTLM) credentials

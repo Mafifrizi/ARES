@@ -45,7 +45,7 @@ from ares.sdk import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from ares.modules.base import FeasibilityReport
 
 logger = get_logger("ares.lateral")
 

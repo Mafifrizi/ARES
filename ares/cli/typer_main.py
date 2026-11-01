@@ -1478,14 +1478,14 @@ def doctor(
 
     # ── optional Windows modules ───────────────────────────────────────────────
     try:
-        import pypykatz  # type: ignore[import]  # noqa: F401  (probe: detect optional dep)
+        import pypykatz  # noqa: F401  (probe: detect optional dep)
         check("pypykatz  (windows.lsass_dump)", "ok", "LSASS dump parsing ready")
     except Exception as exc:
         check("pypykatz  (windows.lsass_dump)", "warn",
               import_failure_detail("pypykatz", exc, "pip install ares-redteam[windows]"))
 
     try:
-        import httpx_ntlm  # type: ignore[import]  # noqa: F401  (probe: detect optional dep)
+        import httpx_ntlm  # noqa: F401  (probe: detect optional dep)
         check("httpx-ntlm  (ad.adcs ESC1)", "ok", "ADCS HTTP enrollment ready")
     except Exception as exc:
         check("httpx-ntlm  (ad.adcs ESC1)", "warn",

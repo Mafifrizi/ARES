@@ -10,6 +10,12 @@ Requires: local admin on target.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 
@@ -263,9 +269,9 @@ class WMISubscriptionModule(BaseModule):
         await self.before_request(target, "wmi")  # scope check + jitter
 
         try:
-            from impacket.dcerpc.v5 import transport  # type: ignore[import]  # noqa: F401
-            from impacket.dcerpc.v5.dcom import wmi  # type: ignore[import]
-            from impacket.dcerpc.v5.dcomrt import DCOMConnection  # type: ignore[import]
+            from impacket.dcerpc.v5 import transport  # noqa: F401
+            from impacket.dcerpc.v5.dcom import wmi
+            from impacket.dcerpc.v5.dcomrt import DCOMConnection
         except ImportError:
             return [], {"error": "impacket not installed"}
 

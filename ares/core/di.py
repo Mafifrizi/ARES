@@ -255,7 +255,7 @@ class AresContainer:
         from ares.credential.vault import CredentialVault
         # Use the dedicated encryption key, not the JWT secret_key.
         # CredentialVault.__init__ handles key derivation internally.
-        raw_key = settings.encryption_key_value  # type: ignore[attr-defined]
+        raw_key = settings.encryption_key_value
         return CredentialVault(raw_key)
 
     def list_services(self) -> dict[str, str]:

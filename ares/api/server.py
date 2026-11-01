@@ -508,7 +508,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Redis rate limiter (optional) ────────────────────────────────────
     if settings.ares_redis_url:
         try:
-            import redis.asyncio as aioredis  # type: ignore[import-untyped]
+            import redis.asyncio as aioredis
 
             _redis = await aioredis.from_url(
                 settings.ares_redis_url,

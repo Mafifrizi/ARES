@@ -1,6 +1,12 @@
 """AWS Recon - boto3 implementation. IAM, S3, Security Groups, IMDS. MITRE: T1526, T1530, T1552.005, T1580"""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from functools import partial
 from typing import Any

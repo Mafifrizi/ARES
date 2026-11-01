@@ -724,7 +724,7 @@ class ModuleInstaller:
 
         mod = importlib.util.module_from_spec(spec)
         try:
-            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+            spec.loader.exec_module(mod)
         except Exception:
             return ModuleManifest(id=path.stem, name=path.stem, description="", source_url=source_url)
 

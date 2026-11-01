@@ -14,6 +14,12 @@ Routes:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.db.database import AresDatabase
+
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any

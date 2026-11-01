@@ -468,7 +468,7 @@ class SMBRelayAuditModule(BaseModule):
                         If it succeeds, LDAP signing is NOT enforced.
                         """
                         try:
-                            from ldap3 import (  # type: ignore[import]
+                            from ldap3 import (
                                 ALL,
                                 ANONYMOUS,
                                 Connection,

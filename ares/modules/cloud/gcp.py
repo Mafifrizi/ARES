@@ -20,6 +20,12 @@ Required optional extras:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 import datetime
 from functools import partial
@@ -48,12 +54,12 @@ _PUBLIC_MEMBERS = frozenset({"allUsers", "allAuthenticatedUsers"})
 def _get_gcp_credentials(credentials_file: str | None = None) -> "Any":
     """Return Google credentials - file or ADC."""
     if credentials_file:
-        from google.oauth2 import service_account  # type: ignore[import]
+        from google.oauth2 import service_account
         return service_account.Credentials.from_service_account_file(
             credentials_file,
             scopes=["https://www.googleapis.com/auth/cloud-platform.read-only"],
         )
-    import google.auth  # type: ignore[import]
+    import google.auth
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform.read-only"]
     )
@@ -272,7 +278,7 @@ class GCPModule(BaseModule):
         """
         try:
             import google.auth.transport.requests as _garequests
-            from google.cloud import resourcemanager_v3  # type: ignore[import]
+            from google.cloud import resourcemanager_v3
             from google.oauth2 import credentials as _creds_module  # noqa: F401
 
             client = resourcemanager_v3.ProjectsClient(credentials=credentials)
@@ -368,8 +374,8 @@ class GCPModule(BaseModule):
         List all GCS buckets and check their IAM policies for public access.
         Also checks uniform bucket-level access and versioning.
         """
-        import google.auth.transport.requests  # type: ignore[import]
-        import requests  # type: ignore[import]
+        import google.auth.transport.requests
+        import requests
 
         auth_req = google.auth.transport.requests.Request()
         credentials.refresh(auth_req)
@@ -476,8 +482,8 @@ class GCPModule(BaseModule):
         Flag keys older than _SA_KEY_MAX_AGE_DAYS days.
         Also flags service accounts with owner/editor bindings.
         """
-        import google.auth.transport.requests  # type: ignore[import]
-        import requests  # type: ignore[import]
+        import google.auth.transport.requests
+        import requests
 
         auth_req = google.auth.transport.requests.Request()
         credentials.refresh(auth_req)

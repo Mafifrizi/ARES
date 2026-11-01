@@ -1266,7 +1266,7 @@ class LinuxCapParser:
         if not hasattr(os, "getxattr"):
             return []
         try:
-            cap_data = os.getxattr(path, "security.capability")  # type: ignore[attr-defined]
+            cap_data = os.getxattr(path, "security.capability")
             return cls.decode_capability_bytes(cap_data)
         except (OSError, ValueError):
             return []

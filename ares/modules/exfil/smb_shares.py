@@ -244,7 +244,7 @@ class SmbSharesExfil(BaseModule):
                  "sensitive_file_paths": mock_files, "sensitive_data_found": True}
 
         try:
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket_not_installed"}
 

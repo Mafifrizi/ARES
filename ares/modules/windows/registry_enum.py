@@ -63,7 +63,7 @@ def _decode_vnc_password(enc: bytes) -> str:
         try:
             from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
         except ImportError:
-            from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES  # type: ignore[no-redef]
+            from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
         from cryptography.hazmat.primitives.ciphers import Cipher, modes
         cipher = Cipher(TripleDES(vnc_key * 3), modes.ECB())  # nosec: B304
         decryptor = cipher.decryptor()
@@ -75,7 +75,7 @@ def _decode_vnc_password(enc: bytes) -> str:
         return f"<decode_error: {enc.hex()}>"
 
     try:
-        from Crypto.Cipher import DES  # type: ignore[import] # nosec: B413
+        from Crypto.Cipher import DES  # nosec: B413
         cipher = DES.new(vnc_key, DES.MODE_ECB)  # nosec: B304
         decoded = cipher.decrypt(padded)
         return decoded.rstrip(b"\x00").decode("latin-1", errors="replace")
@@ -388,8 +388,8 @@ class RegistryEnumModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (  # type: ignore[import]
+            from impacket.dcerpc.v5 import rrp, transport
+            from impacket.dcerpc.v5.rrp import (
                 DCERPCException,
                 hBaseRegCloseKey,
                 hBaseRegEnumValue,
@@ -399,7 +399,7 @@ class RegistryEnumModule(BaseModule):
                 hOpenCurrentUser,
                 hOpenLocalMachine,
             )
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             logger.warning("registry_enum_impacket_missing", target=target)
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
@@ -507,7 +507,7 @@ class RegistryEnumModule(BaseModule):
                         info  = hBaseRegQueryInfoKey(dce, hbase)
                         count = info["lpcSubKeys"]
 
-                        from impacket.dcerpc.v5.rrp import hBaseRegEnumKey  # type: ignore[import]
+                        from impacket.dcerpc.v5.rrp import hBaseRegEnumKey
                         for i in range(count):
                             try:
                                 ek       = hBaseRegEnumKey(dce, hbase, i)

@@ -20,6 +20,12 @@ OPSEC: MEDIUM - file access only, no process injection.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import os
 from typing import Any

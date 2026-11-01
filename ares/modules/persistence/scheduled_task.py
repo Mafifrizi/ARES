@@ -16,6 +16,12 @@ MITRE ATT&CK:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import xml.sax.saxutils as _xmlesc
 from typing import Any
 
@@ -67,7 +73,7 @@ def _tsch_register_sync(target: str, username: str, password: str,
                         domain: str, lmhash: str, nthash: str,
                         task_name: str, command: str) -> None:
     """Register a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
-    from impacket.dcerpc.v5 import transport, tsch  # type: ignore[import]
+    from impacket.dcerpc.v5 import transport, tsch
     from impacket.dcerpc.v5.dtypes import NULL
 
     string_binding = f"ncacn_np:{target}[\\pipe\\atsvc]"
@@ -101,7 +107,7 @@ def _tsch_delete_sync(target: str, username: str, password: str,
                       domain: str, lmhash: str, nthash: str,
                       task_name: str) -> None:
     """Delete a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
-    from impacket.dcerpc.v5 import transport, tsch  # type: ignore[import]
+    from impacket.dcerpc.v5 import transport, tsch
 
     string_binding = f"ncacn_np:{target}[\\pipe\\atsvc]"
     rpctransport   = transport.DCERPCTransportFactory(string_binding)
@@ -397,7 +403,7 @@ class ScheduledTaskPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import tsch  # type: ignore[import]  # noqa: F401
+            from impacket.dcerpc.v5 import tsch  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 
@@ -478,7 +484,7 @@ _RUN_KEY = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
 def _rrp_set_run_key(target: str, username: str, password: str,
                      domain: str, value_name: str, payload: str) -> None:
     """Write a Run key via impacket dcerpc rrp RPC."""
-    from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
+    from impacket.dcerpc.v5 import rrp, transport
     from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
 
     string_binding = f"ncacn_np:{target}[\\pipe\\winreg]"
@@ -672,7 +678,7 @@ class RegistryRunKeyPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import rrp  # type: ignore[import]  # noqa: F401
+            from impacket.dcerpc.v5 import rrp  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 

@@ -43,7 +43,7 @@ logger = get_logger("ares.worker.cluster")
 
 # Redis client type hint (optional dep)
 try:
-    import redis.asyncio as aioredis  # type: ignore[import-untyped]
+    import redis.asyncio as aioredis
 
     _REDIS_AVAILABLE = True
 except ImportError:

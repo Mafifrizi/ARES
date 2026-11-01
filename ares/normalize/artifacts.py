@@ -398,19 +398,19 @@ class ArtifactStore:
         return [a for a in self._store.values() if a.artifact_type == artifact_type]
 
     def hosts(self)       -> list[HostArtifact]:
-        return [a for a in self._store.values() if isinstance(a, HostArtifact)]          # type: ignore[return-value]
+        return [a for a in self._store.values() if isinstance(a, HostArtifact)]
 
     def users(self)       -> list[UserArtifact]:
-        return [a for a in self._store.values() if isinstance(a, UserArtifact)]          # type: ignore[return-value]
+        return [a for a in self._store.values() if isinstance(a, UserArtifact)]
 
     def credentials(self) -> list[CredentialArtifact]:
-        return [a for a in self._store.values() if isinstance(a, CredentialArtifact)]    # type: ignore[return-value]
+        return [a for a in self._store.values() if isinstance(a, CredentialArtifact)]
 
     def hashes(self)      -> list[HashArtifact]:
-        return [a for a in self._store.values() if isinstance(a, HashArtifact)]          # type: ignore[return-value]
+        return [a for a in self._store.values() if isinstance(a, HashArtifact)]
 
     def permissions(self) -> list[PermissionArtifact]:
-        return [a for a in self._store.values() if isinstance(a, PermissionArtifact)]    # type: ignore[return-value]
+        return [a for a in self._store.values() if isinstance(a, PermissionArtifact)]
 
     def kerberoastable(self) -> list[UserArtifact]:
         return [u for u in self.users() if u.is_kerberoastable]

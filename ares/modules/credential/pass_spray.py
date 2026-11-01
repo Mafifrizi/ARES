@@ -10,6 +10,12 @@ Built-in lockout protection:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 
@@ -545,14 +551,14 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         smb_available = False
         if not use_ldap:
             try:
-                from impacket.smbconnection import SMBConnection  # type: ignore[import]  # noqa: F401
+                from impacket.smbconnection import SMBConnection  # noqa: F401
                 smb_available = True
             except ImportError:
                 use_ldap = True   # impacket missing - try ldap3
 
         if use_ldap or not smb_available:
             try:
-                import ldap3 as _ldap3  # type: ignore[import]  # noqa: F401
+                import ldap3 as _ldap3  # noqa: F401
                 use_ldap = True
             except ImportError:
                 return [], {"error": "Neither impacket nor ldap3 installed"}

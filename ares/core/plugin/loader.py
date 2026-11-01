@@ -432,7 +432,7 @@ class PluginLoader:
                 return
             mod = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = mod
-            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+            spec.loader.exec_module(mod)
 
             for _, cls in inspect.getmembers(mod, inspect.isclass):
                 if self._is_valid_module_class(cls):

@@ -1621,7 +1621,7 @@ def _postgres_ticket_column_census(
     by_name: dict[str, object] = {}
     for row in rows:
         try:
-            raw_name = row["column_name"]  # type: ignore[index]
+            raw_name = row["column_name"]
         except (KeyError, TypeError, IndexError):
             actual_names.append(None)
             section["x"] = 0xFFF
@@ -2321,7 +2321,7 @@ class PostgresDatabase:
 
     async def connect(self) -> "PostgresDatabase":
         try:
-            import asyncpg  # type: ignore[import-untyped]
+            import asyncpg
         except ImportError as exc:
             raise RuntimeError(
                 "asyncpg is required for PostgreSQL support. "

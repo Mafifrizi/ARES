@@ -1184,7 +1184,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             # NTLM auth via httpx + httpx-ntlm or basic fallback
             auth: tuple | None = None
             try:
-                from httpx_ntlm import HttpNtlmAuth  # type: ignore[import]
+                from httpx_ntlm import HttpNtlmAuth
                 ntlm_user = f"{domain}\\{username}" if domain else username
                 auth = HttpNtlmAuth(ntlm_user, password)
             except ImportError:

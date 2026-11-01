@@ -343,8 +343,8 @@ class ScheduledTasksEnumModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.dcerpc.v5 import transport, tsch  # type: ignore[import]
-            from impacket.dcerpc.v5.tsch import (  # type: ignore[import]
+            from impacket.dcerpc.v5 import transport, tsch
+            from impacket.dcerpc.v5.tsch import (
                 TASK_ENUM_HIDDEN,
                 hSchRpcEnumFolders,
                 hSchRpcEnumTasks,

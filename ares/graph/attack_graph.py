@@ -145,7 +145,7 @@ class AttackGraph:
             raise ImportError(
                 "networkx is required for attack graph: pip install networkx"
             )
-        self._g: Any = nx.DiGraph()  # type: ignore[attr-defined]
+        self._g: Any = nx.DiGraph()
         self._nodes: dict[str, GraphNode] = {}
         self._edges: list[GraphEdge] = []
 

@@ -21,6 +21,12 @@ Prerequisites: Azure AD tenant ID. Optional: client credentials or existing acce
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from typing import Any
 
@@ -383,7 +389,7 @@ class AzureADModule(BaseModule):
                                        client_secret: str) -> str:
         """Acquire access token via client credentials flow."""
         try:
-            import msal  # type: ignore[import]
+            import msal
             app = msal.ConfidentialClientApplication(
                 client_id,
                 authority=f"{_LOGIN_ENDPOINT}/{tenant_id}",
@@ -403,7 +409,7 @@ class AzureADModule(BaseModule):
     def _request_device_code(self, tenant_id: str, client_id: str) -> dict:
         """Request a device code for phishing-style auth capture."""
         try:
-            import msal  # type: ignore[import]
+            import msal
             app = msal.PublicClientApplication(
                 client_id,
                 authority=f"{_LOGIN_ENDPOINT}/{tenant_id}",

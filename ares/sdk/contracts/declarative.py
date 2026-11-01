@@ -101,7 +101,7 @@ def module_contract(
 
                 return await pipe.run(self, ctx, _inner_exec)
 
-            cls.execute = wrapped_execute  # type: ignore[assignment]
+            cls.execute = wrapped_execute
 
         return cls
 

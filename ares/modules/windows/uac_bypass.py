@@ -281,14 +281,14 @@ class UACBypassModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (  # type: ignore[import]
+            from impacket.dcerpc.v5 import rrp, transport
+            from impacket.dcerpc.v5.rrp import (
                 hBaseRegCloseKey,
                 hBaseRegOpenKey,
                 hBaseRegQueryValue,
                 hOpenLocalMachine,
             )
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 

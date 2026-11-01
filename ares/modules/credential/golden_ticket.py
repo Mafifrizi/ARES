@@ -10,6 +10,12 @@ Requires: krbtgt NTLM hash (from ad.dcsync), domain SID.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 

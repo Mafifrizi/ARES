@@ -256,7 +256,7 @@ def _ssh_scan(target: str, username: str, password: str = "",
             verification. Strongly recommended in production. When omitted,
             AutoAddPolicy is used (MITM risk on untrusted networks).
     """
-    import paramiko  # type: ignore[import]
+    import paramiko
     _log = get_logger("ares.modules.exfil.secrets_scan")
     client = paramiko.SSHClient()
     if known_hosts_file:
@@ -320,7 +320,7 @@ def _ssh_scan(target: str, username: str, password: str = "",
 def _wmi_scan(target: str, username: str, password: str = "",
                domain: str = "", paths: str = _WIN_SCAN_PATHS) -> list[dict]:
     """Run PowerShell credential scan via impacket WMIEXEC."""
-    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]
+    from impacket.examples.wmiexec import WMIEXEC
 
     ps_script = (
         r"$paths = @('C:\\inetpub','C:\\Users','C:\\ProgramData'); "
@@ -610,13 +610,13 @@ class SecretsScan(BaseModule):
         try:
             if platform == "windows":
                 try:
-                    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]  # noqa: F401
+                    from impacket.examples.wmiexec import WMIEXEC  # noqa: F401
                 except ImportError:
                     return [], {"error": "impacket_not_installed"}
                 hits = _wmi_scan(target, username, password, domain)
             else:
                 try:
-                    import paramiko  # type: ignore[import]  # noqa: F401
+                    import paramiko  # noqa: F401
                 except ImportError:
                     return [], {"error": "paramiko_not_installed"}
                 hits = _ssh_scan(target, username, password, key_path)

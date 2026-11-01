@@ -324,7 +324,7 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
         await self.before_request(target, "ssh")  # scope check + jitter
 
         try:
-            import paramiko  # type: ignore[import]
+            import paramiko
         except ImportError:
             return [], {"error": "paramiko not installed"}
 

@@ -225,6 +225,21 @@ skips = [
 python_version         = "3.11"
 strict                 = true
 ignore_missing_imports = true
+plugins                = ["pydantic.mypy"]
+# Type-safety checks (None-safety, arg/return/attr compatibility, undefined names)
+# stay strict — they catch real bugs. The annotation-completeness mandates below are
+# relaxed: requiring an explicit annotation on every def/call/generic in a 130k-LOC
+# codebase that predates typing is churn, not bug-finding. New code is still checked
+# for correctness; it just isn't forced to annotate every parameter.
+disallow_untyped_defs     = false   # no-untyped-def
+disallow_incomplete_defs  = false
+disallow_untyped_calls    = false   # no-untyped-call
+disallow_any_generics     = false   # type-arg (bare dict/list)
+warn_return_any           = false   # no-any-return
+
+[tool.pydantic-mypy]
+init_forbid_extra   = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

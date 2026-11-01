@@ -570,7 +570,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
         port: int,
     ) -> Any:
         try:
-            import asyncssh  # type: ignore[import]
+            import asyncssh
         except ImportError:
             from ares.core.errors import ModuleError
             raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904

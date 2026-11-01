@@ -12,6 +12,12 @@ Based on Rhino Security Labs IAM privesc research.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from typing import Any
 
@@ -237,7 +243,7 @@ class AWSPrivescModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            import boto3  # type: ignore[import]
+            import boto3
         except ImportError:
             return [], {"error": "boto3 not installed - pip install ares-redteam[cloud]"}
 

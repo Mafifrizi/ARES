@@ -22,6 +22,12 @@ Credential extraction from vault is handled by BaseLateralModule.execute().
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import time
 from typing import Any
@@ -241,12 +247,12 @@ class DCOMLateral(BaseLateralModule):
               target=target, technique="T1021.003")
 
         try:
-            from impacket.dcerpc.v5 import dcomrt, transport  # type: ignore[import]  # noqa: F401
-            from impacket.dcerpc.v5.dcom import mmc, wmi  # type: ignore[import]
-            from impacket.dcerpc.v5.dcom.oaut import (  # type: ignore[import]
+            from impacket.dcerpc.v5 import dcomrt, transport  # noqa: F401
+            from impacket.dcerpc.v5.dcom import mmc, wmi
+            from impacket.dcerpc.v5.dcom.oaut import (
                 IDispatch,  # noqa: F401
             )
-            from impacket.dcerpc.v5.dcomrt import (  # type: ignore[import]
+            from impacket.dcerpc.v5.dcomrt import (
                 DCOMConnection,
             )
         except ImportError:

@@ -5,6 +5,12 @@ JWT authentication, AES-256-GCM encryption for stored data (with legacy Fernet f
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
 import re
 import secrets
 import threading

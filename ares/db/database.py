@@ -5,6 +5,12 @@ All credential/token content encrypted at rest via AES-256-GCM (v2 format, Ferne
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.db.postgres import PostgresDatabase
+
+
 import asyncio
 import hashlib
 import json
@@ -738,7 +744,7 @@ class AresDatabase:
         cls,
         db_path: "str | Path" = "ares.db",
         encryption_key: str | None = None,
-    ) -> "AresDatabase | PostgresDatabase":  # type: ignore[return]  # noqa: F821
+    ) -> "AresDatabase | PostgresDatabase":  # noqa: F821
         """
         Factory that returns the correct backend based on db_path / DATABASE_URL.
 

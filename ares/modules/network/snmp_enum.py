@@ -72,7 +72,7 @@ def _snmp_get_sync(host: str, community: str, port: int,
     Returns dict {oid_name: value}. Empty dict if community wrong or host unreachable.
     """
     try:
-        from pysnmp.hlapi import (  # type: ignore[import]
+        from pysnmp.hlapi import (
             CommunityData,
             ContextData,
             ObjectIdentity,
@@ -112,7 +112,7 @@ def _snmp_walk_sync(host: str, community: str, port: int,
     Returns list of string values (up to max_rows).
     """
     try:
-        from pysnmp.hlapi import (  # type: ignore[import]
+        from pysnmp.hlapi import (
             CommunityData,
             ContextData,
             ObjectIdentity,

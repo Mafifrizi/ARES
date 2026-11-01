@@ -722,7 +722,7 @@ class SandboxRunner:
 
         # 2. Check docker availability & client connection
         try:
-            import docker  # type: ignore[import-untyped]
+            import docker
         except ImportError:
             docker = None
 

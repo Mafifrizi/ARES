@@ -951,7 +951,7 @@ class NTLMRelayModule(BaseModule):
         """
         # ACE: ACCESS_ALLOWED_ACE (type=0, flags=0, mask=GENERIC_ALL)
         ace_mask = struct.pack("<I", 0x000F01FF)  # GENERIC_ALL equivalent
-        ace_body = struct.pack("<B", 0x00)   # type: ACCESS_ALLOWED
+        ace_body = struct.pack("<B", 0x00)   # ACE type byte: ACCESS_ALLOWED
         ace_body += struct.pack("<B", 0x00)  # flags
         ace_size = 8 + len(machine_sid)
         ace_body += struct.pack("<H", ace_size)

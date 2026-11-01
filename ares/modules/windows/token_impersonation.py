@@ -8,6 +8,12 @@ Requires existing shell/WinRM access to the target.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 
@@ -210,7 +216,7 @@ class TokenImpersonationModule(BaseModule):
         await self.before_request(target, "smb")  # scope check + jitter
 
         try:
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
@@ -235,7 +241,7 @@ class TokenImpersonationModule(BaseModule):
         privs_output = ""  # noqa: F841
         loop = asyncio.get_running_loop()
         try:
-            from impacket.dcerpc.v5 import transport, wmi  # type: ignore[import]
+            from impacket.dcerpc.v5 import transport, wmi
 
             def _check_privs() -> str:
                 try:

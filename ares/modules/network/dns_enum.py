@@ -220,10 +220,10 @@ class DnsEnumModule(BaseModule):
         await self.before_request(target, "dns")  # scope check + jitter
 
         try:
-            import dns.exception  # type: ignore[import]
-            import dns.query  # type: ignore[import]
-            import dns.resolver  # type: ignore[import]
-            import dns.zone  # type: ignore[import]
+            import dns.exception
+            import dns.query
+            import dns.resolver
+            import dns.zone
         except ImportError:
             return [], {"error": "dnspython not installed - run: pip install dnspython"}
 

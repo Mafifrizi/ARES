@@ -12,6 +12,12 @@ HIGH_NOISE: Windows Event ID 4648 (explicit credential logon) + registry access.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import re
 from typing import Any
@@ -291,13 +297,13 @@ class LSASecretsModule(BaseModule):
         await self.before_request(target, "smb")  # scope check + jitter
 
         try:
-            from impacket.examples.secretsdump import (  # type: ignore[import]
+            from impacket.examples.secretsdump import (
                 LSASecrets,
                 NTDSHashes,  # noqa: F401
                 RemoteOperations,
                 SAMHashes,
             )
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 

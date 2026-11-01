@@ -24,6 +24,12 @@ State synchronization:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncio
+
+
 import time
 import uuid
 from dataclasses import dataclass, field

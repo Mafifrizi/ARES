@@ -466,8 +466,8 @@ class CloudIdentityFederationModule(BaseModule):
         result: dict[str, Any] = {"error": None, "saml_providers": [], "oidc_providers": [],
                                    "federated_roles": []}
         try:
-            import boto3  # type: ignore[import]
-            from botocore.config import Config  # type: ignore[import]
+            import boto3
+            from botocore.config import Config
 
             session = boto3.Session(
                 aws_access_key_id=access_key,
