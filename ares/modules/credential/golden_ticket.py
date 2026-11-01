@@ -336,7 +336,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
 
         loop = asyncio.get_running_loop()
 
-        def _forge() -> tuple[bool, str, str]:
+        def _forge() -> tuple[bool, bytes, str]:
             """
             Forge Golden Ticket using impacket.krb5 library directly.
             Drops the old subprocess ticketer approach - unstable, PATH-dependent.

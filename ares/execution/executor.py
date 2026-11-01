@@ -295,11 +295,11 @@ class RemoteExecutor:
             from ares.modules.lateral.modules import PsExecLateral
             _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = PsExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
-            result = await lateral.execute(
-                target=target, username=username,
-                password=secret, domain=domain, command=command,
+            result = await lateral.move(
+                target=target, username=username, domain=domain,
+                secret=secret, command=command,
             )
-            return result.stdout or "", result.stderr or "", 0 if result.success else 1
+            return result.output or "", result.error or "", 0 if result.success else 1
         except Exception as exc:
             return "", str(exc)[:300], 1
     async def _run_winrm(self, target, command, username, domain, secret) -> tuple[str, str, int]:
@@ -355,11 +355,11 @@ class RemoteExecutor:
             from ares.modules.lateral.modules import WMIExecLateral
             _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = WMIExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
-            result = await lateral.execute(
-                target=target, username=username,
-                password=secret, domain=domain, command=command,
+            result = await lateral.move(
+                target=target, username=username, domain=domain,
+                secret=secret, command=command,
             )
-            return result.stdout or "", result.stderr or "", 0 if result.success else 1
+            return result.output or "", result.error or "", 0 if result.success else 1
         except Exception as exc:
             return "", str(exc)[:300], 1
     async def _run_ssh(self, target, command, username, secret) -> tuple[str, str, int]:
