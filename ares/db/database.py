@@ -712,6 +712,11 @@ class AresDatabase:
             raise asyncio.CancelledError
 
         self._conn = connection
+        # Mark connected before schema init: the connection is usable now, and
+        # _init_schema() runs query helpers that go through self.conn
+        # (_require_connected). Runs under _lifecycle_lock, so no caller can
+        # observe this window; the except below resets it on any failure.
+        self._connected = True
         try:
             connection.row_factory = aiosqlite.Row
             if not self._is_sqlite_uri:
@@ -730,7 +735,6 @@ class AresDatabase:
                 caught_cancellations=cleanup_cancellations,
             )
             raise
-        self._connected = True
         return self
 
     async def __aenter__(self) -> "AresDatabase":
@@ -817,7 +821,7 @@ class AresDatabase:
                 await validate_sqlite_admission_authority_catalog_async(self._conn)
                 return
 
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='websocket_tickets'"
         ) as cursor:
             ticket_table_exists = await cursor.fetchone() is not None
@@ -837,12 +841,12 @@ class AresDatabase:
                 maxsplit=1,
             )[1]
             try:
-                await self._conn.executescript(f"BEGIN IMMEDIATE;\n{schema_body}")
+                await self.conn.executescript(f"BEGIN IMMEDIATE;\n{schema_body}")
                 await self._validate_websocket_ticket_schema()
                 await validate_sqlite_admission_authority_catalog_async(self._conn)
-                await self._conn.commit()
+                await self.conn.commit()
             except BaseException:
-                await self._conn.rollback()
+                await self.conn.rollback()
                 raise
         await self._reconcile_sqlite_schema()
         await self._validate_websocket_ticket_schema()
@@ -857,7 +861,7 @@ class AresDatabase:
         """Ensure critical columns exist after idempotent/fallback migrations."""
 
         async def _columns(table: str) -> set[str]:
-            async with self._conn.execute(f"PRAGMA table_info({table})") as cur:
+            async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
                 rows = await cur.fetchall()
             return {row["name"] for row in rows}
 
@@ -869,12 +873,12 @@ class AresDatabase:
         ]
         for name, ddl in missing_findings_columns:
             if name not in findings_columns:
-                await self._conn.execute(f"ALTER TABLE findings ADD COLUMN {ddl}")
+                await self.conn.execute(f"ALTER TABLE findings ADD COLUMN {ddl}")
                 findings_columns.add(name)
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_findings_cvss ON findings(cvss_score)"
         )
-        await self._conn.execute(
+        await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS module_runs (
                 id           TEXT PRIMARY KEY,
@@ -887,15 +891,15 @@ class AresDatabase:
             )
             """
         )
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_module_runs_campaign ON module_runs(campaign_id)"
         )
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_module_runs_completed ON module_runs(completed_at)"
         )
 
         # ── Reconcile Organizations & SSO Tables ──────────────────────────────
-        await self._conn.execute(
+        await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS organizations (
                 id          TEXT PRIMARY KEY,
@@ -906,10 +910,10 @@ class AresDatabase:
             )
             """
         )
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_organizations_slug ON organizations(slug)"
         )
-        await self._conn.execute(
+        await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sso_configurations (
                 id                  TEXT PRIMARY KEY,
@@ -932,10 +936,10 @@ class AresDatabase:
             )
             """
         )
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sso_org ON sso_configurations(org_id)"
         )
-        await self._conn.execute(
+        await self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sso_flow_states (
                 id          TEXT PRIMARY KEY,
@@ -950,7 +954,7 @@ class AresDatabase:
             )
             """
         )
-        await self._conn.execute(
+        await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sso_flow_lookup ON sso_flow_states(flow_id, is_consumed, expires_at)"
         )
 
@@ -963,17 +967,17 @@ class AresDatabase:
         ]
         for name, ddl in missing_users_columns:
             if name not in users_columns:
-                await self._conn.execute(f"ALTER TABLE users ADD COLUMN {ddl}")
+                await self.conn.execute(f"ALTER TABLE users ADD COLUMN {ddl}")
                 users_columns.add(name)
 
         # Seed default organization if none exists
-        async with self._conn.execute("SELECT id FROM organizations WHERE slug='default'") as cur:
+        async with self.conn.execute("SELECT id FROM organizations WHERE slug='default'") as cur:
             if await cur.fetchone() is None:
-                await self._conn.execute(
+                await self.conn.execute(
                     "INSERT INTO organizations(id, slug, name) VALUES('default-org-id', 'default', 'Default Organization')"
                 )
 
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def _validate_websocket_ticket_schema(self) -> None:
         """Reject a partially present ticket table instead of using it silently."""
@@ -1286,8 +1290,8 @@ class AresDatabase:
     async def checkpoint_wal(self) -> None:
         """Force a WAL checkpoint - consolidates WAL into main DB file.
         Call periodically (e.g. hourly) or before taking a file-system backup."""
-        await self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        await self._conn.commit()
+        await self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        await self.conn.commit()
 
     async def export_json(self, output_path: str | None = None) -> str:
         """
@@ -1307,13 +1311,13 @@ class AresDatabase:
             backup_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(backup_dir / f"ares_export_{ts}.json")
 
-        async with self._conn.execute("SELECT * FROM campaigns ORDER BY created_at DESC") as cur:
+        async with self.conn.execute("SELECT * FROM campaigns ORDER BY created_at DESC") as cur:
             campaigns = [dict(r) for r in await cur.fetchall()]
 
-        async with self._conn.execute("SELECT * FROM findings ORDER BY discovered_at DESC") as cur:
+        async with self.conn.execute("SELECT * FROM findings ORDER BY discovered_at DESC") as cur:
             all_findings = [dict(r) for r in await cur.fetchall()]
 
-        async with self._conn.execute("SELECT * FROM hosts ORDER BY first_seen") as cur:
+        async with self.conn.execute("SELECT * FROM hosts ORDER BY first_seen") as cur:
             all_hosts = [dict(r) for r in await cur.fetchall()]
 
         from collections import defaultdict
@@ -1381,7 +1385,7 @@ class AresDatabase:
     # ── Campaigns ─────────────────────────────────────────────────────────────
 
     async def save_campaign(self, c: Campaign) -> None:
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO campaigns(id,name,client,operator,noise_profile,status,scope_json,targets_json,notes)
             VALUES(?,?,?,?,?,?,?,?,?)
@@ -1404,19 +1408,19 @@ class AresDatabase:
                 c.notes,
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def update_campaign_status(self, campaign_id: str, status: str) -> bool:
         """Update campaign operational status (e.g. 'created' -> 'running')."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "UPDATE campaigns SET status = ?, updated_at = datetime('now') WHERE id = ?",
             (status, campaign_id),
         ) as cur:
-            await self._conn.commit()
+            await self.conn.commit()
             return cur.rowcount > 0
 
     async def get_campaign(self, campaign_id: str) -> dict[str, Any] | None:
-        async with self._conn.execute("SELECT * FROM campaigns WHERE id=?", (campaign_id,)) as cur:
+        async with self.conn.execute("SELECT * FROM campaigns WHERE id=?", (campaign_id,)) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -1431,12 +1435,12 @@ class AresDatabase:
             params_list.append(operator)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
-        async with self._conn.execute(
+        async with self.conn.execute(
             f"SELECT COUNT(*) as n FROM campaigns {where}", params_list
         ) as cur:
             total = (await cur.fetchone())["n"]
 
-        async with self._conn.execute(
+        async with self.conn.execute(
             f"SELECT * FROM campaigns {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             params_list + [per_page, offset],
         ) as cur:
@@ -1694,7 +1698,7 @@ class AresDatabase:
 
     async def save_finding(self, campaign_id: str, f: Finding, module_id: str = "") -> None:
         """FIX: module_id sekarang opsional (default '')."""
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO findings
             (id,campaign_id,module_id,title,description,severity,cvss_score,cvss_vector,
@@ -1731,7 +1735,7 @@ class AresDatabase:
                 int(bool(getattr(f, "false_positive", False))),
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def list_findings(
         self,
@@ -1757,12 +1761,12 @@ class AresDatabase:
         where = " AND ".join(conditions)
         offset = (page - 1) * per_page
 
-        async with self._conn.execute(
+        async with self.conn.execute(
             f"SELECT COUNT(*) as n FROM findings WHERE {where}", params_list
         ) as cur:
             total = (await cur.fetchone())["n"]
 
-        async with self._conn.execute(
+        async with self.conn.execute(
             f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC LIMIT ? OFFSET ?",
             params_list + [per_page, offset],
         ) as cur:
@@ -1781,7 +1785,7 @@ class AresDatabase:
             conditions.append("validated=1")
             conditions.append("false_positive=0")
         where = " AND ".join(conditions)
-        async with self._conn.execute(
+        async with self.conn.execute(
             f"SELECT * FROM findings WHERE {where} ORDER BY discovered_at DESC",
             params_list,
         ) as cur:
@@ -1789,7 +1793,7 @@ class AresDatabase:
 
     async def get_finding_stats(self, campaign_id: str) -> dict[str, Any]:
         """Return count breakdown by severity for a campaign."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT severity, COUNT(*) as n FROM findings WHERE campaign_id=? GROUP BY severity",
             (campaign_id,),
         ) as cur:
@@ -1812,7 +1816,7 @@ class AresDatabase:
         """Return confirmed findings grouped by day in the current UTC month."""
         period = datetime.now(UTC).strftime("%Y-%m")
         if campaign_id:
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """
                 SELECT COUNT(*) AS n
                 FROM findings
@@ -1823,7 +1827,7 @@ class AresDatabase:
                 (campaign_id,),
             ) as cur:
                 confirmed_findings = int((await cur.fetchone())["n"])
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """
                 SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
                 FROM findings
@@ -1838,7 +1842,7 @@ class AresDatabase:
             ) as cur:
                 rows = await cur.fetchall()
         else:
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """
                 SELECT COUNT(*) AS n
                 FROM findings
@@ -1847,7 +1851,7 @@ class AresDatabase:
                 """
             ) as cur:
                 confirmed_findings = int((await cur.fetchone())["n"])
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """
                 SELECT substr(discovered_at, 1, 10) AS finding_date, COUNT(*) AS n
                 FROM findings
@@ -1878,7 +1882,7 @@ class AresDatabase:
         duration_ms: float,
     ) -> None:
         """Persist non-sensitive execution metadata for restart-safe telemetry."""
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO module_runs
                 (id, campaign_id, module_id, outcome, success, duration_ms, completed_at)
@@ -1894,7 +1898,7 @@ class AresDatabase:
                 datetime.now(UTC).isoformat(),
             ),
         )
-        await self._conn.execute(
+        await self.conn.execute(
             """
             UPDATE campaigns
                SET status = 'running', updated_at = datetime('now')
@@ -1902,7 +1906,7 @@ class AresDatabase:
             """,
             (campaign_id,),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def get_telemetry_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Aggregate persisted execution, finding, and discovered-host telemetry."""
@@ -1929,7 +1933,7 @@ class AresDatabase:
             hosts_sql = "SELECT COUNT(*) AS n FROM hosts"
             hosts_params = ()
 
-        async with self._conn.execute(run_sql, run_params) as cur:
+        async with self.conn.execute(run_sql, run_params) as cur:
             run_rows = await cur.fetchall()
 
         total = len(run_rows)
@@ -1946,9 +1950,9 @@ class AresDatabase:
         recent_cutoff = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
         recent_runs = sum(1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff)
 
-        async with self._conn.execute(findings_sql, findings_params) as cur:
+        async with self.conn.execute(findings_sql, findings_params) as cur:
             confirmed_findings = int((await cur.fetchone())["n"])
-        async with self._conn.execute(hosts_sql, hosts_params) as cur:
+        async with self.conn.execute(hosts_sql, hosts_params) as cur:
             discovered_hosts = int((await cur.fetchone())["n"])
 
         return {
@@ -1993,7 +1997,7 @@ class AresDatabase:
     # ── Hosts ─────────────────────────────────────────────────────────────────
 
     async def upsert_host(self, h: Host) -> str:
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO hosts(id,campaign_id,ip_address,hostname,fqdn,os,os_version,
                 domain,is_dc,open_ports_json,tags_json)
@@ -2017,20 +2021,20 @@ class AresDatabase:
                 json.dumps(h.tags),
             ),
         )
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT id FROM hosts WHERE campaign_id=? AND ip_address=?",
             (h.campaign_id, h.ip_address),
         ) as cursor:
             row = await cursor.fetchone()
         if row is None:
-            await self._conn.rollback()
+            await self.conn.rollback()
             raise RuntimeError("Canonical host persistence failed")
-        await self._conn.commit()
+        await self.conn.commit()
         return str(row["id"])
 
     async def get_hosts(self, campaign_id: str) -> list[dict]:
         """Retrieve all hosts recorded for a campaign."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM hosts WHERE campaign_id=? ORDER BY first_seen", (campaign_id,)
         ) as cur:
             rows = await cur.fetchall()
@@ -2039,7 +2043,7 @@ class AresDatabase:
     # ── Credentials ───────────────────────────────────────────────────────────
 
     async def save_credential(self, c: DBCredential) -> None:
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO credentials
             (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
@@ -2062,7 +2066,7 @@ class AresDatabase:
                 c.notes,
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def save_credential_preencrypted(self, c: DBCredential) -> None:
         """
@@ -2071,7 +2075,7 @@ class AresDatabase:
         Uses INSERT OR IGNORE so re-running after a crash doesn't overwrite
         existing secrets with the same ID.
         """
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO credentials
                 (id,campaign_id,host_id,username,secret_enc,cred_type,domain,source_module,notes)
@@ -2093,7 +2097,7 @@ class AresDatabase:
                 c.notes,
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def load_credentials_raw(self, campaign_id: str) -> list[dict]:
         """
@@ -2101,7 +2105,7 @@ class AresDatabase:
         Secrets are returned as-is (vault-encrypted: AES-256-GCM v2, with transparent legacy Fernet support) -
         use CredentialVault.restore_from_db_records() to re-hydrate.
         """
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM credentials WHERE campaign_id=? ORDER BY captured_at DESC",
             (campaign_id,),
         ) as cur:
@@ -2109,7 +2113,7 @@ class AresDatabase:
 
     async def get_credentials(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
         """Retrieve all credentials captured for a campaign."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM credentials WHERE campaign_id=? ORDER BY captured_at", (campaign_id,)
         ) as cur:
             rows = await cur.fetchall()
@@ -2127,7 +2131,7 @@ class AresDatabase:
 
     async def save_loot(self, l: Loot) -> None:
         content_str = json.dumps(l.content) if isinstance(l.content, (dict, list)) else l.content
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO loot
             (id,campaign_id,host_id,loot_type,name,description,content_enc,
@@ -2152,7 +2156,7 @@ class AresDatabase:
                 json.dumps(l.tags),
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     def execution_lifecycle_store(self) -> ExecutionLifecycleStore:
         """Return the additive internal lifecycle persistence primitive."""
@@ -2160,7 +2164,7 @@ class AresDatabase:
 
     async def get_loot(self, campaign_id: str, decrypt: bool = False) -> list[dict]:
         """Retrieve all loot items captured for a campaign."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM loot WHERE campaign_id=? ORDER BY captured_at", (campaign_id,)
         ) as cur:
             rows = await cur.fetchall()
@@ -2178,7 +2182,7 @@ class AresDatabase:
         """Persist a sanitized graph snapshot without adding a new schema dependency."""
         graph_id = f"campaign_graph:{campaign_id}"
         payload = json.dumps(graph, separators=(",", ":"))
-        await self._conn.execute(
+        await self.conn.execute(
             """
             INSERT INTO loot
                 (id,campaign_id,loot_type,name,description,content_enc,source_module,tags_json)
@@ -2201,11 +2205,11 @@ class AresDatabase:
                 json.dumps(["runtime", "safe-metadata"]),
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def get_campaign_graph(self, campaign_id: str) -> dict[str, Any] | None:
         """Load the latest safe graph snapshot, returning no decrypted loot to callers."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             """
             SELECT content_enc FROM loot
             WHERE id=? AND campaign_id=? AND loot_type='campaign_graph'
@@ -2237,11 +2241,11 @@ class AresDatabase:
         campaign_id: str | None = None,
         module_id: str | None = None,
     ) -> None:
-        await self._conn.execute(
+        await self.conn.execute(
             "INSERT INTO audit_log(campaign_id,actor,action,detail,module_id) VALUES(?,?,?,?,?)",
             (campaign_id, actor, action, detail, module_id),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     # ── Users (v5) ────────────────────────────────────────────────────────────
 
@@ -2249,23 +2253,23 @@ class AresDatabase:
         self, username: str, password: str, role: str, created_by: str = "system"
     ) -> str:
         user_id = str(uuid.uuid4())
-        await self._conn.execute(
+        await self.conn.execute(
             "INSERT INTO users(id,username,hashed_password,role,created_by) VALUES(?,?,?,?,?)",
             (user_id, username, hash_password(password), role, created_by),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         logger.info("user_created", username=username, role=role, by=created_by)
         return user_id
 
     async def get_user(self, username: str) -> dict[str, Any] | None:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM users WHERE username=? AND is_active=1", (username,)
         ) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
 
     async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM users WHERE id=? AND is_active=1", (user_id,)
         ) as cur:
             row = await cur.fetchone()
@@ -2314,17 +2318,17 @@ class AresDatabase:
         password_ok = verify_password(password, candidate_hash)
         if not user or not password_ok:
             return None
-        await self._conn.execute(
+        await self.conn.execute(
             "UPDATE users SET last_login=datetime('now') WHERE id=?", (user["id"],)
         )
-        await self._conn.commit()
+        await self.conn.commit()
         return user
 
     # ── SSO & Organizations ───────────────────────────────────────────────────
 
     async def get_organization(self, slug_or_id: str) -> dict[str, Any] | None:
         """Fetch organization by slug or UUID id."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT * FROM organizations WHERE slug=? OR id=?", (slug_or_id, slug_or_id)
         ) as cur:
             row = await cur.fetchone()
@@ -2338,7 +2342,7 @@ class AresDatabase:
         else:
             query = "SELECT * FROM sso_configurations WHERE org_id=? AND is_enabled=1 LIMIT 1"
             params = (org_id,)
-        async with self._conn.execute(query, params) as cur:
+        async with self.conn.execute(query, params) as cur:
             row = await cur.fetchone()
         return dict(row) if row else None
 
@@ -2360,7 +2364,7 @@ class AresDatabase:
     ) -> str:
         """Create or update an SSO configuration for an organization."""
         sso_id = str(uuid.uuid4())
-        await self._conn.execute(
+        await self.conn.execute(
             """INSERT INTO sso_configurations(
                    id, org_id, protocol, is_enabled, issuer_or_entity_id, sso_url,
                    idp_certificate_enc, sp_entity_id, acs_url, client_id,
@@ -2385,7 +2389,7 @@ class AresDatabase:
                 client_secret_enc, jwks_uri, default_role, role_mapping_json,
             ),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         return sso_id
 
     async def create_sso_flow_state(
@@ -2399,12 +2403,12 @@ class AresDatabase:
         """Record an ephemeral one-time SSO flow state (AuthnRequest ID or OIDC state)."""
         state_id = str(uuid.uuid4())
         expires_at = (datetime.now(UTC) + timedelta(minutes=ttl_minutes)).isoformat()
-        await self._conn.execute(
+        await self.conn.execute(
             """INSERT INTO sso_flow_states(id, org_id, flow_type, flow_id, nonce, expires_at)
                VALUES(?, ?, ?, ?, ?, ?)""",
             (state_id, org_id, flow_type, flow_id, nonce, expires_at),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         return state_id
 
     async def consume_sso_flow_state(
@@ -2414,7 +2418,7 @@ class AresDatabase:
     ) -> dict[str, Any] | None:
         """Atomically validate and consume an SSO flow state, preventing replay attacks."""
         now_str = datetime.now(UTC).isoformat()
-        async with self._conn.execute(
+        async with self.conn.execute(
             """SELECT * FROM sso_flow_states
                WHERE flow_id=? AND flow_type=? AND is_consumed=0 AND expires_at > ?""",
             (flow_id, flow_type, now_str),
@@ -2423,11 +2427,11 @@ class AresDatabase:
         if not row:
             return None
         record = dict(row)
-        await self._conn.execute(
+        await self.conn.execute(
             "UPDATE sso_flow_states SET is_consumed=1, consumed_at=? WHERE id=?",
             (now_str, record["id"]),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         return record
 
     async def provision_or_get_sso_user(
@@ -2441,7 +2445,7 @@ class AresDatabase:
         """JIT provision or look up an SSO user adhering to the canonical schema."""
         row = None
         if external_id:
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """SELECT * FROM users
                    WHERE external_subject_id=? AND external_subject_id IS NOT NULL AND external_subject_id != ''
                      AND auth_provider=?""",
@@ -2449,7 +2453,7 @@ class AresDatabase:
             ) as cur:
                 row = await cur.fetchone()
 
-        async with self._conn.execute("SELECT * FROM users WHERE username=?", (username,)) as cur:
+        async with self.conn.execute("SELECT * FROM users WHERE username=?", (username,)) as cur:
             username_row = await cur.fetchone()
 
         if username_row:
@@ -2486,47 +2490,47 @@ class AresDatabase:
                 params.append(role)
             if updates:
                 params.append(user["id"])
-                await self._conn.execute(
+                await self.conn.execute(
                     f"UPDATE users SET {', '.join(updates)} WHERE id=?",
                     tuple(params),
                 )
-                await self._conn.commit()
-                async with self._conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
+                await self.conn.commit()
+                async with self.conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
                     user = dict(await cur.fetchone())
             return user
 
         user_id = str(uuid.uuid4())
         dummy_hash = hash_password(secrets.token_urlsafe(32))
-        await self._conn.execute(
+        await self.conn.execute(
             """INSERT INTO users(id, username, hashed_password, role, is_active, created_by, org_id, auth_provider, external_subject_id)
                VALUES(?, ?, ?, ?, 1, ?, ?, ?, ?)""",
             (user_id, username, dummy_hash, role, f"sso:{auth_provider}", org_id, auth_provider, external_id),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         logger.info("sso_user_provisioned", username=username, role=role, org_id=org_id, provider=auth_provider)
-        async with self._conn.execute("SELECT * FROM users WHERE id=?", (user_id,)) as cur:
+        async with self.conn.execute("SELECT * FROM users WHERE id=?", (user_id,)) as cur:
             return dict(await cur.fetchone())
 
     async def user_exists(self, username: str) -> bool:
-        async with self._conn.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
+        async with self.conn.execute("SELECT 1 FROM users WHERE username=?", (username,)) as cur:
             return (await cur.fetchone()) is not None
 
     async def update_password(self, user_id: str, new_hash: str) -> None:
         """Update a user's hashed password. Called from change-password endpoint."""
-        await self._conn.execute(
+        await self.conn.execute(
             "UPDATE users SET hashed_password=? WHERE id=?",
             (new_hash, user_id),
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def list_users(self) -> list[dict[str, Any]]:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT id,username,role,is_active,created_at,last_login FROM users ORDER BY created_at"
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
 
     async def ensure_default_admin(self, admin_password: str) -> bool:
-        async with self._conn.execute("SELECT COUNT(*) as n FROM users") as cur:
+        async with self.conn.execute("SELECT COUNT(*) as n FROM users") as cur:
             n = (await cur.fetchone())["n"]
         if n == 0:
             await self.create_user("admin", admin_password, "team_lead", "bootstrap")
@@ -2552,12 +2556,12 @@ class AresDatabase:
         expires_at = None
         if expires_days:
             expires_at = (datetime.now(UTC) + timedelta(days=expires_days)).isoformat()
-        await self._conn.execute(
+        await self.conn.execute(
             "INSERT INTO api_keys(id,user_id,name,key_hash,key_prefix,scopes,expires_at) "
             "VALUES(?,?,?,?,?,?,?)",
             (key_id, user_id, name, hash_password(raw_key), key_prefix, scopes, expires_at),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         logger.info("api_key_created", user_id=user_id, name=name, prefix=key_prefix)
         return key_id, raw_key
 
@@ -2565,7 +2569,7 @@ class AresDatabase:
         if not raw_key.startswith("ares_"):
             return None
         prefix = raw_key[:12]
-        async with self._conn.execute(
+        async with self.conn.execute(
             """SELECT ak.*, u.username, u.role
                FROM api_keys ak JOIN users u ON ak.user_id=u.id
                WHERE ak.key_prefix=? AND ak.is_active=1
@@ -2583,7 +2587,7 @@ class AresDatabase:
 
         for row in rows:
             if verify_password(raw_key, row["key_hash"]):
-                async with self._conn.execute(
+                async with self.conn.execute(
                     """UPDATE api_keys
                        SET last_used=datetime('now')
                        WHERE id=? AND is_active=1
@@ -2601,7 +2605,7 @@ class AresDatabase:
                     (row["id"],),
                 ) as cur:
                     changed = cur.rowcount
-                await self._conn.commit()
+                await self.conn.commit()
                 if changed != 1:
                     return None
                 return {
@@ -2614,7 +2618,7 @@ class AresDatabase:
         return None
 
     async def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT id,name,key_prefix,scopes,is_active,last_used,expires_at,created_at "
             "FROM api_keys WHERE user_id=? AND is_active=1 ORDER BY created_at DESC",
             (user_id,),
@@ -2622,12 +2626,12 @@ class AresDatabase:
             return [dict(r) for r in await cur.fetchall()]
 
     async def revoke_api_key(self, key_id: str, user_id: str) -> bool:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "UPDATE api_keys SET is_active=0 WHERE id=? AND user_id=? AND is_active=1",
             (key_id, user_id),
         ) as cur:
             changed = cur.rowcount
-        await self._conn.commit()
+        await self.conn.commit()
         return changed > 0
 
     async def _open_websocket_ticket_connection(self) -> aiosqlite.Connection:
@@ -3409,11 +3413,11 @@ class AresDatabase:
         raw_token = secrets.token_urlsafe(48)  # 384 bits - URL-safe, client sees this
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()  # stored in DB
         expires_at = (datetime.now(UTC) + timedelta(days=expires_days)).isoformat()
-        await self._conn.execute(
+        await self.conn.execute(
             "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
             (token_hash, user_id, expires_at),
         )
-        await self._conn.commit()
+        await self.conn.commit()
         return raw_token  # client gets raw; DB stores only hash
 
     async def _open_refresh_rotation_connection(self) -> aiosqlite.Connection:
@@ -3773,19 +3777,19 @@ class AresDatabase:
 
     async def revoke_access_token(self, jti: str, user_id: str, expires_at: str) -> None:
         """Add access token jti to blacklist. Called on logout."""
-        await self._conn.execute(
+        await self.conn.execute(
             "INSERT OR IGNORE INTO revoked_access_tokens (jti, user_id, expires_at) VALUES (?,?,?)",
             (jti, user_id, expires_at),
         )
         # Prune expired entries while we're here (low-cost housekeeping)
-        await self._conn.execute(
+        await self.conn.execute(
             "DELETE FROM revoked_access_tokens WHERE expires_at < datetime('now')",
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def is_access_token_revoked(self, jti: str) -> bool:
         """Return True if this jti has been explicitly revoked."""
-        async with self._conn.execute(
+        async with self.conn.execute(
             "SELECT 1 FROM revoked_access_tokens WHERE jti=?", (jti,)
         ) as cur:
             return await cur.fetchone() is not None
@@ -3977,10 +3981,10 @@ class AresDatabase:
         await self._run_refresh_family_transaction(_revoke)
 
     async def _legacy_revoke_all_refresh_tokens(self, user_id: str) -> None:
-        await self._conn.execute(
+        await self.conn.execute(
             "UPDATE refresh_tokens SET is_revoked=1 WHERE user_id=?", (user_id,)
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def save_bypass_outcome(
         self,
@@ -3995,7 +3999,7 @@ class AresDatabase:
         import time as _time
 
         try:
-            await self._conn.execute(
+            await self.conn.execute(
                 """INSERT INTO bypass_outcomes
                    (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -4009,11 +4013,11 @@ class AresDatabase:
                     _time.time(),
                 ),
             )
-            await self._conn.commit()
+            await self.conn.commit()
         except Exception:
             # Table may not exist yet - create it
             await self._ensure_bypass_outcomes_table()
-            await self._conn.execute(
+            await self.conn.execute(
                 """INSERT INTO bypass_outcomes
                    (technique_id, edr_vendor, edr_version, success, campaign_id, notes, ts)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -4027,7 +4031,7 @@ class AresDatabase:
                     _time.time(),
                 ),
             )
-            await self._conn.commit()
+            await self.conn.commit()
 
     async def get_bypass_success_rate(
         self,
@@ -4042,7 +4046,7 @@ class AresDatabase:
         import time as _time
 
         try:
-            async with self._conn.execute(
+            async with self.conn.execute(
                 """SELECT COUNT(*) as total, COALESCE(SUM(success), 0) as successes
                    FROM bypass_outcomes
                    WHERE technique_id = ? AND edr_vendor = ?
@@ -4058,7 +4062,7 @@ class AresDatabase:
 
     async def _ensure_bypass_outcomes_table(self) -> None:
         """Create bypass_outcomes table if it doesn't exist."""
-        await self._conn.execute(
+        await self.conn.execute(
             """CREATE TABLE IF NOT EXISTS bypass_outcomes (
                id           INTEGER PRIMARY KEY AUTOINCREMENT,
                technique_id TEXT    NOT NULL,
@@ -4070,14 +4074,14 @@ class AresDatabase:
                ts           REAL    NOT NULL
             )"""
         )
-        await self._conn.commit()
+        await self.conn.commit()
 
     async def purge_expired_tokens(self) -> int:
-        async with self._conn.execute(
+        async with self.conn.execute(
             "DELETE FROM refresh_token_families WHERE julianday(retain_until) <= julianday('now')"
         ) as cur:
             n = cur.rowcount
-        await self._conn.commit()
+        await self.conn.commit()
         await self.purge_expired_websocket_tickets()
         return n
 
