@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 try:
     import msvcrt
 
-    def check_keypress() -> Optional[str]:
+    def check_keypress() -> str | None:
         if msvcrt.kbhit():
             ch = msvcrt.getch()
             try:
@@ -25,7 +25,7 @@ try:
 except ImportError:
     import select
 
-    def check_keypress() -> Optional[str]:
+    def check_keypress() -> str | None:
         r, _, _ = select.select([sys.stdin], [], [], 0)
         if r:
             ch = sys.stdin.read(1)
@@ -47,21 +47,21 @@ class TuiState:
     """Operational state for the ARES MCP Two-Pane Split TUI."""
 
     def __init__(self, campaign: str = "Internal-Audit-2026", scope: str = "10.0.1.0/24, 192.168.10.0/24") -> None:
-        self.events: List[Dict[str, Any]] = []
+        self.events: list[dict[str, Any]] = []
         self.campaign_name: str = campaign
         self.scope_cidrs: str = scope
         self.strict_mode: bool = True
         self.opsec_profile: str = "STEALTH (Jitter: 2.5s)"
 
         # Staged action state
-        self.staged_module: Optional[str] = None
-        self.staged_target: Optional[str] = None
-        self.staged_action: Optional[str] = None
-        self.staged_risk: Optional[str] = None
+        self.staged_module: str | None = None
+        self.staged_target: str | None = None
+        self.staged_action: str | None = None
+        self.staged_risk: str | None = None
 
         # Pending authorization token
-        self.pending_token: Optional[str] = None
-        self.token_module: Optional[str] = None
+        self.pending_token: str | None = None
+        self.token_module: str | None = None
         self.token_expiry: float = 0.0
         self.token_status: str = "IDLE"  # IDLE, PENDING, APPROVED, REJECTED, EXPIRED
 
@@ -82,14 +82,14 @@ class TuiState:
         self.token_expiry = time.time() + ttl_seconds
         self.token_status = "PENDING"
 
-    def approve_token(self) -> Optional[str]:
+    def approve_token(self) -> str | None:
         if self.pending_token and self.token_status == "PENDING":
             self.token_status = "APPROVED"
             token = self.pending_token
             return token
         return None
 
-    def reject_token(self) -> Optional[str]:
+    def reject_token(self) -> str | None:
         if self.pending_token and self.token_status == "PENDING":
             self.token_status = "REJECTED"
             token = self.pending_token

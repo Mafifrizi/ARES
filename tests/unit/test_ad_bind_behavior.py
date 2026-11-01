@@ -173,9 +173,9 @@ async def test_asreproast_dry_run_does_not_bind_or_request_kerberos(monkeypatch)
 
 
 def test_asreproast_capture_uses_impacket_no_preauth_api(monkeypatch):
-    import ares.modules.ad.asreproast as asreproast_mod
-
     import impacket.krb5.kerberosv5 as kerberosv5
+
+    import ares.modules.ad.asreproast as asreproast_mod
 
     captured = {}
 
@@ -719,9 +719,9 @@ async def test_enum_computers_ssl_close_is_actionable_operator_error(monkeypatch
 async def test_enum_computers_config_error_does_not_retry(monkeypatch, minimal_campaign):
     from unittest.mock import AsyncMock, patch
 
+    from ares.core.config import AresSettings
     from ares.core.engine import AresEngine
     from ares.core.execution_admission import _mint_test_dispatch_context
-    from ares.core.config import AresSettings
     from ares.core.noise import JitterEngine
     from ares.modules.ad.enum_computers import ADEnumComputersModule
 
@@ -859,7 +859,7 @@ async def test_asreproast_candidate_kerberos_failure_is_candidate_aware(monkeypa
 @pytest.mark.asyncio
 async def test_asreproast_parse_failure_is_candidate_aware(monkeypatch):
     import ares.modules.ad.asreproast as asreproast_mod
-    from ares.modules.ad.asreproast import ASREPRoastModule, ASREPParseError
+    from ares.modules.ad.asreproast import ASREPParseError, ASREPRoastModule
 
     monkeypatch.setattr(asreproast_mod, "ensure_ad_dependencies", lambda *args, **kwargs: None)
     module, _ = _make_module(ASREPRoastModule)

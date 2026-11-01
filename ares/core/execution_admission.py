@@ -33,7 +33,7 @@ from ares.db.execution_lifecycle import (
 
 if TYPE_CHECKING:
     from ares.core.campaign import Campaign
-    from ares.core.engine import AresEngine, EngineModuleResult
+    from ares.core.engine import AresEngine
 
 
 C_LIVE_SUBMISSION_DOMAIN = "ares.c-live.v1.submission"
@@ -1110,7 +1110,7 @@ class ExecutionAdmissionCoordinatorV1:
         )
         try:
             await asyncio.wait_for(asyncio.shield(parking), timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             parking.cancel()
             try:
                 await parking

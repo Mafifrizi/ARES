@@ -4,28 +4,25 @@ Verifies fail-closed enforcement preventing phantom exploits, fake findings, and
 """
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-
-from ares.core.config import AresSettings
-from ares.core.campaign import Campaign, Finding, Severity, ScopeEntry
-from ares.core.engine import AresEngine, EngineModuleResult, ModuleStatus
-from ares.core.validator import (
-    FindingValidator,
-    ValidationCheck,
-    ValidationStage,
-    ValidationResult,
-    build_default_validator,
-)
-from ares.strategy.engine import StrategyEngine
-from ares.credential.vault import CredentialVault, Credential, CredentialType, PrivilegeLevel
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helper Fixtures & Factories
 # ═══════════════════════════════════════════════════════════════════════════════
+from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
+from ares.core.config import AresSettings
+from ares.core.engine import AresEngine, ModuleStatus
+from ares.core.validator import (
+    FindingValidator,
+    ValidationCheck,
+    ValidationStage,
+    build_default_validator,
+)
+from ares.credential.vault import Credential, CredentialType, CredentialVault, PrivilegeLevel
+from ares.strategy.engine import StrategyEngine
 
-from ares.core.campaign import Campaign, Finding, Severity, ScopeEntry, NoiseProfile
 
 def _make_campaign() -> Campaign:
     return Campaign(
@@ -173,8 +170,9 @@ class TestGate3ValidatorEnforcement:
     @pytest.mark.asyncio
     async def test_engine_execution_filters_unvalidated_findings(self):
         """Engine execution loop rejects findings where validator returned confidence < 0.4."""
-        from ares.modules.base import ModuleResult
         from unittest.mock import patch
+
+        from ares.modules.base import ModuleResult
 
         validator = FindingValidator()
         validator.register("test.mixed", [

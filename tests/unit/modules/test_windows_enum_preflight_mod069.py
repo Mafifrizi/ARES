@@ -3,7 +3,8 @@ Tests for MOD-069: Pre-flight parameter validation in validate()
 and non-silent logging in run() for windows.registry_enum and windows.scheduled_tasks_enum.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

@@ -24,7 +24,6 @@ import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from ares.core.campaign import NoiseProfile
 from ares.core.logger import get_logger

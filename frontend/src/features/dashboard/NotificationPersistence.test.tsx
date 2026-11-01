@@ -2,7 +2,6 @@ import { describe, expect, it, beforeEach } from "vitest";
 
 describe("Dashboard notification deletion and persistence", () => {
   const DELETED_KEY = "ares.dashboard.notifications.deleted";
-  const READ_KEY = "ares.dashboard.notifications.read";
 
   beforeEach(() => {
     localStorage.clear();
@@ -40,12 +39,10 @@ describe("Dashboard notification deletion and persistence", () => {
   });
 
   it("does not wipe deleted notifications when current active notifications change or switch scopes", () => {
-    let deleted = ["telemetry:failed-runs"];
+    const deleted = ["telemetry:failed-runs"];
 
-    // Simulate switching campaign where telemetry:failed-runs is not in current active query
-    const activeIdsInNewCampaign: string[] = ["reports:error:camp-2"];
-
-    // Buggy behavior was: deleted = deleted.filter(id => activeIdsInNewCampaign.includes(id));
+    // Simulate switching campaign where telemetry:failed-runs is not in the active query.
+    // Buggy behavior was: deleted = deleted.filter(id => activeIds.includes(id));
     // Correct behavior: deleted list is preserved across scope changes
     expect(deleted).toContain("telemetry:failed-runs");
 

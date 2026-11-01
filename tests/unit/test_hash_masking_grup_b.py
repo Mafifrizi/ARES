@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,9 +22,9 @@ from ares.core.noise import NoiseController
 from ares.core.security import mask_secret_hash
 from ares.modules.ad.dcsync import DCSyncModule
 from ares.modules.linux.samba_secrets import SambaSecretsModule
-from tests.unit.modules.test_linux_ad_tradecraft import _synthesize_tdb
-from ares.modules.params import DCSyncParams, LSASecretsParams, SambaSecretsParams
+from ares.modules.params import LSASecretsParams, SambaSecretsParams
 from ares.modules.windows.lsa_secrets import LSASecretsModule
+from tests.unit.modules.test_linux_ad_tradecraft import _synthesize_tdb
 
 
 def test_mask_secret_hash_behavior():

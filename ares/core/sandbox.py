@@ -28,6 +28,7 @@ import asyncio
 import json
 import os
 import sys as _sys
+
 if _sys.platform != "win32":
     import resource
 else:
@@ -431,9 +432,9 @@ class SandboxRunner:
         requested_tier: IsolationTier = IsolationTier.NONE,
     ) -> SandboxResult:
         """Direct in-process execution. For trusted core modules only."""
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.config import AresSettings
         from ares.core.noise import NoiseController
-        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.plugin.loader import ModuleRegistry
         from ares.core.scope_firewall import scope_firewall_guard
 
@@ -447,9 +448,10 @@ class SandboxRunner:
         # Do NOT default to 0.0.0.0/0 (wildcard) as that bypasses scope enforcement.
         scope_entries: list[ScopeEntry] = []
         try:
-            from ares.db.database import AresDatabase
-            from ares.core.config import get_settings as _gs
             import json as _j
+
+            from ares.core.config import get_settings as _gs
+            from ares.db.database import AresDatabase
             _s = _gs()
             async with await AresDatabase.create(
                 _s.ares_database_url, _s.encryption_key_value
@@ -517,9 +519,10 @@ class SandboxRunner:
             # Pass real campaign scope so child process respects it
             _scope_cidrs: list[str] = []
             try:
-                from ares.db.database import AresDatabase
-                from ares.core.config import get_settings as _gs
                 import json as _j
+
+                from ares.core.config import get_settings as _gs
+                from ares.db.database import AresDatabase
                 _s = _gs()
                 async with await AresDatabase.create(
                     _s.ares_database_url, _s.encryption_key_value
@@ -641,7 +644,7 @@ class SandboxRunner:
                         proc.communicate(payload.encode()),
                         timeout=self.policy.timeout_s,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
                     await proc.wait()
                     return SandboxResult(
@@ -814,9 +817,10 @@ class SandboxRunner:
         # Fetch real scope for Docker container (same as subprocess)
         _docker_scope: list[str] = []
         try:
-            from ares.db.database import AresDatabase
-            from ares.core.config import get_settings as _dgs
             import json as _dj
+
+            from ares.core.config import get_settings as _dgs
+            from ares.db.database import AresDatabase
             _ds = _dgs()
             async with await AresDatabase.create(
                 _ds.ares_database_url, _ds.encryption_key_value

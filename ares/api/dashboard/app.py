@@ -16,16 +16,15 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from ares.__version__ import __version__ as _ares_version
 from ares.api.findings import redact_finding_response_rows
 from ares.core.logger import get_logger
-from ares.__version__ import __version__ as _ares_version
 
 # ── Dashboard auth dependency ─────────────────────────────────────────────────
 # Dashboard is a sub-application separate from the main FastAPI app.

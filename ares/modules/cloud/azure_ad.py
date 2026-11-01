@@ -24,15 +24,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AzureADParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -88,6 +87,7 @@ class AzureADModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -184,11 +184,11 @@ class AzureADModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         tenant_short = str(tenant_id)[:8] if tenant_id else "AzureADTenant"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Azure AD / Entra ID Privileged Role Assignment & App Abuse\n"
-            f"// Monitors AuditLogs for role assignments, service principal secret addition, or app consent\n"
-            f"AuditLogs\n"
-            f"| where OperationName in~ (\"Add member to role\", \"Add service principal credentials\", \"Consent to application\", \"Update application – Certificates and secrets management \")\n"
-            f"| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result\n"
+            "// ARES Closed-Loop Telemetry: Detect Azure AD / Entra ID Privileged Role Assignment & App Abuse\n"
+            "// Monitors AuditLogs for role assignments, service principal secret addition, or app consent\n"
+            "AuditLogs\n"
+            "| where OperationName in~ (\"Add member to role\", \"Add service principal credentials\", \"Consent to application\", \"Update application – Certificates and secrets management \")\n"
+            "| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result\n"
         )
         sigma_rule = (
             f"title: Azure AD / Entra ID Privileged Role Assignment & App Secret Addition ({tenant_short})\n"

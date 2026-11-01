@@ -6,7 +6,8 @@ Verifies:
 3. PivotModule does not publish a successful SOCKS5 pivot finding if backend is unavailable.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
@@ -14,7 +15,7 @@ from ares.core.config import AresSettings
 from ares.core.errors import ModuleExecutionError
 from ares.core.noise import NoiseController
 from ares.modules.network.pivot import PivotModule
-from ares.pivot.infrastructure import PivotManager, TunnelState
+from ares.pivot.infrastructure import PivotManager
 
 
 def _make_pivot_module():

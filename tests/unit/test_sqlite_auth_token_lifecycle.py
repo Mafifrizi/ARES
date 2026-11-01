@@ -7,7 +7,7 @@ import hashlib
 import os
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable
 from unittest.mock import Mock
@@ -191,7 +191,7 @@ async def test_sqlite_c_live_trusted_store_factory_is_coordinator_only(
             user_id=user_id,
             subject="sqlite-lifecycle-user",
             jti="10000000-0000-4000-8000-000000000001",
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
             family_id=family_id,
             auth_epoch=1,
         ),
@@ -1231,7 +1231,7 @@ async def test_api_key_rejects_iso_expiry_earlier_on_current_utc_date(
 ) -> None:
     db, user_id = db_and_user
     key_id, raw_key = await db.create_api_key(user_id, "expired-current-day")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expired = now.replace(hour=0, minute=0, second=0, microsecond=0)
     assert expired.date() == now.date()
     assert expired <= now
@@ -1249,7 +1249,7 @@ async def test_api_key_accepts_future_iso_offset_expiry(
     await _set_api_key_expiry(
         db,
         key_id,
-        (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        (datetime.now(UTC) + timedelta(days=1)).isoformat(),
     )
 
     assert await db.verify_api_key(raw_key) is not None
@@ -1271,7 +1271,7 @@ async def test_api_key_accepts_legacy_space_format_future_expiry(
 ) -> None:
     db, user_id = db_and_user
     key_id, raw_key = await db.create_api_key(user_id, "future-legacy")
-    future = datetime.now(timezone.utc) + timedelta(days=1)
+    future = datetime.now(UTC) + timedelta(days=1)
     await _set_api_key_expiry(db, key_id, future.strftime("%Y-%m-%d %H:%M:%S"))
 
     assert await db.verify_api_key(raw_key) is not None
@@ -1283,7 +1283,7 @@ async def test_nonzero_offset_crossing_utc_date_uses_instant_ordering(
 ) -> None:
     db, user_id = db_and_user
     key_id, raw_key = await db.create_api_key(user_id, "future-offset")
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     future_utc = (now_utc + timedelta(days=2)).replace(
         hour=0,
         minute=30,
@@ -1293,7 +1293,7 @@ async def test_nonzero_offset_crossing_utc_date_uses_instant_ordering(
     encoded = future_utc.astimezone(timezone(timedelta(hours=-5)))
 
     assert encoded.date() < future_utc.date()
-    assert encoded.astimezone(timezone.utc) == future_utc
+    assert encoded.astimezone(UTC) == future_utc
     assert future_utc > now_utc
     await _set_api_key_expiry(db, key_id, encoded.isoformat())
 
@@ -1382,7 +1382,7 @@ async def test_future_refresh_rotates_with_hashed_successor_and_30_day_expiry(
     assert active["id"] == _token_hash(successor)
     assert active["id"] != successor
     remaining = datetime.fromisoformat(str(active["expires_at"])) - datetime.now(
-        timezone.utc
+        UTC
     )
     assert timedelta(days=29, hours=23) < remaining <= timedelta(days=30)
 

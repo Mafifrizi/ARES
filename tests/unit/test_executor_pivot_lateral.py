@@ -10,9 +10,9 @@ Round 2 tests - covers previously 0% components:
 from __future__ import annotations
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ── execution/executor.py ─────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_returns_result_object(self):
-        from ares.execution.executor import RemoteExecutor, ExecutionMethod, PayloadType
+        from ares.execution.executor import ExecutionMethod
         ex = self._make_executor()
 
         # Patch _dispatch to avoid real network
@@ -52,7 +52,7 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_timeout_handled(self):
-        from ares.execution.executor import RemoteExecutor, ExecutionMethod
+        from ares.execution.executor import ExecutionMethod, RemoteExecutor
 
         ex = RemoteExecutor(operator="tester", timeout_s=1)
 
@@ -73,7 +73,6 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_powershell_base64_encoding(self):
-        from ares.execution.executor import RemoteExecutor, ExecutionMethod
         import base64
 
         ex = self._make_executor()
@@ -101,7 +100,7 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_execute_bash_dispatches_ssh(self):
-        from ares.execution.executor import RemoteExecutor, ExecutionMethod
+        from ares.execution.executor import ExecutionMethod
         ex = self._make_executor()
         captured = {}
 
@@ -119,7 +118,6 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_run_psexec_no_impacket_returns_error(self):
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
 
         with patch.dict("sys.modules", {"impacket": None, "impacket.smbconnection": None}):
@@ -130,7 +128,6 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_run_wmiexec_no_impacket_returns_error(self):
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
 
         with patch.dict("sys.modules", {"impacket": None, "impacket.smbconnection": None}):
@@ -141,7 +138,6 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_run_ssh_no_paramiko_returns_error(self):
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
 
         with patch.dict("sys.modules", {"paramiko": None}):
@@ -152,7 +148,6 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_run_winrm_no_pywinrm_returns_error(self):
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
 
         with patch.dict("sys.modules", {"winrm": None}):
@@ -164,7 +159,6 @@ class TestRemoteExecutor:
     @pytest.mark.asyncio
     async def test_run_ssh_with_real_paramiko_auth_failure(self):
         """Paramiko raises AuthenticationException → returns exit_code 1."""
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
 
         mock_paramiko = MagicMock()
@@ -182,8 +176,8 @@ class TestRemoteExecutor:
 
     @pytest.mark.asyncio
     async def test_run_lateral_inherits_campaign(self):
-        from ares.execution.executor import RemoteExecutor
         from ares.core.campaign import Campaign
+        from ares.execution.executor import RemoteExecutor
 
         mock_campaign = Campaign(name="ScopedCampaign", operator="test_op")
         ex = RemoteExecutor(operator="test_op", campaign=mock_campaign)
@@ -201,7 +195,7 @@ class TestRemoteExecutor:
              patch("ares.modules.lateral.modules.WinRMLateral", return_value=mock_winrm) as mock_winrm_cls, \
              patch("ares.modules.lateral.modules.WMIExecLateral", return_value=mock_wmiexec) as mock_wmiexec_cls, \
              patch.dict("sys.modules", {"impacket": MagicMock(), "winrm": MagicMock()}):
-            
+
             await ex._run_psexec("10.0.0.1", "whoami", "admin", "CORP", "pass")
             assert mock_psexec_cls.call_args[1]["campaign"] == mock_campaign
 
@@ -212,7 +206,7 @@ class TestRemoteExecutor:
             assert mock_wmiexec_cls.call_args[1]["campaign"] == mock_campaign
 
     def test_execution_result_defaults(self):
-        from ares.execution.executor import ExecutionResult, ExecutionMethod, PayloadType
+        from ares.execution.executor import ExecutionMethod, ExecutionResult
         r = ExecutionResult(target="10.0.0.1", method=ExecutionMethod.SSH)
         assert r.success is False
         assert r.exit_code == -1
@@ -220,7 +214,6 @@ class TestRemoteExecutor:
 
     def test_upload_and_run_logs_correctly(self):
         """upload_and_run should not crash synchronously."""
-        from ares.execution.executor import RemoteExecutor
         ex = self._make_executor()
         # Just ensure the method exists and has correct signature
         assert hasattr(ex, "upload_and_run")
@@ -466,14 +459,14 @@ class TestNetworkModel:
         assert len(topo.hosts) == 0
 
     def test_network_topology_add_host(self):
-        from ares.network.model import NetworkTopology, NetworkHost
+        from ares.network.model import NetworkHost, NetworkTopology
         topo = NetworkTopology(campaign_id="c-001")
         host = NetworkHost(ip="10.0.0.1", hostname="dc01")
         topo.add_host(host)
         assert "10.0.0.1" in topo.hosts
 
     def test_network_topology_get_host(self):
-        from ares.network.model import NetworkTopology, NetworkHost
+        from ares.network.model import NetworkHost, NetworkTopology
         topo = NetworkTopology(campaign_id="c-001")
         topo.add_host(NetworkHost(ip="10.0.0.1", hostname="dc01"))
         found = topo.get_host("10.0.0.1")
@@ -486,7 +479,7 @@ class TestNetworkModel:
         assert topo.get_host("99.99.99.99") is None
 
     def test_network_topology_to_dict(self):
-        from ares.network.model import NetworkTopology, NetworkHost
+        from ares.network.model import NetworkHost, NetworkTopology
         topo = NetworkTopology(campaign_id="c-001")
         topo.add_host(NetworkHost(ip="10.0.0.1"))
         d = topo.to_dict()
@@ -521,7 +514,7 @@ class TestWinRMValidator:
 
     @pytest.mark.asyncio
     async def test_winrm_no_pywinrm_returns_false(self):
-        from ares.credential.reuse import _WinRMValidator, ReuseProtocol
+        from ares.credential.reuse import _WinRMValidator
         from ares.credential.vault import CredentialType
         v = _WinRMValidator()
 
@@ -707,7 +700,7 @@ class TestLateralModules:
 class TestReuseEngine:
 
     def _make_vault_with_cred(self):
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key=None)
         cred = Credential(
             id="cred-001",
@@ -734,7 +727,7 @@ class TestReuseEngine:
     @pytest.mark.asyncio
     async def test_try_single_no_validator(self):
         from ares.credential.reuse import ReuseEngine, ReuseProtocol
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key=None)
         cred = Credential(
             id="c1", username="u", domain="D",
@@ -751,7 +744,7 @@ class TestReuseEngine:
 
     def test_should_skip_lockout(self):
         from ares.credential.reuse import ReuseEngine
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key=None)
         cred = Credential(
             id="c1", username="admin", domain="CORP",
@@ -764,7 +757,7 @@ class TestReuseEngine:
 
     def test_should_not_skip_below_threshold(self):
         from ares.credential.reuse import ReuseEngine
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key=None)
         cred = Credential(
             id="c1", username="admin", domain="CORP",

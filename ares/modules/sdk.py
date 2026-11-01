@@ -58,6 +58,46 @@ Quick start:
 
 from __future__ import annotations
 
+import math
+
+# ── Convenience types for type hints ──────────────────────────────────────────
+from typing import Any
+
+# ── Campaign types ─────────────────────────────────────────────────────────────
+from ares.core.campaign import Finding, Severity
+
+# ── Context ────────────────────────────────────────────────────────────────────
+from ares.core.context import ExecutionContext
+
+# ── Errors ────────────────────────────────────────────────────────────────────
+from ares.core.errors import (
+    AccountLocked,
+    AresError,
+    AuthenticationFailed,
+    ConnectionRefused,
+    ConnectionTimeout,
+    CredentialError,
+    CredentialExpired,
+    DetectionSignal,
+    ExecutionError,
+    HoneypotDetected,
+    HostUnreachable,
+    InsufficientPrivilege,
+    InvalidContext,
+    ModuleError,
+    ModuleExecutionError,
+    ModuleTimeoutError,
+    ModuleValidationError,
+    NetworkError,
+    NoCredentialsAvailable,
+    OpsecError,
+    SandboxError,
+    ScopeError,
+)
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+from ares.core.logger import get_logger
+
 # ── Core base ──────────────────────────────────────────────────────────────────
 from ares.modules.base import (
     BaseModule,
@@ -66,58 +106,18 @@ from ares.modules.base import (
     validate_module_class,
 )
 
-# ── Context ────────────────────────────────────────────────────────────────────
-from ares.core.context import ExecutionContext
-
-# ── Errors ────────────────────────────────────────────────────────────────────
-from ares.core.errors import (
-    AresError,
-    ModuleError,
-    ModuleExecutionError,
-    ModuleValidationError,
-    ModuleTimeoutError,
-    NetworkError,
-    ConnectionRefused,
-    ConnectionTimeout,
-    HostUnreachable,
-    CredentialError,
-    AuthenticationFailed,
-    AccountLocked,
-    CredentialExpired,
-    NoCredentialsAvailable,
-    ExecutionError,
-    SandboxError,
-    ScopeError,
-    OpsecError,
-    DetectionSignal,
-    HoneypotDetected,
-    InsufficientPrivilege,
-    InvalidContext,
-)
-
-# ── Campaign types ─────────────────────────────────────────────────────────────
-from ares.core.campaign import Finding, Severity
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-from ares.core.logger import get_logger
-
-# ── MITRE ─────────────────────────────────────────────────────────────────────
-from ares.technique.library import TechniqueLibrary, TechniqueMapper
-
 # ── Normalize ─────────────────────────────────────────────────────────────────
 from ares.normalize.artifacts import (
     ArtifactStore,
-    HostArtifact,
-    UserArtifact,
     CredentialArtifact,
     HashArtifact,
+    HostArtifact,
     PermissionArtifact,
+    UserArtifact,
 )
 
-# ── Convenience types for type hints ──────────────────────────────────────────
-from typing import Any
-import math
-
+# ── MITRE ─────────────────────────────────────────────────────────────────────
+from ares.technique.library import TechniqueLibrary, TechniqueMapper
 
 # ── Decorators / helpers ──────────────────────────────────────────────────────
 

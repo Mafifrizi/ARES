@@ -1,15 +1,10 @@
 import {
-  Background,
-  Controls,
-  Handle,
   MarkerType,
-  Position,
   ReactFlow,
   useReactFlow,
   ReactFlowProvider,
   type Edge,
   type Node,
-  type NodeProps,
   type NodeTypes
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -20,27 +15,18 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
-  HelpCircle,
-  Info,
-  ExternalLink,
-  Sliders,
-  Moon,
-  Link as LinkIcon,
   Check
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
-import type { AttackPath, Campaign, SafeGraphValue } from "../../api/types";
 import {
   adaptApiGraphToCobalt,
   attackPathSummary,
   filterGraph,
   generateCobaltPivotTopology,
   getPathHighlight,
-  graphNodeTypes,
   inferCobaltNodeData,
-  isGraphEmpty,
   type GraphFilters,
   type SafeGraph,
   type SafeGraphEdge,
@@ -467,49 +453,6 @@ function cobaltPivotLayout(
   return { nodes: canvasNodes, edges: canvasEdges };
 }
 
-function safeValueText(value: SafeGraphValue): string {
-  if (value === null) return "-";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map(safeValueText).join(", ");
-  return Object.entries(value).map(([key, item]) => `${key}: ${safeValueText(item)}`).join(" · ");
-}
-
-function CampaignSelect({
-  campaigns,
-  value,
-  onChange
-}: {
-  campaigns: Campaign[];
-  value: string;
-  onChange: (campaignId: string) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs font-mono text-zinc-300">
-      <span className="text-zinc-400">Campaign:</span>
-      <select
-        className="bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-red-500"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">Select campaign</option>
-        {campaigns.map((campaign) => (
-          <option key={campaign.id} value={campaign.id}>
-            {campaign.name || campaign.id}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function FlowControlsBridge({ onZoomIn, onZoomOut, onFitView }: {
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onFitView: () => void;
-}) {
-  return null;
-}
-
 function CobaltGraphInner({
   graph,
   highlightedNodeIds,
@@ -640,14 +583,6 @@ function CobaltGraphInner({
               onSelect(null);
             } else {
               onSelect({ kind: "node", value: selectedNode });
-
-              // TRIGGER LOGIC: Significant event - First-time pathway unlock to this host
-              const isFirewall =
-                selectedNode.type === "firewall" ||
-                selectedNode.id.includes("firewall") ||
-                selectedNode.id.includes("ingress");
-              if (!isFirewall) {
-              }
             }
           }
         }}

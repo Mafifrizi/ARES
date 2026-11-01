@@ -4,27 +4,27 @@ MITRE: T1003.006 - Replicates NTLM hashes via MS-DRSR.
 ⚠️ Very noisy - auto-blocked in STEALTH profile. Triggers MDI in seconds.
 """
 from __future__ import annotations
+
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.dcsync")
-from ares.core.campaign import Finding, Severity, NoiseProfile
+from ares.core.campaign import NoiseProfile, Severity
 from ares.core.security import mask_secret_hash, sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
 from ares.modules.params import DCSyncParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
+
 
 @module_contract(
     permissions=[
@@ -62,8 +62,8 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         Evaluates DC replication rights, noise profile restrictions,
         and MDI / DRSUAPI monitoring alarms, recommending stealthier alternatives (ad.adcs, ad.shadow_credentials).
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
+        from ares.modules.base import FeasibilityReport
         ad = self._extract_ad_params(ctx)
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -115,9 +115,9 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         Enforce dc, domain, domain-admin credentials, and noise profile.
         DCSync requires DA-level credentials - catch misconfigured runs early.
         """
+        from ares.core.campaign import NoiseProfile
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import NoiseProfile
         if not isinstance(ctx, ExecutionContext):
             return
         ad = self._extract_ad_params(ctx)
@@ -189,32 +189,32 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
 
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect DRSUAPI DCSync Directory Replication\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4662\n"
-            f"| where Properties has \"1131f6aa-9c07-11d1-f79f-00c04fc2dcd2\" or Properties has \"1131f6ad-9c07-11d1-f79f-00c04fc2dcd2\"\n"
-            f"| where SubjectUserName !endswith \"$\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
+            "// ARES Closed-Loop Telemetry: Detect DRSUAPI DCSync Directory Replication\n"
+            "SecurityEvent\n"
+            "| where EventID == 4662\n"
+            "| where Properties has \"1131f6aa-9c07-11d1-f79f-00c04fc2dcd2\" or Properties has \"1131f6ad-9c07-11d1-f79f-00c04fc2dcd2\"\n"
+            "| where SubjectUserName !endswith \"$\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
         )
         sigma_rule = (
-            f"title: Directory Service Replication via DRSUAPI (DCSync)\n"
-            f"id: d4e5f6a1-ares-4662-dcsync\n"
-            f"status: experimental\n"
-            f"description: Detects DS-Replication-Get-Changes-All extended right request via MS-DRSR by non-machine account\n"
-            f"logsource:\n"
-            f"  product: windows\n"
-            f"  service: security\n"
-            f"detection:\n"
-            f"  selection:\n"
-            f"    EventID: 4662\n"
-            f"    Properties|contains: '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'\n"
-            f"  filter:\n"
-            f"    SubjectUserName|endswith: '$'\n"
-            f"  condition: selection and not filter\n"
-            f"level: critical\n"
-            f"tags:\n"
-            f"  - attack.credential_access\n"
-            f"  - attack.t1003.006\n"
+            "title: Directory Service Replication via DRSUAPI (DCSync)\n"
+            "id: d4e5f6a1-ares-4662-dcsync\n"
+            "status: experimental\n"
+            "description: Detects DS-Replication-Get-Changes-All extended right request via MS-DRSR by non-machine account\n"
+            "logsource:\n"
+            "  product: windows\n"
+            "  service: security\n"
+            "detection:\n"
+            "  selection:\n"
+            "    EventID: 4662\n"
+            "    Properties|contains: '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'\n"
+            "  filter:\n"
+            "    SubjectUserName|endswith: '$'\n"
+            "  condition: selection and not filter\n"
+            "level: critical\n"
+            "tags:\n"
+            "  - attack.credential_access\n"
+            "  - attack.t1003.006\n"
         )
         loot_items: list[dict[str, Any]] = raw.get("loot", [])
         if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
@@ -281,7 +281,7 @@ class DCSyncModule(BaseModule[DCSyncParams, ModuleResult]):
         Uses impacket.examples.secretsdump with stable callback-based API.
         try/finally ensures RemoteOperations.finish() + smb.logoff() always called.
         """
-        from impacket.examples.secretsdump import RemoteOperations, NTDSHashes
+        from impacket.examples.secretsdump import NTDSHashes, RemoteOperations
         from impacket.smbconnection import SMBConnection
 
         smb = SMBConnection(dc, dc, timeout=30)

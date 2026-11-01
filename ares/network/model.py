@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ares.core.logger import get_logger
-from ares.state.target_state import HostState, ServiceEntry
 
 logger = get_logger("ares.network")
 

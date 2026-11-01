@@ -5,10 +5,8 @@ Auto-discovered by pytest. All fixtures are available to every test file.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
-import uuid
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -175,7 +173,7 @@ def artifact_store():
 @pytest.fixture
 def populated_artifact_store(artifact_store):
     """ArtifactStore with hosts, users, hashes."""
-    from ares.normalize.artifacts import HostArtifact, UserArtifact, HashArtifact
+    from ares.normalize.artifacts import HashArtifact, HostArtifact, UserArtifact
     artifact_store.add(HostArtifact(
         ip="10.0.0.1", hostname="DC01", os="windows",
         domain="CORP", domain_controller=True,
@@ -219,9 +217,10 @@ def technique_library():
 @pytest.fixture
 def goal_engine():
     """GoalEngine with mock registry and operator session."""
+    from unittest.mock import MagicMock
+
     from ares.goal.engine import GoalEngine
     from ares.state.target_state import OperatorSession
-    from unittest.mock import MagicMock
     mock_registry = MagicMock()
     mock_registry.__iter__ = lambda self: iter([])
     mock_registry.all.return_value = []   # ModuleRegistry uses .all() not .all_modules()
@@ -341,6 +340,7 @@ def dashboard_client():
     """HTTPX async client for dashboard. Returns None if deps missing."""
     try:
         from httpx import AsyncClient
+
         from ares.api.dashboard.app import dashboard_app
         return AsyncClient(app=dashboard_app, base_url="http://test")
     except ImportError:

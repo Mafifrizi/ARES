@@ -11,10 +11,10 @@ from __future__ import annotations
 try:
     from ares.knowledge.base import (  # noqa: F401
         AttackKnowledgeBase,
-        KBEntry,
-        EvidenceStore,
-        Evidence,
         CampaignGuardrail,
+        Evidence,
+        EvidenceStore,
+        KBEntry,
         OutcomeTracker,
     )
 except ImportError:

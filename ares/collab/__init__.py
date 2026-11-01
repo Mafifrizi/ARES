@@ -11,8 +11,8 @@ from __future__ import annotations
 try:
     from ares.collab.manager import (  # noqa: F401
         CollaborationManager,
-        OperatorRole,
         OperatorProfile,
+        OperatorRole,
         TargetLock,
     )
 except ImportError:

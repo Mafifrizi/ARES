@@ -22,26 +22,22 @@ OPSEC: MEDIUM - LDAP write + Kerberos TGS requests. Does not trigger MDI by defa
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import os
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
 from ares.modules.params import DelegationAbuseParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -158,12 +154,12 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         deleg_target = ad["dc"] or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Kerberos Delegation Abuse & RBCD Modification\n"
-            f"// Monitors Security Event 4769 for S4U2Proxy delegation tickets (TicketOptions 0x40810010) or Event 5136\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4769, 5136)\n"
-            f"| where TicketOptions has \"0x40810010\" or AttributeLDAPDisplayName == \"msDS-AllowedToActOnBehalfOfOtherIdentity\"\n"
-            f"| project TimeGenerated, Computer, ServiceName, TicketOptions, TicketEncryptionType\n"
+            "// ARES Closed-Loop Telemetry: Detect Kerberos Delegation Abuse & RBCD Modification\n"
+            "// Monitors Security Event 4769 for S4U2Proxy delegation tickets (TicketOptions 0x40810010) or Event 5136\n"
+            "SecurityEvent\n"
+            "| where EventID in (4769, 5136)\n"
+            "| where TicketOptions has \"0x40810010\" or AttributeLDAPDisplayName == \"msDS-AllowedToActOnBehalfOfOtherIdentity\"\n"
+            "| project TimeGenerated, Computer, ServiceName, TicketOptions, TicketEncryptionType\n"
         )
         sigma_rule = (
             f"title: Kerberos Delegation Abuse / RBCD Manipulation ({deleg_target})\n"
@@ -331,9 +327,10 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
     def _enum_delegation_sync(self, dc: str, username: str, password: str,
                                domain: str) -> tuple[list[dict], list[dict]]:
         """Enumerate unconstrained and constrained delegation via LDAP."""
-        import ssl, ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
-        from ldap3.core.exceptions import LDAPBindError
+        import ssl
+
+        import ldap3
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
 
         conn = None
         for port, use_ssl in [(636, True), (389, False)]:
@@ -405,10 +402,10 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
         4. Save .ccache and return path
         """
         try:
-            from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
-            from impacket.krb5.types import Principal
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
+            from impacket.krb5.kerberosv5 import getKerberosTGS, getKerberosTGT
+            from impacket.krb5.types import Principal
 
             domain_upper = domain.upper()
 
@@ -471,10 +468,10 @@ class DelegationAbuseModule(BaseModule[DelegationAbuseParams, ModuleResult]):
                           constrained_acct: dict, impersonate_user: str) -> str:
         """Constrained delegation S4U attack."""
         try:
-            from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
-            from impacket.krb5.types import Principal
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
+            from impacket.krb5.kerberosv5 import getKerberosTGS, getKerberosTGT
+            from impacket.krb5.types import Principal
 
             domain_upper = domain.upper()
             user_principal = Principal(

@@ -30,7 +30,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -249,7 +248,7 @@ async def _run_pip_audit(
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout_s
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("pip-audit timed out after %ds", timeout_s)
         return AuditResult(
             error          = f"pip-audit timed out after {timeout_s}s",

@@ -19,15 +19,13 @@ import shlex
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import SecretsScanParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -60,6 +58,7 @@ _GREP_PATTERN = "|".join([
 
 import math
 from collections import Counter
+
 
 def calculate_shannon_entropy(data: str) -> float:
     """Calculate Shannon entropy for a given string."""

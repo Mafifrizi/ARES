@@ -9,17 +9,17 @@ Extremely stealthy - survives reboots, not visible in Autoruns by default.
 Requires: local admin on target.
 """
 from __future__ import annotations
+
 import asyncio
 from typing import Any
-from ares.core.logger import get_logger, audit
+
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import WMISubscriptionParams
 from ares.sdk import (
-    CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -66,9 +66,9 @@ class WMISubscriptionModule(BaseModule):
         Evaluates WMI event subscription persistence feasibility (survives reboot, stealthy).
         Checks Sysmon Event ID 19/20/21 and WMI monitoring on target.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -263,9 +263,9 @@ class WMISubscriptionModule(BaseModule):
         await self.before_request(target, "wmi")  # scope check + jitter
 
         try:
-            from impacket.dcerpc.v5 import transport         # type: ignore[import]
-            from impacket.dcerpc.v5.dcom import wmi           # type: ignore[import]
-            from impacket.dcerpc.v5.dcomrt import DCOMConnection # type: ignore[import]
+            from impacket.dcerpc.v5 import transport  # type: ignore[import]
+            from impacket.dcerpc.v5.dcom import wmi  # type: ignore[import]
+            from impacket.dcerpc.v5.dcomrt import DCOMConnection  # type: ignore[import]
         except ImportError:
             return [], {"error": "impacket not installed"}
 
@@ -366,8 +366,8 @@ class WMISubscriptionModule(BaseModule):
         def _remove() -> tuple[bool, str]:
             dcom = None
             try:
+                from impacket.dcerpc.v5.dcom import wmi as wmimod
                 from impacket.dcerpc.v5.dcomrt import DCOMConnection
-                from impacket.dcerpc.v5.dcom  import wmi as wmimod
                 from impacket.dcerpc.v5.dtypes import NULL
 
                 dcom = DCOMConnection(target, username=username, password=password,

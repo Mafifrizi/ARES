@@ -9,11 +9,10 @@ and Domain Controller trust impersonation.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.security import mask_secret_hash

@@ -12,11 +12,10 @@ import asyncio
 import json
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,7 +24,7 @@ import pytest
 # ─────────────────────────────────────────────────────────────
 
 def _make_campaign(name="Test Campaign", client="Acme", n_findings=3):
-    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Finding, Severity
+    from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 
     campaign = Campaign(
         name=name, client=client, operator="tester",
@@ -343,13 +342,13 @@ class TestDependencyResolver:
         return DependencyResolver()
 
     def test_single_node_no_deps(self):
-        from ares.core.chain.chain import DependencyResolver, ChainNode
+        from ares.core.chain.chain import ChainNode, DependencyResolver
         r = DependencyResolver()
         stages = r.resolve([ChainNode("a")])
         assert stages == [["a"]]
 
     def test_linear_chain(self):
-        from ares.core.chain.chain import DependencyResolver, ChainNode
+        from ares.core.chain.chain import ChainNode, DependencyResolver
         r = DependencyResolver()
         nodes = [
             ChainNode("a"),
@@ -362,7 +361,7 @@ class TestDependencyResolver:
         assert stages[2] == ["c"]
 
     def test_parallel_modules_in_same_stage(self):
-        from ares.core.chain.chain import DependencyResolver, ChainNode
+        from ares.core.chain.chain import ChainNode, DependencyResolver
         r = DependencyResolver()
         nodes = [
             ChainNode("enum_users"),
@@ -375,7 +374,7 @@ class TestDependencyResolver:
         assert set(stages[0]) == {"enum_users", "enum_computers"}
 
     def test_cyclic_dependency_raises(self):
-        from ares.core.chain.chain import DependencyResolver, ChainNode, CyclicDependencyError
+        from ares.core.chain.chain import ChainNode, CyclicDependencyError, DependencyResolver
         r = DependencyResolver()
         nodes = [
             ChainNode("a", depends_on=["b"]),
@@ -390,7 +389,7 @@ class TestDependencyResolver:
         assert r.resolve([]) == []
 
     def test_diamond_dependency(self):
-        from ares.core.chain.chain import DependencyResolver, ChainNode
+        from ares.core.chain.chain import ChainNode, DependencyResolver
         r = DependencyResolver()
         # a → b, a → c, b+c → d
         nodes = [
@@ -593,6 +592,7 @@ class TestDashboardApp:
     @pytest.fixture
     def client(self):
         from fastapi.testclient import TestClient
+
         from ares.api.dashboard.app import dashboard_app
         return TestClient(dashboard_app)
 
@@ -717,7 +717,8 @@ class TestDashboardApp:
     def test_broadcast_finding_sends_to_connections(self):
         """broadcast_finding sends JSON to all active WS connections."""
         import asyncio
-        from ares.api.dashboard.app import broadcast_finding, _live_connections
+
+        from ares.api.dashboard.app import _live_connections, broadcast_finding
 
         mock_ws1 = AsyncMock()
         mock_ws2 = AsyncMock()
@@ -740,7 +741,8 @@ class TestDashboardApp:
     def test_broadcast_removes_dead_connections(self):
         """Dead WebSocket connections are removed from _live_connections."""
         import asyncio
-        from ares.api.dashboard.app import broadcast_finding, _live_connections
+
+        from ares.api.dashboard.app import _live_connections, broadcast_finding
 
         mock_dead = AsyncMock()
         mock_dead.send_text.side_effect = RuntimeError("connection closed")
@@ -814,7 +816,6 @@ class TestGoalEngine:
             assert step.module_id != ""
 
     def test_plan_unknown_goal_raises(self):
-        from ares.goal.engine import Goal
         engine = self._make_engine()
         with pytest.raises(ValueError):
             engine.plan("nonexistent_goal")  # type: ignore
@@ -827,8 +828,7 @@ class TestGoalEngine:
 
     def test_check_initial_access_with_owned_host(self):
         from ares.goal.engine import Goal, GoalEngine
-        from ares.state.target_state import OperatorSession, TargetHost, CompromiseLevel
-        from ares.core.plugin.loader import ModuleRegistry
+        from ares.state.target_state import CompromiseLevel, OperatorSession, TargetHost
 
         registry = _make_mock_registry()
         session  = OperatorSession(campaign_id="test")
@@ -939,8 +939,8 @@ class TestAttackPlanner:
         return AttackPlanner(registry=registry)
 
     def test_suggest_returns_list(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
 
         planner = self._make_planner()
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
@@ -948,8 +948,8 @@ class TestAttackPlanner:
         assert isinstance(suggestions, list)
 
     def test_suggest_respects_limit(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import AttackPlanner, PlannerContext
 
         registry = _make_mock_registry(
             ["ad.enum_users", "ad.kerberoast", "ad.dcsync",
@@ -961,8 +961,8 @@ class TestAttackPlanner:
         assert len(suggestions) <= 3
 
     def test_suggestions_sorted_by_score(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
 
         planner = self._make_planner()
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
@@ -972,8 +972,8 @@ class TestAttackPlanner:
             assert scores == sorted(scores, reverse=True)
 
     def test_suggestion_has_rationale(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
 
         planner = self._make_planner()
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
@@ -983,8 +983,8 @@ class TestAttackPlanner:
             assert 0.0 <= s.score <= 1.0
 
     def test_noisy_modules_filtered_in_stealth(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import AttackPlanner, PlannerContext
 
         # Create a noisy module
         class NoisyMod:
@@ -1010,8 +1010,8 @@ class TestAttackPlanner:
         assert "ad.noisy" not in noisy_ids
 
     def test_already_tried_excluded(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
 
         planner = self._make_planner(["ad.enum_users"])
         ctx = PlannerContext(
@@ -1061,7 +1061,7 @@ class TestAdaptiveStrategy:
         assert "ad.kerberoast" in summary or isinstance(summary, dict)
 
     def test_next_alternative_kerberoast_fails(self):
-        from ares.goal.adaptive import AdaptiveStrategy, FALLBACK_GRAPH
+        from ares.goal.adaptive import AdaptiveStrategy
         from ares.state.target_state import OperatorSession
 
         session = OperatorSession(campaign_id="test")
@@ -1105,7 +1105,6 @@ class TestCampaignStore:
 
     def _store(self, tmpdir):
         from ares.cli._store import CampaignStore
-        import ares.cli._store as store_mod
         # Patch campaigns_dir to use tmpdir
         with patch("ares.cli._store.campaigns_dir",
                    return_value=Path(tmpdir)):
@@ -1113,7 +1112,6 @@ class TestCampaignStore:
 
     def test_save_and_load_campaign(self, tmp_path):
         from ares.cli._store import CampaignStore
-        import ares.cli._store as store_mod
 
         with patch("ares.cli._store.campaigns_dir", return_value=tmp_path):
             store = CampaignStore()
@@ -1280,7 +1278,7 @@ class TestReportCampaignRoundTrip:
 
     def test_chain_plan_to_execution_flow(self):
         """AttackChain.resolve() produces a valid stage order for GoalEngine."""
-        from ares.core.chain.chain import AttackChain, DependencyResolver
+        from ares.core.chain.chain import AttackChain
 
         chain = AttackChain("full_flow")
         chain.add("ad.enum_users")

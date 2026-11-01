@@ -13,7 +13,7 @@ import secrets
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, TypeVar
 from urllib.parse import unquote
@@ -1292,10 +1292,10 @@ class AresDatabase:
         Default path: ~/.ares/backups/ares_export_<timestamp>.json
         """
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
         from pathlib import Path
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         if not output_path:
             backup_dir = Path.home() / ".ares" / "backups"
             backup_dir.mkdir(parents=True, exist_ok=True)
@@ -1804,7 +1804,7 @@ class AresDatabase:
 
     async def get_monthly_confirmed_finding_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Return confirmed findings grouped by day in the current UTC month."""
-        period = datetime.now(timezone.utc).strftime("%Y-%m")
+        period = datetime.now(UTC).strftime("%Y-%m")
         if campaign_id:
             async with self._conn.execute(
                 """
@@ -1885,7 +1885,7 @@ class AresDatabase:
                 outcome,
                 int(bool(success)),
                 max(0.0, float(duration_ms or 0.0)),
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self._conn.execute(
@@ -1937,7 +1937,7 @@ class AresDatabase:
             index = max(0, min(len(durations) - 1, int(len(durations) * fraction + 0.999999) - 1))
             return round(durations[index], 1)
 
-        recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        recent_cutoff = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
         recent_runs = sum(1 for row in run_rows if str(row["completed_at"]) >= recent_cutoff)
 
         async with self._conn.execute(findings_sql, findings_params) as cur:
@@ -2392,7 +2392,7 @@ class AresDatabase:
     ) -> str:
         """Record an ephemeral one-time SSO flow state (AuthnRequest ID or OIDC state)."""
         state_id = str(uuid.uuid4())
-        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(minutes=ttl_minutes)).isoformat()
         await self._conn.execute(
             """INSERT INTO sso_flow_states(id, org_id, flow_type, flow_id, nonce, expires_at)
                VALUES(?, ?, ?, ?, ?, ?)""",
@@ -2407,7 +2407,7 @@ class AresDatabase:
         flow_type: str,
     ) -> dict[str, Any] | None:
         """Atomically validate and consume an SSO flow state, preventing replay attacks."""
-        now_str = datetime.now(timezone.utc).isoformat()
+        now_str = datetime.now(UTC).isoformat()
         async with self._conn.execute(
             """SELECT * FROM sso_flow_states
                WHERE flow_id=? AND flow_type=? AND is_consumed=0 AND expires_at > ?""",
@@ -2545,7 +2545,7 @@ class AresDatabase:
         key_id = str(uuid.uuid4())
         expires_at = None
         if expires_days:
-            expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
+            expires_at = (datetime.now(UTC) + timedelta(days=expires_days)).isoformat()
         await self._conn.execute(
             "INSERT INTO api_keys(id,user_id,name,key_hash,key_prefix,scopes,expires_at) "
             "VALUES(?,?,?,?,?,?,?)",
@@ -3153,7 +3153,7 @@ class AresDatabase:
 
     @staticmethod
     def _family_timestamps() -> tuple[str, str, str]:
-        created = datetime.now(timezone.utc)
+        created = datetime.now(UTC)
         expires = created + timedelta(days=FAMILY_ABSOLUTE_LIFETIME_DAYS)
         retain = expires + timedelta(days=FAMILY_RETENTION_DAYS)
         return (
@@ -3316,7 +3316,7 @@ class AresDatabase:
             )
             await tx.execute(
                 "UPDATE users SET last_login=? WHERE id=?",
-                (format_sqlite_utc(datetime.now(timezone.utc)), row["id"]),
+                (format_sqlite_utc(datetime.now(UTC)), row["id"]),
             )
             await tx.execute(
                 "INSERT INTO audit_log(actor,action,detail) VALUES("
@@ -3372,7 +3372,7 @@ class AresDatabase:
             )
             await tx.execute(
                 "UPDATE users SET last_login=? WHERE id=?",
-                (format_sqlite_utc(datetime.now(timezone.utc)), row["id"]),
+                (format_sqlite_utc(datetime.now(UTC)), row["id"]),
             )
             await tx.execute(
                 "INSERT INTO audit_log(actor,action,detail) VALUES("
@@ -3402,7 +3402,7 @@ class AresDatabase:
         # Generate cryptographically strong random token
         raw_token = secrets.token_urlsafe(48)  # 384 bits - URL-safe, client sees this
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()  # stored in DB
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
+        expires_at = (datetime.now(UTC) + timedelta(days=expires_days)).isoformat()
         await self._conn.execute(
             "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES(?,?,?)",
             (token_hash, user_id, expires_at),
@@ -3512,7 +3512,7 @@ class AresDatabase:
             if row is None:
                 return RefreshRotationResult(RefreshRotationStatus.INVALID)
 
-            now_dt = datetime.now(timezone.utc)
+            now_dt = datetime.now(UTC)
             now = format_sqlite_utc(now_dt)
             if row["state"] != "active":
                 if row["family_state"] == "active":
@@ -3701,7 +3701,7 @@ class AresDatabase:
                     row = dict(row)
                     new_raw = secrets.token_urlsafe(48)
                     new_hash = hashlib.sha256(new_raw.encode()).hexdigest()
-                    expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+                    expires_at = (datetime.now(UTC) + timedelta(days=30)).isoformat()
                     await self._insert_refresh_successor(
                         tx,
                         new_hash,
@@ -3792,7 +3792,7 @@ class AresDatabase:
         reason: str,
         family_id: str | None = None,
     ) -> int:
-        now_dt = datetime.now(timezone.utc)
+        now_dt = datetime.now(UTC)
         now = format_sqlite_utc(now_dt)
         if family_id is None:
             cursor = await tx.execute(

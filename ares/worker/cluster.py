@@ -447,7 +447,7 @@ class InProcessTaskQueue:
             else:
                 await self._queue.put((score, task))
                 return None
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     async def complete(self, task: ClusterTask, result: dict[str, Any]) -> None:
@@ -762,7 +762,7 @@ class ClusterWorkerNode:
                     findings=len(findings),
                 )
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self.queue.fail(
                     task, f"Timeout after {task.timeout_s}s", requeue=True
                 )

@@ -6,31 +6,32 @@ ldap3 with NTLM auth, paged search, UAC flag parsing.
 Detects: dormant accounts, ASREPRoastable, no-expiry, missing lockout.
 """
 from __future__ import annotations
+
 import asyncio
 import datetime
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.enum_users")
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
+from ares.core.errors import AresError, ModuleValidationError, NetworkError
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
+from ares.modules.ad.dependencies import (
+    build_ad_bind_plan,
+    classify_ad_ldap_bind_failure,
+)
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
     module_contract,
-)
-from ares.core.tracing import trace_module
-from ares.core.errors import AresError, ModuleValidationError, NetworkError
-from ares.modules.ad.dependencies import (
-    build_ad_bind_plan,
-    classify_ad_ldap_bind_failure,
 )
 
 UAC_ACCOUNT_DISABLE      = 0x0002
@@ -51,7 +52,7 @@ def _parse_windows_ts(ts: Any) -> datetime.datetime | None:
 def _days_since(dt: datetime.datetime | None) -> int | None:
     if dt is None:
         return None
-    return max(0, (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - dt).days)
+    return max(0, (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - dt).days)
 
 @module_contract(
     permissions=[
@@ -152,12 +153,12 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         user_target = dc or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Mass AD User & Privileged Account Enumeration\n"
-            f"// Monitors Directory Service Event 1644 for LDAP queries looking for adminCount=1 or DONT_REQ_PREAUTH\n"
-            f"DirectoryServiceAccess\n"
-            f"| where EventID == 1644\n"
-            f"| where SearchFilter has \"adminCount=1\" or SearchFilter has \"userAccountControl:1.2.840.113556.1.4.803:=4194304\"\n"
-            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+            "// ARES Closed-Loop Telemetry: Detect Mass AD User & Privileged Account Enumeration\n"
+            "// Monitors Directory Service Event 1644 for LDAP queries looking for adminCount=1 or DONT_REQ_PREAUTH\n"
+            "DirectoryServiceAccess\n"
+            "| where EventID == 1644\n"
+            "| where SearchFilter has \"adminCount=1\" or SearchFilter has \"userAccountControl:1.2.840.113556.1.4.803:=4194304\"\n"
+            "| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
         )
         sigma_rule = (
             f"title: Active Directory Privileged & Roastable User Enumeration ({user_target})\n"
@@ -227,7 +228,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw = {"user_list": users, "users": users, "password_policy": policy}
         # ISU-07: produce UserArtifact objects for ArtifactIntelEngine
         try:
-            from ares.normalize.artifacts import UserArtifact, ArtifactStore
+            from ares.normalize.artifacts import ArtifactStore, UserArtifact
             store = getattr(getattr(self, "campaign", None), "_artifact_store", None)
             if store is None:
                 store = ArtifactStore()
@@ -255,8 +256,9 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         Fix Issue #2: conn.unbind() in try/finally - always closes even on exception.
         """
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)

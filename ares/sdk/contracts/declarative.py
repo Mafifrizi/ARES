@@ -17,7 +17,7 @@ from ares.sdk.pipeline.interceptors import (
     ScopeEnforcementInterceptor,
     SecretSanitizationInterceptor,
 )
-from ares.sdk.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerTripped
+from ares.sdk.resilience.circuit_breaker import CircuitBreaker
 from ares.sdk.security.permissions import CapabilitySandbox, SecurityPermission
 
 M = TypeVar("M")
@@ -80,7 +80,10 @@ def module_contract(
                     try:
                         res = await original_execute(self, c)
                         if cb is not None:
-                            from ares.sdk.resilience.circuit_breaker import LockoutCircuitBreaker, CircuitBreakerState
+                            from ares.sdk.resilience.circuit_breaker import (
+                                CircuitBreakerState,
+                                LockoutCircuitBreaker,
+                            )
                             if isinstance(cb, LockoutCircuitBreaker):
                                 raw_res = getattr(res, "raw", {}) or {}
                                 for acc in raw_res.get("locked_accounts", []):

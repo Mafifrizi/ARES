@@ -13,13 +13,9 @@ Run: pytest tests/unit/test_core_infrastructure.py -v
 """
 from __future__ import annotations
 
-import asyncio
-import os
 import sys
 import time
-import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -74,6 +70,7 @@ class TestAresDatabase:
     async def test_save_campaign_upsert_refreshes_persisted_fields(self, db):
         """Saving an existing campaign should refresh every persisted campaign field."""
         import json
+
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 
         c = Campaign(
@@ -120,7 +117,7 @@ class TestAresDatabase:
     @pytest.mark.asyncio
     async def test_save_and_get_finding(self, db):
         """Save finding then retrieve it."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="FindTest", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -139,7 +136,7 @@ class TestAresDatabase:
     @pytest.mark.asyncio
     async def test_finding_stats(self, db):
         """Finding stats should count by severity."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="StatsTest", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -155,7 +152,7 @@ class TestAresDatabase:
     @pytest.mark.asyncio
     async def test_delete_campaign_cascades_children(self, db):
         """Deleting a campaign should remove its stored child data."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         from ares.db.database import DBCredential, Host, Loot
 
         c = Campaign(name="DeleteCascade", scope=[ScopeEntry(cidr="10.0.0.0/8")],
@@ -240,8 +237,8 @@ class TestAresDatabase:
     @pytest.mark.asyncio
     async def test_host_upsert(self, db):
         """Hosts should be inserted and retrievable."""
-        from ares.db.database import Host
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.db.database import Host
         # Campaign must exist first (FK constraint)
         c = Campaign(id="camp-1", name="HostTest",
                      scope=[ScopeEntry(cidr="10.0.0.0/8")],
@@ -257,8 +254,8 @@ class TestAresDatabase:
     @pytest.mark.asyncio
     async def test_credential_encryption_roundtrip(self, db):
         """Saved credentials should be decryptable."""
-        from ares.db.database import DBCredential
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.db.database import DBCredential
         c = Campaign(name="CredTest", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -331,21 +328,21 @@ class TestCampaign:
         assert c.noise_profile == NoiseProfile.STEALTH
 
     def test_scope_in_range(self):
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.0.1") is True
         assert c.is_in_scope("10.0.0.254") is True
 
     def test_scope_out_of_range(self):
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("192.168.1.1") is False
         assert c.is_in_scope("10.0.1.1") is False
 
     def test_add_finding(self):
-        from ares.core.campaign import Campaign, Finding, Severity, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         f = Finding(title="Test", description="D", severity=Severity.HIGH,
@@ -355,7 +352,7 @@ class TestCampaign:
         assert c.findings[0].title == "Test"
 
     def test_confirmed_findings_exclude_false_positives(self):
-        from ares.core.campaign import Campaign, Finding, Severity, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         f1 = Finding(title="Real", description="D", severity=Severity.HIGH,
@@ -508,8 +505,8 @@ class TestSecurity:
 class TestNoiseController:
 
     def test_noise_controller_creation(self):
-        from ares.core.noise import NoiseController
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.core.noise import NoiseController
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.STEALTH)
         nc = NoiseController(c)
@@ -520,8 +517,8 @@ class TestNoiseController:
     @pytest.mark.asyncio
     async def test_jitter_sleep_executes(self):
         """Jitter sleep should complete without error."""
-        from ares.core.noise import NoiseController
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.core.noise import NoiseController
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.AGGRESSIVE)
         nc = NoiseController(c)
@@ -534,8 +531,8 @@ class TestNoiseController:
     @pytest.mark.asyncio
     async def test_rate_limiter_acquire(self):
         """Rate limiter should allow acquisition."""
-        from ares.core.noise import NoiseController
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.core.noise import NoiseController
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         nc = NoiseController(c)
@@ -629,8 +626,8 @@ class TestAresContainer:
 class TestCVSSAndCompliance:
 
     def test_cvss_score_assignment(self):
-        from ares.core.cvss import enrich_finding_with_cvss
         from ares.core.campaign import Finding, Severity
+        from ares.core.cvss import enrich_finding_with_cvss
         f = Finding(title="Test", description="D", severity=Severity.CRITICAL,
                     confidence=1.0, module_id="ad.dcsync", host="10.0.0.1",
                     mitre_technique="T1003.006")
@@ -652,8 +649,8 @@ class TestCVSSAndCompliance:
         assert mapping == {}
 
     def test_finding_compliance_enrichment(self):
-        from ares.core.cvss import enrich_finding_with_compliance
         from ares.core.campaign import Finding, Severity
+        from ares.core.cvss import enrich_finding_with_compliance
         f = Finding(title="Kerberoast", description="D", severity=Severity.HIGH,
                     confidence=0.9, module_id="ad.kerberoast", host="10.0.0.1",
                     mitre_technique="T1558.003", evidence={})

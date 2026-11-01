@@ -11,15 +11,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import TokenImpersonationParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -136,12 +135,12 @@ class TokenImpersonationModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         token_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Token Impersonation & Privilege Escalation\n"
-            f"// Detects Security Event 4673 (Privilege Service Called) for SeImpersonatePrivilege / SeAssignPrimaryTokenPrivilege\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4672, 4673)\n"
-            f"| where PrivilegeList has \"SeImpersonatePrivilege\" or PrivilegeList has \"SeAssignPrimaryTokenPrivilege\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, PrivilegeList, ProcessName\n"
+            "// ARES Closed-Loop Telemetry: Detect Token Impersonation & Privilege Escalation\n"
+            "// Detects Security Event 4673 (Privilege Service Called) for SeImpersonatePrivilege / SeAssignPrimaryTokenPrivilege\n"
+            "SecurityEvent\n"
+            "| where EventID in (4672, 4673)\n"
+            "| where PrivilegeList has \"SeImpersonatePrivilege\" or PrivilegeList has \"SeAssignPrimaryTokenPrivilege\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, PrivilegeList, ProcessName\n"
         )
         sigma_rule = (
             f"title: Token Impersonation Privilege Exploitation ({token_target})\n"
@@ -237,7 +236,6 @@ class TokenImpersonationModule(BaseModule):
         loop = asyncio.get_running_loop()
         try:
             from impacket.dcerpc.v5 import transport, wmi  # type: ignore[import]
-            from impacket.dcerpc.v5.dtypes import NULL       # type: ignore[import]
 
             def _check_privs() -> str:
                 try:
@@ -381,8 +379,8 @@ class TokenImpersonationModule(BaseModule):
             "samr": False,
         }
         try:
-            from impacket.smbconnection import SMBConnection
             from impacket.dcerpc.v5 import transport
+            from impacket.smbconnection import SMBConnection
 
             smb = SMBConnection(target, target, timeout=10)
             smb.login(username, password, domain, lmhash, nthash)

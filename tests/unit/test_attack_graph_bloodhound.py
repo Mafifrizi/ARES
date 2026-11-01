@@ -1,7 +1,8 @@
 import json
 import zipfile
+
 import pytest
-from pathlib import Path
+
 from ares.graph.attack_graph import AttackGraph
 
 

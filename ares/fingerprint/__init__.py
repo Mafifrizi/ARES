@@ -10,11 +10,11 @@ from __future__ import annotations
 
 try:
     from ares.fingerprint.engine import (  # noqa: F401
+        DomainRole,
+        EDRVendor,
         EnvironmentFingerprinter,
         FingerprintResult,
         OSType,
-        EDRVendor,
-        DomainRole,
     )
 except ImportError:
     pass  # Optional deps not installed

@@ -3,8 +3,10 @@ Tests for MOD-067: Azure AD indentation bug, UnboundLocalError,
 and Graph API enumeration reachability in cloud.azure_ad.
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
+
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.noise import NoiseController

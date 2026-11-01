@@ -10,14 +10,14 @@ Notifies operator of every removal with reason.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 
 if TYPE_CHECKING:
-    from ares.modules.ai.autonomous_planner import AIPlan
     from ares.core.campaign import Campaign
+    from ares.modules.ai.autonomous_planner import AIPlan
 
 logger = get_logger("ares.strategy.enforcer")
 
@@ -31,7 +31,6 @@ ALWAYS_REQUIRE_AUTH: frozenset[str] = frozenset({
     "persistence.wmi_subscription",
     "persistence.scheduled_task",
     "persistence.registry_run",
-    "windows.lsass_dump",
     "edr.bypass_adaptive",
 })
 

@@ -453,7 +453,7 @@ async def _firewall_loop_create_connection(
             if kwargs.get("ssl") and "server_hostname" not in kwargs and isinstance(host, str):
                 kwargs["server_hostname"] = host
     return await _orig_loop_create_connection(
-        self, protocol_factory, host=target_host, port=port, *args, **kwargs
+        self, protocol_factory, target_host, port, *args, **kwargs
     )
 
 

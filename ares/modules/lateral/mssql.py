@@ -21,15 +21,14 @@ import ipaddress
 import re
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import MSSQLParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,

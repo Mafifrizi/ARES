@@ -1,7 +1,7 @@
 """Real PostgreSQL migration and catalog proof for revision 0009."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ async def _seed_revision_0008(
         "INSERT INTO refresh_tokens(id,user_id,expires_at) VALUES($1,$2,$3)",
         legacy_identifier,
         "family-migration-user",
-        datetime(2099, 1, 1, tzinfo=timezone.utc),
+        datetime(2099, 1, 1, tzinfo=UTC),
     )
 
 
@@ -146,8 +146,8 @@ async def test_real_postgres_family_finite_and_single_active_constraints() -> No
                 "$1,$2,1,'active',$3,'infinity'::timestamptz,$4)",
                 "A" * 43,
                 "family-constraint-user",
-                datetime(2030, 1, 1, tzinfo=timezone.utc),
-                datetime(2030, 3, 1, tzinfo=timezone.utc),
+                datetime(2030, 1, 1, tzinfo=UTC),
+                datetime(2030, 3, 1, tzinfo=UTC),
                 expected_type="CheckViolationError",
             )
             await connection.execute(
@@ -156,9 +156,9 @@ async def test_real_postgres_family_finite_and_single_active_constraints() -> No
                 "retain_until) VALUES($1,$2,1,'active',$3,$4,$5)",
                 "A" * 43,
                 "family-constraint-user",
-                datetime(2030, 1, 1, tzinfo=timezone.utc),
-                datetime(2030, 2, 1, tzinfo=timezone.utc),
-                datetime(2030, 3, 1, tzinfo=timezone.utc),
+                datetime(2030, 1, 1, tzinfo=UTC),
+                datetime(2030, 2, 1, tzinfo=UTC),
+                datetime(2030, 3, 1, tzinfo=UTC),
             )
             await connection.execute(
                 "INSERT INTO refresh_tokens("
@@ -167,8 +167,8 @@ async def test_real_postgres_family_finite_and_single_active_constraints() -> No
                 "'consumed',$4)",
                 "b" * 64,
                 "family-constraint-user",
-                datetime(2030, 2, 1, tzinfo=timezone.utc),
-                datetime(2030, 1, 1, tzinfo=timezone.utc),
+                datetime(2030, 2, 1, tzinfo=UTC),
+                datetime(2030, 1, 1, tzinfo=UTC),
                 "A" * 43,
             )
             await connection.execute(
@@ -177,8 +177,8 @@ async def test_real_postgres_family_finite_and_single_active_constraints() -> No
                 "generation,state) VALUES($1,$2,0,$3,$4,$5,$6,1,'active')",
                 "c" * 64,
                 "family-constraint-user",
-                datetime(2030, 2, 1, tzinfo=timezone.utc),
-                datetime(2030, 1, 2, tzinfo=timezone.utc),
+                datetime(2030, 2, 1, tzinfo=UTC),
+                datetime(2030, 1, 2, tzinfo=UTC),
                 "A" * 43,
                 "b" * 64,
             )
@@ -189,8 +189,8 @@ async def test_real_postgres_family_finite_and_single_active_constraints() -> No
                 "generation,state) VALUES($1,$2,0,$3,$4,$5,$6,2,'active')",
                 "d" * 64,
                 "family-constraint-user",
-                datetime(2030, 2, 1, tzinfo=timezone.utc),
-                datetime(2030, 1, 3, tzinfo=timezone.utc),
+                datetime(2030, 2, 1, tzinfo=UTC),
+                datetime(2030, 1, 3, tzinfo=UTC),
                 "A" * 43,
                 "c" * 64,
                 expected_type="UniqueViolationError",

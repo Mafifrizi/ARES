@@ -12,7 +12,7 @@ import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -31,7 +31,6 @@ from ares.core.execution_admission import (
 )
 from ares.core.notifier import build_notifier_from_settings
 from ares.db.execution_lifecycle import FixedResult, OperationResult, TrustedPrincipal
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

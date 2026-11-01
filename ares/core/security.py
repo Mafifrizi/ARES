@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import secrets
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt as _bcrypt
@@ -147,8 +147,8 @@ def create_access_token(
     payload = data.copy()
     if family_id is not None:
         payload.pop("role", None)
-    payload["exp"] = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
-    payload["iat"] = datetime.now(timezone.utc)
+    payload["exp"] = datetime.now(UTC) + timedelta(minutes=expires_minutes)
+    payload["iat"] = datetime.now(UTC)
     payload["jti"] = secrets.token_hex(16)  # unique token ID for revocation
     key = _load_jwt_key(secret_key, algorithm, private=True)
     return jwt.encode(payload, key, algorithm=algorithm)
@@ -214,7 +214,6 @@ class DataEncryptor:
     _LEGACY_SALT: bytes = _get_legacy_salt()
 
     def __init__(self, key: str) -> None:
-        import base64
         import os as _os
 
         from cryptography.hazmat.primitives import hashes as _hashes

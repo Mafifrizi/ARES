@@ -20,8 +20,6 @@ import secrets
 import time
 from typing import Any
 
-from ares.sdk import UntrustedTargetData, LockoutCircuitBreaker
-
 
 class McpSecurityViolation(Exception):
     """Raised when any MCP security guarantee or boundary is breached."""

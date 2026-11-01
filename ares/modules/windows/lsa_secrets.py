@@ -17,14 +17,13 @@ import re
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.security import mask_secret_hash, sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import LSASecretsParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -73,8 +72,8 @@ class LSASecretsModule(BaseModule):
         Evaluates registry auditing, local admin access, noise constraints,
         and recommends ad.dcsync if target is a DC, or ad.kerberoast if in stealth.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -138,9 +137,9 @@ class LSASecretsModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         """LSA secrets dump blocked in STEALTH - registry access triggers Sysmon."""
+        from ares.core.campaign import NoiseProfile
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import NoiseProfile
         if not isinstance(ctx, ExecutionContext):
             return
         if isinstance(ctx.params, dict):
@@ -221,12 +220,12 @@ class LSASecretsModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         sec_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect LSA Secrets & Registry Hive Access\n"
-            f"// Detects Security Event 4663 (Object Access on Registry SECURITY hive / Policy Secrets)\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4656, 4663)\n"
-            f"| where ObjectName has \"\\\\SECURITY\\\\Policy\\\\Secrets\" or ObjectName has \"\\\\SAM\\\\SAM\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ObjectName, AccessMask, ProcessName\n"
+            "// ARES Closed-Loop Telemetry: Detect LSA Secrets & Registry Hive Access\n"
+            "// Detects Security Event 4663 (Object Access on Registry SECURITY hive / Policy Secrets)\n"
+            "SecurityEvent\n"
+            "| where EventID in (4656, 4663)\n"
+            "| where ObjectName has \"\\\\SECURITY\\\\Policy\\\\Secrets\" or ObjectName has \"\\\\SAM\\\\SAM\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ObjectName, AccessMask, ProcessName\n"
         )
         sigma_rule = (
             f"title: LSA Policy Secrets Registry Hive Access ({sec_target})\n"
@@ -293,7 +292,10 @@ class LSASecretsModule(BaseModule):
 
         try:
             from impacket.examples.secretsdump import (  # type: ignore[import]
-                RemoteOperations, SAMHashes, LSASecrets, NTDSHashes
+                LSASecrets,
+                NTDSHashes,
+                RemoteOperations,
+                SAMHashes,
             )
             from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
@@ -17,8 +18,8 @@ from ares.core.config import AresSettings
 from ares.core.errors import ModuleError
 from ares.core.noise import NoiseController
 from ares.modules.windows.lsass_dump import LsassDumpModule
-from ares.modules.windows.token_impersonation import TokenImpersonationModule
 from ares.modules.windows.registry_enum import RegistryEnumModule
+from ares.modules.windows.token_impersonation import TokenImpersonationModule
 
 
 @pytest.fixture

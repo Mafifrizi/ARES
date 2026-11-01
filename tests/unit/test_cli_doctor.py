@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 import typer
 
-
 VersionInfo = namedtuple("version_info", "major minor micro releaselevel serial")
 
 
@@ -267,7 +266,7 @@ def test_doctor_guides_windows_ad_impacket_to_python_312(monkeypatch, tmp_path, 
 
     output = capsys.readouterr().out
     assert "Python 3.11.9" in output
-    assert "Package metadata permits Python 3.10-3.12" in output
+    assert "Package metadata permits Python 3.11-3.12" in output
     normalized = " ".join(output.split())
     assert "Windows AD/Impacket" in normalized
     assert "Python 3.12" in normalized
@@ -619,7 +618,7 @@ def test_python_setup_rejects_python_313_before_writing_env(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "Python: 3.13.0" in output
-    assert "Python 3.10-3.12 is required" in output
+    assert "Python 3.11-3.12 is required" in output
     assert "Python 3.12.x" in output
     assert not (tmp_path / ".env").exists()
 
@@ -782,8 +781,8 @@ def test_python_setup_cleans_invalid_browser_origin_placeholder(tmp_path, capsys
 
 
 def test_doctor_validates_browser_session_policy(monkeypatch, capsys):
-    from ares.core.browser_sessions import BrowserSessionPolicy
     import ares.cli.typer_main as tm
+    from ares.core.browser_sessions import BrowserSessionPolicy
 
     # Test OK path
     fake_policy = BrowserSessionPolicy(

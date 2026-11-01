@@ -2,21 +2,29 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
-from ares.core.campaign import Campaign, Finding, NoiseProfile, Severity, ScopeEntry
-from ares.core.noise import JitterEngine, NoiseController, RateLimiter, ScopeGuard, ScopeViolationError
+from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
+from ares.core.noise import (
+    JitterEngine,
+    RateLimiter,
+    ScopeGuard,
+    ScopeViolationError,
+)
 from ares.core.security import (
     DataEncryptor,
-    hash_password,
-    verify_password,
-    sanitize_ldap,
-    sanitize_hostname,
     create_access_token,
     decode_access_token,
+    hash_password,
+    sanitize_hostname,
+    sanitize_ldap,
+    verify_password,
 )
-from ares.core.validator import FindingValidator, ValidationCheck, ValidationStage, build_default_validator
-
+from ares.core.validator import (
+    FindingValidator,
+    ValidationCheck,
+    ValidationStage,
+    build_default_validator,
+)
 
 # ── Campaign tests ────────────────────────────────────────────────────────────
 
@@ -146,8 +154,9 @@ class TestSecurity:
 class TestValidator:
     @pytest.mark.asyncio
     async def test_validator_confidence_log_is_ascii_safe(self, monkeypatch):
-        import ares.core.validator as validator_module
         from unittest.mock import Mock
+
+        import ares.core.validator as validator_module
 
         logger_info = Mock()
         monkeypatch.setattr(validator_module.logger, "info", logger_info)

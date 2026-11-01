@@ -11,19 +11,18 @@ Connects to open ports, reads banner/response, identifies:
 from __future__ import annotations
 
 import asyncio
-import ssl
 import re
+import ssl
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import ServiceDetectParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -129,7 +128,7 @@ async def _grab_banner(host: str, port: int, timeout: float = 4.0,
             writer.close()
             try:
                 await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
+            except (TimeoutError, Exception):
                 pass  # Best effort cleanup
 
 

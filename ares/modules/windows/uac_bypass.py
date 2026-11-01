@@ -23,15 +23,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import UACBypassParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -208,13 +207,13 @@ class UACBypassModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         uac_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect UAC Auto-Elevation & Bypass\n"
-            f"// Detects high integrity child process spawned by auto-elevating binaries (fodhelper, sdclt, eventvwr)\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4688\n"
-            f"| where ParentProcessName has_any (\"fodhelper.exe\", \"eventvwr.exe\", \"sdclt.exe\", \"computerdefaults.exe\")\n"
-            f"| where NewProcessName has_any (\"cmd.exe\", \"powershell.exe\", \"pwsh.exe\")\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, NewProcessName, CommandLine\n"
+            "// ARES Closed-Loop Telemetry: Detect UAC Auto-Elevation & Bypass\n"
+            "// Detects high integrity child process spawned by auto-elevating binaries (fodhelper, sdclt, eventvwr)\n"
+            "SecurityEvent\n"
+            "| where EventID == 4688\n"
+            "| where ParentProcessName has_any (\"fodhelper.exe\", \"eventvwr.exe\", \"sdclt.exe\", \"computerdefaults.exe\")\n"
+            "| where NewProcessName has_any (\"cmd.exe\", \"powershell.exe\", \"pwsh.exe\")\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, NewProcessName, CommandLine\n"
         )
         sigma_rule = (
             f"title: UAC Bypass Execution via Auto-Elevated Binary ({uac_target})\n"
@@ -282,12 +281,14 @@ class UACBypassModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.smbconnection import SMBConnection            # type: ignore[import]
-            from impacket.dcerpc.v5 import transport, rrp               # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (                        # type: ignore[import]
-                hOpenLocalMachine, hBaseRegOpenKey, hBaseRegQueryValue,
+            from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
+            from impacket.dcerpc.v5.rrp import (  # type: ignore[import]
                 hBaseRegCloseKey,
+                hBaseRegOpenKey,
+                hBaseRegQueryValue,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 

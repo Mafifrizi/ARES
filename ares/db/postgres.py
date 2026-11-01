@@ -34,7 +34,7 @@ import json
 import re
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ares.core.logger import get_logger
@@ -61,7 +61,6 @@ from ares.db.execution_lifecycle import (
     OperationResult,
     valid_uuid,
     validate_postgresql_admission_authority_catalog,
-    validate_postgresql_lifecycle_catalog,
 )
 from ares.db.websocket_tickets import (
     WEBSOCKET_TICKET_TTL_SECONDS,
@@ -126,8 +125,8 @@ def _parse_postgres_timestamptz(value: str) -> datetime:
     """Convert the public access-token expiry string to an aware datetime."""
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is None:
-        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 # ── Postgres schema DDL ────────────────────────────────────────────────────────
@@ -4777,7 +4776,6 @@ class PostgresDatabase:
     # ── Campaigns ──────────────────────────────────────────────────────────────
 
     async def save_campaign(self, c: Any) -> None:
-        from ares.core.campaign import Campaign
 
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -5183,7 +5181,7 @@ class PostgresDatabase:
 
     async def get_monthly_confirmed_finding_stats(self, campaign_id: str = "") -> dict[str, Any]:
         """Return confirmed findings grouped by day in the current UTC month."""
-        period_start = datetime.now(timezone.utc).replace(
+        period_start = datetime.now(UTC).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
         if period_start.month == 12:
@@ -5277,7 +5275,7 @@ class PostgresDatabase:
                 outcome,
                 int(bool(success)),
                 max(0.0, float(duration_ms or 0.0)),
-                datetime.now(timezone.utc),
+                datetime.now(UTC),
             )
             await conn.execute(
                 """
@@ -5335,7 +5333,7 @@ class PostgresDatabase:
             index = max(0, min(len(durations) - 1, int(len(durations) * fraction + 0.999999) - 1))
             return round(durations[index], 1)
 
-        recent_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        recent_cutoff = datetime.now(UTC) - timedelta(seconds=60)
         recent_runs = sum(
             1
             for row in run_rows
@@ -6109,7 +6107,7 @@ class PostgresDatabase:
         key_prefix = raw_key[:12]
         key_id = str(uuid.uuid4())
         expires_at = (
-            datetime.now(timezone.utc) + timedelta(days=expires_days) if expires_days else None
+            datetime.now(UTC) + timedelta(days=expires_days) if expires_days else None
         )
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -6481,7 +6479,7 @@ class PostgresDatabase:
         family_id = generate_family_id()
         raw_token = generate_refresh_token()
         token_hash = hash_refresh_token(raw_token)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         absolute_expiry = now + timedelta(days=FAMILY_ABSOLUTE_LIFETIME_DAYS)
         retain_until = absolute_expiry + timedelta(days=FAMILY_RETENTION_DAYS)
         await conn.execute(
@@ -6618,7 +6616,7 @@ class PostgresDatabase:
         if family is None:
             return False
         if family["state"] == "active":
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             retain_until = max(family["absolute_expires_at"], now) + timedelta(
                 days=FAMILY_RETENTION_DAYS
             )
@@ -6682,8 +6680,8 @@ class PostgresDatabase:
                     row["family_state"] != "active"
                     or not bool(row["is_active"])
                     or int(row["auth_epoch"]) != int(row["user_epoch"])
-                    or row["expires_at"] <= datetime.now(timezone.utc)
-                    or row["absolute_expires_at"] <= datetime.now(timezone.utc)
+                    or row["expires_at"] <= datetime.now(UTC)
+                    or row["absolute_expires_at"] <= datetime.now(UTC)
                 ):
                     return RefreshRotationResult(RefreshRotationStatus.INVALID)
                 updated = await conn.execute(
@@ -7069,7 +7067,7 @@ class PostgresDatabase:
         import json as _json
         from pathlib import Path
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         if not output_path:
             backup_dir = Path.home() / ".ares" / "backups"
             backup_dir.mkdir(parents=True, exist_ok=True)

@@ -9,19 +9,19 @@ Does NOT transfer files to operator (use separate exfil module after review).
 Patterns: credentials, keys, configs, databases, source code secrets.
 """
 from __future__ import annotations
+
 import asyncio
 import shlex
 from typing import Any
-from ares.core.logger import get_logger, audit
+
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import StagedCollectionParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -46,9 +46,9 @@ def _audit_lots_egress_sync(target: str) -> dict[str, Any]:
     Non-destructive audit of Living-off-the-Trusted-Services (LOTS) cloud egress paths
     and enterprise Tenant Restrictions enforcement (T1567.002).
     """
-    import urllib.request
-    import urllib.error
     import ssl
+    import urllib.error
+    import urllib.request
 
     cloud_endpoints = {
         "m365_graph": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",

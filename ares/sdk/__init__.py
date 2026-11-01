@@ -62,13 +62,6 @@ from ares.modules.sdk import (
     validate_module_class,
 )
 
-# v2 Modern Module Declarative & Schema Contracts
-from ares.sdk.module import ares_module
-from ares.sdk.params import ModuleParams, SecretParam, param, validate_params
-
-# v2 Testing Harness
-from ares.sdk.testing import ModuleTestHarness, SimulationResult
-
 # v2 Programmatic API Client
 from ares.sdk.client import (
     AresAuthenticationError,
@@ -77,6 +70,15 @@ from ares.sdk.client import (
     AresNotFoundError,
     AresValidationError,
 )
+
+# Declarative Module Contracts
+from ares.sdk.contracts import (
+    module_contract,
+)
+
+# v2 Modern Module Declarative & Schema Contracts
+from ares.sdk.module import ares_module
+from ares.sdk.params import ModuleParams, SecretParam, param, validate_params
 
 # Enterprise Security Pipeline & Interceptors
 from ares.sdk.pipeline import (
@@ -87,6 +89,14 @@ from ares.sdk.pipeline import (
     ExecutionPipeline,
     ScopeEnforcementInterceptor,
     SecretSanitizationInterceptor,
+)
+
+# Resilience & Circuit Breakers
+from ares.sdk.resilience import (
+    CircuitBreaker,
+    CircuitBreakerState,
+    CircuitBreakerTripped,
+    LockoutCircuitBreaker,
 )
 
 # Capability-Based Permissions & Sandboxing
@@ -100,24 +110,14 @@ from ares.sdk.security import (
     VaultPermission,
 )
 
-# Resilience & Circuit Breakers
-from ares.sdk.resilience import (
-    CircuitBreaker,
-    CircuitBreakerState,
-    CircuitBreakerTripped,
-    LockoutCircuitBreaker,
-)
-
 # Taint Tracking & Tamper-Evident Evidence
 from ares.sdk.taint import (
     EvidenceRecord,
     UntrustedTargetData,
 )
 
-# Declarative Module Contracts
-from ares.sdk.contracts import (
-    module_contract,
-)
+# v2 Testing Harness
+from ares.sdk.testing import ModuleTestHarness, SimulationResult
 
 __all__ = [
     # Base module contracts

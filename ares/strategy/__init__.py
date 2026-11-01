@@ -11,20 +11,20 @@ Internal structure:
   strategy/target_state.py   - TargetStateMap
 """
 
-from ares.strategy.models import (           # noqa: F401
-    ModuleOutcome,
-    RoundResult,
-    EngagementResult,
-    DetectionSpikeError,
+from ares.strategy.engine import (  # noqa: F401
+    StrategyEngine,
 )
-from ares.strategy.knowledge_base import (   # noqa: F401
+from ares.strategy.knowledge_base import (  # noqa: F401
     OutcomeKnowledgeBase,
 )
-from ares.strategy.notifier import (         # noqa: F401
-    OperatorNotifier,
+from ares.strategy.models import (  # noqa: F401
+    DetectionSpikeError,
+    EngagementResult,
+    ModuleOutcome,
+    RoundResult,
 )
-from ares.strategy.engine import (           # noqa: F401
-    StrategyEngine,
+from ares.strategy.notifier import (  # noqa: F401
+    OperatorNotifier,
 )
 
 __all__ = [

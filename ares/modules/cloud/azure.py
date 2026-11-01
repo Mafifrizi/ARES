@@ -22,13 +22,12 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.cloud.azure")
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AzureParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -76,6 +75,7 @@ class AzureModule(BaseModule):
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -167,11 +167,11 @@ class AzureModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         azure_target = subscription_id[:8] if subscription_id else "AzureSubscription"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Azure Resource & Key Vault Reconnaissance\n"
-            f"// Monitors AzureActivity for KeyVault secret reads or Storage Account key enumeration\n"
-            f"AzureActivity\n"
-            f"| where OperationNameValue in~ (\"Microsoft.KeyVault/vaults/secrets/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\", \"Microsoft.Compute/virtualMachines/runCommand/action\")\n"
-            f"| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, SubscriptionId\n"
+            "// ARES Closed-Loop Telemetry: Detect Azure Resource & Key Vault Reconnaissance\n"
+            "// Monitors AzureActivity for KeyVault secret reads or Storage Account key enumeration\n"
+            "AzureActivity\n"
+            "| where OperationNameValue in~ (\"Microsoft.KeyVault/vaults/secrets/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\", \"Microsoft.Compute/virtualMachines/runCommand/action\")\n"
+            "| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, SubscriptionId\n"
         )
         sigma_rule = (
             f"title: Azure KeyVault & Secret Key Enumeration ({azure_target})\n"

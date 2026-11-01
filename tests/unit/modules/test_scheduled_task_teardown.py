@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
@@ -8,7 +9,6 @@ from ares.core.config import AresSettings
 from ares.core.noise import NoiseController
 from ares.modules.persistence.scheduled_task import (
     ScheduledTaskPersistence,
-    _tsch_delete_sync,
 )
 
 

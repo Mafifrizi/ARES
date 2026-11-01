@@ -4,26 +4,25 @@ Find dangerous ACL delegations: WriteDACL, GenericAll, GenericWrite, DCSync righ
 MITRE: T1222.001, T1003.006
 """
 from __future__ import annotations
+
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.enum_acl")
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
 from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -122,12 +121,12 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         acl_target = dc or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Active Directory ACL & DACL Modification\n"
-            f"// Monitors Security Event 5136 and 4670 for nTSecurityDescriptor changes or WriteDacl/GenericAll grant\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4670, 5136)\n"
-            f"| where AttributeLDAPDisplayName == \"nTSecurityDescriptor\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ObjectDN, AttributeLDAPDisplayName, OperationType\n"
+            "// ARES Closed-Loop Telemetry: Detect Active Directory ACL & DACL Modification\n"
+            "// Monitors Security Event 5136 and 4670 for nTSecurityDescriptor changes or WriteDacl/GenericAll grant\n"
+            "SecurityEvent\n"
+            "| where EventID in (4670, 5136)\n"
+            "| where AttributeLDAPDisplayName == \"nTSecurityDescriptor\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ObjectDN, AttributeLDAPDisplayName, OperationType\n"
         )
         sigma_rule = (
             f"title: Active Directory DACL / Object Permission Modification ({acl_target})\n"
@@ -195,7 +194,7 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw = {"misconfigs": misconfigs, "acl_findings": misconfigs}  # acl_findings = OUTPUTS key
         # ISU-07: produce PermissionArtifact objects for ArtifactIntelEngine
         try:
-            from ares.normalize.artifacts import PermissionArtifact, ArtifactStore
+            from ares.normalize.artifacts import ArtifactStore, PermissionArtifact
             store = getattr(getattr(self, "campaign", None), "_artifact_store", None)
             if store is None:
                 store = ArtifactStore()
@@ -220,8 +219,9 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         Fixes: AUTO_BIND_NONE, cookie loop, LDAPS fallback, try/finally unbind.
         """
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)

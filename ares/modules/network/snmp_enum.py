@@ -22,14 +22,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import SNMPEnumParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -74,8 +73,13 @@ def _snmp_get_sync(host: str, community: str, port: int,
     """
     try:
         from pysnmp.hlapi import (  # type: ignore[import]
-            getCmd, SnmpEngine, CommunityData, UdpTransportTarget,
-            ContextData, ObjectType, ObjectIdentity,
+            CommunityData,
+            ContextData,
+            ObjectIdentity,
+            ObjectType,
+            SnmpEngine,
+            UdpTransportTarget,
+            getCmd,
         )
     except ImportError:
         return {"_error": "pysnmp not installed - run: pip install pysnmp"}
@@ -109,8 +113,13 @@ def _snmp_walk_sync(host: str, community: str, port: int,
     """
     try:
         from pysnmp.hlapi import (  # type: ignore[import]
-            nextCmd, SnmpEngine, CommunityData, UdpTransportTarget,
-            ContextData, ObjectType, ObjectIdentity,
+            CommunityData,
+            ContextData,
+            ObjectIdentity,
+            ObjectType,
+            SnmpEngine,
+            UdpTransportTarget,
+            nextCmd,
         )
     except ImportError:
         return ["_error: pysnmp not installed"]
@@ -335,8 +344,8 @@ class SnmpEnumModule(BaseModule):
                 for oid_prefix, label in _WALK_OIDS.items():
                     rows = await loop.run_in_executor(
                         None,
-                        lambda op=oid_prefix, lbl=label: _snmp_walk_sync(
-                            target, community, port, op, lbl
+                        lambda op=oid_prefix, lbl=label, comm=community: _snmp_walk_sync(
+                            target, comm, port, op, lbl
                         )
                     )
                     if rows:

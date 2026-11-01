@@ -19,10 +19,8 @@ Reference: https://www.first.org/cvss/v3.1/specification-document
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, field
 from typing import Any
-
 
 # ── CVSS v3.1 metric tables ───────────────────────────────────────────────────
 

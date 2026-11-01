@@ -32,13 +32,12 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from ares.core.logger import get_logger
-from ares.state.target_state import HostState, ServiceEntry
+from ares.state.target_state import HostState
 
 logger = get_logger("ares.service_intel")
 
@@ -275,10 +274,10 @@ class ServiceIntelEngine:
                     writer.close()
                     try:
                         await writer.wait_closed()
-                    except (OSError, asyncio.TimeoutError):
+                    except (TimeoutError, OSError):
                         pass
                     result.open_ports.append(port)
-                except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+                except (TimeoutError, ConnectionRefusedError, OSError):
                     pass
                 except Exception as exc:
                     logger.debug("port_scan_error", host=host, port=port, error=str(exc)[:50])

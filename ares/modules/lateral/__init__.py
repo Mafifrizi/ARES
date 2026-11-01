@@ -14,19 +14,19 @@ try:
         BaseLateralModule,
         LateralResult,
         LateralTechnique,
-        RDPLateral,
         PsExecLateral,
-        WMIExecLateral,
+        RDPLateral,
         SSHPivot,
         WinRMLateral,
+        WMIExecLateral,
     )
 except ImportError:
     pass
 
 try:
-    from ares.modules.lateral.dcom      import DCOMLateral          # noqa: F401
+    from ares.modules.lateral.dcom import DCOMLateral  # noqa: F401
+    from ares.modules.lateral.mssql import MSSQLModule  # noqa: F401
     from ares.modules.lateral.smb_relay import SMBRelayAuditModule  # noqa: F401
-    from ares.modules.lateral.mssql     import MSSQLModule          # noqa: F401
 except ImportError:
     pass
 

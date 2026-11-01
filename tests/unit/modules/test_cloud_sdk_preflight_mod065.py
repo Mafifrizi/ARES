@@ -4,6 +4,7 @@ across cloud modules: cloud.aws, cloud.azure, cloud.azure_ad, and cloud.gcp.
 """
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

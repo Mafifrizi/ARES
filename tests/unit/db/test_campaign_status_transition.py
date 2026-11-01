@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

@@ -28,16 +28,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
-import time
-import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
@@ -50,7 +44,7 @@ def _session(campaign_id: str = "test-001") -> "OperatorSession":
 
 def _host(ip: str = "10.0.0.1", hostname: str = "srv01",
           level: str = "none") -> "HostState":
-    from ares.state.target_state import HostState, CompromiseLevel
+    from ares.state.target_state import CompromiseLevel, HostState
     return HostState(
         ip_address       = ip,
         hostname         = hostname,
@@ -59,7 +53,7 @@ def _host(ip: str = "10.0.0.1", hostname: str = "srv01",
 
 
 def _campaign(n_findings: int = 3):
-    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Finding, Severity
+    from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
     c = Campaign(
         name="R4 Test", client="Acme", operator="tester",
         scope=[ScopeEntry(cidr="10.0.0.0/8")],
@@ -83,13 +77,13 @@ def _campaign(n_findings: int = 3):
 class TestHostState:
 
     def test_create_default_none_level(self):
-        from ares.state.target_state import HostState, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, HostState
         h = HostState(ip_address="10.0.0.1")
         assert h.compromise_level == CompromiseLevel.NONE
         assert h.is_owned() is False
 
     def test_mark_owned(self):
-        from ares.state.target_state import HostState, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, HostState
         h = HostState(ip_address="10.0.0.1")
         h.mark_owned(CompromiseLevel.LOCAL_ADMIN, username="admin", method="psexec")
         assert h.is_owned() is True
@@ -103,7 +97,7 @@ class TestHostState:
         assert any(s.port == 445 for s in h.services)
 
     def test_to_dict(self):
-        from ares.state.target_state import HostState, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, HostState
         h = HostState(ip_address="10.0.0.1", hostname="dc01",
                       compromise_level=CompromiseLevel.DOMAIN_ADMIN)
         d = h.to_dict()
@@ -141,7 +135,7 @@ class TestOperatorSession:
 
     def test_update_host(self):
         """update_host() upserts a pre-built HostState."""
-        from ares.state.target_state import HostState, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, HostState
         sess = _session()
         host = HostState(ip_address="10.0.0.5", hostname="db01",
                          compromise_level=CompromiseLevel.LOCAL_ADMIN)
@@ -151,7 +145,7 @@ class TestOperatorSession:
         assert retrieved.compromise_level == CompromiseLevel.LOCAL_ADMIN
 
     def test_update_host_replaces_existing(self):
-        from ares.state.target_state import HostState, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, HostState
         sess = _session()
         sess.add_host("10.0.0.5")
         new_host = HostState(ip_address="10.0.0.5",
@@ -161,7 +155,7 @@ class TestOperatorSession:
 
     def test_target_host_alias(self):
         """TargetHost should be an alias for HostState."""
-        from ares.state.target_state import TargetHost, HostState
+        from ares.state.target_state import HostState, TargetHost
         assert TargetHost is HostState
 
     def test_owned_hosts(self):
@@ -175,7 +169,6 @@ class TestOperatorSession:
         assert owned[0].ip_address == "10.0.0.1"
 
     def test_domain_controllers_detected(self):
-        from ares.state.target_state import CompromiseLevel
         sess = _session()
         h = sess.add_host("10.0.0.1", hostname="DC01", os_type="Windows Server",
                           domain_role="domain_controller")
@@ -212,7 +205,7 @@ class TestOperatorSession:
         assert isinstance(s["total_hosts"], int)
 
     def test_snapshot_round_trip(self):
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         sess = _session()
         sess.add_host("10.0.0.1")
         sess.mark_host_owned("10.0.0.1", CompromiseLevel.USER)
@@ -383,7 +376,7 @@ class TestArtifactStore:
 class TestFingerprintEngine:
 
     def test_fingerprint_result_structure(self):
-        from ares.fingerprint.engine import FingerprintResult, OSType, DomainRole, EDRVendor
+        from ares.fingerprint.engine import DomainRole, EDRVendor, FingerprintResult, OSType
         result = FingerprintResult(
             ip_address   = "10.0.0.1",
             os_type      = OSType.WINDOWS_SERVER,
@@ -398,7 +391,7 @@ class TestFingerprintEngine:
         assert EDRVendor.WINDOWS_DEFENDER in result.edr_detected
 
     def test_fingerprint_result_to_dict(self):
-        from ares.fingerprint.engine import FingerprintResult, OSType, DomainRole
+        from ares.fingerprint.engine import DomainRole, FingerprintResult, OSType
         result = FingerprintResult(
             ip_address = "10.0.0.1",
             os_type    = OSType.WINDOWS_SERVER,
@@ -559,7 +552,7 @@ class TestCollaborationManager:
         assert not mgr.is_locked("10.0.0.1")
 
     def test_journal_append(self):
-        from ares.collab.manager import CollaborationManager, OperatorRole
+        from ares.collab.manager import CollaborationManager
         mgr = CollaborationManager(campaign_id="camp-001")
         mgr.log_event(operator_id="op-001", event_type="module_run",
                       details={"module": "ad.kerberoast", "target": "10.0.0.1"})
@@ -621,7 +614,7 @@ class TestKnowledgeBase:
 class TestEvidenceStore:
 
     def test_add_and_retrieve(self):
-        from ares.knowledge.base import EvidenceStore, Evidence, EvidenceType
+        from ares.knowledge.base import Evidence, EvidenceStore, EvidenceType
         store = EvidenceStore()
         ev = Evidence(
             name="kerberoast_ticket",
@@ -632,7 +625,7 @@ class TestEvidenceStore:
         assert len(store.all()) == 1
 
     def test_get_by_type(self):
-        from ares.knowledge.base import EvidenceStore, Evidence
+        from ares.knowledge.base import Evidence, EvidenceStore
         store = EvidenceStore()
         store.add(Evidence(name="e1", evidence_type="screenshot", content="img"))
         store.add(Evidence(name="e2", evidence_type="hash", content="aabb"))
@@ -641,7 +634,7 @@ class TestEvidenceStore:
         assert screenshots[0].name == "e1"
 
     def test_clear(self):
-        from ares.knowledge.base import EvidenceStore, Evidence
+        from ares.knowledge.base import Evidence, EvidenceStore
         store = EvidenceStore()
         store.add(Evidence(name="e1", evidence_type="hash", content="x"))
         store.clear()
@@ -736,7 +729,7 @@ class TestCheckpointManager:
         )
 
     def test_save_and_load(self, tmp_path):
-        from ares.checkpoint.manager import CheckpointManager, CheckpointData
+        from ares.checkpoint.manager import CheckpointData, CheckpointManager
         with patch("ares.checkpoint.manager.CHECKPOINT_DIR", tmp_path):
             mgr  = CheckpointManager(encryption_key=b"test-key-32-bytes-padded-xxxxxxx")
             data = CheckpointData(
@@ -752,7 +745,7 @@ class TestCheckpointManager:
             assert loaded.session["owned_hosts"] == ["10.0.0.1"]
 
     def test_list_checkpoints(self, tmp_path):
-        from ares.checkpoint.manager import CheckpointManager, CheckpointData
+        from ares.checkpoint.manager import CheckpointData, CheckpointManager
         with patch("ares.checkpoint.manager.CHECKPOINT_DIR", tmp_path):
             mgr  = CheckpointManager(encryption_key=b"test-key-32-bytes-padded-xxxxxxx")
             data = CheckpointData(campaign_id="camp-002", session={}, vault={})
@@ -769,7 +762,7 @@ class TestCheckpointManager:
                 mgr.load("nonexistent-campaign-id")
 
     def test_purge_old(self, tmp_path):
-        from ares.checkpoint.manager import CheckpointManager, CheckpointData
+        from ares.checkpoint.manager import CheckpointData, CheckpointManager
         with patch("ares.checkpoint.manager.CHECKPOINT_DIR", tmp_path):
             mgr  = CheckpointManager(encryption_key=b"test-key-32-bytes-padded-xxxxxxx")
             data = CheckpointData(campaign_id="camp-003", session={}, vault={})
@@ -780,7 +773,7 @@ class TestCheckpointManager:
             assert len(remaining) <= 3
 
     def test_delete_checkpoint(self, tmp_path):
-        from ares.checkpoint.manager import CheckpointManager, CheckpointData
+        from ares.checkpoint.manager import CheckpointData, CheckpointManager
         with patch("ares.checkpoint.manager.CHECKPOINT_DIR", tmp_path):
             mgr  = CheckpointManager(encryption_key=b"test-key-32-bytes-padded-xxxxxxx")
             data = CheckpointData(campaign_id="camp-004", session={}, vault={})
@@ -793,7 +786,7 @@ class TestCheckpointManager:
             assert not any(c["checkpoint_id"] == cp_id for c in cps_after)
 
     def test_build_checkpoint_helper(self):
-        from ares.checkpoint.manager import build_checkpoint, CheckpointData
+        from ares.checkpoint.manager import CheckpointData, build_checkpoint
         sess = _session("camp-001")
         sess.add_host("10.0.0.1")
         data = build_checkpoint(sess, vault=None)
@@ -808,7 +801,11 @@ class TestCheckpointManager:
 class TestInProcessTaskQueue:
 
     def test_enqueue_and_dequeue(self):
-        from ares.worker.cluster import InProcessTaskQueue, ClusterTask, WorkerRegistration, TaskState
+        from ares.worker.cluster import (
+            ClusterTask,
+            InProcessTaskQueue,
+            WorkerRegistration,
+        )
         queue  = InProcessTaskQueue()
         worker = WorkerRegistration(
             worker_id      = "w-001",
@@ -833,7 +830,7 @@ class TestInProcessTaskQueue:
         assert result.task_id == "task-001"
 
     def test_disconnect_clears_queue(self):
-        from ares.worker.cluster import InProcessTaskQueue, ClusterTask, WorkerRegistration
+        from ares.worker.cluster import ClusterTask, InProcessTaskQueue
 
         async def run():
             queue = InProcessTaskQueue()
@@ -1105,7 +1102,7 @@ class TestTelemetry:
         assert isinstance(workers, list)
 
     def test_get_collector_singleton(self):
-        from ares.telemetry.collector import get_collector, TelemetryCollector
+        from ares.telemetry.collector import TelemetryCollector, get_collector
         c = get_collector()
         assert isinstance(c, TelemetryCollector)
 
@@ -1159,7 +1156,8 @@ class TestPackageExports:
         # TelemetryCollector is the real name
         assert hasattr(tel, "TelemetryCollector") or "TelemetryCollector" in getattr(tel, "__all__", [])
         """Every ARES package with an __init__.py should define __all__."""
-        import os, importlib
+        import importlib
+        import os
         base = "/home/claude/ARES_r4/ares"
         missing = []
         for root, dirs, files in os.walk(base):
@@ -1189,9 +1187,7 @@ class TestPackageExports:
 class TestArtifactCorrelationEngine:
 
     def _store_with_da_hash(self):
-        from ares.normalize.artifacts import (
-            ArtifactStore, HostArtifact, UserArtifact, HashArtifact
-        )
+        from ares.normalize.artifacts import ArtifactStore, HashArtifact, HostArtifact, UserArtifact
         store = ArtifactStore()
         store.add(HostArtifact(ip="10.0.0.1", hostname="dc01",
                                 os="windows", domain="CORP",
@@ -1321,7 +1317,7 @@ class TestServiceIntel:
         assert profile.service_name == "smb"
 
     def test_recommend_modules_for_port_scan(self):
-        from ares.service_intel.engine import ServiceIntelEngine, PortScanResult
+        from ares.service_intel.engine import PortScanResult, ServiceIntelEngine
         engine = ServiceIntelEngine()
         scan = PortScanResult(
             host       = "10.0.0.1",
@@ -1331,7 +1327,7 @@ class TestServiceIntel:
         assert isinstance(modules, list)
 
     def test_is_likely_dc(self):
-        from ares.service_intel.engine import ServiceIntelEngine, PortScanResult
+        from ares.service_intel.engine import PortScanResult, ServiceIntelEngine
         engine = ServiceIntelEngine()
         dc_scan = PortScanResult(
             host       = "10.0.0.1",
@@ -1352,8 +1348,9 @@ class TestServiceIntel:
 class TestReplayEngine:
 
     def test_campaign_replay_init(self):
-        from ares.replay.engine import CampaignReplay
         from unittest.mock import MagicMock
+
+        from ares.replay.engine import CampaignReplay
         mock_campaign = MagicMock()
         mock_campaign.id = "camp-001"
         mock_campaign.findings = []
@@ -1361,8 +1358,9 @@ class TestReplayEngine:
         assert e is not None
 
     def test_build_timeline(self):
-        from ares.replay.engine import CampaignReplay, ReplayEvent
         from unittest.mock import MagicMock
+
+        from ares.replay.engine import CampaignReplay
         mock_campaign = MagicMock()
         mock_campaign.id = "camp-001"
         mock_campaign.findings = []
@@ -1371,8 +1369,9 @@ class TestReplayEngine:
         assert isinstance(timeline, list)
 
     def test_replay_event_structure(self):
-        from ares.replay.engine import ReplayEvent
         import time
+
+        from ares.replay.engine import ReplayEvent
         ev = ReplayEvent(
             timestamp = time.time(),
             module_id = "ad.kerberoast",
@@ -1386,8 +1385,9 @@ class TestReplayEngine:
         assert "module_id" in d
 
     def test_replay_result_summary(self):
-        from ares.replay.engine import ReplayResult, ReplayEvent
         import time
+
+        from ares.replay.engine import ReplayEvent, ReplayResult
         events = [
             ReplayEvent(
                 timestamp=time.time(), module_id="ad.kerberoast",
@@ -1420,9 +1420,9 @@ class TestCrossModuleIntegration:
 
     def test_state_to_graph_pipeline(self):
         """Session host data flows correctly into ArtifactStore → AttackGraph."""
-        from ares.state.target_state import OperatorSession, CompromiseLevel
-        from ares.normalize.artifacts import ArtifactStore, HostArtifact
         from ares.graph.attack_graph import AttackGraph
+        from ares.normalize.artifacts import ArtifactStore, HostArtifact
+        from ares.state.target_state import CompromiseLevel, OperatorSession
 
         sess = OperatorSession(campaign_id="integration-001")
         sess.add_host("10.0.0.1", hostname="dc01", domain_role="domain_controller")
@@ -1443,7 +1443,7 @@ class TestCrossModuleIntegration:
 
     def test_session_snapshot_preserves_all_data(self):
         """Full snapshot round-trip keeps all session data intact."""
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         sess = OperatorSession(campaign_id="snap-test", operator="alice")
         sess.add_host("10.0.0.1")
         sess.mark_host_owned("10.0.0.1", CompromiseLevel.LOCAL_ADMIN)
@@ -1461,6 +1461,7 @@ class TestCrossModuleIntegration:
     def test_campaign_findings_to_report(self):
         """Campaign → ReportGenerator → JSON output has correct finding count."""
         import tempfile
+
         from ares.modules.reporting.report_gen import ReportGenerator
         c = _campaign(n_findings=4)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1472,9 +1473,10 @@ class TestCrossModuleIntegration:
 
     def test_attacker_planner_uses_correct_goal_definitions(self):
         """GoalEngine GOAL_DEFINITIONS is consumed correctly by AttackPlanner."""
-        from ares.goal.engine import Goal, GOAL_DEFINITIONS
-        from ares.goal.planner import AttackPlanner, PlannerContext
         from unittest.mock import MagicMock
+
+        from ares.goal.engine import Goal
+        from ares.goal.planner import AttackPlanner, PlannerContext
 
         registry = MagicMock()
         registry.all.return_value = []

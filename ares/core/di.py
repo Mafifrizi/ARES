@@ -212,9 +212,9 @@ class AresContainer:
         """
         from ares.core.config import AresSettings
         from ares.core.plugin.loader import ModuleRegistry
-        from ares.telemetry.collector import TelemetryCollector
-        from ares.knowledge import AttackKnowledgeBase
         from ares.core.sandbox import SandboxRunner
+        from ares.knowledge import AttackKnowledgeBase
+        from ares.telemetry.collector import TelemetryCollector
 
         s = settings or AresSettings()
         c = cls()
@@ -239,8 +239,8 @@ class AresContainer:
         """
         from ares.core.config import AresSettings
         from ares.core.plugin.loader import ModuleRegistry
-        from ares.telemetry.collector import TelemetryCollector
         from ares.knowledge import AttackKnowledgeBase
+        from ares.telemetry.collector import TelemetryCollector
 
         c = cls()
         c.register("settings",  AresSettings())

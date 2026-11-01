@@ -38,7 +38,6 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ── Graph types ────────────────────────────────────────────────────────────────
 
 @dataclass

@@ -60,7 +60,7 @@ export function LoginPage() {
       } else {
         setSsoError("SSO is not configured for this organization. Contact your administrator.");
       }
-    } catch (exc) {
+    } catch {
       setSsoError("SSO is not configured for this organization. Contact your administrator.");
     } finally {
       setIsSsoLoading(false);

@@ -182,7 +182,7 @@ async def test_runtime_retries_use_module_timeout_contract(monkeypatch) -> None:
         async def execute(self, ctx: sdk.ExecutionContext) -> sdk.ModuleResult:
             type(self).execute_calls += 1
             if type(self).execute_calls == 1:
-                raise asyncio.TimeoutError
+                raise TimeoutError
             return sdk.ModuleResult(status="success", module_id=self.MODULE_ID)
 
         async def run(self, **kwargs):

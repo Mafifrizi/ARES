@@ -12,13 +12,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import PassTheHashParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -26,7 +26,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.pass_the_hash")
 
@@ -68,8 +67,8 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
         Evaluates NTLM hash presence, target host, and Kerberos-only/NTLM-disabled policies.
         Recommends Overpass-the-Hash (ad.kerberoast / credential.golden_ticket) if NTLM is blocked.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import getpass
 import json
+import logging
 import os
 import shutil
 import signal
@@ -34,10 +35,10 @@ import sys
 import threading
 import time
 import uuid
+import warnings
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-import warnings
 from typing import Any, Optional
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -88,7 +89,7 @@ try:
 except Exception:
     logging.basicConfig(level=getattr(logging, _ares_cli_log_level, logging.WARNING))
 
-PYTHON_MIN_VERSION = (3, 10)
+PYTHON_MIN_VERSION = (3, 11)
 PYTHON_MAX_VERSION_EXCLUSIVE = (3, 13)
 AD_IMPACKET_TESTED_PYTHON = (3, 12)
 _C_LIVE_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -265,8 +266,8 @@ def _display_c_live_http_result(result: dict[str, Any]) -> None:
 def _python_minor(version_info: object | None = None) -> tuple[int, int]:
     info = sys.version_info if version_info is None else version_info
     try:
-        major = getattr(info, "major")
-        minor = getattr(info, "minor")
+        major = info.major
+        minor = info.minor
     except AttributeError:
         major = info[0]  # type: ignore[index]
         minor = info[1]  # type: ignore[index]
@@ -385,7 +386,6 @@ def campaign_list(
     table.add_column("Findings", justify="right", width=8)
     table.add_column("Created",  width=16)
 
-    import time
     for c in campaigns:
         table.add_row(
             c.get("id", "")[:8],
@@ -622,7 +622,7 @@ def module_info(
         f"  Requires:    {', '.join(meta.get('requires', [])) or ' - '}\n"
         f"  Outputs:     {', '.join(meta.get('outputs', [])) or ' - '}\n"
         f"  MITRE:       {', '.join(meta.get('mitre_list', []))}\n"
-        + (f"\n[bold]Techniques:[/]\n" + "\n".join(
+        + ("\n[bold]Techniques:[/]\n" + "\n".join(
             f"  [cyan]{t.technique_id}[/] {t.name} - [dim]{t.tactic}[/]"
             for t in techs
         ) if techs else ""),
@@ -795,9 +795,9 @@ def chain_suggest(
 ) -> None:
     """AI-style ranked suggestions for next attack modules (AttackPlanner)."""
     try:
+        from ares.core.plugin.loader import ModuleRegistry
         from ares.goal.engine import Goal as GoalEnum
         from ares.goal.planner import AttackPlanner, PlannerContext
-        from ares.core.plugin.loader import ModuleRegistry
 
         goal_enum = GoalEnum(goal) if goal in [g.value for g in GoalEnum] else GoalEnum.DOMAIN_ADMIN
         registry  = ModuleRegistry()
@@ -1089,7 +1089,8 @@ async def _run_chain(
     # Static goal definitions provide a complete, ordered chain without
     # invoking GoalEngine planning callbacks or loading executable modules.
     try:
-        from ares.goal.engine import GOAL_DEFINITIONS, Goal as GoalEnum
+        from ares.goal.engine import GOAL_DEFINITIONS
+        from ares.goal.engine import Goal as GoalEnum
 
         goal_enum = GoalEnum(goal)
         modules = tuple(GOAL_DEFINITIONS[goal_enum].preferred_chain)
@@ -1156,9 +1157,9 @@ async def _generate_report(
     Generate report(s) via ReportGenerator.
     Returns {format: path_str} for each generated file.
     """
+
     from ares.cli._store import load_campaign
-    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Finding, Severity
-    import json
+    from ares.core.campaign import Finding, NoiseProfile, ScopeEntry, Severity
 
     raw = load_campaign(campaign_id)
     if not raw:
@@ -1335,9 +1336,12 @@ def doctor(
     ),
 ) -> None:
     """Check all prerequisites and configuration. Run this first."""
-    import importlib, shutil, os
+    import importlib
+    import os
+    import shutil
     from importlib import metadata as importlib_metadata
     from pathlib import Path
+
     from ares.modules.ad.dependencies import AD_INSTALL_HINT, AD_SUPPORT_DEPENDENCIES
 
     console.print("\n[bold]ARES Doctor[/bold] - prerequisite check\n")
@@ -1382,7 +1386,7 @@ def doctor(
             check(
                 f"Python {python_label}",
                 "warn",
-                "Package metadata permits Python 3.10-3.12, but the full "
+                "Package metadata permits Python 3.11-3.12, but the full "
                 "dashboard + Windows AD/Impacket release path is tested on "
                 "Python 3.12.x",
             )
@@ -1474,14 +1478,12 @@ def doctor(
 
     # ── optional Windows modules ───────────────────────────────────────────────
     try:
-        import pypykatz  # type: ignore[import]
         check("pypykatz  (windows.lsass_dump)", "ok", "LSASS dump parsing ready")
     except Exception as exc:
         check("pypykatz  (windows.lsass_dump)", "warn",
               import_failure_detail("pypykatz", exc, "pip install ares-redteam[windows]"))
 
     try:
-        import httpx_ntlm  # type: ignore[import]
         check("httpx-ntlm  (ad.adcs ESC1)", "ok", "ADCS HTTP enrollment ready")
     except Exception as exc:
         check("httpx-ntlm  (ad.adcs ESC1)", "warn",
@@ -1503,8 +1505,8 @@ def doctor(
 
     # PDF export capability
     try:
-        from ares.modules.reporting.report_gen import ReportGenerator
         import ares.modules.reporting.report_gen as report_gen_module
+        from ares.modules.reporting.report_gen import ReportGenerator
 
         pdf_generator = ReportGenerator()
         try:
@@ -2182,7 +2184,6 @@ def dashboard_dev(
 @app.command("quickstart")
 def quickstart() -> None:
     """Guided wizard for first-time users - creates your first campaign."""
-    import uuid
 
     console.print("\n[bold cyan]ARES Quick Start Wizard[/bold cyan]\n")
 
@@ -2292,12 +2293,12 @@ def _run_python_setup(
     console.print(f"Python: {runtime_version} ({sys.executable})")
 
     if not (PYTHON_MIN_VERSION <= python_minor < PYTHON_MAX_VERSION_EXCLUSIVE):
-        console.print("[red]ERROR[/red] Python 3.10-3.12 is required.")
+        console.print("[red]ERROR[/red] Python 3.11-3.12 is required.")
         console.print("Windows AD/Impacket modules are tested on Python 3.12.x.")
         raise SystemExit(1)
     if python_minor != AD_IMPACKET_TESTED_PYTHON:
         console.print(
-            "[yellow]Warning[/yellow] Package metadata permits Python 3.10-3.12, "
+            "[yellow]Warning[/yellow] Package metadata permits Python 3.11-3.12, "
             "but the tested release path for the dashboard and Windows "
             "AD/Impacket modules is Python 3.12.x."
         )
@@ -2359,9 +2360,9 @@ def _run_python_setup(
                 env_path.write_text(updated, encoding="utf-8")
 
                 if force:
-                    console.print(f"[green]OK[/green] .env regenerated with fresh secure keys (--force).")
+                    console.print("[green]OK[/green] .env regenerated with fresh secure keys (--force).")
                 else:
-                    console.print(f"[green]OK[/green] Replaced CHANGE_ME placeholders in .env with secure generated keys.")
+                    console.print("[green]OK[/green] Replaced CHANGE_ME placeholders in .env with secure generated keys.")
 
                 if admin_password is not None:
                     console.print(f"Admin password: {admin_password}")
@@ -2429,8 +2430,9 @@ def backup(
 ) -> None:
     """Export all campaigns and findings to a JSON backup file."""
     import asyncio
-    from ares.db.database import AresDatabase
+
     from ares.core.config import get_settings
+    from ares.db.database import AresDatabase
 
     async def _run() -> str:
         s = get_settings()
@@ -2451,7 +2453,7 @@ def backup(
 
 @app.command("update")
 def update_cmd(
-    module: Optional[str] = typer.Option(None, "--module", "-m", help="Specific new module ID to install"),
+    module: str | None = typer.Option(None, "--module", "-m", help="Specific new module ID to install"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview new modules without downloading"),
     repo: str = typer.Option("Mafifrizi/ARES", "--repo", help="Official GitHub repository (owner/repo)"),
     branch: str = typer.Option("main", "--branch", help="Git branch to synchronize against"),
@@ -2525,7 +2527,7 @@ def upgrade_cmd(
     system: bool = typer.Option(False, "--system", "--core", help="Upgrade core framework engine and apply database schema migrations"),
     ui: bool = typer.Option(False, "--ui", help="Upgrade Frontend Web UI Dashboard bundle"),
     modules: bool = typer.Option(False, "--modules", help="Upgrade existing attack modules to latest versions"),
-    module: Optional[str] = typer.Option(None, "--module", "-m", help="Specific installed module ID to upgrade"),
+    module: str | None = typer.Option(None, "--module", "-m", help="Specific installed module ID to upgrade"),
     check: bool = typer.Option(False, "--check", "-c", help="Check for available system and module updates without modifying disk"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview upgrades without modifying disk"),
     repo: str = typer.Option("Mafifrizi/ARES", "--repo", help="Official GitHub repository (owner/repo)"),
@@ -2583,7 +2585,7 @@ def upgrade_cmd(
 
         sys_res = res.get("system", {})
         console.print("\n[bold green][+] Platform System Upgrade Completed[/bold green]\n")
-        
+
         # System Core
         sys_status = sys_res.get("status", "ok")
         if sys_status == "ok":
@@ -2591,7 +2593,7 @@ def upgrade_cmd(
         elif sys_status == "up_to_date":
             console.print("  [green]*[/green] Core Framework: [dim]Already up to date[/dim]")
         elif sys_status == "dirty_tree":
-            console.print(f"  [yellow]![/yellow] Core Framework: [yellow]Skipped (working tree has modified files)[/yellow]")
+            console.print("  [yellow]![/yellow] Core Framework: [yellow]Skipped (working tree has modified files)[/yellow]")
         else:
             console.print(f"  [yellow]![/yellow] Core Framework: {sys_res.get('system', {}).get('message', 'Checked')}")
 
@@ -2674,7 +2676,7 @@ def upgrade_cmd(
         elif res.get("status") == "not_found":
             console.print(f"[yellow][!] {res.get('message')}[/yellow]")
         else:
-            console.print(f"[yellow][!] Upgraded with warnings:[/yellow]")
+            console.print("[yellow][!] Upgraded with warnings:[/yellow]")
             for err in res.get("errors", []):
                 console.print(f"  [red]-[/red] {err}")
 
@@ -2698,7 +2700,8 @@ def goal_run(
     """Preview locally or submit one goal request to the authenticated API."""
     del dc, domain  # Strategy API owns target context for the selected campaign.
     try:
-        from ares.goal.engine import GOAL_DEFINITIONS, Goal as GoalEnum
+        from ares.goal.engine import GOAL_DEFINITIONS
+        from ares.goal.engine import Goal as GoalEnum
 
         goal_enum = GoalEnum(goal)
         modules = tuple(GOAL_DEFINITIONS[goal_enum].preferred_chain)
@@ -2756,7 +2759,7 @@ def goal_list() -> None:
 
 @goal_app.command("capabilities")
 def goal_capabilities(
-    module_id: Optional[str] = typer.Argument(None, help="Show deps for specific module"),
+    module_id: str | None = typer.Argument(None, help="Show deps for specific module"),
 ) -> None:
     """Show capability dependency graph (REQUIRES / OUTPUTS for all modules)."""
     from ares.core.plugin.loader import PluginLoader
@@ -2794,6 +2797,7 @@ def graph_show(
 ) -> None:
     """Show top attack paths in the campaign's artifact graph."""
     import asyncio
+
     from ares.core.config import get_settings
     from ares.db.database import AresDatabase
     from ares.graph.attack_graph import AttackGraph
@@ -2853,6 +2857,7 @@ def graph_path(
 ) -> None:
     """Find shortest attack path between two nodes."""
     import asyncio
+
     from ares.core.config import get_settings
     from ares.db.database import AresDatabase
     from ares.graph.attack_graph import AttackGraph
@@ -3179,8 +3184,8 @@ def mcp_doctor_cmd(
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON status"),
 ) -> None:
     """Check health, readiness, and security gates of ARES MCP subsystems."""
-    from ares.cli.mcp_commands import get_doctor_diagnostics
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.cli.mcp_commands import get_doctor_diagnostics
 
     diag = get_doctor_diagnostics()
     out_console = get_mcp_console(json_mode=json_output)
@@ -3205,13 +3210,13 @@ def mcp_doctor_cmd(
 @mcp_app.command("module-catalog")
 @mcp_app.command("catalog")
 def mcp_module_catalog_cmd(
-    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category (ad, cloud, windows, linux, etc.)"),
-    query: Optional[str] = typer.Option(None, "--query", "-q", help="Search keyword in module ID or class name"),
+    category: str | None = typer.Option(None, "--category", "-c", help="Filter by category (ad, cloud, windows, linux, etc.)"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Search keyword in module ID or class name"),
     json_output: bool = typer.Option(False, "--json", help="Output catalog as machine-readable JSON"),
 ) -> None:
     """Browse 60+ attack modules, OPSEC noise levels, and governance policies."""
-    from ares.cli.mcp_commands import query_module_catalog
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.cli.mcp_commands import query_module_catalog
 
     modules = query_module_catalog(category=category, query=query)
     out_console = get_mcp_console(json_mode=json_output)
@@ -3246,14 +3251,14 @@ def mcp_module_catalog_cmd(
 @mcp_app.command("scope-check")
 def mcp_scope_check_cmd(
     target: str = typer.Option(..., "--target", "-t", help="Target IP, hostname, or domain to verify"),
-    cidr: Optional[str] = typer.Option(None, "--cidr", "-c", help="Specific CIDR network rule to test against"),
+    cidr: str | None = typer.Option(None, "--cidr", "-c", help="Specific CIDR network rule to test against"),
     campaign: str = typer.Option("default-lab", "--campaign", help="Campaign ID"),
     strict: bool = typer.Option(True, "--strict/--no-strict", help="Exit with code 1 if target is out of scope"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
 ) -> None:
     """Verify deterministically if a target IP, CIDR, or hostname is authorized."""
-    from ares.cli.mcp_commands import check_scope
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.cli.mcp_commands import check_scope
 
     result = check_scope(target=target, cidr=cidr, campaign_id=campaign)
     out_console = get_mcp_console(json_mode=json_output)
@@ -3286,8 +3291,8 @@ def mcp_dry_run_cmd(
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
 ) -> None:
     """Simulate module pre-flight execution and obtain a single-use confirmation token."""
-    from ares.cli.mcp_commands import execute_dry_run
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.cli.mcp_commands import execute_dry_run
 
     try:
         parsed_params = json.loads(params)
@@ -3327,12 +3332,12 @@ def mcp_dry_run_cmd(
 
 @mcp_app.command("setup")
 def mcp_setup_cmd(
-    client: Optional[str] = typer.Option(None, "--client", "-c", help="Target client: cursor, claude, windsurf, or cline"),
+    client: str | None = typer.Option(None, "--client", "-c", help="Target client: cursor, claude, windsurf, or cline"),
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
 ) -> None:
     """1-Click automated configuration for AI IDEs and clients without manual JSON editing."""
-    from ares.cli.mcp_commands import setup_client_configuration
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.cli.mcp_commands import setup_client_configuration
 
     chosen_client = client
     if not chosen_client:
@@ -3373,8 +3378,8 @@ def mcp_run_tool_cmd(
     json_output: bool = typer.Option(False, "--json", help="Output result as JSON"),
 ) -> None:
     """Execute an ARES operational MCP tool headlessly and output structured results."""
-    from ares.mcp import AresMcpServer
     from ares.cli.mcp_cli_utils import get_mcp_console
+    from ares.mcp import AresMcpServer
 
     try:
         parsed_args = json.loads(args)
@@ -3426,11 +3431,13 @@ def mcp_stdio_cmd() -> None:
 def mcp_sse_cmd(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind (default: 127.0.0.1)"),
     port: int = typer.Option(8001, "--port", "-p", help="Port to listen on"),
-    api_key: Optional[str] = typer.Option(None, "--api-key", "-k", help="Optional Bearer API Key for network authentication"),
+    api_key: str | None = typer.Option(None, "--api-key", "-k", help="Optional Bearer API Key for network authentication"),
 ) -> None:
     """Run the ARES MCP Server over HTTP with Server-Sent Events (SSE)."""
     import secrets
+
     import uvicorn
+
     from ares.cli.mcp_cli_utils import warn_cli_secret_exposure
     from ares.mcp import AresMcpServer, create_sse_app
 

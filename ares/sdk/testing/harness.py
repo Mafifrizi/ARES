@@ -16,8 +16,8 @@ from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.errors import AresError, ModuleValidationError
 from ares.core.noise import NoiseController
-from ares.credential.vault import Credential, CredentialVault
-from ares.modules.base import BaseModule, ModuleResult
+from ares.credential.vault import CredentialVault
+from ares.modules.base import BaseModule
 
 M = TypeVar("M", bound=BaseModule)
 
@@ -136,7 +136,7 @@ class SimulationResult:
     def assert_circuit_closed(self) -> SimulationResult:
         """Assert that the circuit breaker remained CLOSED during simulation."""
         if self.context and hasattr(self.context, "_circuit_breaker"):
-            cb = getattr(self.context, "_circuit_breaker")
+            cb = self.context._circuit_breaker
             assert getattr(cb, "state", "closed") == "closed", f"Expected circuit breaker CLOSED, got {cb.state}"
         return self
 

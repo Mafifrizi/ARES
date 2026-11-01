@@ -22,7 +22,6 @@ Engine calls:
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from ares.core.logger import get_logger

@@ -7,17 +7,12 @@ Also tests thresholds, sliding window, blacklist expiry, and edge cases.
 from __future__ import annotations
 
 import time
-import pytest
-from unittest.mock import patch
 
 from ares.core.opsec.adaptive import (
     AdaptiveOpsecEngine,
     DetectionLevel,
     ResponseAction,
-    SignalEvent,
-    OpsecAdaptation,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

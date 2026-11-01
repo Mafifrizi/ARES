@@ -15,21 +15,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
-from ares.core.logger import get_logger
-
 from pydantic import BaseModel, Field
+
 from ares.core.campaign import Campaign, Finding
 from ares.core.config import AresSettings, get_settings
 from ares.core.context import ExecutionContext
-from ares.core.errors import AresError, NetworkError, ScopeError, ScopeFirewallBlockError
-from ares.core.logger import audit, setup_logger
-from ares.core.noise import NoiseController
-from ares.core.notifier import build_notifier_from_settings
-from ares.core.plugin.loader import ModuleRegistry, PluginLoader
-from ares.core.runtime_state import CampaignRuntimeState, CampaignRuntimeStateStore
-from ares.core.scope_firewall import scope_firewall_guard
-from ares.core.validator import FindingValidator, ValidationResult, build_default_validator
-
+from ares.core.errors import AresError, NetworkError, ScopeFirewallBlockError
 from ares.core.execution_admission import (
     AdmittedDispatchContextV1,
     AdmittedPlanContextV1,
@@ -38,6 +29,13 @@ from ares.core.execution_admission import (
     consume_terminal_commit_context,
     mark_effect_started,
 )
+from ares.core.logger import audit, get_logger, setup_logger
+from ares.core.noise import NoiseController
+from ares.core.notifier import build_notifier_from_settings
+from ares.core.plugin.loader import ModuleRegistry, PluginLoader
+from ares.core.runtime_state import CampaignRuntimeState, CampaignRuntimeStateStore
+from ares.core.scope_firewall import scope_firewall_guard
+from ares.core.validator import FindingValidator, ValidationResult, build_default_validator
 
 if TYPE_CHECKING:
     pass
@@ -699,7 +697,7 @@ class AresEngine:
                             instance.validate(ctx),
                             timeout=10,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         duration_ms = round((time.monotonic() - t0) * 1000, 2)
                         audit(
                             "module_validation_failed",
@@ -741,13 +739,13 @@ class AresEngine:
                 module_result = await asyncio.wait_for(execute_coro, timeout=effective_timeout)
                 findings = module_result.findings
                 raw = module_result.raw
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "engine_timed_out_s",
                 module_id=module_id,
                 timeout_seconds=effective_timeout,
             )
-            _last_exc: Exception = asyncio.TimeoutError(f"Timed out after {effective_timeout}s")
+            _last_exc: Exception = TimeoutError(f"Timed out after {effective_timeout}s")
             _action = AresError.RETRY
         except ScopeFirewallBlockError as exc:
             audit(
@@ -981,7 +979,7 @@ class AresEngine:
                                 res = manager.teardown_all()
                                 if inspect.iscoroutine(res):
                                     await asyncio.wait_for(res, timeout=10.0)
-                            except asyncio.TimeoutError:
+                            except TimeoutError:
                                 logger.warning("pivot_teardown_timeout", campaign_id=campaign_id[:8])
                             except Exception as e:
                                 logger.warning("pivot_teardown_error", campaign_id=campaign_id[:8], error=str(e))
@@ -997,7 +995,7 @@ class AresEngine:
                                             if inspect.iscoroutinefunction(getattr(proc, "wait", None)):
                                                 await asyncio.wait_for(proc.wait(), timeout=5)
                                             else:
-                                                await asyncio.to_thread(lambda: proc.wait(timeout=5))
+                                                await asyncio.to_thread(lambda p=proc: p.wait(timeout=5))
                                         except Exception:
                                             try:
                                                 proc.kill()

@@ -5,8 +5,8 @@ Ensures zero loopback bypass and strict operator RBAC.
 
 from starlette.testclient import TestClient
 
-from ares.api.server import app
 from ares.api.rbac import AuthenticatedUser, get_current_user
+from ares.api.server import app
 
 
 def test_modules_reload_unauthenticated_rejected_401():
@@ -38,6 +38,7 @@ def test_modules_reload_loopback_unauthenticated_rejected_401():
 def test_modules_reload_operator_authenticated_succeeds_200():
     """Request dengan token valid operator -> 200 OK."""
     from unittest.mock import MagicMock
+
     from ares.api.server import get_engine
     from ares.core.engine import AresEngine
 

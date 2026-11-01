@@ -23,13 +23,12 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import audit, get_logger
 from ares.credential.vault import Credential, CredentialType, CredentialVault
 
 if TYPE_CHECKING:
-    from ares.state.target_state import OperatorSession
     from ares.core.opsec.opsec import OpSecProfile
 
 logger = get_logger("ares.credential.reuse")
@@ -105,7 +104,7 @@ class _SMBValidator(_ProtocolValidator):
 
     async def test(self, host, username, domain, secret, cred_type) -> tuple[bool, str]:
         try:
-            from impacket.smbconnection import SMBConnection, SessionError
+            from impacket.smbconnection import SessionError, SMBConnection
         except ImportError:
             return False, "impacket not installed"
 
@@ -195,7 +194,9 @@ class _SSHValidator(_ProtocolValidator):
 
     async def test(self, host, username, domain, secret, cred_type) -> tuple[bool, str]:
         try:
-            import paramiko, io
+            import io
+
+            import paramiko
         except ImportError:
             return False, "paramiko not installed"
 

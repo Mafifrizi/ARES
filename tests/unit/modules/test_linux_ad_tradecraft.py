@@ -17,7 +17,7 @@ import os
 import struct
 import tempfile
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,14 +39,6 @@ from ares.modules.linux.ccache_hunt import CcacheHuntModule
 from ares.modules.linux.keytab_abuse import KeytabAbuseModule
 from ares.modules.linux.samba_secrets import SambaSecretsModule
 from ares.modules.linux.sssd_harvest import SssdHarvestModule
-from ares.modules.params import (
-    CcacheHuntParams,
-    KeytabAbuseParams,
-    SambaSecretsParams,
-    SssdHarvestParams,
-    TicketConverterParams,
-)
-
 
 # ── Fixtures & Mock Context ───────────────────────────────────────────────────
 
@@ -299,7 +291,7 @@ class TestSssdHarvestModule:
     async def test_sssd_harvest_mod045_semantic_type_integrity(self):
         """MOD-045: Verify hashes ($6$) are stored as CredentialType.HASH, not CLEARTEXT,
         and standard output keys are dual-written for ArtifactNormalizer pipeline."""
-        from ares.credential.vault import CredentialVault, CredentialType
+        from ares.credential.vault import CredentialType, CredentialVault
         from ares.normalize.artifacts import ArtifactNormalizer, ArtifactStore
 
         vault = CredentialVault(encryption_key=None)

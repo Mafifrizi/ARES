@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings

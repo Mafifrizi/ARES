@@ -5,6 +5,7 @@ instead of the uncalibrated 'default'.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

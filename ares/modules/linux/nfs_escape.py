@@ -24,22 +24,20 @@ import asyncio
 import os
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleValidationError
+from ares.core.logger import get_logger
 from ares.core.security import sanitize_hostname
 from ares.core.tracing import trace_module
 from ares.modules.params import NFSEscapeParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -246,11 +244,11 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         nfs_target = host or "LinuxHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux NFS no_root_squash Misconfiguration / SUID Drop\n"
-            f"// Monitors Syslog / auditd for modifications to /etc/exports or SUID creation on NFS mounts\n"
-            f"Syslog\n"
-            f"| where SyslogMessage has \"/etc/exports\" or SyslogMessage has \"no_root_squash\" or SyslogMessage has \"mountd\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux NFS no_root_squash Misconfiguration / SUID Drop\n"
+            "// Monitors Syslog / auditd for modifications to /etc/exports or SUID creation on NFS mounts\n"
+            "Syslog\n"
+            "| where SyslogMessage has \"/etc/exports\" or SyslogMessage has \"no_root_squash\" or SyslogMessage has \"mountd\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Insecure NFS no_root_squash Export Configuration ({nfs_target})\n"
@@ -329,7 +327,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                 exports_raw = ""
                 if os.path.isfile(_EXPORTS_FILE):
                     try:
-                        with open(_EXPORTS_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        with open(_EXPORTS_FILE, encoding="utf-8", errors="replace") as f:
                             exports_raw = f.read()
                     except OSError:
                         pass
@@ -337,7 +335,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                 mounts_raw = ""
                 if os.path.isfile(_MOUNTS_FILE):
                     try:
-                        with open(_MOUNTS_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        with open(_MOUNTS_FILE, encoding="utf-8", errors="replace") as f:
                             mounts_raw = "\n".join(l.strip() for l in f if "nfs" in l)
                     except OSError:
                         pass
@@ -345,7 +343,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
                 nfs_conf_raw = ""
                 if os.path.isfile(_NFS_CONF_FILE):
                     try:
-                        with open(_NFS_CONF_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        with open(_NFS_CONF_FILE, encoding="utf-8", errors="replace") as f:
                             nfs_conf_raw = f.read()
                     except OSError:
                         pass
@@ -543,7 +541,7 @@ class NFSEscapeModule(BaseModule[NFSEscapeParams, ModuleResult]):
             return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout = b""

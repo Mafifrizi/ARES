@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from ares.core.config import AresSettings
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.errors import ModuleValidationError
 from ares.core.noise import NoiseController

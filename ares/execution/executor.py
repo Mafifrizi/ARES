@@ -142,7 +142,7 @@ class RemoteExecutor:
             result.stderr    = stderr
             result.exit_code = exit_code
             result.success   = exit_code == 0
-        except asyncio.TimeoutError:
+        except TimeoutError:
             result.stderr    = f"Execution timed out after {self.timeout_s}s"
             result.exit_code = -1
         except Exception as exc:
@@ -289,10 +289,10 @@ class RemoteExecutor:
         except ImportError:
             return "", "impacket not installed - run: pip install impacket", 1
         try:
-            from ares.modules.lateral.modules import PsExecLateral
-            from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+            from ares.core.campaign import Campaign
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
+            from ares.modules.lateral.modules import PsExecLateral
             _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = PsExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.execute(
@@ -316,10 +316,10 @@ class RemoteExecutor:
         except ImportError:
             return "", "pywinrm not installed - run: pip install pywinrm", 1
         try:
-            from ares.modules.lateral.modules import WinRMLateral
             from ares.core.campaign import Campaign
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
+            from ares.modules.lateral.modules import WinRMLateral
             _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = WinRMLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.move(
@@ -349,10 +349,10 @@ class RemoteExecutor:
         except ImportError:
             return "", "impacket not installed - run: pip install impacket", 1
         try:
-            from ares.modules.lateral.modules import WMIExecLateral
             from ares.core.campaign import Campaign
             from ares.core.config import get_settings
             from ares.core.noise import NoiseController
+            from ares.modules.lateral.modules import WMIExecLateral
             _c = self.campaign if self.campaign is not None else Campaign(name="_exec", operator=self.operator)
             lateral = WMIExecLateral(settings=get_settings(), campaign=_c, noise=NoiseController(_c))
             result = await lateral.execute(

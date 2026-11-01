@@ -11,18 +11,18 @@ Checks for IAM privilege escalation paths using current credentials:
 Based on Rhino Security Labs IAM privesc research.
 """
 from __future__ import annotations
+
 import asyncio
-from functools import partial
 from typing import Any
-from ares.core.logger import get_logger
+
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.logger import get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AWSPrivescParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -167,11 +167,11 @@ class AWSPrivescModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         aws_region = pdict.get("region") or pdict.get("aws_region") or "us-east-1"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect AWS IAM Privilege Escalation Attempts\n"
-            f"// Monitors CloudTrail for high-risk IAM policy manipulation API calls\n"
-            f"AWSCloudTrail\n"
-            f"| where EventName in~ (\"PutUserPolicy\", \"AttachUserPolicy\", \"AttachRolePolicy\", \"CreateAccessKey\", \"UpdateAssumeRolePolicy\")\n"
-            f"| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, RequestParameters, AWSRegion\n"
+            "// ARES Closed-Loop Telemetry: Detect AWS IAM Privilege Escalation Attempts\n"
+            "// Monitors CloudTrail for high-risk IAM policy manipulation API calls\n"
+            "AWSCloudTrail\n"
+            "| where EventName in~ (\"PutUserPolicy\", \"AttachUserPolicy\", \"AttachRolePolicy\", \"CreateAccessKey\", \"UpdateAssumeRolePolicy\")\n"
+            "| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, RequestParameters, AWSRegion\n"
         )
         sigma_rule = (
             f"title: AWS IAM Privilege Escalation Policy Modification ({aws_region})\n"

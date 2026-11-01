@@ -5,10 +5,11 @@ import os
 import types
 from typing import Any
 from unittest.mock import MagicMock, patch
+
 import pytest
 
-from ares.core.config import AresSettings
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.errors import ModuleExecutionError, ModuleValidationError
 from ares.core.noise import NoiseController

@@ -363,7 +363,6 @@ def score_modules_for_profile(
 
 import json as _json
 from pathlib import Path as _Path
-import time as _time
 
 _OUTCOMES_PATH = _Path.home() / ".ares" / "kb_outcomes.json"
 

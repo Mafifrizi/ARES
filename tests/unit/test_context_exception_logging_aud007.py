@@ -3,7 +3,6 @@ Tests for AUD-007: Verification of structured error logging and explicit return 
 when vault.add() or runtime_state.record_finding() raises exceptions.
 """
 from unittest.mock import MagicMock, patch
-import pytest
 
 from ares.core.campaign import Finding, Severity
 from ares.core.context import ExecutionContext

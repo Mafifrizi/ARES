@@ -13,7 +13,6 @@ from ares.worker._subprocess_worker import (
     run_module,
 )
 
-
 CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
 MODULE_ID = "test.worker_probe"
 

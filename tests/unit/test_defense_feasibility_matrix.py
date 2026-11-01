@@ -17,18 +17,18 @@ from ares.core.campaign import Campaign, NoiseProfile
 from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.noise import NoiseController
-from ares.state.target_state import HostState, OperatorSession
-from ares.modules.windows.lsass_dump import LsassDumpModule
-from ares.modules.windows.dpapi import DPAPIModule
-from ares.modules.windows.lsa_secrets import LSASecretsModule
-from ares.modules.windows.token_impersonation import TokenImpersonationModule
-from ares.modules.lateral.modules import PsExecLateral, WmiExecLateral, WinRMLateral, RDPLateral
-from ares.modules.lateral.dcom import DCOMLateral
 from ares.modules.credential.golden_ticket import GoldenTicketModule
 from ares.modules.credential.pass_spray import PassSprayModule
 from ares.modules.credential.pass_the_hash import PassTheHashModule
+from ares.modules.lateral.dcom import DCOMLateral
+from ares.modules.lateral.modules import PsExecLateral, RDPLateral, WinRMLateral
 from ares.modules.persistence.scheduled_task import ScheduledTaskPersistence
 from ares.modules.persistence.wmi_subscription import WMISubscriptionModule
+from ares.modules.windows.dpapi import DPAPIModule
+from ares.modules.windows.lsa_secrets import LSASecretsModule
+from ares.modules.windows.lsass_dump import LsassDumpModule
+from ares.modules.windows.token_impersonation import TokenImpersonationModule
+from ares.state.target_state import OperatorSession
 
 
 @pytest.fixture
@@ -337,9 +337,9 @@ class TestLateralMovementFeasibility:
 
 class TestAttackPlannerDefenseEvasion:
     def test_planner_prefers_dpapi_over_lsass_dump_when_credential_guard_active(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
-        from ares.goal.engine import Goal
         from ares.core.plugin.loader import ModuleRegistry
+        from ares.goal.engine import Goal
+        from ares.goal.planner import AttackPlanner, PlannerContext
 
         session = OperatorSession(campaign_id="test-camp")
         host = session.add_host("10.10.10.50")
@@ -364,9 +364,9 @@ class TestAttackPlannerDefenseEvasion:
         assert registry.is_disabled("windows.dpapi") is True
 
     def test_planner_penalizes_psexec_when_edr_monitors_services(self):
-        from ares.goal.planner import AttackPlanner, PlannerContext
-        from ares.goal.engine import Goal
         from ares.core.plugin.loader import ModuleRegistry
+        from ares.goal.engine import Goal
+        from ares.goal.planner import AttackPlanner, PlannerContext
 
         session = OperatorSession(campaign_id="test-camp")
         host = session.add_host("10.10.10.50")
@@ -617,10 +617,12 @@ class TestWMISubscriptionFeasibility:
 class TestModuleFeasibilityEndpoint:
     def test_feasibility_endpoint_success(self, test_campaign):
         from unittest.mock import AsyncMock, MagicMock
+
         from fastapi.testclient import TestClient
-        from ares.api.server import app, get_engine, get_db, get_current_user
-        from ares.core.engine import AresEngine
+
         from ares.api.rbac import AuthenticatedUser
+        from ares.api.server import app, get_current_user, get_db, get_engine
+        from ares.core.engine import AresEngine
         from ares.modules.base import FeasibilityReport
 
         mock_user = AuthenticatedUser(username=getattr(test_campaign, "operator", "lead_operator"), role="operator")

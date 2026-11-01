@@ -6,7 +6,8 @@ Verifies:
 3. PermissionError on /proc/keys produces low-confidence finding (0.35) and is_tgt=False.
 """
 
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

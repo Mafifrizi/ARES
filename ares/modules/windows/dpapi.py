@@ -24,15 +24,14 @@ import asyncio
 import os
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, secure_mkstemp
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import DPAPIParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -379,6 +378,7 @@ class DPAPIModule(BaseModule):
         Returns {logical_name: local_temp_path}.
         """
         import io
+
         from impacket.smbconnection import SMBConnection
 
         local_files: dict[str, str] = {}
@@ -456,8 +456,9 @@ class DPAPIModule(BaseModule):
                           target_user: str, domain: str) -> list[dict]:
         """Derive DPAPI master key from NT hash and decrypt blobs."""
         try:
-            from impacket.dpapi import MasterKey, Credential
             import hashlib
+
+            from impacket.dpapi import Credential, MasterKey
 
             # SHA1(NT_HASH) = DPAPI user key derivation
             nt_bytes = bytes.fromhex(nt_hash) if len(nt_hash) == 32 else b""

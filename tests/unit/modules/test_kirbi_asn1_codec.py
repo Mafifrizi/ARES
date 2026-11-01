@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import base64
 import time
+
 import pytest
 
 from ares.core.errors import ModuleValidationError
-from ares.modules.linux._parsers import KirbiASN1Codec, KirbiParseError
 from ares.modules.credential.ticket_converter import TicketConverterModule
+from ares.modules.linux._parsers import KirbiASN1Codec, KirbiParseError
 
 
 def test_decode_kirbi_extracts_genuine_session_key_and_principal():

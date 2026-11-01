@@ -31,19 +31,16 @@ Object Access auditing is enabled, which is rare on workstations).
 from __future__ import annotations
 
 import asyncio
-import base64
-import struct
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import RegistryEnumParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -391,14 +388,18 @@ class RegistryEnumModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.smbconnection import SMBConnection            # type: ignore[import]
-            from impacket.dcerpc.v5 import transport, rrp               # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (                        # type: ignore[import]
-                hOpenLocalMachine, hOpenCurrentUser,
-                hBaseRegOpenKey, hBaseRegQueryValue,
-                hBaseRegQueryInfoKey, hBaseRegEnumValue,
-                hBaseRegCloseKey, DCERPCException,
+            from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
+            from impacket.dcerpc.v5.rrp import (  # type: ignore[import]
+                DCERPCException,
+                hBaseRegCloseKey,
+                hBaseRegEnumValue,
+                hBaseRegOpenKey,
+                hBaseRegQueryInfoKey,
+                hBaseRegQueryValue,
+                hOpenCurrentUser,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:
             logger.warning("registry_enum_impacket_missing", target=target)
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}

@@ -20,21 +20,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import CredentialCrackParams
 from ares.sdk import (
     BaseModule,
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.crack")
 
@@ -109,7 +108,6 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
                 module_id=self.MODULE_ID, field="vault",
             )
         # Check there are actually hashes to crack
-        from ares.credential.vault import CredentialType
         hashes = [
             c for c in vault._store.values()
             if c.is_hash and not c.cracked and c.active
@@ -220,7 +218,7 @@ class CrackModule(BaseModule[CredentialCrackParams, ModuleResult]):
         # Note: before_request() intentionally not called - credential.crack is
         # OpsecLevel.LOCAL (offline hash cracking, no network calls).
         # Scope, jitter, and rate-limit checks apply only to network-facing operations.
-        from ares.credential.cracker import CrackingWorker, CrackingQueue, CrackJob, CrackStatus
+        from ares.credential.cracker import CrackingQueue, CrackingWorker, CrackJob, CrackStatus
         from ares.credential.vault import CredentialType
 
         if vault is None:

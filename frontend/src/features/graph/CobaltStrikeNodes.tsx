@@ -148,9 +148,7 @@ export const PivotFirewallNode = memo(function PivotFirewallNode({ id, data, sel
 export const PivotComputerNode = memo(function PivotComputerNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as PivotNodeData;
   const privilege = nodeData.privilege ?? "uncompromised";
-  const isElevated = privilege === "system" || privilege === "admin";
   const isActiveBeacon = privilege === "user" || nodeData.status === "active";
-  const isMapped = privilege === "uncompromised";
 
   let auraClass = "mapped";
   if (privilege === "system") auraClass = "elevated";

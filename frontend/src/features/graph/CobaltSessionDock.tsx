@@ -1,4 +1,3 @@
-import { X, Terminal as TerminalIcon, Shield, Play, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 export interface BeaconSession {
@@ -104,7 +103,6 @@ const DEFAULT_SESSIONS: BeaconSession[] = [
 export function CobaltSessionDock({
   selectedNodeId,
   selectedNodeLabel,
-  onNodeSelect,
   campaignId,
   campaignName,
   activeNodes = []

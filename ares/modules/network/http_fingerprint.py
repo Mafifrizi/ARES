@@ -7,19 +7,17 @@ exposed API endpoints, version disclosure in headers/responses.
 """
 from __future__ import annotations
 
-import asyncio
 import re
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import HTTPFingerprintParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -166,11 +164,11 @@ class HttpFingerprintModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         http_target = target or "WebTarget"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Web Application Reconnaissance & Admin Surface Probing\n"
-            f"// Monitors W3CIISLog / AppGW for scanning of administrative endpoints (/admin, /actuator, /swagger)\n"
-            f"W3CIISLog\n"
-            f"| where csUriStem in~ (\"/admin\", \"/actuator\", \"/swagger-ui.html\", \"/api-docs\", \"/.env\")\n"
-            f"| project TimeGenerated, cIP, csMethod, csUriStem, scStatus, sSiteName\n"
+            "// ARES Closed-Loop Telemetry: Detect Web Application Reconnaissance & Admin Surface Probing\n"
+            "// Monitors W3CIISLog / AppGW for scanning of administrative endpoints (/admin, /actuator, /swagger)\n"
+            "W3CIISLog\n"
+            "| where csUriStem in~ (\"/admin\", \"/actuator\", \"/swagger-ui.html\", \"/api-docs\", \"/.env\")\n"
+            "| project TimeGenerated, cIP, csMethod, csUriStem, scStatus, sSiteName\n"
         )
         sigma_rule = (
             f"title: Web Application Admin Interface & Actuator Probing ({http_target})\n"

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,9 +31,9 @@ def test_refresh_token_lock_key_is_stable_namespaced_signed_bigint() -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        ("2030-01-02 03:04:05", datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)),
-        ("2030-01-02T03:04:05+00:00", datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)),
-        ("2030-01-02T08:34:05+05:30", datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)),
+        ("2030-01-02 03:04:05", datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)),
+        ("2030-01-02T03:04:05+00:00", datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)),
+        ("2030-01-02T08:34:05+05:30", datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)),
     ],
 )
 def test_parse_postgres_timestamptz_normalizes_to_utc(

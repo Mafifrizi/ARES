@@ -30,13 +30,12 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.cloud.gcp")
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import GCPParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -91,6 +90,7 @@ class GCPModule(BaseModule):
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -171,11 +171,11 @@ class GCPModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         gcp_target = project_id[:8] if project_id else "GCPProject"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect GCP IAM Privilege Escalation & Service Account Key Creation\n"
-            f"// Monitors Google Cloud Audit Logs for SetIamPolicy or CreateServiceAccountKey\n"
-            f"GCPAuditLogs\n"
-            f"| where MethodName in~ (\"google.iam.admin.v1.CreateServiceAccountKey\", \"google.iam.admin.v1.SetIamPolicy\", \"google.cloud.resourcemanager.v3.Projects.SetIamPolicy\")\n"
-            f"| project TimeGenerated, PrincipalEmail, CallerIp, MethodName, ResourceName, Status\n"
+            "// ARES Closed-Loop Telemetry: Detect GCP IAM Privilege Escalation & Service Account Key Creation\n"
+            "// Monitors Google Cloud Audit Logs for SetIamPolicy or CreateServiceAccountKey\n"
+            "GCPAuditLogs\n"
+            "| where MethodName in~ (\"google.iam.admin.v1.CreateServiceAccountKey\", \"google.iam.admin.v1.SetIamPolicy\", \"google.cloud.resourcemanager.v3.Projects.SetIamPolicy\")\n"
+            "| project TimeGenerated, PrincipalEmail, CallerIp, MethodName, ResourceName, Status\n"
         )
         sigma_rule = (
             f"title: GCP Service Account Key Creation & IAM Policy Modification ({gcp_target})\n"
@@ -271,9 +271,9 @@ class GCPModule(BaseModule):
         auth refresh automatically and is the supported stable API.
         """
         try:
+            import google.auth.transport.requests as _garequests
             from google.cloud import resourcemanager_v3  # type: ignore[import]
             from google.oauth2 import credentials as _creds_module
-            import google.auth.transport.requests as _garequests
 
             client = resourcemanager_v3.ProjectsClient(credentials=credentials)
             request = resourcemanager_v3.GetIamPolicyRequest(
@@ -297,8 +297,8 @@ class GCPModule(BaseModule):
 
         except ImportError:
             # Fallback to requests if google-cloud-resource-manager not installed
-            import requests
             import google.auth.transport.requests as _garequests
+            import requests
 
             auth_req = _garequests.Request()
             credentials.refresh(auth_req)
@@ -368,8 +368,8 @@ class GCPModule(BaseModule):
         List all GCS buckets and check their IAM policies for public access.
         Also checks uniform bucket-level access and versioning.
         """
-        import requests  # type: ignore[import]
         import google.auth.transport.requests  # type: ignore[import]
+        import requests  # type: ignore[import]
 
         auth_req = google.auth.transport.requests.Request()
         credentials.refresh(auth_req)
@@ -476,8 +476,8 @@ class GCPModule(BaseModule):
         Flag keys older than _SA_KEY_MAX_AGE_DAYS days.
         Also flags service accounts with owner/editor bindings.
         """
-        import requests  # type: ignore[import]
         import google.auth.transport.requests  # type: ignore[import]
+        import requests  # type: ignore[import]
 
         auth_req = google.auth.transport.requests.Request()
         credentials.refresh(auth_req)
@@ -507,7 +507,7 @@ class GCPModule(BaseModule):
             if not page_token:
                 break
 
-        cutoff = datetime.datetime.now(datetime.timezone.utc) - \
+        cutoff = datetime.datetime.now(datetime.UTC) - \
                  datetime.timedelta(days=_SA_KEY_MAX_AGE_DAYS)
 
         for sa in service_accounts:
@@ -544,7 +544,7 @@ class GCPModule(BaseModule):
                     created = datetime.datetime.fromisoformat(
                         created_str.replace("Z", "+00:00")
                     )
-                    age_days = (datetime.datetime.now(datetime.timezone.utc) - created).days
+                    age_days = (datetime.datetime.now(datetime.UTC) - created).days
                     if age_days > _SA_KEY_MAX_AGE_DAYS:
                         old_keys.append({
                             "service_account": sa_email,

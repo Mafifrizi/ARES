@@ -5,14 +5,12 @@ Tests for staged next-gen offensive modules:
 """
 from __future__ import annotations
 
-import asyncio
-import os
 import pytest
 
+from ares.modules.ad.ghost_forge import GhostForgeModule
+from ares.modules.cloud.phantom_token import PhantomTokenModule
 from tests.unit.modules.test_modules import _make_module
 from tests.unit.test_roadmap_modules import _mock_ctx, _run
-from ares.modules.cloud.phantom_token import PhantomTokenModule
-from ares.modules.ad.ghost_forge import GhostForgeModule
 
 
 class TestPhantomTokenModule:
@@ -441,8 +439,8 @@ class TestGhostForgeModule:
         assert any(l["loot_type"] == "detection_rule_sigma" for l in res.raw["loot"])
 
     def test_token_impersonation_closed_loop_telemetry(self, monkeypatch):
-        from ares.modules.windows.token_impersonation import TokenImpersonationModule
         from ares.core.errors import ModuleError
+        from ares.modules.windows.token_impersonation import TokenImpersonationModule
         mod, _ = _make_module(TokenImpersonationModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5", "username": "Admin", "password": "Password123!"})
         ctx.dry_run = False
@@ -465,8 +463,8 @@ class TestGhostForgeModule:
         assert any(l["loot_type"] == "detection_rule_sigma" for l in res.raw["loot"])
 
     def test_dpapi_closed_loop_telemetry(self, monkeypatch):
-        from ares.modules.windows.dpapi import DPAPIModule
         from ares.core.errors import ModuleError
+        from ares.modules.windows.dpapi import DPAPIModule
         mod, _ = _make_module(DPAPIModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5", "username": "Admin", "password": "Password123!"})
         ctx.dry_run = False

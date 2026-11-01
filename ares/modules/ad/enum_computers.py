@@ -4,19 +4,23 @@ Enumerate domain computers, DCs, OS versions, stale accounts.
 MITRE: T1018, T1087.002
 """
 from __future__ import annotations
+
 import datetime
 import re
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.enum_computers")
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
+from ares.core.errors import AresError, ModuleValidationError, NetworkError
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
+from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -24,15 +28,13 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
-from ares.core.errors import AresError, ModuleValidationError, NetworkError
-from ares.modules.ad.dependencies import build_ad_bind_plan
+
 
 def _days_since_ts(ts):
     if not ts or str(ts) in ("0","9223372036854775807"): return None
     try:
         dt = datetime.datetime(1601,1,1) + datetime.timedelta(microseconds=int(str(ts))//10)
-        return max(0,(datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-dt).days)
+        return max(0,(datetime.datetime.now(datetime.UTC).replace(tzinfo=None)-dt).days)
     except Exception: return None
 
 
@@ -166,12 +168,12 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         comp_target = dc or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Active Directory Computer & DC Enumeration\n"
-            f"// Monitors Directory Service Event 1644 for mass LDAP search on objectClass=computer or userAccountControl\n"
-            f"DirectoryServiceAccess\n"
-            f"| where EventID == 1644\n"
-            f"| where SearchFilter has \"objectCategory=computer\" or SearchFilter has \"primaryGroupID=516\"\n"
-            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+            "// ARES Closed-Loop Telemetry: Detect Active Directory Computer & DC Enumeration\n"
+            "// Monitors Directory Service Event 1644 for mass LDAP search on objectClass=computer or userAccountControl\n"
+            "DirectoryServiceAccess\n"
+            "| where EventID == 1644\n"
+            "| where SearchFilter has \"objectCategory=computer\" or SearchFilter has \"primaryGroupID=516\"\n"
+            "| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
         )
         sigma_rule = (
             f"title: Active Directory Computer & DC Mass Enumeration ({comp_target})\n"
@@ -236,7 +238,7 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw = {"computer_list": computers}
         # ISU-07: produce HostArtifact objects for ArtifactIntelEngine
         try:
-            from ares.normalize.artifacts import HostArtifact, ArtifactStore
+            from ares.normalize.artifacts import ArtifactStore, HostArtifact
             store = getattr(getattr(self, "campaign", None), "_artifact_store", None)
             if store is None:
                 store = ArtifactStore()
@@ -257,7 +259,8 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
 
     async def _fetch_computers(self, dc, username, password, domain, use_ldaps=True):
         import ssl
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, AUTO_BIND_NO_TLS, Tls
+
+        from ldap3 import ALL, AUTO_BIND_NO_TLS, NTLM, SUBTREE, Connection, Server, Tls
         port = 636 if use_ldaps else 389
         tls = Tls(validate=ssl.CERT_NONE) if use_ldaps else None
         bind_plan = build_ad_bind_plan(username, domain)

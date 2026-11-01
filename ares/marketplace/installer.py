@@ -31,9 +31,7 @@ Manifest registry: ~/.ares/plugins/registry.json
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import shutil
 import sys
 import tempfile
@@ -228,6 +226,7 @@ _BUNDLED_INDEX: "dict" = {
 # Disabled by default: the public ares-framework/modules repo is not yet published.
 # Enable: export ARES_MARKETPLACE_LIVE=true
 import os as _os
+
 _COMMUNITY_INDEX_AVAILABLE = _os.getenv("ARES_MARKETPLACE_LIVE", "").lower() in ("1", "true", "yes")
 
 
@@ -669,7 +668,7 @@ class ModuleInstaller:
         if manifest.deps:
             self._install_pip_deps(manifest.deps)
 
-        manifest.installed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        manifest.installed_at = datetime.datetime.now(datetime.UTC).isoformat()
         self.registry.install(manifest, plugin_dir)
         logger.info("marketplace_install_ok", module_id=manifest.id, version=manifest.version)
         return manifest
@@ -716,7 +715,8 @@ class ModuleInstaller:
 
     def _infer_manifest_from_file(self, path: Path, source_url: str = "") -> ModuleManifest:
         """Auto-generate manifest by reading module class attributes."""
-        import importlib.util, inspect
+        import importlib.util
+        import inspect
 
         spec = importlib.util.spec_from_file_location("_ares_inspect", path)
         if not spec or not spec.loader:

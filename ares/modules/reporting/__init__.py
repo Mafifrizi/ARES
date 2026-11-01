@@ -10,9 +10,9 @@ from __future__ import annotations
 
 try:
     from ares.modules.reporting.report_gen import (  # noqa: F401
+        REMEDIATION_SLA,
         ReportGenerator,
         build_report_context,
-        REMEDIATION_SLA,
     )
 except ImportError:
     pass  # Optional deps not installed

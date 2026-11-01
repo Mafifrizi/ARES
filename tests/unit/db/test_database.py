@@ -4,14 +4,12 @@ Note: AresEngine tests are in tests/unit/test_engine.py
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from urllib.parse import unquote, urlparse
 
 import pytest
@@ -19,10 +17,8 @@ import pytest
 import ares.core.plugin.loader as plugin_loader_module
 from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
-from ares.core.engine import AresEngine, ExecutionPlan, ModuleStatus
-from ares.core.plugin.loader import ModuleRegistry, PluginLoader
+from ares.core.plugin.loader import PluginLoader
 from ares.db.database import AresDatabase, Credential, Host, Loot
-from ares.modules.base import BaseModule
 from ares.modules.reporting.report_gen import (
     BROWSER_PDF_TIMEOUT_SECONDS,
     WINDOWS_EDGE_ELEVATED_PDF_MESSAGE,
@@ -197,7 +193,7 @@ class TestDatabase:
     ) -> None:
         stats = await db.get_monthly_confirmed_finding_stats()
 
-        assert stats["period"] == datetime.now(timezone.utc).strftime("%Y-%m")
+        assert stats["period"] == datetime.now(UTC).strftime("%Y-%m")
         assert stats["label"] == "Security signals this cycle"
         assert stats["total"] == 0
         assert stats["confirmed_findings"] == 0
@@ -210,7 +206,7 @@ class TestDatabase:
         await db.save_campaign(campaign)
         second_campaign = Campaign(name="Second Campaign", operator="tester")
         await db.save_campaign(second_campaign)
-        month_start = datetime.now(timezone.utc).replace(
+        month_start = datetime.now(UTC).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
         period = month_start.strftime("%Y-%m")

@@ -21,15 +21,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AppLockerBypassParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -189,11 +188,11 @@ class AppLockerBypassModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         applocker_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect AppLocker & WDAC / Smart App Control Bypasses\n"
-            f"// Monitors Microsoft-Windows-AppLocker (Events 8003, 8004, 8006, 8007) and CodeIntegrity (3076, 3077)\n"
-            f"AppLockerEvent\n"
-            f"| where EventID in (8003, 8004, 8006, 8007) or (EventID in (3076, 3077))\n"
-            f"| project TimeGenerated, Computer, RuleName, PolicyName, FilePath, SHA256Hash, User\n"
+            "// ARES Closed-Loop Telemetry: Detect AppLocker & WDAC / Smart App Control Bypasses\n"
+            "// Monitors Microsoft-Windows-AppLocker (Events 8003, 8004, 8006, 8007) and CodeIntegrity (3076, 3077)\n"
+            "AppLockerEvent\n"
+            "| where EventID in (8003, 8004, 8006, 8007) or (EventID in (3076, 3077))\n"
+            "| project TimeGenerated, Computer, RuleName, PolicyName, FilePath, SHA256Hash, User\n"
         )
         sigma_rule = (
             f"title: AppLocker / WDAC Execution Bypass Attempt ({applocker_target})\n"
@@ -260,14 +259,18 @@ class AppLockerBypassModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.smbconnection import SMBConnection            # type: ignore[import]
-            from impacket.dcerpc.v5 import transport, rrp               # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (                        # type: ignore[import]
-                hOpenLocalMachine, hBaseRegOpenKey,
-                hBaseRegQueryValue, hBaseRegQueryInfoKey,
-                hBaseRegEnumKey, hBaseRegEnumValue,
-                hBaseRegCloseKey, DCERPCException,
+            from impacket.dcerpc.v5 import rrp, transport  # type: ignore[import]
+            from impacket.dcerpc.v5.rrp import (  # type: ignore[import]
+                DCERPCException,
+                hBaseRegCloseKey,
+                hBaseRegEnumKey,
+                hBaseRegEnumValue,
+                hBaseRegOpenKey,
+                hBaseRegQueryInfoKey,
+                hBaseRegQueryValue,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection  # type: ignore[import]
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
@@ -532,8 +535,8 @@ class AppLockerBypassModule(BaseModule):
             self.finding(
                 title=f"Potential Writable Trusted Paths on {target} - Manual Verification Needed",
                 description=(
-                    f"The following paths are commonly writable by low-privileged users "
-                    f"on Windows systems and may fall within AppLocker trusted path rules: "
+                    "The following paths are commonly writable by low-privileged users "
+                    "on Windows systems and may fall within AppLocker trusted path rules: "
                     + ", ".join(_TRUSTED_WRITABLE_CANDIDATES[:6])
                     + ". "
                     "Operator should verify write access to these paths from the current "

@@ -8,7 +8,6 @@ Ensures asyncssh connections are closed in finally block across:
 """
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,7 +20,6 @@ from ares.modules.linux.ld_preload import LDPreloadModule
 from ares.modules.linux.nfs_escape import NFSEscapeModule
 from ares.modules.linux.privesc import LinuxPrivescModule
 from ares.modules.linux.service_hijack import ServiceHijackModule
-
 
 MODULE_CLASSES = [
     LinuxPrivescModule,

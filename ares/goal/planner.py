@@ -40,16 +40,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
 from ares.goal.engine import Goal
 
 if TYPE_CHECKING:
     from ares.core.plugin.loader import ModuleRegistry
-    from ares.state.target_state import OperatorSession
     from ares.credential.vault import CredentialVault
     from ares.knowledge.base import AttackKnowledgeBase
+    from ares.state.target_state import OperatorSession
 
 logger = get_logger("ares.goal.planner")
 

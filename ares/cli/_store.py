@@ -73,7 +73,6 @@ class CampaignStore:
     def add_target(self, campaign_partial_id: str, target: "str | dict") -> bool:
         """Append a target entry to a campaign and re-save. Returns True if found."""
         import json
-        from pathlib import Path
 
         # Normalise: accept either a plain string or a dict like {"target": ip, "tags": [...]}
         if isinstance(target, dict):
@@ -116,13 +115,15 @@ class CampaignStore:
 
     def save_checkpoint(self, campaign_partial_id: str, notes: str = "") -> dict | None:
         """Snapshot a campaign state as an AES-256-GCM encrypted checkpoint."""
-        import json, time, os
+        import json
+        import os
+        import time
         c = load_campaign(campaign_partial_id)
         if not c:
             return None
 
-        from ares.core.config import get_settings
         from ares.checkpoint.manager import CheckpointManager
+        from ares.core.config import get_settings
 
         settings = get_settings()
         enc_key = getattr(settings, "ares_encryption_key", "") or getattr(settings, "ares_secret_key", "")
@@ -187,8 +188,8 @@ class CampaignStore:
             target = matches[0] if matches else checkpoints[0]
 
         data_bytes = target.read_bytes()
-        from ares.core.config import get_settings
         from ares.checkpoint.manager import CheckpointManager
+        from ares.core.config import get_settings
 
         settings = get_settings()
         enc_key = getattr(settings, "ares_encryption_key", "") or getattr(settings, "ares_secret_key", "")

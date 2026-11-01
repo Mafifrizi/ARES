@@ -14,23 +14,21 @@ Designed for authorized enterprise security validation within strict ARES bounda
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleError, ModuleValidationError
 from ares.core.logger import audit, get_logger
-from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
 from ares.core.tracing import trace_module
-from ares.modules.params import ModuleParams, param, SecretParam, PhantomTokenParams
+from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
+from ares.modules.params import PhantomTokenParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
     ExecutionContext,
     NetworkPermission,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 

@@ -19,19 +19,18 @@ import pytest
 
 # Skip entire module gracefully if hypothesis not installed
 hypothesis = pytest.importorskip("hypothesis")
-from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from ares.core.security import (
-    sanitize_ldap,
-    sanitize_hostname,
-    sanitize_path,
-    validate_ip_or_cidr,
     DataEncryptor,
     create_access_token,
     decode_access_token,
+    sanitize_hostname,
+    sanitize_ldap,
+    sanitize_path,
+    validate_ip_or_cidr,
 )
-
 
 # ── Shared strategies ─────────────────────────────────────────────────────────
 

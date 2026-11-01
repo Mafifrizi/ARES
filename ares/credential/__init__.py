@@ -10,9 +10,9 @@ from __future__ import annotations
 
 try:
     from ares.credential.vault import (  # noqa: F401
-        CredentialVault,
         Credential,
         CredentialType,
+        CredentialVault,
     )
 except ImportError:
     pass
@@ -20,10 +20,10 @@ except ImportError:
 try:
     from ares.credential.reuse import (  # noqa: F401
         CredentialReuser,
-        ReuseEngine,
-        ReuseResult,
         ReuseAttempt,
+        ReuseEngine,
         ReuseProtocol,
+        ReuseResult,
     )
 except ImportError:
     pass

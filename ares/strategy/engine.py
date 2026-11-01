@@ -10,19 +10,21 @@ outcome tracking, and strategy/notifier.py for operator notifications.
 from __future__ import annotations
 
 import asyncio
-import time
 import json
+import time
 from collections.abc import Mapping
 from typing import Any
 
-from ares.core.logger import get_logger, audit
-from ares.strategy.models import (
-    ModuleOutcome, RoundResult, EngagementResult, DetectionSpikeError,
-)
+from ares.core.logger import audit, get_logger
+from ares.strategy.enforcer import ConstitutionEnforcer
 from ares.strategy.knowledge_base import OutcomeKnowledgeBase
+from ares.strategy.models import (
+    EngagementResult,
+    ModuleOutcome,
+    RoundResult,
+)
 from ares.strategy.notifier import OperatorNotifier
 from ares.strategy.target_state import TargetStateMap
-from ares.strategy.enforcer import ConstitutionEnforcer
 
 logger = get_logger("ares.strategy.engine")
 
@@ -471,8 +473,8 @@ class StrategyEngine:
 
             # ── Step 3.5: Pre-execution detection risk prediction ────────────
             try:
-                from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
                 from ares.core.noise import NoiseController
+                from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
                 predictor_mod = CoveragePredictorModule(
                     settings=self._settings, campaign=campaign,
                     noise=NoiseController(campaign),

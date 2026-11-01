@@ -31,7 +31,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
-from ares.state.target_state import CompromiseLevel, OperatorSession
+from ares.state.target_state import OperatorSession
 
 if TYPE_CHECKING:
     from ares.core.plugin.loader import ModuleRegistry

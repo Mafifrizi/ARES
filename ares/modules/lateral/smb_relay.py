@@ -31,19 +31,17 @@ OPSEC: LOW - one TCP connection to port 445, reads negotiate response,
 from __future__ import annotations
 
 import asyncio
-import socket
 import struct
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import SMBRelayParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -161,7 +159,7 @@ async def _check_smb_signing(target: str, port: int = 445, timeout: float = 8.0)
         result["signing_enabled"]  = bool(security_mode & _SMB2_NEGOTIATE_SIGNING_ENABLED)
         result["signing_required"] = bool(security_mode & _SMB2_NEGOTIATE_SIGNING_REQUIRED)
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         result["error"] = "Connection timed out"
     except ConnectionRefusedError:
         result["error"] = "Port 445 closed"
@@ -255,13 +253,13 @@ class SMBRelayAuditModule(BaseModule):
         audit_targets = targets if targets else ["Unknown"]
         target_str = ", ".join(audit_targets[:3])
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect NTLM Relay & Unsigned SMB Sessions\n"
-            f"// Correlates SMB Server Security Event 551 (Session Setup) with NTLM Auth Event 4624\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4624 and LogonType == 3\n"
-            f"| where AuthenticationPackageName == \"NTLM\"\n"
-            f"| where TargetUserName !endswith \"$\" // Exclude machine accounts\n"
-            f"| project TimeGenerated, Computer, TargetUserName, IpAddress, WorkstationName, LmPackageName\n"
+            "// ARES Closed-Loop Telemetry: Detect NTLM Relay & Unsigned SMB Sessions\n"
+            "// Correlates SMB Server Security Event 551 (Session Setup) with NTLM Auth Event 4624\n"
+            "SecurityEvent\n"
+            "| where EventID == 4624 and LogonType == 3\n"
+            "| where AuthenticationPackageName == \"NTLM\"\n"
+            "| where TargetUserName !endswith \"$\" // Exclude machine accounts\n"
+            "| project TimeGenerated, Computer, TargetUserName, IpAddress, WorkstationName, LmPackageName\n"
         )
         sigma_rule = (
             f"title: Potential NTLM Relay via Unsigned SMB Target ({audit_targets[0]})\n"
@@ -470,9 +468,11 @@ class SMBRelayAuditModule(BaseModule):
                         If it succeeds, LDAP signing is NOT enforced.
                         """
                         try:
-                            import ssl
                             from ldap3 import (  # type: ignore[import]
-                                Server, Connection, ALL, ANONYMOUS,
+                                ALL,
+                                ANONYMOUS,
+                                Connection,
+                                Server,
                             )
                             srv  = Server(host, port=389, get_info=ALL,
                                           connect_timeout=8)

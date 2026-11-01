@@ -8,11 +8,10 @@ Security code must be exhaustively tested.
 from __future__ import annotations
 
 import os
-import base64
-import pytest
 from unittest.mock import patch
 
-import os
+import pytest
+
 os.environ.setdefault("ARES_SECRET_KEY",       "test-enc-key-minimum-32chars-here!!")
 os.environ.setdefault("ARES_ENCRYPTION_KEY",   "test-enc-key-minimum-32chars-here!!")
 os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestEnc1!")
@@ -166,10 +165,11 @@ class TestLegacyFormat:
         enc = DataEncryptor(key)
 
         # Manually create a legacy-format ciphertext (no salt prefix)
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.primitives import hashes
         import base64
+
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(), length=32,
@@ -236,7 +236,6 @@ class TestExceptionNarrowing:
 
     def test_unicode_decode_error_returns_none(self):
         """UnicodeDecodeError must be caught and return None."""
-        from cryptography.fernet import InvalidToken
         enc = make_enc()
         fernet_body = self._canonical_fernet_body(enc)
 
@@ -393,10 +392,11 @@ class TestAES256GCMUpgrade:
         enc = DataEncryptor(key)
 
         # Manually create a v6-format ciphertext (per-record salt + Fernet)
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.primitives import hashes
         import base64
+
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         fake_salt = os.urandom(16)
         kdf = PBKDF2HMAC(
@@ -415,10 +415,11 @@ class TestAES256GCMUpgrade:
         key = "test-key-32chars-minimum-required"
         enc = DataEncryptor(key)
 
-        from cryptography.fernet import Fernet
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-        from cryptography.hazmat.primitives import hashes
         import base64
+
+        from cryptography.fernet import Fernet
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(), length=32,
@@ -449,14 +450,14 @@ class TestVaultV2:
     """Verify CredentialVault uses v2 format after upgrade."""
 
     def test_vault_store_reveal_roundtrip(self):
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
         cred = Credential(username="admin", domain="CORP", cred_type=CredentialType.CLEARTEXT)
         cid = vault.store(cred, "SuperSecret123!")
         assert vault.reveal(cid) == "SuperSecret123!"
 
     def test_vault_stored_secret_is_v2_format(self):
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
         cred = Credential(username="admin", domain="CORP", cred_type=CredentialType.CLEARTEXT)
         cid = vault.store(cred, "MyPassword!")
@@ -465,14 +466,14 @@ class TestVaultV2:
         assert enc_bytes.startswith(b"v2:"), "Vault must store in v2 format"
 
     def test_vault_ephemeral_roundtrip(self):
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key=None)
         cred = Credential(username="guest", cred_type=CredentialType.CLEARTEXT)
         cid = vault.store(cred, "ephemeral-secret")
         assert vault.reveal(cid) == "ephemeral-secret"
 
     def test_vault_mark_cracked_uses_v2(self):
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(encryption_key="vault-test-key-32chars-minimum-req!")
         cred = Credential(username="svc", domain="CORP", cred_type=CredentialType.KRB5_TGS)
         cid = vault.store(cred, "$krb5tgs$hash...")

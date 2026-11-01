@@ -9,7 +9,7 @@
 <br>
 
 [![Version](https://img.shields.io/badge/Release-v6.0--Enterprise-red?style=for-the-badge&logo=shield)](releases/)
-[![Python](https://img.shields.io/badge/Engine-Python%203.12%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/Engine-Python%203.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20Async-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/Frontend-React%2018%20%7C%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
 [![MITRE](https://img.shields.io/badge/Coverage-MITRE%20ATT%26CK-FF6F00?style=for-the-badge)](docs/modules.md)

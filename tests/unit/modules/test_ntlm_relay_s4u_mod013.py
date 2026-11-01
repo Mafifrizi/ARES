@@ -6,9 +6,10 @@ Verifies:
 3. If S4U fails, no false success finding is published.
 """
 
-from unittest.mock import MagicMock, patch
 import os
 import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.unit.modules.test_modules import _make_module
 
@@ -34,7 +35,7 @@ def _run(coro):
 
 
 def _mock_campaign(noise="normal"):
-    from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
     return Campaign(
         name="test", client="test",
         scope=[ScopeEntry(cidr="10.0.0.0/8")],
@@ -44,10 +45,10 @@ def _mock_campaign(noise="normal"):
 
 def _mock_ctx(params=None, target="10.0.0.1", domain="corp.local",
               noise="normal", vault=None):
+    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
     from ares.core.config import AresSettings
     from ares.core.context import ExecutionContext
     from ares.core.noise import NoiseController
-    from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
     params = params or {}
     campaign = Campaign(
         name="test", client="test",
@@ -84,14 +85,13 @@ class TestCredentialCrack:
         assert OpsecLevel.LOCAL is not None
 
     def test_crack_module_uses_local_opsec(self):
-        from ares.modules.credential.crack import CrackModule
         from ares.modules.base import OpsecLevel
+        from ares.modules.credential.crack import CrackModule
         assert CrackModule.OPSEC_LEVEL == OpsecLevel.LOCAL
 
     def test_validate_raises_when_no_vault(self):
-        from ares.modules.credential.crack import CrackModule
         from ares.core.errors import ModuleValidationError
-        from ares.core.context import ExecutionContext
+        from ares.modules.credential.crack import CrackModule
         mod, _ = _make_module(CrackModule)
         ctx = _mock_ctx()
         # ctx.vault is None by default
@@ -102,9 +102,9 @@ class TestCredentialCrack:
         _run(_test())
 
     def test_validate_raises_when_no_hashes_in_vault(self):
-        from ares.modules.credential.crack import CrackModule
         from ares.core.errors import ModuleValidationError
         from ares.credential.vault import CredentialVault
+        from ares.modules.credential.crack import CrackModule
 
         mod, _ = _make_module(CrackModule)
         vault = CredentialVault(encryption_key=None)   # empty vault
@@ -140,8 +140,8 @@ class TestCredentialCrack:
 class TestReconFingerprint:
 
     def test_validate_raises_when_no_target(self):
-        from ares.modules.recon.fingerprint import FingerprintModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.recon.fingerprint import FingerprintModule
         mod, _ = _make_module(FingerprintModule)
         ctx = _mock_ctx(target="")
         ctx.target = ""
@@ -164,8 +164,8 @@ class TestReconFingerprint:
         _run(_test())
 
     def test_edr_finding_generated_for_crowdstrike(self):
+        from ares.fingerprint.engine import EDRVendor, FingerprintResult
         from ares.modules.recon.fingerprint import FingerprintModule
-        from ares.fingerprint.engine import FingerprintResult, EDRVendor, DomainRole, OSType
         mod, _ = _make_module(FingerprintModule)
 
         result = FingerprintResult(
@@ -180,8 +180,8 @@ class TestReconFingerprint:
         assert EDRVendor.CROWDSTRIKE in result.edr_vendors
 
     def test_module_id_and_opsec(self):
-        from ares.modules.recon.fingerprint import FingerprintModule
         from ares.modules.base import OpsecLevel
+        from ares.modules.recon.fingerprint import FingerprintModule
         assert FingerprintModule.MODULE_ID == "recon.fingerprint"
         assert FingerprintModule.OPSEC_LEVEL == OpsecLevel.LOW
 
@@ -193,8 +193,8 @@ class TestReconFingerprint:
 class TestNetworkPivot:
 
     def test_validate_raises_no_target(self):
-        from ares.modules.network.pivot import PivotModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.network.pivot import PivotModule
         mod, _ = _make_module(PivotModule)
         ctx = _mock_ctx(target="")
         ctx.target = ""
@@ -206,8 +206,8 @@ class TestNetworkPivot:
         _run(_test())
 
     def test_validate_raises_no_username(self):
-        from ares.modules.network.pivot import PivotModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.network.pivot import PivotModule
         mod, _ = _make_module(PivotModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5"})
 
@@ -228,7 +228,7 @@ class TestNetworkPivot:
         _run(_test())
 
     def test_teardown_clears_manager(self):
-        from ares.modules.network.pivot import PivotModule, _PIVOT_MANAGERS
+        from ares.modules.network.pivot import _PIVOT_MANAGERS, PivotModule
         mod, _ = _make_module(PivotModule)
         campaign_id = "test-campaign-teardown"
         # Inject a fake manager
@@ -249,8 +249,8 @@ class TestNetworkPivot:
 class TestADADCS:
 
     def test_validate_requires_dc(self):
-        from ares.modules.ad.adcs import ADCSModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.adcs import ADCSModule
         mod, _ = _make_module(ADCSModule)
         ctx = _mock_ctx(params={"domain": "corp.local", "username": "user",
                                  "password": "pass"})
@@ -290,8 +290,8 @@ class TestADADCS:
 class TestADDelegationAbuse:
 
     def test_rbcd_mode_requires_target_computer(self):
-        from ares.modules.ad.delegation_abuse import DelegationAbuseModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.delegation_abuse import DelegationAbuseModule
         mod, _ = _make_module(DelegationAbuseModule)
         ctx = _mock_ctx(params={
             "dc": "10.0.0.1", "domain": "corp.local",
@@ -325,8 +325,8 @@ class TestADDelegationAbuse:
 class TestADCoerce:
 
     def test_blocked_in_stealth(self):
-        from ares.modules.ad.coerce import CoerceModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.coerce import CoerceModule
         mod, _ = _make_module(CoerceModule)
         ctx = _mock_ctx(
             params={"dc": "10.0.0.1", "listener_ip": "10.0.0.99"},
@@ -340,8 +340,8 @@ class TestADCoerce:
         _run(_test())
 
     def test_validate_requires_listener_ip(self):
-        from ares.modules.ad.coerce import CoerceModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.coerce import CoerceModule
         mod, _ = _make_module(CoerceModule)
         ctx = _mock_ctx(params={"dc": "10.0.0.1"})   # no listener_ip
         ctx.target = "10.0.0.1"
@@ -376,8 +376,8 @@ class TestADCoerce:
 class TestWindowsLsassDump:
 
     def test_blocked_in_stealth(self):
-        from ares.modules.windows.lsass_dump import LsassDumpModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.windows.lsass_dump import LsassDumpModule
         mod, _ = _make_module(LsassDumpModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5", "username": "admin"}, noise="stealth")
         ctx.target = "10.0.0.5"
@@ -388,8 +388,8 @@ class TestWindowsLsassDump:
         _run(_test())
 
     def test_validate_requires_username(self):
-        from ares.modules.windows.lsass_dump import LsassDumpModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.windows.lsass_dump import LsassDumpModule
         mod, _ = _make_module(LsassDumpModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5"})   # no username
         ctx.target = "10.0.0.5"
@@ -412,8 +412,10 @@ class TestWindowsLsassDump:
         _run(_test())
 
     def test_pypykatz_import_error_handled(self):
+        import os
+        import tempfile
+
         from ares.modules.windows.lsass_dump import LsassDumpModule
-        import tempfile, os
         mod, _ = _make_module(LsassDumpModule)
         # Create an empty fake dump file
         _fd, fake_dump = tempfile.mkstemp(suffix=".dmp")
@@ -433,8 +435,8 @@ class TestWindowsLsassDump:
 class TestWindowsDPAPI:
 
     def test_validate_requires_target(self):
-        from ares.modules.windows.dpapi import DPAPIModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.windows.dpapi import DPAPIModule
         mod, _ = _make_module(DPAPIModule)
         ctx = _mock_ctx(params={"username": "user"})
         ctx.target = ""
@@ -445,8 +447,8 @@ class TestWindowsDPAPI:
         _run(_test())
 
     def test_validate_requires_username(self):
-        from ares.modules.windows.dpapi import DPAPIModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.windows.dpapi import DPAPIModule
         mod, _ = _make_module(DPAPIModule)
         ctx = _mock_ctx(params={"target": "10.0.0.5"})   # no username
 
@@ -456,8 +458,8 @@ class TestWindowsDPAPI:
         _run(_test())
 
     def test_dry_run(self):
-        from ares.modules.windows.dpapi import DPAPIModule
         from ares.core.errors import ModuleError
+        from ares.modules.windows.dpapi import DPAPIModule
         mod, _      = _make_module(DPAPIModule)
         ctx         = _mock_ctx(params={"target": "10.0.0.5", "username": "user"})
         ctx.target  = "10.0.0.5"
@@ -471,8 +473,8 @@ class TestWindowsDPAPI:
 
     def test_auth_error_classified(self):
         """Disabled module must raise explicit ModuleError on run()."""
-        from ares.modules.windows.dpapi import DPAPIModule
         from ares.core.errors import ModuleError
+        from ares.modules.windows.dpapi import DPAPIModule
         mod, _ = _make_module(DPAPIModule)
 
         async def _test():
@@ -512,8 +514,8 @@ class TestADLAPSEnum:
 
     def test_vault_store_called_for_each_entry(self):
         """BUG-02 regression: vault.store() must be called for every LAPS entry."""
-        from ares.modules.ad.laps_enum import LAPSEnumModule
         from ares.credential.vault import CredentialVault
+        from ares.modules.ad.laps_enum import LAPSEnumModule
 
         mod, _ = _make_module(LAPSEnumModule)
         vault = CredentialVault(encryption_key=None)
@@ -546,8 +548,8 @@ class TestADLAPSEnum:
         _run(_test())
 
     def test_validate_requires_dc(self):
-        from ares.modules.ad.laps_enum import LAPSEnumModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.laps_enum import LAPSEnumModule
         mod, _ = _make_module(LAPSEnumModule)
         ctx = _mock_ctx(params={"domain": "corp.local", "username": "u",
                                  "password": "p"})
@@ -566,8 +568,8 @@ class TestADLAPSEnum:
 class TestLateralMSSQL:
 
     def test_validate_requires_target(self):
-        from ares.modules.lateral.mssql import MSSQLModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.lateral.mssql import MSSQLModule
         mod, _ = _make_module(MSSQLModule)
         ctx = _mock_ctx(params={"username": "sa", "password": "pass"})
         ctx.target = ""
@@ -578,8 +580,8 @@ class TestLateralMSSQL:
         _run(_test())
 
     def test_validate_requires_username(self):
-        from ares.modules.lateral.mssql import MSSQLModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.lateral.mssql import MSSQLModule
         mod, _ = _make_module(MSSQLModule)
         ctx = _mock_ctx(params={"target": "10.0.0.20"})   # no username
 
@@ -603,8 +605,8 @@ class TestLateralMSSQL:
 
     def test_auth_error_18456_classified(self):
         """SQL Server error 18456 = wrong credentials - must raise AuthenticationFailed."""
-        from ares.modules.lateral.mssql import MSSQLModule
         from ares.core.errors import AuthenticationFailed
+        from ares.modules.lateral.mssql import MSSQLModule
         mod, _ = _make_module(MSSQLModule)
 
         async def _test():
@@ -619,8 +621,8 @@ class TestLateralMSSQL:
 
     def test_network_error_classified(self):
         """Connection refused to port 1433 must raise NetworkError."""
-        from ares.modules.lateral.mssql import MSSQLModule
         from ares.core.errors import NetworkError
+        from ares.modules.lateral.mssql import MSSQLModule
         mod, _ = _make_module(MSSQLModule)
 
         async def _test():
@@ -641,8 +643,8 @@ class TestLateralMSSQL:
 class TestCloudAzureAD:
 
     def test_validate_requires_tenant_id(self):
-        from ares.modules.cloud.azure_ad import AzureADModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.cloud.azure_ad import AzureADModule
         mod, _ = _make_module(AzureADModule)
         ctx = _mock_ctx(params={})   # no tenant_id
 
@@ -693,12 +695,12 @@ class TestOpsecLevelEnum:
 
     def test_new_modules_have_correct_opsec(self):
         """Spot-check OPSEC levels on new modules match their declared risk."""
+        from ares.modules.ad.adcs import ADCSModule
+        from ares.modules.ad.coerce import CoerceModule
         from ares.modules.base import OpsecLevel
-        from ares.modules.ad.coerce       import CoerceModule
-        from ares.modules.ad.adcs         import ADCSModule
-        from ares.modules.windows.lsass_dump import LsassDumpModule
-        from ares.modules.network.pivot   import PivotModule
         from ares.modules.credential.crack import CrackModule
+        from ares.modules.network.pivot import PivotModule
+        from ares.modules.windows.lsass_dump import LsassDumpModule
 
         assert CoerceModule.OPSEC_LEVEL    == OpsecLevel.HIGH_NOISE  # triggers MDI
         assert LsassDumpModule.OPSEC_LEVEL == OpsecLevel.HIGH_NOISE  # triggers EDR

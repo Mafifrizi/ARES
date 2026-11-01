@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -113,7 +112,7 @@ class IsolatedRunner:
             )
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration_ms = round((time.monotonic() - t0) * 1000, 2)
             logger.error("isolation_timeout", module_id=module_id, timeout_s=self.timeout)
             return IsolatedResult(
@@ -147,7 +146,7 @@ class IsolatedRunner:
                 proc.communicate(input=payload.encode()),
                 timeout=self.timeout + 30,  # +30s buffer beyond outer timeout
             )
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             # Outer wait_for or inner timeout fired.
             # MUST kill subprocess or it becomes an orphan zombie.
             proc.kill()

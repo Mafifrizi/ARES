@@ -6,7 +6,6 @@ Provides 9+ enterprise purple-teaming tools divided into:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any, Callable, Coroutine
@@ -20,7 +19,7 @@ from ares.mcp.security import (
     SecretMasker,
 )
 from ares.modules.descriptors import FIRST_PARTY_DESCRIPTORS, get_descriptor
-from ares.sdk import LockoutCircuitBreaker, ModuleTestHarness
+from ares.sdk import LockoutCircuitBreaker
 
 logger = logging.getLogger("ares.mcp.tools")
 

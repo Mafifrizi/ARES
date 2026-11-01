@@ -36,17 +36,16 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Severity
-from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 from ares.modules.params import AIPlannerParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -56,6 +55,22 @@ if TYPE_CHECKING:
     from ares.core.engine import ExecutionPlan
 
 logger = get_logger("ares.modules.ai.planner")
+
+
+def _strip_md_fence(text: str) -> str:
+    """Remove an optional ```json ... ``` markdown code fence around a JSON blob.
+
+    Uses substring removal (not str.strip, which treats its argument as a
+    character set and would corrupt the payload).
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
 
 
 @dataclass
@@ -857,8 +872,8 @@ class AIAutonomousPlannerModule(BaseModule):
                 )
                 if isinstance(result_a, Exception) or isinstance(result_b, Exception):
                     raise (result_a if isinstance(result_a, Exception) else result_b)
-                plan_a = json.loads(result_a["content"].strip().lstrip("```json").rstrip("```"))
-                plan_b = json.loads(result_b["content"].strip().lstrip("```json").rstrip("```"))
+                plan_a = json.loads(_strip_md_fence(result_a["content"]))
+                plan_b = json.loads(_strip_md_fence(result_b["content"]))
                 merged = _merge_plans(plan_a, plan_b)
                 raw_content = json.dumps(merged)
                 model_used  = f"{result_a['model']}+{result_b['model']}"

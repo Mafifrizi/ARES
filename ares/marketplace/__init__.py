@@ -10,9 +10,9 @@ from __future__ import annotations
 
 try:
     from ares.marketplace.installer import (  # noqa: F401
+        LocalRegistry,
         ModuleInstaller,
         ModuleManifest,
-        LocalRegistry,
     )
 except ImportError:
     pass  # Optional deps not installed

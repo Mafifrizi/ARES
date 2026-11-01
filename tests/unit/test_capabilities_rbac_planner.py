@@ -13,25 +13,26 @@ Run: pytest tests/unit/test_capabilities_rbac_planner.py -v
 """
 from __future__ import annotations
 
-import asyncio
 import concurrent.futures
 import time
-from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ares.api.rbac import (
+    RATE_LIMITS,
+    AuthenticatedUser,
+    RateLimiter,
+)
 from ares.core.capabilities import (
-    Capability, CapabilityPolicy, CapabilityViolation,
-    CAP_NETWORK_MODULE, CAP_LATERAL_MODULE, CAP_PRIVESC_MODULE,
-    CAP_COMMUNITY_MAX, CAP_EXTERNAL_FORBIDDEN,
+    CAP_COMMUNITY_MAX,
+    CAP_LATERAL_MODULE,
+    CAP_NETWORK_MODULE,
+    Capability,
+    CapabilityPolicy,
+    CapabilityViolation,
     default_capabilities_for_category,
 )
-from ares.api.rbac import (
-    AuthenticatedUser, RateLimiter, RATE_LIMITS,
-)
-
 
 # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 # 1. Capability System
@@ -252,8 +253,9 @@ class TestAPIRBAC:
         assert not _role_can_access("reporter", "POST", "/campaigns")
 
     def test_rate_limit_check_or_raise(self):
-        from ares.api.rbac import _limiter
         from fastapi import HTTPException
+
+        from ares.api.rbac import _limiter
         key = f"test_raise:{time.time()}"  # unique key
         for _ in range(60):
             _limiter.is_allowed(key, max_per_minute=60)
@@ -272,9 +274,9 @@ class TestAttackPlanner:
     @pytest.fixture
     def mock_registry(self):
         """Registry with stub modules."""
+        from ares.core.capabilities import Capability
         from ares.core.plugin.loader import ModuleRegistry
         from ares.modules.base import BaseModule, OpsecLevel
-        from ares.core.capabilities import Capability
 
         class StubKerberoast(BaseModule):
             MODULE_ID          = "ad.kerberoast"
@@ -337,8 +339,8 @@ class TestAttackPlanner:
         return AttackPlanner(registry=mock_registry)
 
     def test_suggest_returns_suggestions(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(
             goal=Goal.DOMAIN_ADMIN,
             targets=["10.0.0.1"],
@@ -348,8 +350,8 @@ class TestAttackPlanner:
         assert len(suggestions) > 0
 
     def test_suggest_excludes_reporting_modules(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(
             goal=Goal.DOMAIN_ADMIN,
             targets=["10.0.0.1"],
@@ -359,8 +361,8 @@ class TestAttackPlanner:
         assert "reporting.html" not in module_ids
 
     def test_suggest_excludes_high_noise_in_stealth(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(
             goal=Goal.DOMAIN_ADMIN,
             targets=["10.0.0.1"],
@@ -371,8 +373,8 @@ class TestAttackPlanner:
         assert "ad.dcsync" not in module_ids   # HIGH_NOISE filtered
 
     def test_suggest_prefers_asrep_when_no_creds(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         # No creds available Ã¢â€ â€™ ASREPRoast (no prereqs) should score higher
         # than Kerberoast (requires domain_creds)
         ctx = PlannerContext(
@@ -389,8 +391,8 @@ class TestAttackPlanner:
             assert asrep.score >= kerberoast.score
 
     def test_suggest_excludes_already_tried(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(
             goal=Goal.DOMAIN_ADMIN,
             targets=["10.0.0.1"],
@@ -401,8 +403,8 @@ class TestAttackPlanner:
         assert "ad.asreproast" not in module_ids
 
     def test_suggestions_have_required_fields(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
         suggestions = planner.suggest(ctx, limit=3)
         for s in suggestions:
@@ -415,8 +417,8 @@ class TestAttackPlanner:
             assert len(s.score_breakdown) > 0
 
     def test_suggestion_to_dict(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
         suggestions = planner.suggest(ctx, limit=1)
         if suggestions:
@@ -427,16 +429,16 @@ class TestAttackPlanner:
             assert "score_breakdown" in d
 
     def test_suggestions_sorted_highest_first(self, planner):
-        from ares.goal.planner import PlannerContext
         from ares.goal.engine import Goal
+        from ares.goal.planner import PlannerContext
         ctx = PlannerContext(goal=Goal.DOMAIN_ADMIN, targets=["10.0.0.1"])
         suggestions = planner.suggest(ctx)
         scores = [s.score for s in suggestions]
         assert scores == sorted(scores, reverse=True)
 
     def test_auto_suggest_function(self, mock_registry):
-        from ares.goal.planner import auto_suggest
         from ares.goal.engine import Goal
+        from ares.goal.planner import auto_suggest
         suggestions = auto_suggest(
             goal=Goal.DOMAIN_ADMIN,
             targets=["10.0.0.1"],
@@ -460,7 +462,7 @@ class TestDependencyAudit:
         assert clean.total_count == 0
 
     def test_audit_result_counts(self):
-        from ares.security.audit import AuditResult, Vulnerability, CVSSScore
+        from ares.security.audit import AuditResult, CVSSScore, Vulnerability
         result = AuditResult(
             scanned_packages=20,
             vulnerabilities=[
@@ -495,7 +497,7 @@ class TestDependencyAudit:
         assert "50" in summary
 
     def test_audit_result_summary_with_vulns(self):
-        from ares.security.audit import AuditResult, Vulnerability, CVSSScore
+        from ares.security.audit import AuditResult, CVSSScore, Vulnerability
         result = AuditResult(
             scanned_packages=10,
             vulnerabilities=[
@@ -551,7 +553,13 @@ class TestDependencyAudit:
 
     @pytest.mark.asyncio
     async def test_startup_audit_warn_continues(self):
-        from ares.security.audit import startup_audit, AuditPolicy, AuditResult, Vulnerability, CVSSScore
+        from ares.security.audit import (
+            AuditPolicy,
+            AuditResult,
+            CVSSScore,
+            Vulnerability,
+            startup_audit,
+        )
         mock_result = AuditResult(
             scanned_packages=10,
             vulnerabilities=[
@@ -564,7 +572,13 @@ class TestDependencyAudit:
 
     @pytest.mark.asyncio
     async def test_startup_audit_block_critical_raises(self):
-        from ares.security.audit import startup_audit, AuditPolicy, AuditResult, Vulnerability, CVSSScore
+        from ares.security.audit import (
+            AuditPolicy,
+            AuditResult,
+            CVSSScore,
+            Vulnerability,
+            startup_audit,
+        )
         mock_result = AuditResult(
             scanned_packages=5,
             vulnerabilities=[
@@ -808,7 +822,7 @@ class TestPluginLoaderSecurity:
 
     def test_default_caps_assigned_when_missing(self):
         """Loader assigns sensible default caps when CAPABILITIES not declared."""
-        from ares.core.capabilities import default_capabilities_for_category, Capability
+        from ares.core.capabilities import Capability, default_capabilities_for_category
         ad_caps = default_capabilities_for_category("ad")
         assert Capability.CAP_NET in ad_caps
         assert Capability.CAP_DB  in ad_caps
@@ -819,10 +833,9 @@ class TestPluginLoaderSecurity:
         from unittest.mock import patch
         with patch.dict(os.environ, {"ARES_PLUGIN_SIGNING_POLICY": "require_signed"}):
             # Re-import to test env var reading
-            import importlib
             import ares.core.plugin.loader as loader_module
             policy = loader_module._SIGNING_POLICY
-            # Note: module-level var is set at import time, 
+            # Note: module-level var is set at import time,
             # but we can test the env var is read
             assert "ARES_PLUGIN_SIGNING_POLICY" in os.environ
 
@@ -850,8 +863,6 @@ class TestCapabilityGraphCircularDeps:
 
     def _make_registry_stub(self, modules: list[dict]):
         """Build a minimal registry stub from a list of {id, requires, outputs} dicts."""
-        from dataclasses import dataclass
-        from typing import Any
 
         class ModuleStub:
             pass

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
@@ -17,22 +18,20 @@ from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.errors import ModuleValidationError
 from ares.core.noise import NoiseController
+from ares.modules.ad.coerce import CoerceModule
+from ares.modules.lateral.dcom import DCOMLateral
 from ares.modules.lateral.modules import (
     BaseLateralModule,
-    LateralResult,
     LateralTechnique,
-    AuthStrategy,
     PsExecLateral,
-    WmiExecLateral,
     WinRMLateral,
+    WmiExecLateral,
 )
-from ares.modules.lateral.dcom import DCOMLateral
 from ares.modules.lateral.ntlm_relay import (
+    CoercionResult,
     NTLMRelayModule,
     RelayTarget,
-    CoercionResult,
 )
-from ares.modules.ad.coerce import CoerceModule
 
 
 def _make_module(cls):

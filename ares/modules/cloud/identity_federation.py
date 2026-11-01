@@ -26,19 +26,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
-from ares.core.tracing import trace_module
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 from ares.modules.params import CloudFederationParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -200,12 +198,12 @@ class CloudIdentityFederationModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         fed_target = domain or tenant_id or "HybridFederation"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Federated Identity & Golden SAML Abuse\n"
-            f"// Monitors SigninLogs for anomalous federated authentications or new Federated Identity Credentials\n"
-            f"SigninLogs\n"
-            f"| where AuthenticationRequirement == \"singleFactorAuthentication\" and TokenIssuerType == \"AzureADFederated\"\n"
-            f"| where RiskLevelDuringSignIn in~ (\"high\", \"medium\") or ResultType in (50005, 50107)\n"
-            f"| project TimeGenerated, UserPrincipalName, AppDisplayName, IPAddress, TokenIssuerType, ResultType\n"
+            "// ARES Closed-Loop Telemetry: Detect Federated Identity & Golden SAML Abuse\n"
+            "// Monitors SigninLogs for anomalous federated authentications or new Federated Identity Credentials\n"
+            "SigninLogs\n"
+            "| where AuthenticationRequirement == \"singleFactorAuthentication\" and TokenIssuerType == \"AzureADFederated\"\n"
+            "| where RiskLevelDuringSignIn in~ (\"high\", \"medium\") or ResultType in (50005, 50107)\n"
+            "| project TimeGenerated, UserPrincipalName, AppDisplayName, IPAddress, TokenIssuerType, ResultType\n"
         )
         sigma_rule = (
             f"title: Federated Identity SAML / OIDC Trust Abuse ({fed_target})\n"

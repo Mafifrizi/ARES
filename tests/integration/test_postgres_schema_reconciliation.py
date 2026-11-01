@@ -5,7 +5,7 @@ import importlib
 import os
 import sys
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -4194,7 +4194,7 @@ async def test_real_postgres_all_managed_timestamps_enforce_finite_values(
         try:
             await harness._seed_postgres_contract(connection)
             enforcement_valid = True
-            finite_value = datetime(2099, 1, 1, tzinfo=timezone.utc)
+            finite_value = datetime(2099, 1, 1, tzinfo=UTC)
             for table, column, constraint, nullable in _FINITE_TIMESTAMPS:
                 catalog = await connection.fetchrow(
                     """

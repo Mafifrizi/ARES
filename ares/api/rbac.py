@@ -23,12 +23,13 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
+
 from ares.core.logger import get_logger
 from ares.core.token_sessions import is_canonical_family_id
 from ares.db.websocket_tickets import BearerTicketSource
@@ -41,10 +42,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token", auto_error=False)
 # ── Role source of truth ───────────────────────────────────────────────────────
 # OperatorRole enum and ROLE_PERMISSIONS live in collab/manager.py.
 # rbac.py imports from there so there is exactly one definition of roles.
-from ares.collab.manager import (   # noqa: E402
-    OperatorRole,
-    ROLE_PERMISSIONS,
+from ares.collab.manager import (  # noqa: E402
     ROLE_ORDER,
+    OperatorRole,
     can_role_run_module,
 )
 
@@ -155,7 +155,7 @@ async def resolve_bearer_principal(
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
     try:
         expires_at_is_finite = math.isfinite(float(expires_at))
-        source_expiry = datetime.fromtimestamp(float(expires_at), timezone.utc)
+        source_expiry = datetime.fromtimestamp(float(expires_at), UTC)
     except (TypeError, ValueError, OverflowError):
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
     if not expires_at_is_finite:
@@ -221,7 +221,7 @@ async def revalidate_bearer_principal(
     """Revalidate retained non-secret bearer facts without retaining the token."""
     if type(source) is not BearerTicketSource:
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
-    if source.expires_at <= datetime.now(timezone.utc):
+    if source.expires_at <= datetime.now(UTC):
         return PrincipalDecision(PrincipalDecisionStatus.INVALID)
     if db is None:
         return PrincipalDecision(PrincipalDecisionStatus.BACKEND_UNAVAILABLE)

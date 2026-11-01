@@ -1,8 +1,9 @@
 """Tests for ARES modules."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings

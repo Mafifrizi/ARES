@@ -215,7 +215,10 @@ class PivotManager:
         except ImportError:
             # Fallback: paramiko with SSH -D subprocess
             try:
-                import paramiko, subprocess, shutil
+                import shutil
+                import subprocess
+
+                import paramiko
 
                 if shutil.which("ssh"):
                     # Use system ssh -D (most reliable for SOCKS5)
@@ -344,7 +347,8 @@ class PivotManager:
                         local_port=local_port, remote=f"{remote_host}:{remote_port}")
 
         except ImportError:
-            import shutil, subprocess
+            import shutil
+            import subprocess
             if shutil.which("ssh"):
                 cmd = [
                     "ssh", "-N",

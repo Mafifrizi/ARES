@@ -7,24 +7,25 @@ from __future__ import annotations
 
 import asyncio
 import socket
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ares.core.campaign import Campaign, ScopeEntry
+from ares.core.config import AresSettings
+from ares.core.engine import AresEngine, ModuleStatus, _extract_all_targets
 from ares.core.errors import ScopeFirewallBlockError
+from ares.core.execution_admission import _mint_test_dispatch_context
 from ares.core.scope_firewall import (
-    ScopeFirewall,
     OSFirewallController,
+    ScopeFirewall,
+    _current_firewall,
     get_os_firewall_status,
+    install_hooks,
     scope_firewall_guard,
     scope_firewall_sync_guard,
-    install_hooks,
     uninstall_hooks,
-    _current_firewall,
 )
-from ares.core.engine import AresEngine, ModuleStatus, _extract_all_targets
-from ares.core.config import AresSettings
-from ares.core.execution_admission import _mint_test_dispatch_context
 
 
 @pytest.fixture
@@ -397,6 +398,7 @@ class TestOSFirewallController:
     def test_proxy_environment_variables_neutralized_during_guard(self, sample_campaign: Campaign, monkeypatch: pytest.MonkeyPatch):
         import os
         import urllib.request
+
         from ares.core.scope_firewall import _firewall_getproxies
         os.environ["HTTP_PROXY"] = "http://127.0.0.1:8080"
         os.environ["HTTPS_PROXY"] = "http://127.0.0.1:8443"
@@ -446,6 +448,7 @@ class TestOSFirewallController:
     def test_compute_out_of_scope_cidrs(self):
         """Mathematical complement must cover all of IPv4 except scope and loopback."""
         import ipaddress
+
         from ares.core.scope_firewall import compute_out_of_scope_cidrs
 
         scope = ["10.0.0.0/24"]
@@ -466,9 +469,10 @@ class TestOSFirewallController:
 
     def test_os_firewall_windows_strict_block_complement(self, monkeypatch: pytest.MonkeyPatch):
         """Windows OS firewall must apply explicit block rules for complement CIDRs."""
-        from ares.core.scope_firewall import OSFirewallController
         import subprocess
         import sys
+
+        from ares.core.scope_firewall import OSFirewallController
 
         commands_executed: list[list[str]] = []
 
@@ -502,9 +506,10 @@ class TestOSFirewallController:
 
     def test_os_firewall_linux_strict_allowlist_commands(self, monkeypatch: pytest.MonkeyPatch):
         """Linux OS firewall must apply lo ACCEPT, scope ACCEPT, and process DROP rules."""
-        from ares.core.scope_firewall import OSFirewallController
         import subprocess
         import sys
+
+        from ares.core.scope_firewall import OSFirewallController
 
         commands_executed: list[list[str]] = []
 
@@ -546,9 +551,10 @@ class TestOSFirewallController:
 
     def test_os_firewall_transactional_rollback_on_failure(self, monkeypatch: pytest.MonkeyPatch):
         """If any sub-rule fails during application, all previously applied sub-rules must roll back."""
-        from ares.core.scope_firewall import OSFirewallController
         import subprocess
         import sys
+
+        from ares.core.scope_firewall import OSFirewallController
 
         applied_commands: list[list[str]] = []
         cleanup_commands: list[list[str]] = []

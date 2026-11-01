@@ -14,7 +14,6 @@ Covers:
 """
 from __future__ import annotations
 
-import io
 import os
 import stat
 import struct

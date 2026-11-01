@@ -8,9 +8,10 @@ Unit tests covering previously untested modules:
 Written against the actual source APIs - verified before writing.
 """
 from __future__ import annotations
-import pytest
+
 from pathlib import Path
 
+import pytest
 
 # ─────────────────────────────────────────────────────────────────────────────
 # credential/vault.py
@@ -173,11 +174,12 @@ class TestFingerprintEngine:
 
     def test_fingerprinter_fingerprint_is_coroutine(self):
         import asyncio
+
         from ares.fingerprint.engine import EnvironmentFingerprinter
         assert asyncio.iscoroutinefunction(EnvironmentFingerprinter().fingerprint)
 
     def test_result_is_dc_flag(self):
-        from ares.fingerprint.engine import FingerprintResult, DomainRole
+        from ares.fingerprint.engine import DomainRole, FingerprintResult
         r = FingerprintResult(host="10.0.0.1", is_dc=True,
                               domain_role=DomainRole.DOMAIN_CONTROLLER)
         assert r.is_dc is True
@@ -455,8 +457,9 @@ class TestCapabilityGraphEdgeCases:
 
     def test_empty_registry_returns_empty_chain(self):
         """Empty registry → empty chain."""
-        from ares.goal.engine import CapabilityGraph
         from unittest.mock import MagicMock
+
+        from ares.goal.engine import CapabilityGraph
         reg = MagicMock()
         reg.all.return_value = []
         cg = CapabilityGraph.from_registry(reg)

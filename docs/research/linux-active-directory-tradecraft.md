@@ -5,7 +5,7 @@
 - **Domain**: Offensive Security Research / Active Directory / Linux Post-Exploitation
 - **Status**: Implemented & Production Ready (ARES v6.0.0)
 - **Author**: ARES Architecture & Red Team Engineering Group
-- **Engine Compatibility**: ARES Engine v6.0 (`BaseModule[P, R]`, Pydantic v2, Python 3.10+)
+- **Engine Compatibility**: ARES Engine v6.0 (`BaseModule[P, R]`, Pydantic v2, Python 3.11+)
 - **Implementation Status**: Fully implemented across 5 production modules with pure-Python parsers and 18 unit tests.
 
 ---

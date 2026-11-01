@@ -20,15 +20,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
 from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import LAPSEnumParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -36,7 +36,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.ad.laps_enum")
 
@@ -139,32 +138,32 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
 
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect LAPS v1 (ms-Mcs-AdmPwd) & Windows LAPS v2 (msLAPS-Password) Reads\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4662\n"
-            f"| where Properties has \"ms-Mcs-AdmPwd\" or Properties has \"msLAPS-Password\" or Properties has \"msLAPS-EncryptedPassword\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
+            "// ARES Closed-Loop Telemetry: Detect LAPS v1 (ms-Mcs-AdmPwd) & Windows LAPS v2 (msLAPS-Password) Reads\n"
+            "SecurityEvent\n"
+            "| where EventID == 4662\n"
+            "| where Properties has \"ms-Mcs-AdmPwd\" or Properties has \"msLAPS-Password\" or Properties has \"msLAPS-EncryptedPassword\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ObjectServer, Properties, AccessMask\n"
         )
         sigma_rule = (
-            f"title: LAPS / Windows LAPS v2 Password Attribute Read\n"
-            f"id: e5f6a1b2-ares-4662-laps\n"
-            f"status: experimental\n"
-            f"description: Detects directory service read operations against LAPS v1 or modern Windows LAPS v2 password attributes\n"
-            f"logsource:\n"
-            f"  product: windows\n"
-            f"  service: security\n"
-            f"detection:\n"
-            f"  selection:\n"
-            f"    EventID: 4662\n"
-            f"    Properties|contains:\n"
-            f"      - 'ms-Mcs-AdmPwd'\n"
-            f"      - 'msLAPS-Password'\n"
-            f"      - 'msLAPS-EncryptedPassword'\n"
-            f"  condition: selection\n"
-            f"level: high\n"
-            f"tags:\n"
-            f"  - attack.credential_access\n"
-            f"  - attack.t1552.004\n"
+            "title: LAPS / Windows LAPS v2 Password Attribute Read\n"
+            "id: e5f6a1b2-ares-4662-laps\n"
+            "status: experimental\n"
+            "description: Detects directory service read operations against LAPS v1 or modern Windows LAPS v2 password attributes\n"
+            "logsource:\n"
+            "  product: windows\n"
+            "  service: security\n"
+            "detection:\n"
+            "  selection:\n"
+            "    EventID: 4662\n"
+            "    Properties|contains:\n"
+            "      - 'ms-Mcs-AdmPwd'\n"
+            "      - 'msLAPS-Password'\n"
+            "      - 'msLAPS-EncryptedPassword'\n"
+            "  condition: selection\n"
+            "level: high\n"
+            "tags:\n"
+            "  - attack.credential_access\n"
+            "  - attack.t1552.004\n"
         )
         loot_items: list[dict[str, Any]] = raw.get("loot", [])
         if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
@@ -314,9 +313,9 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
         Sync - runs in executor.
         """
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
-        from ldap3.core.exceptions import LDAPBindError
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
 
         bind_plan = build_ad_bind_plan(username, domain)
         conn = None

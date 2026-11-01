@@ -11,16 +11,15 @@ Built-in lockout protection:
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import PassSprayParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -28,7 +27,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.pass_spray")
 
@@ -62,8 +60,9 @@ def query_password_policy(
     """
     result: dict[str, Any] = {"error": None, "policy_found": False}
     try:
-        import ldap3
         import ssl
+
+        import ldap3
         for port, use_ssl in [(636, True), (389, False)]:
             try:
                 tls = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
@@ -329,9 +328,9 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         Recommends ad.asreproast or ad.kerberoast under STEALTH to completely prevent
         account lockout risks and Event ID 4625 failed logon spikes.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -467,13 +466,13 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         spray_target = target or domain or "Domain"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Password Spraying (Event 4625 Failed Logons Across Accounts)\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4625\n"
-            f"| where SubStatus == \"0xc000006a\" // STATUS_WRONG_PASSWORD\n"
-            f"| summarize FailedAccounts = dcount(TargetUserName), TotalFailures = count(), AccountList = make_set(TargetUserName) by IpAddress, bin(TimeGenerated, 15m)\n"
-            f"| where FailedAccounts >= 3\n"
-            f"| project TimeGenerated, IpAddress, FailedAccounts, TotalFailures, AccountList\n"
+            "// ARES Closed-Loop Telemetry: Detect Password Spraying (Event 4625 Failed Logons Across Accounts)\n"
+            "SecurityEvent\n"
+            "| where EventID == 4625\n"
+            "| where SubStatus == \"0xc000006a\" // STATUS_WRONG_PASSWORD\n"
+            "| summarize FailedAccounts = dcount(TargetUserName), TotalFailures = count(), AccountList = make_set(TargetUserName) by IpAddress, bin(TimeGenerated, 15m)\n"
+            "| where FailedAccounts >= 3\n"
+            "| project TimeGenerated, IpAddress, FailedAccounts, TotalFailures, AccountList\n"
         )
         sigma_rule = (
             f"title: Low-and-Slow Password Spraying Activity ({spray_target})\n"
@@ -643,8 +642,9 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                     if use_ldap:
                         # LDAP SIMPLE bind - fallback when SMB 445 is blocked
                         try:
-                            import ldap3
                             import ssl
+
+                            import ldap3
                             use_ssl = (ldap_port == 636)
                             tls_arg = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
                             server  = ldap3.Server(

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
 
-from ares.core.config import AresSettings
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+from ares.core.config import AresSettings
 from ares.core.noise import NoiseController
 from ares.modules.credential.pass_spray import PassSprayModule
-from ares.modules.credential.ssh_spray import SSHSprayModule
 from ares.modules.credential.pass_the_hash import PassTheHashModule
 from ares.modules.credential.reuse import CredentialReuseModule
+from ares.modules.credential.ssh_spray import SSHSprayModule
 
 
 def make_module(cls):
