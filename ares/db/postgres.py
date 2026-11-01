@@ -61,6 +61,7 @@ from ares.db.execution_lifecycle import (
     OperationResult,
     valid_uuid,
     validate_postgresql_admission_authority_catalog,
+    validate_postgresql_lifecycle_catalog,  # noqa: F401  re-export: ares.db.postgres.<name> is a public hook (integration tests patch it here)
 )
 from ares.db.websocket_tickets import (
     WEBSOCKET_TICKET_TTL_SECONDS,
