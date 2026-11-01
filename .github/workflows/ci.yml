@@ -17,9 +17,9 @@ env:
 
 jobs:
   lint:
-    name: Lint & Security (ruff + bandit)
+    name: Lint, Types & Security (ruff + mypy + bandit)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,6 +29,8 @@ jobs:
       - run: pip install -e ".[dev]"
       - name: Ruff (correctness/bug lint)
         run: ruff check ares tests
+      - name: Mypy (baseline gate — strict on new code, legacy findings grandfathered)
+        run: python scripts/mypy_gate.py
       - name: Bandit (security scan; intrinsic categories skipped in pyproject)
         run: bandit -c pyproject.toml -r ares -q
 
