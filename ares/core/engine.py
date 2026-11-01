@@ -995,7 +995,7 @@ class AresEngine:
                                             if inspect.iscoroutinefunction(getattr(proc, "wait", None)):
                                                 await asyncio.wait_for(proc.wait(), timeout=5)
                                             else:
-                                                await asyncio.to_thread(lambda p=proc: p.wait(timeout=5))
+                                                await asyncio.to_thread(lambda: proc.wait(timeout=5))  # noqa: B023  (awaited in-iteration; proc is stable)
                                         except Exception:
                                             try:
                                                 proc.kill()

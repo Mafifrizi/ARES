@@ -1109,8 +1109,11 @@ class PlatformUpdateManager:
         """
         checks: list[dict[str, Any]] = []
 
-        # 1. Core Framework imports
+        # 1. Core Framework imports (probe: these imports must actually run)
         try:
+            import ares.api.server  # noqa: F401
+            import ares.core  # noqa: F401
+            import ares.mcp  # noqa: F401
             checks.append({"subsystem": "Core Platform Engine", "status": "PASS", "detail": "Core, API, and MCP imported cleanly"})
         except Exception as exc:
             checks.append({"subsystem": "Core Platform Engine", "status": "FAIL", "detail": str(exc)})
