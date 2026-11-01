@@ -6,10 +6,9 @@ Verifies:
 3. run() raw["kerberos_tickets"] reflects the extracted tickets.
 """
 
-from unittest.mock import MagicMock, patch
-import os
 import sys
-import tempfile
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

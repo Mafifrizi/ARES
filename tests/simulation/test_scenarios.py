@@ -20,27 +20,20 @@ Run with: pytest tests/simulation/ -v --tb=short
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
-import time
-import uuid
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ares.core.campaign import Campaign, Finding, NoiseProfile, Severity, ScopeEntry
+from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.di import AresContainer
 from ares.core.errors import (
-    AccountLocked, AuthenticationFailed,
-    ModuleValidationError, ScopeError,
-    HoneypotDetected,
+    ModuleValidationError,
 )
 from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -302,34 +295,37 @@ class TestScenario02ErrorFallback:
         assert err.action == AresError.ABORT
 
     def test_connection_refused_action_is_fallback(self) -> None:
-        from ares.core.errors import ConnectionRefused, AresError
+        from ares.core.errors import AresError, ConnectionRefused
         err = ConnectionRefused("Port 445 refused", port=445)
         assert err.action == AresError.FALLBACK
 
     def test_host_unreachable_action_is_skip(self) -> None:
-        from ares.core.errors import HostUnreachable, AresError
+        from ares.core.errors import AresError, HostUnreachable
         err = HostUnreachable("No route to 10.0.0.100")
         assert err.action == AresError.SKIP
 
     def test_detection_signal_action_is_pause(self) -> None:
-        from ares.core.errors import DetectionSignal, AresError
+        from ares.core.errors import AresError, DetectionSignal
         err = DetectionSignal("IDS alert detected", signal_type="rate_limited")
         assert err.action == AresError.PAUSE
 
     def test_honeypot_action_is_abort(self) -> None:
-        from ares.core.errors import HoneypotDetected, AresError
+        from ares.core.errors import AresError, HoneypotDetected
         err = HoneypotDetected("Honeypot indicators found", indicators=["fake_share"])
         assert err.action == AresError.ABORT
 
     def test_scope_error_action_is_abort(self) -> None:
-        from ares.core.errors import ScopeError, AresError
+        from ares.core.errors import AresError, ScopeError
         err = ScopeError("Target 8.8.8.8 is out of scope", target="8.8.8.8")
         assert err.action == AresError.ABORT
 
     def test_http_status_mapping(self) -> None:
         from ares.core.errors import (
-            http_status, AuthenticationFailed, AccountLocked,
-            RateLimited, ModuleValidationError,
+            AccountLocked,
+            AuthenticationFailed,
+            ModuleValidationError,
+            RateLimited,
+            http_status,
         )
         assert http_status(AuthenticationFailed("bad creds")) == 401
         assert http_status(AccountLocked("locked")) == 423
@@ -347,7 +343,7 @@ class TestScenario02ErrorFallback:
         assert d["action"]     in ("retry", "skip", "fallback", "abort", "pause")
 
     def test_is_lockout_risk(self) -> None:
-        from ares.core.errors import AuthenticationFailed, is_lockout_risk, AccountLocked
+        from ares.core.errors import AccountLocked, AuthenticationFailed, is_lockout_risk
         auth_err  = AuthenticationFailed("bad", username="user1")
         lock_err  = AccountLocked("locked", username="user1", domain="CORP")
         other_err = AuthenticationFailed("bad")   # no username
@@ -420,7 +416,7 @@ class TestScenario04SessionTracking:
     """
 
     def test_simulate_host_discovery_and_ownership(self) -> None:
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         session = OperatorSession(campaign_id="sim-state", operator="op")
 
         # Discover DC
@@ -436,7 +432,7 @@ class TestScenario04SessionTracking:
         assert host.is_owned
 
     def test_simulate_compromise_level_never_downgrades(self) -> None:
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         session = OperatorSession(campaign_id="sim-state2", operator="op")
         session.discover_host("10.0.0.2")
         session.mark_owned("10.0.0.2", CompromiseLevel.DOMAIN_ADMIN,
@@ -449,7 +445,8 @@ class TestScenario04SessionTracking:
 
     def test_simulate_session_snapshot_is_serializable(self) -> None:
         import json
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         session = OperatorSession(campaign_id="sim-snap", operator="op")
         session.discover_host("10.0.0.1", hostname="dc01", is_dc=True)
         session.mark_owned("10.0.0.1", CompromiseLevel.SYSTEM,
@@ -462,7 +459,7 @@ class TestScenario04SessionTracking:
         assert "hosts" in restored
 
     def test_simulate_attack_history_recorded(self) -> None:
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
         session = OperatorSession(campaign_id="sim-hist", operator="op")
         session.discover_host("10.0.0.1")
         session.mark_owned("10.0.0.1", CompromiseLevel.LOCAL_ADMIN,
@@ -524,9 +521,10 @@ class TestScenario06TelemetryCollection:
 
     @pytest.mark.asyncio
     async def test_simulate_telemetry_through_chain(self, campaign) -> None:
+        import time
+
         from ares.core.noise import NoiseController
         from ares.telemetry.collector import TelemetryCollector
-        import time
 
         settings  = AresSettings()
         noise     = NoiseController(campaign)
@@ -697,7 +695,7 @@ class TestScenario08ModuleSDKContract:
         assert result.raw["would_execute"] is False
 
     def test_module_metadata_decorator(self) -> None:
-        from ares.modules.sdk import module_metadata, OpsecLevel, BaseModule
+        from ares.modules.sdk import BaseModule, OpsecLevel, module_metadata
         @module_metadata(
             module_id   = "test.decorated",
             name        = "Decorated Test",
@@ -724,8 +722,11 @@ class TestScenario09ArtifactCorrelation:
     def test_simulate_full_correlation_pipeline(self) -> None:
         from ares.artifact_intel.correlation import ArtifactCorrelationEngine
         from ares.normalize.artifacts import (
-            ArtifactStore, CredentialArtifact, HostArtifact,
-            UserArtifact, PermissionArtifact,
+            ArtifactStore,
+            CredentialArtifact,
+            HostArtifact,
+            PermissionArtifact,
+            UserArtifact,
         )
 
         store = ArtifactStore()

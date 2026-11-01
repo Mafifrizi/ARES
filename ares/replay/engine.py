@@ -21,9 +21,10 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from ares.core.logger import audit, get_logger
 from ares.state.target_state import AttackHistoryEntry

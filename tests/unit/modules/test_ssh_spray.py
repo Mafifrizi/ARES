@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings

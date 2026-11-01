@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import typer
 
-
 _LEGACY_DASHBOARD_DISABLED = (
     "Legacy dashboard ASGI application is disabled. "
     "Use the dashboard served by the main ARES application; "

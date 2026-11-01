@@ -12,11 +12,11 @@ try:
     from ares.normalize.artifacts import (  # noqa: F401
         ArtifactNormalizer,
         ArtifactStore,
-        HostArtifact,
-        UserArtifact,
-        HashArtifact,
         CredentialArtifact,
+        HashArtifact,
+        HostArtifact,
         PermissionArtifact,
+        UserArtifact,
     )
 except ImportError:
     pass  # Optional deps not installed

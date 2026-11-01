@@ -12,15 +12,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import DNSEnumParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -155,11 +154,11 @@ class DnsEnumModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         dns_target = target or domain or "DNSHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect DNS Zone Transfer (AXFR) & Mass Subdomain Enumeration\n"
-            f"// Monitors DnsEvents for AXFR queries (QueryType == 252) or massive burst queries\n"
-            f"DnsEvents\n"
-            f"| where QueryType == 252 or (QueryType in (1, 28) and EventId == 257)\n"
-            f"| project TimeGenerated, ClientIP, Name, QueryType, ResultCode\n"
+            "// ARES Closed-Loop Telemetry: Detect DNS Zone Transfer (AXFR) & Mass Subdomain Enumeration\n"
+            "// Monitors DnsEvents for AXFR queries (QueryType == 252) or massive burst queries\n"
+            "DnsEvents\n"
+            "| where QueryType == 252 or (QueryType in (1, 28) and EventId == 257)\n"
+            "| project TimeGenerated, ClientIP, Name, QueryType, ResultCode\n"
         )
         sigma_rule = (
             f"title: DNS Zone Transfer AXFR Request ({dns_target})\n"
@@ -221,10 +220,10 @@ class DnsEnumModule(BaseModule):
         await self.before_request(target, "dns")  # scope check + jitter
 
         try:
-            import dns.resolver       # type: ignore[import]
-            import dns.zone           # type: ignore[import]
-            import dns.query          # type: ignore[import]
-            import dns.exception      # type: ignore[import]
+            import dns.exception
+            import dns.query
+            import dns.resolver
+            import dns.zone
         except ImportError:
             return [], {"error": "dnspython not installed - run: pip install dnspython"}
 

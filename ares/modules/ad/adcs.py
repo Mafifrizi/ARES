@@ -23,22 +23,19 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
 from ares.modules.params import ADCSParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -235,31 +232,31 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
 
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect ADCS Certificate Requests & Enrollment\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4886, 4887)\n"
-            f"| extend Requester = extract(@\"Requester:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
-            f"| extend CertTemplate = extract(@\"Template:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
-            f"| project TimeGenerated, Computer, EventID, Requester, CertTemplate, Activity\n"
+            "// ARES Closed-Loop Telemetry: Detect ADCS Certificate Requests & Enrollment\n"
+            "SecurityEvent\n"
+            "| where EventID in (4886, 4887)\n"
+            "| extend Requester = extract(@\"Requester:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
+            "| extend CertTemplate = extract(@\"Template:\\s*([^,\\r\\n]+)\", 1, EventData)\n"
+            "| project TimeGenerated, Computer, EventID, Requester, CertTemplate, Activity\n"
         )
         sigma_rule = (
-            f"title: ADCS Certificate Enrollment Request for Vulnerable Template\n"
-            f"id: c3d4e5f6-ares-4886-adcs\n"
-            f"status: experimental\n"
-            f"description: Detects certificate enrollment request (Event 4886) targeting potentially vulnerable ADCS templates\n"
-            f"logsource:\n"
-            f"  product: windows\n"
-            f"  service: security\n"
-            f"detection:\n"
-            f"  selection:\n"
-            f"    EventID:\n"
-            f"      - 4886\n"
-            f"      - 4887\n"
-            f"  condition: selection\n"
-            f"level: high\n"
-            f"tags:\n"
-            f"  - attack.credential_access\n"
-            f"  - attack.t1649\n"
+            "title: ADCS Certificate Enrollment Request for Vulnerable Template\n"
+            "id: c3d4e5f6-ares-4886-adcs\n"
+            "status: experimental\n"
+            "description: Detects certificate enrollment request (Event 4886) targeting potentially vulnerable ADCS templates\n"
+            "logsource:\n"
+            "  product: windows\n"
+            "  service: security\n"
+            "detection:\n"
+            "  selection:\n"
+            "    EventID:\n"
+            "      - 4886\n"
+            "      - 4887\n"
+            "  condition: selection\n"
+            "level: high\n"
+            "tags:\n"
+            "  - attack.credential_access\n"
+            "  - attack.t1649\n"
         )
         loot_items: list[dict[str, Any]] = raw.get("loot", [])
         if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
@@ -337,7 +334,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             shadow_posture = {"target_user": target_user, "account_found": False, "error": str(shadow_err)}
 
         esc1_vulns = esc_map.get("ESC1", [])
-        esc2_vulns = esc_map.get("ESC2", [])
+        esc2_vulns = esc_map.get("ESC2", [])  # noqa: F841
 
         # Step 4: ESC1 evaluation (Audit Assessment Mode - non-intrusive)
         cert_path = ""
@@ -706,7 +703,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         import ssl
         try:
             import ldap3
-            from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+            from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
         except ImportError:
             posture["error"] = "ldap3 module not installed"
             return posture
@@ -852,8 +849,9 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                              domain: str) -> tuple[list[dict], list[dict]]:
         """Query LDAP for certificate templates and CA objects. Sync - runs in executor."""
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         conn = None
@@ -953,7 +951,9 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                                             continue
                                         for right_mask, right_name in _DANGEROUS_RIGHTS.items():
                                             if mask & right_mask == right_mask:
-                                                from ldap3.protocol.formatters.formatters import format_sid
+                                                from ldap3.protocol.formatters.formatters import (
+                                                    format_sid,
+                                                )
                                                 sid = format_sid(ace["Ace"]["Sid"].getData())
                                                 if sid.endswith("-513") or sid.endswith("-515") or sid in ("S-1-5-11", "S-1-1-0", "S-1-5-32-545"):
                                                     dangerous_acls.append({"trustee_sid": sid, "right": right_name})
@@ -987,7 +987,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             for e in conn.entries:
                 ca_flags = 0
                 try:
-                    ca_flags = int(getattr(e, "flags").value or 0)
+                    ca_flags = int(e.flags.value or 0)
                 except Exception:
                     pass
                 ca_list.append({
@@ -1041,8 +1041,8 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         Uses impacket's PKCS12/certificate request flow.
         Returns path to .pfx file on success.
         """
-        import tempfile, os
-        from impacket.dcerpc.v5 import transport, rpcrt
+        import os
+
 
         if not ca_list:
             raise ValueError("No CA found in ADCS configuration")
@@ -1054,17 +1054,18 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         # Generate key pair and CSR with target UPN as SAN
         pfx_path = key_path = csr_path = ""
         try:
+            import datetime  # noqa: F401
+
             from cryptography import x509
-            from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import rsa
-            import datetime
+            from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID  # noqa: F401
 
             # Generate RSA key
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
             # Build CSR with SAN = target_user@domain
-            upn = f"{target_user}@{domain.upper()}"
+            upn = f"{target_user}@{domain.upper()}"  # noqa: F841
             csr = (
                 x509.CertificateSigningRequestBuilder()
                 .subject_name(x509.Name([
@@ -1166,8 +1167,9 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             self.noise.scope_guard.assert_in_scope(ca_host)
 
         try:
-            import httpx
             from base64 import b64encode
+
+            import httpx
 
             # Strip PEM headers for certsrv - it expects raw base64
             csr_b64 = b64encode(
@@ -1182,7 +1184,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             # NTLM auth via httpx + httpx-ntlm or basic fallback
             auth: tuple | None = None
             try:
-                from httpx_ntlm import HttpNtlmAuth  # type: ignore[import]
+                from httpx_ntlm import HttpNtlmAuth
                 ntlm_user = f"{domain}\\{username}" if domain else username
                 auth = HttpNtlmAuth(ntlm_user, password)
             except ImportError:
@@ -1274,19 +1276,26 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
         result: dict[str, Any] = {"success": False, "error": None,
                                     "ccache_path": "", "nt_hash": ""}
         try:
-            from impacket.krb5.kerberosv5 import getKerberosTGT
-            from impacket.krb5.types import Principal
+            import os
+            import tempfile  # noqa: F401
+
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
-            import tempfile, os
+            from impacket.krb5.kerberosv5 import getKerberosTGT
+            from impacket.krb5.types import Principal
 
             # Load certificate and private key from PEM file
             with open(cert_path, "rb") as f:
                 pem_data = f.read()
 
-            from cryptography.hazmat.primitives.serialization import pkcs12, Encoding, PrivateFormat, NoEncryption
             from cryptography import x509
-            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives import hashes  # noqa: F401
+            from cryptography.hazmat.primitives.serialization import (
+                Encoding,  # noqa: F401
+                NoEncryption,
+                PrivateFormat,  # noqa: F401
+                pkcs12,
+            )
 
             # Parse PEM - file contains both cert and key
             pem_text = pem_data.decode("utf-8", errors="replace")
@@ -1326,7 +1335,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
             )
 
             # Save PKCS12 to temp file for impacket
-            from ares.core.security import secure_mkstemp, secure_mkdtemp
+            from ares.core.security import secure_mkdtemp, secure_mkstemp
             pfx_path, _fd = secure_mkstemp(suffix=".pfx", prefix="ares_pkinit_")
             os.close(_fd)
             try:
@@ -1336,7 +1345,7 @@ class ADCSModule(BaseModule[ADCSParams, ModuleResult]):
                 # Use impacket's PKINIT implementation to get TGT
                 # impacket >= 0.11 has gettgtpkinit support
                 try:
-                    from impacket.krb5 import types as krb_types
+                    from impacket.krb5 import types as krb_types  # noqa: F401
 
                     user_principal = Principal(
                         target_user,

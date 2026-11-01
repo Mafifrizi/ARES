@@ -2,16 +2,17 @@
 Unit tests for Gate 1: Minimal Schema Pre-Flight Guard.
 Verifies engine validate() enforcement and declarative REQUIRED_PARAMS.
 """
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from ares.core.campaign import Campaign
-from ares.core.engine import AresEngine, EngineModuleResult, ModuleStatus
-from ares.core.errors import ModuleValidationError
 from ares.core.config import AresSettings
+from ares.core.engine import AresEngine, ModuleStatus
+from ares.core.errors import ModuleValidationError
+from ares.core.execution_admission import _mint_test_dispatch_context
 from ares.core.noise import NoiseController
 from ares.modules.base import BaseModule
-from ares.core.execution_admission import _mint_test_dispatch_context
 
 
 class DummyValidatingModule(BaseModule):

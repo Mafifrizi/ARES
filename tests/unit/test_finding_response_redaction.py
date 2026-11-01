@@ -12,7 +12,6 @@ from ares.api.findings import (
     redact_finding_response_rows,
 )
 
-
 SYNTHETIC_EVIDENCE_MARKER = "SYNTHETIC-RAW-EVIDENCE-MARKER"
 
 

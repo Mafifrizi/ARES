@@ -33,13 +33,11 @@ from ares.modules.params import LDPreloadParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -79,7 +77,7 @@ _CMD_SUID_BINS = (
 )
 class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
     """
-    linux.ld_preload - Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths  - 
+    linux.ld_preload - Detect LD_PRELOAD in sudoers, writable RPATH in SUID binaries, and writable ld.so config paths  -
 
     OPSEC: LOW
     MITRE: "T1574.006", "T1082"
@@ -191,11 +189,11 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         preload_target = host or "LinuxHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux Shared Library Hijack / LD_PRELOAD Persistence\n"
-            f"// Monitors Syslog / auditd for modifications to /etc/ld.so.preload or execution with LD_PRELOAD env\n"
-            f"Syslog\n"
-            f"| where SyslogMessage has \"/etc/ld.so.preload\" or SyslogMessage has \"LD_PRELOAD\" or SyslogMessage has \"/etc/ld.so.conf.d/\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux Shared Library Hijack / LD_PRELOAD Persistence\n"
+            "// Monitors Syslog / auditd for modifications to /etc/ld.so.preload or execution with LD_PRELOAD env\n"
+            "Syslog\n"
+            "| where SyslogMessage has \"/etc/ld.so.preload\" or SyslogMessage has \"LD_PRELOAD\" or SyslogMessage has \"/etc/ld.so.conf.d/\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Shared Library Hijacking via LD_PRELOAD / ld.so.preload ({preload_target})\n"
@@ -279,7 +277,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                 preload_file_out = ""
                 if os.path.isfile(_LD_PRELOAD_FILE):
                     try:
-                        with open(_LD_PRELOAD_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        with open(_LD_PRELOAD_FILE, encoding="utf-8", errors="replace") as f:
                             preload_file_out = f.read()
                     except OSError:
                         pass
@@ -287,7 +285,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                 ld_conf_parts: list[str] = []
                 if os.path.isfile(_LD_CONF_FILE):
                     try:
-                        with open(_LD_CONF_FILE, "r", encoding="utf-8", errors="replace") as f:
+                        with open(_LD_CONF_FILE, encoding="utf-8", errors="replace") as f:
                             ld_conf_parts.append(f.read())
                     except OSError:
                         pass
@@ -295,7 +293,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
                     try:
                         for entry in os.scandir(_LD_CONF_DIR):
                             if entry.is_file() and entry.name.endswith(".conf"):
-                                with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                                with open(entry.path, encoding="utf-8", errors="replace") as f:
                                     ld_conf_parts.append(f.read())
                     except OSError:
                         pass
@@ -573,10 +571,10 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
         port: int,
     ) -> Any:
         try:
-            import asyncssh  # type: ignore[import]
+            import asyncssh
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed - pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}
@@ -615,7 +613,7 @@ class LDPreloadModule(BaseModule[LDPreloadParams, ModuleResult]):
             return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout = b""

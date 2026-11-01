@@ -28,9 +28,10 @@ import subprocess
 import sys
 import threading
 import urllib.request
+from collections.abc import AsyncGenerator, Generator
 from contextvars import ContextVar
 from enum import Enum
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Generator
+from typing import TYPE_CHECKING, Any
 
 from ares.core.errors import ScopeFirewallBlockError
 from ares.core.logger import audit, get_logger
@@ -453,7 +454,7 @@ async def _firewall_loop_create_connection(
             if kwargs.get("ssl") and "server_hostname" not in kwargs and isinstance(host, str):
                 kwargs["server_hostname"] = host
     return await _orig_loop_create_connection(
-        self, protocol_factory, host=target_host, port=port, *args, **kwargs
+        self, protocol_factory, target_host, port, *args, **kwargs
     )
 
 
@@ -467,17 +468,17 @@ def install_hooks() -> None:
     socket.socket.connect_ex = _firewall_socket_connect_ex  # type: ignore[assignment]
     socket.socket.sendto = _firewall_socket_sendto  # type: ignore[assignment]
     if _orig_socket_sendmsg is not None:
-        socket.socket.sendmsg = _firewall_socket_sendmsg  # type: ignore[assignment]
-    asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
+        socket.socket.sendmsg = _firewall_socket_sendmsg
+    asyncio.base_events.BaseEventLoop.create_connection = (
         _firewall_loop_create_connection
     )
-    urllib.request.getproxies = _firewall_getproxies  # type: ignore[assignment]
+    urllib.request.getproxies = _firewall_getproxies
 
     try:
         import requests.utils
         if _orig_requests_get_environ_proxies is None:
             _orig_requests_get_environ_proxies = requests.utils.get_environ_proxies
-        requests.utils.get_environ_proxies = _firewall_requests_get_environ_proxies  # type: ignore[assignment]
+        requests.utils.get_environ_proxies = _firewall_requests_get_environ_proxies
     except (ImportError, AttributeError):
         pass
 
@@ -485,7 +486,7 @@ def install_hooks() -> None:
         import httpx._utils
         if _orig_httpx_get_environment_proxies is None:
             _orig_httpx_get_environment_proxies = httpx._utils.get_environment_proxies
-        httpx._utils.get_environment_proxies = _firewall_httpx_get_environment_proxies  # type: ignore[assignment]
+        httpx._utils.get_environment_proxies = _firewall_httpx_get_environment_proxies
     except (ImportError, AttributeError):
         pass
 
@@ -499,27 +500,27 @@ def uninstall_hooks() -> None:
     if not _hooks_installed:
         return
 
-    socket.socket.connect = _orig_socket_connect  # type: ignore[assignment]
-    socket.socket.connect_ex = _orig_socket_connect_ex  # type: ignore[assignment]
-    socket.socket.sendto = _orig_socket_sendto  # type: ignore[assignment]
+    socket.socket.connect = _orig_socket_connect
+    socket.socket.connect_ex = _orig_socket_connect_ex
+    socket.socket.sendto = _orig_socket_sendto
     if _orig_socket_sendmsg is not None:
-        socket.socket.sendmsg = _orig_socket_sendmsg  # type: ignore[assignment]
-    asyncio.base_events.BaseEventLoop.create_connection = (  # type: ignore[assignment]
+        socket.socket.sendmsg = _orig_socket_sendmsg
+    asyncio.base_events.BaseEventLoop.create_connection = (
         _orig_loop_create_connection
     )
-    urllib.request.getproxies = _orig_urllib_getproxies  # type: ignore[assignment]
+    urllib.request.getproxies = _orig_urllib_getproxies
 
     if _orig_requests_get_environ_proxies is not None:
         try:
             import requests.utils
-            requests.utils.get_environ_proxies = _orig_requests_get_environ_proxies  # type: ignore[assignment]
+            requests.utils.get_environ_proxies = _orig_requests_get_environ_proxies
         except (ImportError, AttributeError):
             pass
 
     if _orig_httpx_get_environment_proxies is not None:
         try:
             import httpx._utils
-            httpx._utils.get_environment_proxies = _orig_httpx_get_environment_proxies  # type: ignore[assignment]
+            httpx._utils.get_environment_proxies = _orig_httpx_get_environment_proxies
         except (ImportError, AttributeError):
             pass
 
@@ -649,7 +650,7 @@ class OSFirewallController:
         elevated = cls.is_elevated()
         with cls._lock:
             active_count = len(cls._active_rules)
-            rule_list = sorted(list(cls._active_rules))
+            rule_list = sorted(cls._active_rules)
             state_val = cls._state.value
             cleanup_pending = cls._state == OSFirewallState.CLEANUP_PENDING
 

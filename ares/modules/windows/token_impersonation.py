@@ -8,18 +8,23 @@ Requires existing shell/WinRM access to the target.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import TokenImpersonationParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -63,7 +68,7 @@ class TokenImpersonationModule(BaseModule):
     ENABLED            = False
     DISABLED_REASON    = "module disabled: privilege check heuristic insufficient, named pipe != exploitation confirmed (MOD-030)"
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """Pre-flight Defense Feasibility Assessment: Disabled under MOD-030."""
         from ares.modules.base import FeasibilityReport
         return FeasibilityReport(
@@ -136,12 +141,12 @@ class TokenImpersonationModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         token_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Token Impersonation & Privilege Escalation\n"
-            f"// Detects Security Event 4673 (Privilege Service Called) for SeImpersonatePrivilege / SeAssignPrimaryTokenPrivilege\n"
-            f"SecurityEvent\n"
-            f"| where EventID in (4672, 4673)\n"
-            f"| where PrivilegeList has \"SeImpersonatePrivilege\" or PrivilegeList has \"SeAssignPrimaryTokenPrivilege\"\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, PrivilegeList, ProcessName\n"
+            "// ARES Closed-Loop Telemetry: Detect Token Impersonation & Privilege Escalation\n"
+            "// Detects Security Event 4673 (Privilege Service Called) for SeImpersonatePrivilege / SeAssignPrimaryTokenPrivilege\n"
+            "SecurityEvent\n"
+            "| where EventID in (4672, 4673)\n"
+            "| where PrivilegeList has \"SeImpersonatePrivilege\" or PrivilegeList has \"SeAssignPrimaryTokenPrivilege\"\n"
+            "| project TimeGenerated, Computer, SubjectUserName, PrivilegeList, ProcessName\n"
         )
         sigma_rule = (
             f"title: Token Impersonation Privilege Exploitation ({token_target})\n"
@@ -211,7 +216,7 @@ class TokenImpersonationModule(BaseModule):
         await self.before_request(target, "smb")  # scope check + jitter
 
         try:
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
 
@@ -233,11 +238,10 @@ class TokenImpersonationModule(BaseModule):
             password = ""
 
         # Run whoami /priv via WMI to check SeImpersonatePrivilege
-        privs_output = ""
+        privs_output = ""  # noqa: F841
         loop = asyncio.get_running_loop()
         try:
-            from impacket.dcerpc.v5 import transport, wmi  # type: ignore[import]
-            from impacket.dcerpc.v5.dtypes import NULL       # type: ignore[import]
+            from impacket.dcerpc.v5 import transport, wmi
 
             def _check_privs() -> str:
                 try:
@@ -253,7 +257,7 @@ class TokenImpersonationModule(BaseModule):
                     # Query Win32_Process
                     wmi_iface = wmi.WMIInterface(dce)
                     query     = "SELECT * FROM Win32_Process WHERE Name = 'lsass.exe'"
-                    results   = wmi_iface.ExecQuery(query)
+                    results   = wmi_iface.ExecQuery(query)  # noqa: F841
                     # Just connectivity check - real priv check via WMI is complex
                     return "connected"
                 except Exception as e:
@@ -381,8 +385,8 @@ class TokenImpersonationModule(BaseModule):
             "samr": False,
         }
         try:
-            from impacket.smbconnection import SMBConnection
             from impacket.dcerpc.v5 import transport
+            from impacket.smbconnection import SMBConnection
 
             smb = SMBConnection(target, target, timeout=10)
             smb.login(username, password, domain, lmhash, nthash)

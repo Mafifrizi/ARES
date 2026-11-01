@@ -10,15 +10,17 @@ from __future__ import annotations
 
 try:
     from ares.technique.library import (  # noqa: F401
+        CoverageReport,
+        Technique,
         TechniqueLibrary,
-        TechniqueRecord,
-        MITRETactic,
+        TechniqueMapper,
     )
 except ImportError:
     pass  # Optional deps not installed
 
 __all__ = [
+    "CoverageReport",
+    "Technique",
     "TechniqueLibrary",
-    "TechniqueRecord",
-    "MITRETactic",
+    "TechniqueMapper",
 ]

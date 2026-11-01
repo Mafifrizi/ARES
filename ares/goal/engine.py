@@ -31,7 +31,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
-from ares.state.target_state import CompromiseLevel, OperatorSession
+from ares.state.target_state import OperatorSession
 
 if TYPE_CHECKING:
     from ares.core.plugin.loader import ModuleRegistry
@@ -272,9 +272,7 @@ class CapabilityGraph:
         return {
             "total_capabilities": len(self._producers),
             "total_modules":      len(self._requires),
-            "capabilities":       {
-                cap: mods for cap, mods in sorted(self._producers.items())
-            },
+            "capabilities":       dict(sorted(self._producers.items())),
         }
 
 
@@ -395,7 +393,7 @@ class GoalEngine:
                 try:
                     goal = Goal[goal.upper()]
                 except KeyError:
-                    raise ValueError(f"Unknown goal: {goal!r}")
+                    raise ValueError(f"Unknown goal: {goal!r}")  # noqa: B904
         defn    = GOAL_DEFINITIONS.get(goal)
         if not defn:
             raise ValueError(f"Unknown goal: {goal.value}")

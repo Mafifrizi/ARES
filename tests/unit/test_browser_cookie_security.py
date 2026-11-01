@@ -6,7 +6,7 @@ import io
 import json
 import threading
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import MappingProxyType, SimpleNamespace
 from typing import Any
@@ -165,7 +165,7 @@ def test_noncredentialed_cors_rejects_unsafe_values(origin: str) -> None:
 
 
 def test_remaining_cookie_lifetime_is_clamped() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     long_lived = remaining_cookie_seconds(now + timedelta(days=60), now=now)
     expired = remaining_cookie_seconds(now - timedelta(seconds=1), now=now)
     _require(long_lived == MAX_REFRESH_COOKIE_AGE_SECONDS, "Cookie lifetime was not clamped.")
@@ -194,7 +194,7 @@ def test_production_session_cookie_attributes_are_exact() -> None:
         response,
         policy,
         refresh_token="a" * 64,
-        absolute_expiry=datetime.now(timezone.utc) + timedelta(days=30),
+        absolute_expiry=datetime.now(UTC) + timedelta(days=30),
     )
     flags = _cookie_flags(response)
     _require(published and len(flags) == 2, "Session cookies were not both published.")
@@ -213,7 +213,7 @@ def test_expired_family_publishes_no_cookie() -> None:
         response,
         policy,
         refresh_token="a" * 64,
-        absolute_expiry=datetime.now(timezone.utc) - timedelta(seconds=1),
+        absolute_expiry=datetime.now(UTC) - timedelta(seconds=1),
     )
     absent = not published and not response.headers.getlist("set-cookie")
     _require(absent, "Expired cookie was published.")

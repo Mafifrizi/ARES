@@ -12,9 +12,9 @@ try:
     from ares.core.campaign import (  # noqa: F401
         Campaign,
         Finding,
-        Severity,
         NoiseProfile,
         ScopeEntry,
+        Severity,
     )
 except ImportError:
     pass  # Optional deps not installed
@@ -22,9 +22,9 @@ except ImportError:
 try:
     from ares.core.errors import (  # noqa: F401
         AresError,
-        ScopeViolationError,
-        RateLimitError,
         ModuleError,
+        RateLimitError,
+        ScopeViolationError,
         ValidationError,
     )
 except ImportError:
@@ -47,12 +47,12 @@ except ImportError:
 
 try:
     from ares.core.tracing import (  # noqa: F401
-        setup_tracing,
-        trace_module,
-        get_tracer,
-        get_current_trace_id,
         async_span,
+        get_current_trace_id,
+        get_tracer,
+        setup_tracing,
         span,
+        trace_module,
     )
 except ImportError:
     pass

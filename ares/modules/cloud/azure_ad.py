@@ -21,18 +21,23 @@ Prerequisites: Azure AD tenant ID. Optional: client credentials or existing acce
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AzureADParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -88,6 +93,7 @@ class AzureADModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -120,7 +126,7 @@ class AzureADModule(BaseModule):
             )
         self.validate_cloud_scope(tenant_id, "azure_ad")
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """
@@ -184,11 +190,11 @@ class AzureADModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         tenant_short = str(tenant_id)[:8] if tenant_id else "AzureADTenant"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Azure AD / Entra ID Privileged Role Assignment & App Abuse\n"
-            f"// Monitors AuditLogs for role assignments, service principal secret addition, or app consent\n"
-            f"AuditLogs\n"
-            f"| where OperationName in~ (\"Add member to role\", \"Add service principal credentials\", \"Consent to application\", \"Update application – Certificates and secrets management \")\n"
-            f"| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result\n"
+            "// ARES Closed-Loop Telemetry: Detect Azure AD / Entra ID Privileged Role Assignment & App Abuse\n"
+            "// Monitors AuditLogs for role assignments, service principal secret addition, or app consent\n"
+            "AuditLogs\n"
+            "| where OperationName in~ (\"Add member to role\", \"Add service principal credentials\", \"Consent to application\", \"Update application – Certificates and secrets management \")\n"
+            "| project TimeGenerated, InitiatedBy, OperationName, TargetResources, Result\n"
         )
         sigma_rule = (
             f"title: Azure AD / Entra ID Privileged Role Assignment & App Secret Addition ({tenant_short})\n"
@@ -340,7 +346,7 @@ class AzureADModule(BaseModule):
             )
 
         if sps:
-            expired_sps = [s for s in sps if s.get("has_expired_secret")]
+            expired_sps = [s for s in sps if s.get("has_expired_secret")]  # noqa: F841
             high_priv   = [s for s in sps if s.get("privileged")]
             if high_priv:
                 self.finding(
@@ -383,7 +389,7 @@ class AzureADModule(BaseModule):
                                        client_secret: str) -> str:
         """Acquire access token via client credentials flow."""
         try:
-            import msal  # type: ignore[import]
+            import msal
             app = msal.ConfidentialClientApplication(
                 client_id,
                 authority=f"{_LOGIN_ENDPOINT}/{tenant_id}",
@@ -403,7 +409,7 @@ class AzureADModule(BaseModule):
     def _request_device_code(self, tenant_id: str, client_id: str) -> dict:
         """Request a device code for phishing-style auth capture."""
         try:
-            import msal  # type: ignore[import]
+            import msal
             app = msal.PublicClientApplication(
                 client_id,
                 authority=f"{_LOGIN_ENDPOINT}/{tenant_id}",

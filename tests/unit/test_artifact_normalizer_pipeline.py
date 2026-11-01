@@ -13,13 +13,8 @@ from ares.normalize.artifacts import (
     ArtifactNormalizer,
     ArtifactStore,
     ArtifactType,
-    CloudResourceArtifact,
-    CredentialArtifact,
     DomainArtifact,
-    HashArtifact,
     HostArtifact,
-    PermissionArtifact,
-    UserArtifact,
 )
 
 
@@ -110,8 +105,9 @@ async def test_enum_users_dual_write_users_key_mod_056(normalizer: ArtifactNorma
     Normalizer ingests both keys successfully into UserArtifact.
     """
     from unittest.mock import patch
-    from tests.unit.modules.test_modules import _make_module
+
     from ares.modules.ad.enum_users import ADEnumUsersModule
+    from tests.unit.modules.test_modules import _make_module
 
     mod, _ = _make_module(ADEnumUsersModule)
     mock_users = [
@@ -279,6 +275,7 @@ def test_aws_privesc_pipeline_recovers_paths(normalizer: ArtifactNormalizer, sto
 def test_aws_privesc_output_key_separation(normalizer: ArtifactNormalizer, store: ArtifactStore):
     """MOD-052: aws_privesc must use iam_privesc_paths and not overwrite aws_findings."""
     from unittest.mock import MagicMock
+
     from ares.modules.cloud.aws_privesc import AWSPrivescModule
     assert "iam_privesc_paths" in AWSPrivescModule.OUTPUTS
     assert "aws_findings" not in AWSPrivescModule.OUTPUTS
@@ -390,10 +387,11 @@ async def test_laps_opsec_direct_vault_pipeline_mod_055(normalizer: ArtifactNorm
     Normalizer ingests has_password=True and creates CredentialArtifact with secret="" and note.
     """
     from unittest.mock import patch
-    from tests.unit.modules.test_modules import _make_module
-    from ares.modules.ad.laps_enum import LAPSEnumModule
-    from ares.credential.vault import CredentialVault
+
     from ares.core.context import ExecutionContext
+    from ares.credential.vault import CredentialVault
+    from ares.modules.ad.laps_enum import LAPSEnumModule
+    from tests.unit.modules.test_modules import _make_module
 
     mod, _ = _make_module(LAPSEnumModule)
     vault = CredentialVault(encryption_key=None)
@@ -745,10 +743,11 @@ async def test_snmp_enum_vault_and_valid_credentials_mod_061(
     produces standardized valid_credentials output, and serializes snmp_findings.
     """
     from unittest.mock import patch
-    from tests.unit.modules.test_modules import _make_module
-    from ares.modules.network.snmp_enum import SnmpEnumModule
-    from ares.credential.vault import CredentialVault
+
     from ares.core.context import ExecutionContext
+    from ares.credential.vault import CredentialVault
+    from ares.modules.network.snmp_enum import SnmpEnumModule
+    from tests.unit.modules.test_modules import _make_module
 
     mod, _ = _make_module(SnmpEnumModule)
     vault = CredentialVault(encryption_key=None)
@@ -993,7 +992,7 @@ def test_azure_findings_pipeline_mod_066(normalizer: ArtifactNormalizer, store: 
     assert added >= 5
 
     # Cloud resources: storage container + NSG
-    cloud_res = [a for a in store.get(ArtifactType.CLOUD_RESOURCE)]
+    cloud_res = list(store.get(ArtifactType.CLOUD_RESOURCE))
     res_ids = {c.resource_id for c in cloud_res}
     assert "corpbackup/db-dumps" in res_ids
     assert "nsg-prod/Allow-SSH-Internet" in res_ids
@@ -1146,7 +1145,7 @@ def test_identity_federation_pipeline_mod_051(
     )
     assert added >= 7
 
-    cloud_res = [c for c in store.get(ArtifactType.CLOUD_RESOURCE)]
+    cloud_res = list(store.get(ArtifactType.CLOUD_RESOURCE))
     assert any(c.provider == "azure" and c.resource_id == "corp.com" for c in cloud_res)
     assert any(c.provider == "aws" for c in cloud_res)
 

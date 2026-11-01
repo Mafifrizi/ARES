@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from ares.worker.cluster import ClusterTask, TaskState
+from ares.worker.cluster import ClusterTask
 
 
 def test_cluster_task_wire_serialization_preserves_credentials():

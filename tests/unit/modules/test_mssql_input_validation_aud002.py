@@ -3,6 +3,7 @@ Tests for AUD-002: Strict input validation on listener_ip for MSSQL xp_dirtree
 and linked_server parameter validation.
 """
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

@@ -19,17 +19,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import FingerprintParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -199,7 +197,7 @@ class FingerprintModule(BaseModule):
     @trace_module("recon.fingerprint")
     async def run(self, target: str, username: str = "", domain: str = "",
                   secret: str = "", timeout: float = 5.0, **kwargs: Any):
-        from ares.fingerprint.engine import EnvironmentFingerprinter, EDRVendor
+        from ares.fingerprint.engine import EnvironmentFingerprinter
 
         target = sanitize_hostname(target)
         logger.info("fingerprint_start", target=target)
@@ -256,7 +254,7 @@ class FingerprintModule(BaseModule):
                         "HIGH_NOISE modules (dcsync, kerberoast burst, psexec) "
                         "will generate immediate alerts."
                         if is_high else
-                        f"EDR active - use NORMAL or STEALTH profile."
+                        "EDR active - use NORMAL or STEALTH profile."
                     )
                 ),
                 severity    = sev,
@@ -299,5 +297,5 @@ class FingerprintModule(BaseModule):
                 host = target, confidence = 0.95,
             )
 
-        raw["fingerprint_result"] = {k: v for k, v in raw.items()}  # OUTPUTS key - shallow copy to avoid circular ref
+        raw["fingerprint_result"] = dict(raw.items())  # OUTPUTS key - shallow copy to avoid circular ref
         return self._findings[:], raw

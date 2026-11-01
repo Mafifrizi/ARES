@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from ares.core.config import AresSettings
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.errors import ModuleValidationError
 from ares.core.noise import NoiseController
@@ -117,7 +118,7 @@ def test_mssql_xp_cmdshell_teardown_executed_even_on_query_failure():
     mock_cursor.execute.side_effect = cursor_execute
 
     with patch.dict("sys.modules", {"pymssql": MagicMock(connect=MagicMock(return_value=mock_conn))}):
-        out = module._xp_cmdshell_sync("10.0.0.1", "sa", "Password123!", 1433, "whoami")
+        out = module._xp_cmdshell_sync("10.0.0.1", "sa", "Password123!", 1433, "whoami")  # noqa: F841
 
     # Assert teardown query was executed
     executed_queries = [call.args[0] for call in mock_cursor.execute.call_args_list]

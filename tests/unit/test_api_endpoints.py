@@ -21,7 +21,7 @@ import base64
 import hashlib
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -234,7 +234,7 @@ def _issued_session(username: str = "admin", role: str = "team_lead"):
             subject=username,
             family_id=family_id,
             auth_epoch=1,
-            absolute_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            absolute_expires_at=datetime.now(UTC) + timedelta(days=30),
             refresh_generation=0,
             role=role,
         ),
@@ -2987,7 +2987,7 @@ async def test_c_live_http_preview_executes_no_module_code(
 
 @pytest.mark.parametrize("authority", ["credential", "approval"])
 def test_c_live_required_authority_module_is_non_dispatchable(authority: str) -> None:
-    from ares.modules.descriptors import ContractState, FIRST_PARTY_DESCRIPTORS
+    from ares.modules.descriptors import FIRST_PARTY_DESCRIPTORS, ContractState
 
     assert _PRODUCTION_C_LIVE_DESCRIPTOR_GATE is not None
     if authority == "approval":
@@ -3543,8 +3543,8 @@ class TestModuleRunEndpoint:
         self, aclient: Any, monkeypatch: Any
     ) -> None:
         c, db, app = aclient
-        from ares.api.server import get_engine
         import ares.telemetry.collector as telemetry
+        from ares.api.server import get_engine
 
         telemetry._global_collector = telemetry.TelemetryCollector()
 
@@ -5052,7 +5052,7 @@ class _FirstBroadcastSendCoordinator:
         except asyncio.CancelledError:
             self.first_cancelled.set()
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail(
                 "expected the first broadcast send barrier to be released",
                 pytrace=False,
@@ -5131,7 +5131,7 @@ class _MainWebSocketHarness:
     async def receive_text(self) -> str:
         item = await self.inbound.get()
         if item is _WS_TEST_HEARTBEAT:
-            raise asyncio.TimeoutError
+            raise TimeoutError
         if item is _WS_TEST_DISCONNECT:
             self.disconnect_observed.set()
             from starlette.websockets import WebSocketDisconnect
@@ -5149,7 +5149,7 @@ class _MainWebSocketHarness:
 async def _ws_wait(awaitable: Any, message: str) -> Any:
     try:
         return await asyncio.wait_for(awaitable, timeout=3.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail(message, pytrace=False)
 
 
@@ -5245,7 +5245,7 @@ async def _settle_main_websocket(
         await socket.client_disconnect()
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         task.cancel()
         try:
             await task
@@ -5650,7 +5650,7 @@ class TestMainWebSocketAuthoritativeLifetime:
             (username, user_id),
         )
         await database.conn.commit()
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         expired_ticket = await _issue_main_websocket_ticket(
             app, campaign.id, token=token
@@ -5683,7 +5683,7 @@ class TestMainWebSocketAuthoritativeLifetime:
                 "sid": authoritative_claims["sid"],
                 "ver": authoritative_claims["ver"],
                 "jti": revocation_marker,
-                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+                "exp": datetime.now(UTC) + timedelta(hours=1),
             },
             settings.secret_key_value,
             algorithm=settings.ares_jwt_algorithm,
@@ -5694,7 +5694,7 @@ class TestMainWebSocketAuthoritativeLifetime:
         await database.revoke_access_token(
             revocation_marker,
             user_id,
-            (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
         )
         revoked_socket, revoked_task = await _launch_main_websocket(
             app,
@@ -5920,8 +5920,9 @@ class TestMainWebSocketAuthoritativeLifetime:
                 )
                 await database.conn.commit()
             elif state_change == "revoked":
+                from datetime import datetime, timedelta
+
                 from ares.core.security import decode_access_token
-                from datetime import datetime, timedelta, timezone
 
                 settings = _settings()
                 payload = decode_access_token(
@@ -5938,7 +5939,7 @@ class TestMainWebSocketAuthoritativeLifetime:
                 await database.revoke_access_token(
                     revocation_marker,
                     user_id,
-                    (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                    (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
                 )
             elif state_change == "expired":
                 contexts = list(server._ws_connections.get(campaign.id, set()))
@@ -6592,7 +6593,7 @@ class TestMainWebSocketAuthoritativeLifetime:
                 await asyncio.wait_for(broadcast_task, timeout=3.0)
             except asyncio.CancelledError:
                 cancellation_propagated = True
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pytest.fail(
                     "expected parent cancellation to settle owned children",
                     pytrace=False,
@@ -6626,7 +6627,7 @@ class TestMainWebSocketAuthoritativeLifetime:
                     await asyncio.wait_for(broadcast_task, timeout=3.0)
                 except asyncio.CancelledError:
                     pass
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pytest.fail(
                         "expected cancelled broadcast cleanup",
                         pytrace=False,
@@ -6746,9 +6747,10 @@ class TestMainWebSocketAuthoritativeLifetime:
 @pytest.mark.asyncio
 async def test_strategy_active_returns_llm_backends_resiliently():
     """Verify /strategy/active provides fail-safe llm_backends availability without 500s."""
-    from ares.api.server import app
-    from ares.api.rbac import get_current_user, AuthenticatedUser
     from starlette.testclient import TestClient
+
+    from ares.api.rbac import AuthenticatedUser, get_current_user
+    from ares.api.server import app
 
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(username="test_op", role="operator")
     try:

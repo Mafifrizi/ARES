@@ -13,6 +13,12 @@ Required optional extras:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from functools import partial
 from typing import Any
@@ -22,13 +28,12 @@ from ares.core.logger import get_logger
 logger = get_logger("ares.modules.cloud.azure")
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AzureParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -39,7 +44,7 @@ _SENSITIVE_PORTS: set[int] = {22, 23, 3389, 5985, 5986, 1433, 3306, 5432,
 
 
 def _get_credential(tenant_id=None, client_id=None, client_secret=None):
-    from azure.identity import ClientSecretCredential, DefaultAzureCredential  # type: ignore[import]
+    from azure.identity import ClientSecretCredential, DefaultAzureCredential
     if tenant_id and client_id and client_secret:
         return ClientSecretCredential(tenant_id=tenant_id, client_id=client_id,
                                       client_secret=client_secret)
@@ -76,6 +81,7 @@ class AzureModule(BaseModule):
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -113,7 +119,7 @@ class AzureModule(BaseModule):
         if pdict.get("tenant_id"):
             self.validate_cloud_scope(pdict.get("tenant_id"), "azure_ad")
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """
@@ -167,11 +173,11 @@ class AzureModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         azure_target = subscription_id[:8] if subscription_id else "AzureSubscription"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Azure Resource & Key Vault Reconnaissance\n"
-            f"// Monitors AzureActivity for KeyVault secret reads or Storage Account key enumeration\n"
-            f"AzureActivity\n"
-            f"| where OperationNameValue in~ (\"Microsoft.KeyVault/vaults/secrets/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\", \"Microsoft.Compute/virtualMachines/runCommand/action\")\n"
-            f"| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, SubscriptionId\n"
+            "// ARES Closed-Loop Telemetry: Detect Azure Resource & Key Vault Reconnaissance\n"
+            "// Monitors AzureActivity for KeyVault secret reads or Storage Account key enumeration\n"
+            "AzureActivity\n"
+            "| where OperationNameValue in~ (\"Microsoft.KeyVault/vaults/secrets/read\", \"Microsoft.Storage/storageAccounts/listKeys/action\", \"Microsoft.Compute/virtualMachines/runCommand/action\")\n"
+            "| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, SubscriptionId\n"
         )
         sigma_rule = (
             f"title: Azure KeyVault & Secret Key Enumeration ({azure_target})\n"
@@ -262,7 +268,7 @@ class AzureModule(BaseModule):
     # ── AAD Users ─────────────────────────────────────────────────────────────
 
     def _enum_aad_users(self, credential: Any) -> dict[str, Any]:
-        import requests  # type: ignore[import]
+        import requests
         token   = credential.get_token("https://graph.microsoft.com/.default").token
         headers = {"Authorization": f"Bearer {token}"}
         session = requests.Session()
@@ -366,7 +372,7 @@ class AzureModule(BaseModule):
 
     def _check_storage_accounts(self, credential: Any,
                                   subscription_id: str) -> dict[str, Any]:
-        from azure.mgmt.storage import StorageManagementClient  # type: ignore[import]
+        from azure.mgmt.storage import StorageManagementClient
         client = StorageManagementClient(credential, subscription_id)
         public_containers: list[dict[str, Any]] = []
         http_allowed: list[str] = []
@@ -436,7 +442,7 @@ class AzureModule(BaseModule):
     # ── RBAC ──────────────────────────────────────────────────────────────────
 
     def _check_rbac(self, credential: Any, subscription_id: str) -> dict[str, Any]:
-        from azure.mgmt.authorization import AuthorizationManagementClient  # type: ignore[import]
+        from azure.mgmt.authorization import AuthorizationManagementClient
         client    = AuthorizationManagementClient(credential, subscription_id)
         sub_scope = f"/subscriptions/{subscription_id}"
         _OWNER_ID = "8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
@@ -526,7 +532,7 @@ class AzureModule(BaseModule):
     # ── NSG Rules ─────────────────────────────────────────────────────────────
 
     def _check_nsg_rules(self, credential: Any, subscription_id: str) -> dict[str, Any]:
-        from azure.mgmt.network import NetworkManagementClient  # type: ignore[import]
+        from azure.mgmt.network import NetworkManagementClient
         net_client = NetworkManagementClient(credential, subscription_id)
         open_rules:         list[dict[str, Any]] = []
         wildcard_any_rules: list[dict[str, Any]] = []

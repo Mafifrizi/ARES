@@ -42,8 +42,9 @@ Usage:
 from __future__ import annotations
 
 import functools
+from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, AsyncGenerator, Callable, Generator
+from typing import Any
 
 from ares.core.logger import get_logger
 
@@ -54,9 +55,9 @@ logger = get_logger("ares.core.tracing")
 
 try:
     from opentelemetry import trace
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.trace import StatusCode
     _OTEL_AVAILABLE = True
 except ImportError:

@@ -18,7 +18,6 @@ from ares.modules.params import ContainerEscapeParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     FilesystemPermission,
     LockoutCircuitBreaker,
     ModuleResult,
@@ -116,11 +115,11 @@ class ContainerEscapeModule(BaseModule[ContainerEscapeParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         container_target = getattr(ctx, "target", "") or "ContainerHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux Container Escape & Docker Socket Abuse\n"
-            f"// Monitors Syslog / auditd for Docker daemon socket access or privileged container creation\n"
-            f"Syslog\n"
-            f"| where SyslogMessage has \"/var/run/docker.sock\" or SyslogMessage has \"--privileged\" or SyslogMessage has \"cgroup.procs\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux Container Escape & Docker Socket Abuse\n"
+            "// Monitors Syslog / auditd for Docker daemon socket access or privileged container creation\n"
+            "Syslog\n"
+            "| where SyslogMessage has \"/var/run/docker.sock\" or SyslogMessage has \"--privileged\" or SyslogMessage has \"cgroup.procs\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Linux Container Escape / Docker Socket Manipulation ({container_target})\n"

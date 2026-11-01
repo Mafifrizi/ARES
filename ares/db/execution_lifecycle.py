@@ -2527,7 +2527,7 @@ class _ReceiptSpec:
     owner_ref: str | None
     lease_generation: int | None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2552,7 +2552,7 @@ class TransitionRequest:
     actor_user_id: str | None = None
     actor_authority_revision: int | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2568,7 +2568,7 @@ class OutboxMutation:
     event_code: str | None = None
     purge_poisoned: bool | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2576,7 +2576,7 @@ class OperationResult:
     result: FixedResult
     revision: int | None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
     def __bool__(self) -> bool:
         return self.result in {
@@ -2602,7 +2602,7 @@ class BudgetConfiguration:
     principal_user_id: str | None = None
     principal_authority_revision: int | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2626,7 +2626,7 @@ class BudgetReservation:
     principal_user_id: str | None = None
     principal_authority_revision: int | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2649,7 +2649,7 @@ class BudgetSettlement:
     principal_user_id: str | None = None
     principal_authority_revision: int | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2670,7 +2670,7 @@ class ClosureRequest:
     authority_revision: int
     campaign_id: str | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2739,7 +2739,7 @@ class AttemptPolicySnapshot:
     timeout_limit_ms: int
     timeout_settlement: str
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 _SNAPSHOT_BINDING_FIELDS: Final[tuple[str, ...]] = (
@@ -2834,7 +2834,7 @@ class ApprovalBinding:
     authority_revision: int
     binding_digest: str
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2855,7 +2855,7 @@ class AdmissionRequest:
     approval: ApprovalBinding | None = None
     budgets: BudgetReservation | None = None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2865,7 +2865,7 @@ class RetryRequest:
     child: AdmissionRequest
     expected_parent_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2875,7 +2875,7 @@ class TrustedPrincipal:
     subject_ref: str
     user_id: str
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2898,7 +2898,7 @@ class AdmissionIntentV3:
     noise_units: int = 0
     exfiltration_units: int = 0
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2917,7 +2917,7 @@ class RetryIntentV3:
     noise_units: int = 0
     exfiltration_units: int = 0
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2933,7 +2933,7 @@ class ApprovalAuthorityGrant:
     module_id: str
     granted_capability_mask: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2942,7 +2942,7 @@ class GatewayAuthorityMutation:
     expected_revision: int
     mode: str
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2951,7 +2951,7 @@ class ActorAuthorityMutation:
     actor_user_id: str
     expected_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2960,7 +2960,7 @@ class CampaignAuthorityMutation:
     campaign_id: str
     expected_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2970,7 +2970,7 @@ class CampaignActorGrantMutation:
     actor_user_id: str
     expected_revision: int | None
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2979,7 +2979,7 @@ class DestinationAuthorityMutation:
     campaign_id: str
     expected_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2988,7 +2988,7 @@ class CredentialAuthorityMutation:
     credential_id: str
     expected_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -2997,7 +2997,7 @@ class ApprovalAuthorityMutation:
     approval_id: str
     expected_revision: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -3047,7 +3047,7 @@ class OutputObservation:
     kind: OutputKind
     target_id: str
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -3065,7 +3065,7 @@ class TerminalCommitIntentV3:
     execution_result_digest: str | None
     outputs: tuple[OutputObservation, ...] = ()
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -3078,7 +3078,7 @@ class TerminalCommitRequest:
     budgets: BudgetSettlement
     outputs: tuple[OutputObservation, ...] = ()
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 class _AbortOperationError(Exception):
@@ -3693,7 +3693,7 @@ class ExecutionLifecycleStore:
         *,
         suffix: str,
         reserve_budgets: bool = True,
-    ) -> _ResolvedAdmissionV3 | None:
+    ) -> _ResolvedAdmissionV3:
         from ares.modules.descriptors import get_descriptor
 
         # Generation-11 admission has one intersection lock order.  The gateway

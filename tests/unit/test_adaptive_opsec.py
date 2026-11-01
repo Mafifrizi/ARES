@@ -7,29 +7,24 @@ Also tests thresholds, sliding window, blacklist expiry, and edge cases.
 from __future__ import annotations
 
 import time
-import pytest
-from unittest.mock import patch
 
 from ares.core.opsec.adaptive import (
     AdaptiveOpsecEngine,
     DetectionLevel,
     ResponseAction,
-    SignalEvent,
-    OpsecAdaptation,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def make_engine(**kwargs) -> AdaptiveOpsecEngine:
-    defaults = dict(
-        current_profile="normal",
-        window_s=60.0,
-        timeout_threshold=3,
-        reset_threshold=5,
-        auth_fail_threshold=3,
-        jitter_increment_s=2.0,
-    )
+    defaults = {
+        "current_profile": "normal",
+        "window_s": 60.0,
+        "timeout_threshold": 3,
+        "reset_threshold": 5,
+        "auth_fail_threshold": 3,
+        "jitter_increment_s": 2.0,
+    }
     defaults.update(kwargs)
     return AdaptiveOpsecEngine(**defaults)
 

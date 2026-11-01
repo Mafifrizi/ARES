@@ -17,7 +17,7 @@ import os
 import struct
 import tempfile
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -39,14 +39,6 @@ from ares.modules.linux.ccache_hunt import CcacheHuntModule
 from ares.modules.linux.keytab_abuse import KeytabAbuseModule
 from ares.modules.linux.samba_secrets import SambaSecretsModule
 from ares.modules.linux.sssd_harvest import SssdHarvestModule
-from ares.modules.params import (
-    CcacheHuntParams,
-    KeytabAbuseParams,
-    SambaSecretsParams,
-    SssdHarvestParams,
-    TicketConverterParams,
-)
-
 
 # ── Fixtures & Mock Context ───────────────────────────────────────────────────
 
@@ -66,7 +58,7 @@ def _make_module(cls: type, noise_profile: str = "normal") -> tuple:
     return module, campaign
 
 
-def _make_test_ctx(params: dict | None = None, dry_run: bool = False, vault: Any = None) -> ExecutionContext:
+def _make_test_ctx(params: dict | None = None, dry_run: bool = False, vault: Any = None) -> ExecutionContext:  # noqa: F821
     settings = AresSettings(
         ares_secret_key="test-secret-key-32chars-minimum!!",
         ares_encryption_key="test-encryption-key-32chars-min!!",
@@ -117,7 +109,7 @@ def _synthesize_tdb(records: list[tuple[bytes, bytes]]) -> bytes:
     return header + hash_table + bytes(record_bodies)
 
 
-def _synthesize_keytab(entries: list[dict[str, Any]]) -> bytes:
+def _synthesize_keytab(entries: list[dict[str, Any]]) -> bytes:  # noqa: F821
     """Synthesizes a valid Kerberos keytab binary file (format 0x0502)."""
     buf = bytearray(struct.pack(">H", 0x0502))
     for e in entries:
@@ -299,7 +291,7 @@ class TestSssdHarvestModule:
     async def test_sssd_harvest_mod045_semantic_type_integrity(self):
         """MOD-045: Verify hashes ($6$) are stored as CredentialType.HASH, not CLEARTEXT,
         and standard output keys are dual-written for ArtifactNormalizer pipeline."""
-        from ares.credential.vault import CredentialVault, CredentialType
+        from ares.credential.vault import CredentialType, CredentialVault
         from ares.normalize.artifacts import ArtifactNormalizer, ArtifactStore
 
         vault = CredentialVault(encryption_key=None)

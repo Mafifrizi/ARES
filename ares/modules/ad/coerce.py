@@ -25,22 +25,19 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from ares.core.campaign import Finding, Severity, NoiseProfile
+from ares.core.campaign import NoiseProfile, Severity
 from ares.core.logger import audit, get_logger
-from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.security import sanitize_hostname
 from ares.core.tracing import trace_module
-from ares.core.errors import ModuleValidationError
 from ares.modules.params import CoerceParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -154,12 +151,12 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         coerce_target = ad["dc"] or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Remote RPC Coercion Attempts (PetitPotam / PrinterBug / DFSCoerce)\n"
-            f"// Monitors Security Event 5145 for pipe access to efsrpc, spoolss, lsarpc, or netdfs\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 5145\n"
-            f"| where RelativeTargetName in~ (\"efsrpc\", \"spoolss\", \"lsarpc\", \"netdfs\", \"pipe\\\\efsrpc\", \"pipe\\\\spoolss\")\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, SubjectDomainName, RelativeTargetName, AccessMask\n"
+            "// ARES Closed-Loop Telemetry: Detect Remote RPC Coercion Attempts (PetitPotam / PrinterBug / DFSCoerce)\n"
+            "// Monitors Security Event 5145 for pipe access to efsrpc, spoolss, lsarpc, or netdfs\n"
+            "SecurityEvent\n"
+            "| where EventID == 5145\n"
+            "| where RelativeTargetName in~ (\"efsrpc\", \"spoolss\", \"lsarpc\", \"netdfs\", \"pipe\\\\efsrpc\", \"pipe\\\\spoolss\")\n"
+            "| project TimeGenerated, Computer, SubjectUserName, SubjectDomainName, RelativeTargetName, AccessMask\n"
         )
         sigma_rule = (
             f"title: Remote RPC Authentication Coercion ({coerce_target})\n"
@@ -330,9 +327,8 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                           use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-EFSRPC: EfsRpcOpenFileRaw - works unauthenticated on unpatched systems."""
         try:
-            from impacket.dcerpc.v5 import transport, efsrpc
+            from impacket.dcerpc.v5 import efsrpc, transport
             from impacket.dcerpc.v5.rpcrt import DCERPCException
-            from impacket.dcerpc.v5.dtypes import NULL
 
             rpctransport = transport.DCERPCTransportFactory(
                 f"ncacn_np:{dc}[\\pipe\\lsarpc]"
@@ -370,7 +366,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                           use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-RPRN: RpcRemoteFindFirstPrinterChangeNotification - needs domain creds."""
         try:
-            from impacket.dcerpc.v5 import transport, rprn
+            from impacket.dcerpc.v5 import rprn, transport
             from impacket.dcerpc.v5.dtypes import NULL
             from impacket.dcerpc.v5.rpcrt import DCERPCException
 
@@ -412,7 +408,7 @@ class CoerceModule(BaseModule[CoerceParams, ModuleResult]):
                          use_webdav: bool = False, webdav_port: int = 80) -> bool:
         """MS-DFSNM: NetrDfsAddStdRoot - needs domain creds."""
         try:
-            from impacket.dcerpc.v5 import transport, dfsnm
+            from impacket.dcerpc.v5 import dfsnm, transport
             from impacket.dcerpc.v5.rpcrt import DCERPCException
 
             rpctransport = transport.DCERPCTransportFactory(

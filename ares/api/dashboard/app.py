@@ -14,18 +14,23 @@ Routes:
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.db.database import AresDatabase
+
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from ares.__version__ import __version__ as _ares_version
 from ares.api.findings import redact_finding_response_rows
 from ares.core.logger import get_logger
-from ares.__version__ import __version__ as _ares_version
 
 # ── Dashboard auth dependency ─────────────────────────────────────────────────
 # Dashboard is a sub-application separate from the main FastAPI app.
@@ -66,7 +71,7 @@ async def _require_dashboard_auth(
                     raise
                 except Exception as exc:
                     logger.warning("dashboard_auth_revocation_check_failed", error=str(exc))
-                    raise HTTPException(
+                    raise HTTPException(  # noqa: B904
                         status_code=503,
                         detail="Authentication service temporarily unavailable: cannot verify token revocation status.",
                     )
@@ -494,7 +499,7 @@ async def api_status(_auth: None = Depends(_require_dashboard_auth)) -> dict[str
     return {"status": "online", "version": _ares_version}
 
 
-def _get_db() -> "AresDatabase":
+def _get_db() -> "AresDatabase":  # noqa: F821
     """
     Return the shared AresDatabase from dashboard_app.state.
     Set at startup via: dashboard_app.state.db = <AresDatabase instance>
@@ -522,7 +527,7 @@ async def api_campaigns(_auth: None = Depends(_require_dashboard_auth)) -> list[
             return rows
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/findings")
@@ -540,7 +545,7 @@ async def api_findings(campaign_id: str, severity: str | None = None,
             return redact_finding_response_rows(rows)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/hosts")
@@ -554,7 +559,7 @@ async def api_hosts(campaign_id: str,
             return await db.get_hosts(campaign_id)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/summary")
@@ -564,7 +569,7 @@ async def api_summary(campaign_id: str,
         db = _get_db()
         use_shared = getattr(dashboard_app.state, "db", None) is not None
 
-        async def _fetch(db: "AresDatabase") -> dict[str, Any]:
+        async def _fetch(db: "AresDatabase") -> dict[str, Any]:  # noqa: F821
             summary  = await db.campaign_summary(campaign_id)
             findings, _ = await db.list_findings(campaign_id,
                                                   validated=True, false_positive=False)
@@ -574,8 +579,7 @@ async def api_summary(campaign_id: str,
                 for f in findings
             )
             summary["risk_score"] = round(risk, 1)
-            sev_counts: dict[str, int] = {k: 0 for k in
-                                           ("critical", "high", "medium", "low", "info")}
+            sev_counts: dict[str, int] = dict.fromkeys(("critical", "high", "medium", "low", "info"), 0)
             for f in findings:
                 sev = f.get("severity", "info")
                 if sev in sev_counts:
@@ -589,7 +593,7 @@ async def api_summary(campaign_id: str,
             return await _fetch(db)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/workers")

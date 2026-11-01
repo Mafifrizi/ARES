@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from collections.abc import AsyncGenerator, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
-import uuid
 from uuid import UUID
 
 from fastapi import (
@@ -85,18 +85,17 @@ from ares.core.execution_admission import (
 )
 from ares.core.logger import get_logger
 from ares.core.security import create_access_token
+from ares.core.sso import (
+    build_oidc_auth_request,
+    build_saml_auth_request,
+    encrypt_sso_secret,
+    process_oidc_callback,
+    process_saml_response,
+)
 from ares.core.token_sessions import (
     RefreshRotationStatus,
     SessionIssueStatus,
     SessionRevocationStatus,
-)
-from ares.core.sso import (
-    build_oidc_auth_request,
-    build_saml_auth_request,
-    decrypt_sso_secret,
-    encrypt_sso_secret,
-    process_oidc_callback,
-    process_saml_response,
 )
 from ares.core.tracing import get_current_trace_id, instrument_fastapi, setup_tracing
 from ares.db.database import AresDatabase
@@ -509,7 +508,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Redis rate limiter (optional) ────────────────────────────────────
     if settings.ares_redis_url:
         try:
-            import redis.asyncio as aioredis  # type: ignore[import-untyped]
+            import redis.asyncio as aioredis
 
             _redis = await aioredis.from_url(
                 settings.ares_redis_url,
@@ -1130,7 +1129,7 @@ def _browser_policy(request: Request) -> BrowserSessionPolicy:
         from ares.core.config import get_settings
         return build_browser_session_policy(get_settings())
     except Exception:
-        raise HTTPException(503, "Browser authentication unavailable")
+        raise HTTPException(503, "Browser authentication unavailable")  # noqa: B904
 
 
 def _token_response_content(session: Any, settings: AresSettings) -> dict[str, Any]:
@@ -1424,7 +1423,7 @@ async def change_password(
     )
     if not changed:
         raise HTTPException(401, "Not authenticated")
-    # Revoke the current access token by jti - same as logout()  - 
+    # Revoke the current access token by jti - same as logout()  -
     # so the old token cannot be reused within its remaining expiry window.
     return {"status": "ok", "note": "All existing sessions revoked"}
 
@@ -1596,6 +1595,7 @@ async def sso_saml_acs(
     """Assertion Consumer Service endpoint for SAML 2.0 (HTTP-POST binding)."""
     import base64
     from urllib.parse import quote
+
     from lxml import etree
 
     try:
@@ -1839,6 +1839,8 @@ async def save_sso_configuration(
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
     """Save or update SSO configuration for an organization (admin only)."""
+    import json as _json
+
     org = await db.get_organization(org_slug)
     if not org:
         raise HTTPException(404, "Organization not found")
@@ -1865,7 +1867,7 @@ async def save_sso_configuration(
         client_secret_enc=client_sec_enc,
         jwks_uri=body.jwks_uri,
         default_role=body.default_role,
-        role_mapping_json=json.dumps(body.role_mapping),
+        role_mapping_json=_json.dumps(body.role_mapping),
         is_enabled=1 if body.is_enabled else 0,
     )
     await db.audit(actor.username, "sso_config_saved", f"org={org_slug} protocol={body.protocol} id={sso_id}")
@@ -2672,7 +2674,7 @@ async def run_module(
                     elif isinstance(raw_tags, list):
                         existing_tags = [str(t) for t in raw_tags]
 
-                merged_ports = sorted(list(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()])))
+                merged_ports = sorted(set(clean_ports + [int(p) for p in old_ports if str(p).isdigit()]))
                 hostname = match_host.get("hostname") if match_host else (raw.get("hostname") or target_ip)
 
                 # Robust OS classification
@@ -2699,7 +2701,7 @@ async def run_module(
                     k in combined_telemetry
                     for k in ["linux", "debian", "ubuntu", "kali", "centos", "rhel", "red hat", "redhat", "fedora", "arch", "alpine", "openssh", "ssh pivot", "sudo", "suid"]
                 ) or ("linux" in module_id or "ssh" in module_id or module_id == "lateral.ssh_pivot")
-                
+
                 is_win_indicator = any(
                     k in combined_telemetry
                     for k in ["microsoft", "windows", "iis", "active directory", "kerberos", "domain controller", "msrpc"]
@@ -3410,7 +3412,7 @@ async def campaign_events(
                         {"type": "pong"},
                     ):
                         break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not await _send_protected_websocket_event(
                     connection,
                     {"type": "keepalive"},
@@ -3877,7 +3879,7 @@ async def campaign_attack_paths(
         logger.warning(
             "attack_graph_unavailable", error=str(e), hint="pip install networkx"
         )
-        raise HTTPException(
+        raise HTTPException(  # noqa: B904
             503,
             "Attack graph temporarily unavailable. "
             "Ensure networkx is installed: pip install ares-redteam",
@@ -4087,6 +4089,7 @@ async def run_campaign_plan(
     c_obj = _campaign_from_db_row(campaign)
     if not has_c_live_override and get_settings().ares_debug:
         import inspect
+
         from ares.core.execution_admission import _mint_test_dispatch_context
 
         result_rows: list[dict[str, Any]] = []
@@ -4392,7 +4395,7 @@ async def list_templates(
 @app.post("/templates/{template_name}/plan", tags=["campaigns"])
 async def plan_from_template_endpoint(
     template_name: str,
-    body: dict[str, Any] = {},
+    body: dict[str, Any] | None = None,
     actor: AuthenticatedUser = Depends(require_operator()),
 ) -> dict[str, Any]:
     """
@@ -4400,6 +4403,7 @@ async def plan_from_template_endpoint(
     Optionally pass global_params in the body (dc, domain, username, password).
     Returns the plan ready for POST /campaigns/{id}/run.
     """
+    body = body or {}
     from ares.core.engine import get_campaign_template, plan_from_template
 
     template = get_campaign_template(template_name)
@@ -4466,7 +4470,7 @@ async def ingest_bloodhound(
     try:
         safe_path = sanitize_path(body.json_path)
     except ValueError as exc:
-        raise HTTPException(400, f"Invalid path: {str(exc)[:200]}")
+        raise HTTPException(400, f"Invalid path: {str(exc)[:200]}")  # noqa: B904
 
     try:
         from ares.graph.attack_graph import AttackGraph
@@ -4504,11 +4508,11 @@ async def ingest_bloodhound(
             "graph_stats": graph.stats(),
         }
     except ImportError:
-        raise HTTPException(503, "networkx required - pip install networkx")
+        raise HTTPException(503, "networkx required - pip install networkx")  # noqa: B904
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")
+        raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")  # noqa: B904
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────

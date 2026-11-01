@@ -1,39 +1,39 @@
 from __future__ import annotations
+
 import asyncio
 import multiprocessing
 import time
+
 """
 Kerberoasting - impacket.krb5.kerberosv5 low-level API (impacket ≥0.11 compatible)
 MITRE: T1558.003 - Jitter + rate-limited TGS requests, hashcat-ready output.
 """
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.kerberoast")
-from ares.core.campaign import Finding, Severity, NoiseProfile
+from ares.core.campaign import NoiseProfile, Severity
+from ares.core.errors import AresError, ModuleValidationError
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import AresError, ModuleValidationError
-from ares.modules.params import KerberoastParams
-from ares.sdk import (
-    BaseModule,
-    EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
-    ModuleResult,
-    NetworkPermission,
-    OpsecLevel,
-    ProcessPermission,
-    UntrustedTargetData,
-    module_contract,
-)
 from ares.modules.ad.dependencies import (
     ad_bind_dry_run_metadata,
     ensure_ad_dependencies,
     nonretryable_ad_auth_error,
     sanitize_ad_username,
 )
-
+from ares.modules.params import KerberoastParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
+)
 
 KERBEROS_TGS_TIMEOUT_SECONDS = 30
 
@@ -96,9 +96,9 @@ def _kerberos_tgs_worker(
 ) -> None:
     """Run one blocking Impacket TGS request in a killable child process."""
     try:
+        from impacket.krb5 import constants
         from impacket.krb5.kerberosv5 import getKerberosTGS
         from impacket.krb5.types import Principal
-        from impacket.krb5 import constants
 
         server_name = Principal(
             spn,
@@ -166,7 +166,7 @@ async def _run_tgs_request_process(
                     "kerberoast_tgs_worker_timeout",
                     timeout_seconds=timeout_seconds,
                 )
-                raise asyncio.TimeoutError
+                raise TimeoutError
             await asyncio.sleep(min(0.05, remaining))
 
         process.join(timeout=0)
@@ -275,8 +275,8 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         Evaluates DC accessibility, domain credentials, noise profile (Event ID 4769 risk),
         and recommends cipher tuning or targeted SPN requests.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
+        from ares.modules.base import FeasibilityReport
         ad = self._extract_ad_params(ctx)
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -329,9 +329,9 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
         Enforce dc, domain, and domain credentials.
         Also block early in STEALTH profile - each TGS request logs Event ID 4769.
         """
+        from ares.core.campaign import NoiseProfile
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import NoiseProfile
         if not isinstance(ctx, ExecutionContext):
             return
         ad = self._extract_ad_params(ctx)
@@ -533,9 +533,9 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
             ("impacket", "pyasn1", "pyasn1_modules"),
             module_id=self.MODULE_ID,
         )
+        from impacket.krb5 import constants
         from impacket.krb5.kerberosv5 import getKerberosTGT
         from impacket.krb5.types import Principal
-        from impacket.krb5 import constants
 
         noise_profile = self.campaign.noise_profile.value
         # Rate limit: requests per minute by noise profile
@@ -669,7 +669,7 @@ class KerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
                         "spn":  spn,
                         "hash": hash_str[:60] + "...",
                     })
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 logger.warning(
                     "kerberoast_tgs_timeout_classified",
                     candidates=self._last_candidate_count,

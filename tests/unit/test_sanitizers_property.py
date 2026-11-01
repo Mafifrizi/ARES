@@ -18,6 +18,7 @@ Run: pytest tests/unit/test_sanitizers_property.py -v
 from __future__ import annotations
 
 import os
+
 import pytest
 
 os.environ.setdefault("ARES_SECRET_KEY",       "prop-test-key-32chars-minimum!!!")
@@ -26,16 +27,15 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "PropTest1!")
 
 # Skip entire module gracefully if hypothesis not installed
 hypothesis = pytest.importorskip("hypothesis")
-from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from ares.core.security import (
-    sanitize_ldap,
     sanitize_hostname,
+    sanitize_ldap,
     sanitize_path,
     validate_ip_or_cidr,
 )
-
 
 # ── Shared strategies ─────────────────────────────────────────────────────────
 

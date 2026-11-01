@@ -15,13 +15,13 @@ from ares.core.campaign import Campaign, NoiseProfile
 from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.noise import NoiseController
-from ares.modules.base import BaseModule, FeasibilityReport, OpsecLevel
-from ares.state.target_state import HostState, OperatorSession
 from ares.modules.ad.adcs import ADCSModule
-from ares.modules.ad.kerberoast import KerberoastModule
 from ares.modules.ad.asreproast import ASREPRoastModule
 from ares.modules.ad.dcsync import DCSyncModule
+from ares.modules.ad.kerberoast import KerberoastModule
+from ares.modules.base import BaseModule, FeasibilityReport, OpsecLevel
 from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule
+from ares.state.target_state import HostState, OperatorSession
 
 
 @pytest.fixture

@@ -6,17 +6,18 @@ prompt management, and the 7 Unbreakable Security Guarantees.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from ares.mcp.events import McpEventBus
 from ares.mcp.prompts import McpPromptRegistry
 from ares.mcp.protocol import (
+    LATEST_PROTOCOL_VERSION,
     ErrorCode,
     InitializeResult,
     JSONRPCError,
     JSONRPCRequest,
     JSONRPCResponse,
-    LATEST_PROTOCOL_VERSION,
 )
 from ares.mcp.resources import McpResourceRegistry
 from ares.mcp.security import ConfirmationTokenManager, McpRateLimiter

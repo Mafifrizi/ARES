@@ -22,7 +22,6 @@ Engine calls:
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from ares.core.logger import get_logger
@@ -125,7 +124,7 @@ class WebhookNotifier:
                     continue
                 for net in _BLOCKED_NETWORKS:
                     if resolved_addr in net:
-                        raise ValueError(
+                        raise ValueError(  # noqa: B904
                             f"Webhook hostname {hostname!r} resolves to private/internal "
                             f"address {raw_ip!r}. SSRF protection: only public HTTPS "
                             "endpoints are allowed."

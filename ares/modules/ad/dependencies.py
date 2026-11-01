@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import importlib
 import re
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from ares.core.errors import ModuleValidationError, NetworkError
-
 
 AD_INSTALL_HINT = (
     'Install AD dependencies with .\\.venv\\Scripts\\python.exe -m pip install -e ".[ad]" '

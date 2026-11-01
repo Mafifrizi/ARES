@@ -9,16 +9,22 @@ Requires: NTLM hash, target host.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import PassTheHashParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -26,7 +32,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.pass_the_hash")
 
@@ -62,14 +67,14 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1550.002"]
     PARAMS_MODEL       = PassTheHashParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates NTLM hash presence, target host, and Kerberos-only/NTLM-disabled policies.
         Recommends Overpass-the-Hash (ad.kerberoast / credential.golden_ticket) if NTLM is blocked.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -260,7 +265,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
         nt_hash  = kwargs.get("nt_hash", "") or kwargs.get("hash", "")
         lm_hash  = kwargs.get("lm_hash", "aad3b435b51404eeaad3b435b51404ee")
         domain   = kwargs.get("domain", "")
-        command  = kwargs.get("command", "whoami /all")
+        command  = kwargs.get("command", "whoami /all")  # noqa: F841
         dry_run  = kwargs.get("dry_run", False)
 
         if not target or not nt_hash:
@@ -271,7 +276,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
         await self.before_request(target, "smb")  # scope check + jitter
 
         try:
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket not installed"}
 
@@ -295,7 +300,7 @@ class PassTheHashModule(BaseModule[PassTheHashParams, ModuleResult]):
               - STATUS_ACCESS_DENIED   → valid hash but no admin access
               - ConnectionError/timeout → host unreachable
             """
-            err_type = ""
+            err_type = ""  # noqa: F841
             try:
                 smb = SMBConnection(target, target, timeout=15)
                 smb.login(username, "", domain, lm_hash, nt_hash)

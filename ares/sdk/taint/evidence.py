@@ -96,12 +96,12 @@ class EvidenceRecord:
         # 1. Compute payload digest
         serialized = json.dumps(eff_payload, sort_keys=True, default=str)
         payload_digest = hashlib.sha256(
-            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
+            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode()
         ).hexdigest()
         object.__setattr__(self, "sha256_hash", payload_digest)
 
         # 2. Compute chain hash (Merkle link)
-        chain = hashlib.sha256(f"{self.parent_hash}:{payload_digest}".encode("utf-8")).hexdigest()
+        chain = hashlib.sha256(f"{self.parent_hash}:{payload_digest}".encode()).hexdigest()
         object.__setattr__(self, "chain_hash", chain)
 
     @property
@@ -114,7 +114,7 @@ class EvidenceRecord:
         eff_payload = self.payload if self.payload is not None else (self.data if self.data is not None else {})
         serialized = json.dumps(eff_payload, sort_keys=True, default=str)
         recomputed = hashlib.sha256(
-            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode("utf-8")
+            f"{eff_id}:{self.source_target}:{self.timestamp_ns}:{serialized}".encode()
         ).hexdigest()
         return hmac_equal(recomputed, self.sha256_hash)
 

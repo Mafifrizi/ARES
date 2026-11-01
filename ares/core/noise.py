@@ -15,9 +15,8 @@ from ares.core.logger import get_logger
 
 logger = get_logger("ares.core.noise")
 
-from ares.core.errors import ScopeError
 from ares.core.campaign import Campaign, NoiseProfile
-
+from ares.core.errors import ScopeError
 
 # ── Noise profiles ────────────────────────────────────────────────────────────
 

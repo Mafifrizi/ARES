@@ -13,11 +13,16 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
-from ares.modules.linux._parsers import CcacheParser, KirbiASN1Codec, KirbiParseError, build_ccache_v4
+from ares.modules.linux._parsers import (
+    CcacheParser,
+    KirbiASN1Codec,
+    KirbiParseError,
+    build_ccache_v4,
+)
 from ares.modules.params import TicketConverterParams
 from ares.sdk import (
     BaseModule,

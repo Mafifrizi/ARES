@@ -24,7 +24,6 @@ import random
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from ares.core.campaign import NoiseProfile
 from ares.core.logger import get_logger
@@ -352,7 +351,7 @@ class OpSecProfile:
     def from_noise_profile(cls, profile: NoiseProfile | str) -> "OpSecProfile":
         pname = profile.value if isinstance(profile, NoiseProfile) else profile
 
-        is_stealth    = pname == "stealth"
+        is_stealth    = pname == "stealth"  # noqa: F841
         is_aggressive = pname == "aggressive"
 
         beacon_profile = {

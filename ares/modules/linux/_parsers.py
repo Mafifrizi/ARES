@@ -18,7 +18,6 @@ import struct
 import time
 from typing import Any
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Samba TDB & SSSD LDB Binary Parser
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1105,7 +1104,7 @@ class ELFParser:
             elif p_type == 2:  # PT_DYNAMIC
                 dyn_offset = p_offset
                 dyn_size = p_filesz
-                dyn_vaddr = p_vaddr
+                dyn_vaddr = p_vaddr  # noqa: F841
 
         if not dyn_offset or dyn_offset >= len(data):
             return []
@@ -1267,7 +1266,7 @@ class LinuxCapParser:
         if not hasattr(os, "getxattr"):
             return []
         try:
-            cap_data = os.getxattr(path, "security.capability")  # type: ignore[attr-defined]
+            cap_data = os.getxattr(path, "security.capability")
             return cls.decode_capability_bytes(cap_data)
         except (OSError, ValueError):
             return []

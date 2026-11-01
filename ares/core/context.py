@@ -31,7 +31,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from ares.core.errors import InvalidContext
 from ares.core.logger import get_logger
@@ -42,13 +42,8 @@ P = TypeVar("P")
 T = TypeVar("T")
 
 if TYPE_CHECKING:
-    from ares.core.campaign import Campaign, NoiseProfile
-    from ares.core.config import AresSettings
-    from ares.core.noise import NoiseController
-    from ares.core.opsec.opsec import OpSecProfile
-    from ares.credential.vault import CredentialVault, Credential
-    from ares.state.target_state import OperatorSession, HostState
-    from ares.telemetry.collector import TelemetryCollector
+    from ares.credential.vault import Credential
+    from ares.state.target_state import HostState
 
 
 @dataclass
@@ -286,6 +281,7 @@ class ExecutionContext(Generic[P]):
     ) -> Any:
         """Record harvested loot artifact to be persisted durably."""
         import uuid
+
         from ares.db.database import Loot
 
         campaign_id = getattr(getattr(self, "campaign", None), "id", "")

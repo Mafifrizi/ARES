@@ -131,7 +131,7 @@ export function SecurityMeshCanvas({ className = "" }: SecurityMeshCanvasProps) 
         for (let i = 0; i < 6; i++) {
           const px = cx + DRAW_R * OFFSETS[i][0];
           const py = cy + DRAW_R * OFFSETS[i][1];
-          i === 0 ? ctx!.moveTo(px, py) : ctx!.lineTo(px, py);
+          if (i === 0) ctx!.moveTo(px, py); else ctx!.lineTo(px, py);
         }
         ctx!.closePath();
 

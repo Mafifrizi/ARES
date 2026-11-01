@@ -10,12 +10,12 @@ from __future__ import annotations
 
 try:
     from ares.security.audit import (  # noqa: F401
-        run_dependency_audit,
-        startup_audit,
-        AuditResult,
         AuditPolicy,
+        AuditResult,
         CVSSScore,
         Vulnerability,
+        run_dependency_audit,
+        startup_audit,
     )
 except ImportError:
     pass

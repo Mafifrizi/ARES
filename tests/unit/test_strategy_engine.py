@@ -407,7 +407,7 @@ class TestConstitutionEnforcer:
         return FakePlan(stages=stages)
 
     def _make_campaign(self, scope_cidr="10.0.0.0/8"):
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         return Campaign(
             name="Test", scope=[ScopeEntry(cidr=scope_cidr)],
             noise_profile=NoiseProfile.NORMAL,
@@ -444,7 +444,7 @@ class TestConstitutionEnforcer:
         assert "ad.kerberoast" in cleaned.stages[0]["modules"]
 
     def test_unauthorized_high_risk_module_blocked(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer, ALWAYS_REQUIRE_AUTH
+        from ares.strategy.enforcer import ALWAYS_REQUIRE_AUTH, ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(authorizations=[])
         # Pick a module from ALWAYS_REQUIRE_AUTH
         auth_module = sorted(ALWAYS_REQUIRE_AUTH)[0]
@@ -457,7 +457,7 @@ class TestConstitutionEnforcer:
         assert any(v.module_id == auth_module for v in violations)
 
     def test_authorized_high_risk_module_passes(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer, ALWAYS_REQUIRE_AUTH
+        from ares.strategy.enforcer import ALWAYS_REQUIRE_AUTH, ConstitutionEnforcer
         auth_module = sorted(ALWAYS_REQUIRE_AUTH)[0]
         enforcer = ConstitutionEnforcer(
             authorizations=[auth_module],
@@ -635,13 +635,13 @@ class TestReExports:
 
     def test_all_exports_importable(self):
         from ares.strategy import (
-            StrategyEngine,
-            ModuleOutcome,
-            RoundResult,
-            EngagementResult,
             DetectionSpikeError,
-            OutcomeKnowledgeBase,
+            EngagementResult,
+            ModuleOutcome,
             OperatorNotifier,
+            OutcomeKnowledgeBase,
+            RoundResult,
+            StrategyEngine,
         )
         assert StrategyEngine is not None
         assert ModuleOutcome is not None

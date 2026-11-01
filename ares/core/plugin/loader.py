@@ -31,8 +31,9 @@ import importlib.util
 import inspect
 import os as _os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
 
@@ -431,7 +432,7 @@ class PluginLoader:
                 return
             mod = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = mod
-            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+            spec.loader.exec_module(mod)
 
             for _, cls in inspect.getmembers(mod, inspect.isclass):
                 if self._is_valid_module_class(cls):

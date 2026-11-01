@@ -9,18 +9,16 @@ Covers:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import ssl
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings
-from ares.core.context import ExecutionContext
 from ares.core.noise import NoiseController
-from ares.mcp.protocol import ErrorCode, JSONRPCRequest
+from ares.mcp.protocol import ErrorCode
 from ares.mcp.security import McpScopeGate
 from ares.mcp.server import AresMcpServer
 from ares.modules.exfil.staged_collection import StagedCollectionModule, _audit_lots_egress_sync
@@ -194,7 +192,7 @@ class TestCrossPlatformUtf8Invariance:
     """Verifies that persistence layers read and write UTF-8 safely without Windows code page corruption."""
 
     def test_campaign_store_roundtrip_with_multibyte_unicode(self, tmp_path):
-        from ares.cli._store import save_campaign, load_campaign, campaigns_dir
+        from ares.cli._store import load_campaign, save_campaign
 
         with patch("ares.cli._store.campaigns_dir", return_value=tmp_path):
             mock_campaign = MagicMock()

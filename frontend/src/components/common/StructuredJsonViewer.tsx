@@ -11,7 +11,6 @@ import {
   Minimize2,
   Maximize2,
   WrapText,
-  Filter,
   Sparkles
 } from "lucide-react";
 
@@ -393,6 +392,24 @@ function JsonTreeBranch({
     return str.includes(searchTerm);
   }, [value, searchTerm]);
 
+  // Inline preview when collapsed (e.g. "{ status: 'ok', port: 22 }" or "[ 22, 80, 443 ]").
+  // Computed unconditionally and before the early returns below so hook order stays
+  // stable (React rules of hooks); only consumed on the container render path.
+  const collapsedPreview = useMemo(() => {
+    if (isArray) {
+      const arr = value as unknown[];
+      const previews = arr.slice(0, 3).map((item) =>
+        typeof item === "object" && item !== null ? "{...}" : String(item)
+      );
+      return `[ ${previews.join(", ")}${arr.length > 3 ? `, +${arr.length - 3} more` : ""} ]`;
+    }
+    if (isObject) {
+      const keys = Object.keys(value as Record<string, unknown>);
+      return `{ ${keys.slice(0, 3).join(", ")}${keys.length > 3 ? `, +${keys.length - 3} more` : ""} }`;
+    }
+    return "";
+  }, [value, isArray, isObject]);
+
   const defaultOpen = forceExpandAll !== null ? forceExpandAll : hasSearchMatch || depth < defaultDepth;
   const isExpanded = expandedNodes[path] ?? defaultOpen;
 
@@ -442,19 +459,6 @@ function JsonTreeBranch({
   const visibleEntries = isArray && itemCount > arrayLimit && forceExpandAll !== true
     ? entries.slice(0, arrayLimit)
     : entries;
-
-  // Inline preview when collapsed (e.g. "{ status: 'ok', port: 22 }" or "[ 22, 80, 443 ]")
-  const collapsedPreview = useMemo(() => {
-    if (isArray) {
-      const previews = (value as unknown[]).slice(0, 3).map((item) => {
-        if (typeof item === "object" && item !== null) return "{...}";
-        return String(item);
-      });
-      return `[ ${previews.join(", ")}${itemCount > 3 ? `, +${itemCount - 3} more` : ""} ]`;
-    }
-    const keys = Object.keys(value as Record<string, unknown>).slice(0, 3);
-    return `{ ${keys.join(", ")}${itemCount > 3 ? `, +${itemCount - 3} more` : ""} }`;
-  }, [value, isArray, itemCount]);
 
   return (
     <div className="space-y-0.5">

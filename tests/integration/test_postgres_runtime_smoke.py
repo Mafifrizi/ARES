@@ -6,7 +6,7 @@ import os
 import re
 import sys
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -1663,7 +1663,7 @@ async def test_postgres_runtime_schema_and_transaction_smoke() -> None:
                 hash_refresh_token,
             )
 
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
             expires_at = created_at + timedelta(days=30)
             retain_until = expires_at + timedelta(days=30)
             family_id = generate_family_id()

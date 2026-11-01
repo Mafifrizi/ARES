@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import fields, replace
+from datetime import UTC
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -244,14 +245,13 @@ def _live_fixture():
 
 async def _sqlite_live_fixture(tmp_path: Any, monkeypatch: pytest.MonkeyPatch):
     """Build one descriptor-authorized C-LIVE coordinator on the real SQLite store."""
+    from ares.modules import descriptors as descriptor_module
+    from ares.modules.descriptors import ModuleCategory, ModuleDescriptor
     from tests.unit.test_execution_lifecycle_persistence import (
         _p1c_eligible_descriptor,
         _p1c_enable_acceptance,
         _p1c_sqlite_authority_store,
     )
-
-    from ares.modules import descriptors as descriptor_module
-    from ares.modules.descriptors import ModuleCategory, ModuleDescriptor
 
     source = _p1c_eligible_descriptor(monkeypatch)
     descriptor_values = {
@@ -914,7 +914,7 @@ async def test_plan_and_strategy_rehydrate_durable_state_and_done_is_success(tmp
 async def test_strategy_preflight_does_not_reserve_a_slot_for_unknown_campaign(
     monkeypatch: Any,
 ) -> None:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from unittest.mock import MagicMock
 
     from ares.api.rbac import AuthenticatedUser
@@ -959,7 +959,7 @@ async def test_strategy_preflight_does_not_reserve_a_slot_for_unknown_campaign(
             user_id="11111111-1111-4111-8111-111111111111",
             subject="owner",
             jti="preflight-jti",
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
             family_id="A" * 43,
             auth_epoch=1,
         ),

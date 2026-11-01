@@ -11,11 +11,11 @@ from __future__ import annotations
 try:
     from ares.core.chain.chain import (  # noqa: F401
         AttackChain,
-        DependencyResolver,
         CapabilityResolver,
         ChainAdvisor,
         ChainNode,
         CyclicDependencyError,
+        DependencyResolver,
     )
 except ImportError:
     pass  # Optional deps not installed

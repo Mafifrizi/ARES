@@ -6,12 +6,13 @@ refresh token family session remains active and unrevoked.
 """
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+
 import pytest
 
-from ares.db.websocket_tickets import BearerTicketSource
 from ares.db.database import AresDatabase
+from ares.db.websocket_tickets import BearerTicketSource
 
 
 @pytest.mark.asyncio
@@ -35,9 +36,9 @@ async def test_websocket_stays_alive_past_bearer_access_token_expiry() -> None:
         )
         await db.save_campaign(campaign)
 
-        from ares.db.database import format_sqlite_utc
         from ares.core.token_sessions import generate_family_id
-        now = datetime.now(timezone.utc)
+        from ares.db.database import format_sqlite_utc
+        now = datetime.now(UTC)
         family_id = generate_family_id()
         created_str = format_sqlite_utc(now)
         abs_exp_str = format_sqlite_utc(now + timedelta(days=7))
@@ -100,13 +101,13 @@ async def test_websocket_stays_alive_past_bearer_access_token_expiry() -> None:
         assert p16.username == "ws-test-operator"
 
         # However, if the family session is revoked or absolutely expired, it MUST fail (fail-closed)
-        revoked_ts = format_sqlite_utc(datetime.now(timezone.utc))
+        revoked_ts = format_sqlite_utc(datetime.now(UTC))
         await db.conn.execute(
             "UPDATE refresh_token_families SET state='revoked', revoked_at=?, revoke_reason='logout_current' WHERE id=?",
             (revoked_ts, family_id),
         )
         await db.conn.commit()
-        p_revoked = await db.resolve_websocket_ticket_principal(expired_bearer_handle)
+        p_revoked = await db.resolve_websocket_ticket_principal(expired_bearer_handle)  # noqa: F841
         # Test absolute expiration of family session
         # Reactivate family first
         await db.conn.execute(

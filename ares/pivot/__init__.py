@@ -12,9 +12,9 @@ try:
     from ares.pivot.infrastructure import (  # noqa: F401
         PivotManager,
         PivotTunnel,
-        TunnelType,
-        TunnelState,
         PortForward,
+        TunnelState,
+        TunnelType,
     )
 except ImportError:
     pass  # asyncssh not installed

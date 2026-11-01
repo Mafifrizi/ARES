@@ -25,7 +25,7 @@ Usage:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -600,9 +600,9 @@ class TechniqueLibrary:
         ]
 
     def all_tactics(self) -> list[str]:
-        return sorted(set(
+        return sorted({
             tac for t in self._by_id.values() for tac in t.tactics
-        ))
+        })
 
     def all(self) -> list[Technique]:
         return list(self._by_id.values())
@@ -769,7 +769,7 @@ class CoverageReport:
         covered: list[Technique] = [
             t for t in (self.library.get(tid) for tid in technique_ids) if t
         ]
-        tactics_covered = set(tac for t in covered for tac in t.tactics)
+        tactics_covered = {tac for t in covered for tac in t.tactics}
 
         return {
             "total_techniques": len(technique_ids),

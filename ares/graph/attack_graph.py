@@ -29,8 +29,12 @@ from typing import Any
 
 from ares.core.logger import get_logger
 from ares.normalize.artifacts import (
-    ArtifactStore, ArtifactType, CredentialArtifact, DomainArtifact,
-    HashArtifact, HostArtifact, NormalizedArtifact, PermissionArtifact, UserArtifact,
+    ArtifactStore,
+    CredentialArtifact,
+    HashArtifact,
+    HostArtifact,
+    PermissionArtifact,
+    UserArtifact,
 )
 
 try:
@@ -141,7 +145,7 @@ class AttackGraph:
             raise ImportError(
                 "networkx is required for attack graph: pip install networkx"
             )
-        self._g: Any = nx.DiGraph()  # type: ignore[attr-defined]
+        self._g: Any = nx.DiGraph()
         self._nodes: dict[str, GraphNode] = {}
         self._edges: list[GraphEdge] = []
 
@@ -777,14 +781,14 @@ class AttackGraph:
         elif p.is_dir():
             for fp in sorted(p.glob("*.json")):
                 try:
-                    with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                    with open(fp, encoding="utf-8", errors="replace") as fh:
                         raw_payloads.append((fp.name, _json.load(fh)))
                 except Exception as exc:
                     logger.warning("bloodhound_parse_error", file=str(fp), error=str(exc)[:100])
 
         elif p.is_file():
             try:
-                with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                with open(p, encoding="utf-8", errors="replace") as fh:
                     raw_payloads.append((p.name, _json.load(fh)))
             except Exception as exc:
                 logger.warning("bloodhound_parse_error", file=str(p), error=str(exc)[:100])
@@ -1059,7 +1063,7 @@ class AttackGraph:
 
             # 3. Computer Local Admins & Permissions
             if bh_type in ("computers", "computer"):
-                def _process_comp_members(data_field: str, rel_type: str, weight: float) -> None:
+                def _process_comp_members(data_field: str, rel_type: str, weight: float, item: Any = item, target_node: Any = target_node) -> None:
                     raw_block = item.get(data_field)
                     entries = raw_block.get("Results", []) if isinstance(raw_block, dict) else (
                         raw_block if isinstance(raw_block, list) else []

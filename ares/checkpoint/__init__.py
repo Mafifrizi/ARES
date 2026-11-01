@@ -10,8 +10,8 @@ from __future__ import annotations
 
 try:
     from ares.checkpoint.manager import (  # noqa: F401
-        CheckpointManager,
         CheckpointData,
+        CheckpointManager,
         CheckpointManifest,
         build_checkpoint,
     )

@@ -10,9 +10,6 @@ Validates multi-layered security protections:
   - POST /modules/reload API Endpoint
 """
 
-import ast
-import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -23,8 +20,6 @@ from starlette.testclient import TestClient
 
 from ares.api.server import app
 from ares.core.updater import (
-    ALLOWED_DOMAINS,
-    MAX_MODULE_FILE_SIZE,
     ModuleManifestItem,
     PlatformUpdateManager,
     SecurityViolationError,
@@ -35,7 +30,6 @@ from ares.core.updater import (
     secure_verify_url,
     validate_module_code,
 )
-
 
 # ── 1. Security: Path Traversal & Confinement ──────────────────────────────────
 

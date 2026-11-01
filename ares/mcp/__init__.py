@@ -5,7 +5,7 @@ Zed, Open-WebUI, LibreChat, LangChain, LlamaIndex, CrewAI, AutoGen, and Local LL
 """
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401
 from typing import Any
 
 from ares.mcp.export import export_gemini_tools, export_json_schema, export_openai_tools

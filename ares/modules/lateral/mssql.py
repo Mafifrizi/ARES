@@ -21,15 +21,14 @@ import ipaddress
 import re
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import MSSQLParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -392,7 +391,7 @@ class MSSQLModule(BaseModule):
                            port: int) -> dict:
         """Connect to MSSQL and enumerate server info. Sync - runs in executor."""
         try:
-            import impacket.tds as tds  # type: ignore[import]
+            import impacket.tds as tds
 
             ms = tds.MSSQL(target, port)
             ms.connect()
@@ -434,14 +433,14 @@ class MSSQLModule(BaseModule):
         except ImportError:
             # impacket TDS not available - try pymssql fallback
             return self._enum_pymssql(target, username, password, port)
-        except Exception as exc:
+        except Exception as exc:  # noqa: F841
             raise  # propagate to async wrapper for _classify_error
 
     def _enum_pymssql(self, target: str, username: str, password: str,
                        port: int) -> dict:
         """Fallback using pymssql if impacket TDS unavailable."""
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=10)
             cur  = conn.cursor()
             info: dict = {"linked_servers": [], "databases": []}
@@ -459,7 +458,7 @@ class MSSQLModule(BaseModule):
             return info
         except ImportError:
             return {"error": "No MSSQL driver available - pip install pymssql"}
-        except Exception as exc:
+        except Exception as exc:  # noqa: F841
             raise  # propagate to async wrapper for _classify_error
 
     def _xp_cmdshell_sync(self, target: str, username: str, password: str,
@@ -467,7 +466,7 @@ class MSSQLModule(BaseModule):
         """Enable xp_cmdshell, execute command, and safely teardown in finally."""
         conn = None
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
             cur  = conn.cursor()
             # Enable advanced options + xp_cmdshell
@@ -514,7 +513,7 @@ class MSSQLModule(BaseModule):
             parsed = ipaddress.ip_address(ip.strip())
             return str(parsed)
         except ValueError:
-            raise ModuleValidationError(
+            raise ModuleValidationError(  # noqa: B904
                 f"listener_ip must be a valid IP address, got: {ip!r}",
                 module_id=self.MODULE_ID,
                 field="listener_ip",
@@ -546,7 +545,7 @@ class MSSQLModule(BaseModule):
         """Execute command via linked server xp_cmdshell."""
         safe_linked = self._validate_linked_server(linked)
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=15)
             cur  = conn.cursor()
             safe_cmd = command.replace("'", "''")   # SQL-escape
@@ -564,7 +563,7 @@ class MSSQLModule(BaseModule):
         """Coerce NTLM auth from SQL server to listener via xp_dirtree."""
         valid_ip = self._validate_listener_ip(listener_ip)
         try:
-            import pymssql  # type: ignore[import]
+            import pymssql
             conn = pymssql.connect(target, username, password, "master", port=port, timeout=10)
             cur  = conn.cursor()
             try:

@@ -9,12 +9,9 @@ Run: pytest tests/unit/test_core_edge_cases.py -v
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import time
-import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 
@@ -55,7 +52,7 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_finding_with_empty_evidence(self, db):
         """Finding with empty evidence string should still save."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="EmptyEv", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -69,8 +66,9 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_finding_rejects_empty_description(self, db):
         """Finding with empty description should be rejected by Pydantic."""
-        from ares.core.campaign import Finding, Severity
         import pydantic
+
+        from ares.core.campaign import Finding, Severity
         with pytest.raises(pydantic.ValidationError):
             Finding(title="Bad", description="", severity=Severity.LOW,
                     confidence=0.5, module_id="test", host="10.0.0.1")
@@ -78,7 +76,7 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_finding_with_unicode_content(self, db):
         """Finding with unicode/emoji content should save and retrieve correctly."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="Unicode", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -92,7 +90,7 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_finding_with_very_long_description(self, db):
         """Finding with 10K character description should save."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="LongDesc", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -143,8 +141,8 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_credential_with_empty_secret(self, db):
         """Credential with empty secret should still save."""
-        from ares.db.database import DBCredential
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.db.database import DBCredential
         c = Campaign(name="EmptyCred", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -196,7 +194,7 @@ class TestDatabaseEdgeCases:
     @pytest.mark.asyncio
     async def test_concurrent_finding_writes(self, db):
         """Multiple concurrent finding writes should not corrupt DB."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="Concurrent", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -227,28 +225,28 @@ class TestCampaignEdgeCases:
 
     def test_scope_boundary_first_ip(self):
         """First IP in CIDR should be in scope."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.0.0") is True
 
     def test_scope_boundary_last_ip(self):
         """Last IP in CIDR should be in scope."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.0.255") is True
 
     def test_scope_boundary_just_outside(self):
         """IP just outside CIDR boundary should be out of scope."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.1.0") is False
 
     def test_scope_single_host(self):
         """/32 scope should only match exactly one IP."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.5/32")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.0.5") is True
@@ -257,7 +255,7 @@ class TestCampaignEdgeCases:
 
     def test_scope_multiple_entries(self):
         """Multiple scope entries - IP in any should be in scope."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[
             ScopeEntry(cidr="10.0.0.0/24"),
             ScopeEntry(cidr="192.168.1.0/24"),
@@ -268,7 +266,7 @@ class TestCampaignEdgeCases:
 
     def test_scope_overlapping_cidrs(self):
         """Overlapping CIDRs should still work (no double-count issues)."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[
             ScopeEntry(cidr="10.0.0.0/8"),
             ScopeEntry(cidr="10.0.0.0/24"),  # subset of /8
@@ -278,7 +276,7 @@ class TestCampaignEdgeCases:
 
     def test_scope_invalid_ip_returns_false(self):
         """Invalid IP string should return False (not crash)."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         # Garbage strings should fail closed (return False)
@@ -288,7 +286,7 @@ class TestCampaignEdgeCases:
 
     def test_finding_duplicate_titles(self):
         """Multiple findings with same title should all be stored."""
-        from ares.core.campaign import Campaign, Finding, Severity, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         for i in range(5):
@@ -301,7 +299,7 @@ class TestCampaignEdgeCases:
 
     def test_campaign_summary_with_no_findings(self):
         """Summary on empty campaign should return valid dict."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="Empty", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         summary = c.summary()
@@ -405,7 +403,12 @@ class TestVaultEdgeCases:
 
     def test_vault_with_none_key(self):
         """Vault with None encryption key should still function (unencrypted mode)."""
-        from ares.credential.vault import CredentialVault, Credential, CredentialType, PrivilegeLevel
+        from ares.credential.vault import (
+            Credential,
+            CredentialType,
+            CredentialVault,
+            PrivilegeLevel,
+        )
         vault = CredentialVault(encryption_key=None)
         cred = Credential(
             username="nokey", domain="CORP",
@@ -524,8 +527,8 @@ class TestNoiseEdgeCases:
     @pytest.mark.asyncio
     async def test_stealth_jitter_longer_than_aggressive(self):
         """STEALTH jitter should be demonstrably longer than AGGRESSIVE."""
-        from ares.core.noise import NoiseController, NOISE_PROFILES
-        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.core.campaign import NoiseProfile
+        from ares.core.noise import NOISE_PROFILES
 
         stealth_min = NOISE_PROFILES[NoiseProfile.STEALTH]["jitter_min_ms"]
         aggressive_max = NOISE_PROFILES[NoiseProfile.AGGRESSIVE]["jitter_max_ms"]
@@ -538,8 +541,8 @@ class TestNoiseEdgeCases:
     @pytest.mark.asyncio
     async def test_stealth_rate_limit_stricter(self):
         """STEALTH should allow fewer requests per minute than AGGRESSIVE."""
-        from ares.core.noise import NOISE_PROFILES
         from ares.core.campaign import NoiseProfile
+        from ares.core.noise import NOISE_PROFILES
 
         stealth_rpm = NOISE_PROFILES[NoiseProfile.STEALTH]["requests_per_minute"]
         aggressive_rpm = NOISE_PROFILES[NoiseProfile.AGGRESSIVE]["requests_per_minute"]
@@ -548,8 +551,8 @@ class TestNoiseEdgeCases:
     @pytest.mark.asyncio
     async def test_rate_limiter_multiple_acquires(self):
         """Multiple rapid acquires should all complete (within rate limit)."""
-        from ares.core.noise import NoiseController
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.core.noise import NoiseController
         c = Campaign(name="T", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.AGGRESSIVE)
         nc = NoiseController(c)
@@ -563,8 +566,8 @@ class TestNoiseEdgeCases:
     @pytest.mark.asyncio
     async def test_noise_profiles_all_have_required_keys(self):
         """Every noise profile should define all required keys."""
-        from ares.core.noise import NOISE_PROFILES
         from ares.core.campaign import NoiseProfile
+        from ares.core.noise import NOISE_PROFILES
         required = {"jitter_min_ms", "jitter_max_ms", "requests_per_minute",
                      "ldap_page_size", "kerberos_tgs_rpm"}
         for profile in [NoiseProfile.STEALTH, NoiseProfile.NORMAL, NoiseProfile.AGGRESSIVE]:
@@ -633,8 +636,8 @@ class TestCVSSEdgeCases:
 
     def test_cvss_info_severity_low_score(self):
         """INFO severity should get low CVSS score."""
-        from ares.core.cvss import enrich_finding_with_cvss
         from ares.core.campaign import Finding, Severity
+        from ares.core.cvss import enrich_finding_with_cvss
         f = Finding(title="Info", description="D", severity=Severity.INFO,
                     confidence=0.5, module_id="test", host="10.0.0.1")
         enrich_finding_with_cvss(f)
@@ -643,8 +646,8 @@ class TestCVSSEdgeCases:
 
     def test_cvss_critical_high_score(self):
         """CRITICAL severity should get high CVSS score."""
-        from ares.core.cvss import enrich_finding_with_cvss
         from ares.core.campaign import Finding, Severity
+        from ares.core.cvss import enrich_finding_with_cvss
         f = Finding(title="Crit", description="D", severity=Severity.CRITICAL,
                     confidence=1.0, module_id="ad.dcsync", host="10.0.0.1",
                     mitre_technique="T1003.006")
@@ -660,8 +663,8 @@ class TestCVSSEdgeCases:
 
     def test_compliance_enrichment_no_technique(self):
         """Finding without mitre_technique should get empty compliance."""
-        from ares.core.cvss import enrich_finding_with_compliance
         from ares.core.campaign import Finding, Severity
+        from ares.core.cvss import enrich_finding_with_compliance
         f = Finding(title="NoTech", description="D", severity=Severity.MEDIUM,
                     confidence=0.5, module_id="test", host="10.0.0.1",
                     evidence={})
@@ -716,7 +719,7 @@ class TestConcurrencyStress:
     @pytest.mark.asyncio
     async def test_concurrent_findings_no_corruption(self, db):
         """100 findings written concurrently must all have correct content."""
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
         c = Campaign(name="ConcFind", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -825,7 +828,12 @@ class TestEncryptionIntegrity:
 
     def test_vault_different_keys_isolated(self):
         """Two vaults with different keys must not cross-decrypt."""
-        from ares.credential.vault import CredentialVault, Credential, CredentialType, PrivilegeLevel
+        from ares.credential.vault import (
+            Credential,
+            CredentialType,
+            CredentialVault,
+            PrivilegeLevel,
+        )
         vault_a = CredentialVault(encryption_key="vault-key-a-32-chars-padded-xxxx")
         vault_b = CredentialVault(encryption_key="vault-key-b-32-chars-padded-xxxx")
 
@@ -841,7 +849,12 @@ class TestEncryptionIntegrity:
 
     def test_vault_secret_not_in_plaintext_memory(self):
         """After storing, the plaintext secret should only exist encrypted."""
-        from ares.credential.vault import CredentialVault, Credential, CredentialType, PrivilegeLevel
+        from ares.credential.vault import (
+            Credential,
+            CredentialType,
+            CredentialVault,
+            PrivilegeLevel,
+        )
         vault = CredentialVault(encryption_key="test-vault-key-32-chars-padded!")
         cred = Credential(username="admin", domain="CORP",
                           cred_type=CredentialType.CLEARTEXT,
@@ -868,8 +881,8 @@ class TestEncryptionIntegrity:
     @pytest.mark.asyncio
     async def test_db_credential_encrypted_at_rest(self, db):
         """Credential secret in DB must be encrypted - NOT plaintext."""
-        from ares.db.database import DBCredential
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.db.database import DBCredential
         c = Campaign(name="EncTest", scope=[ScopeEntry(cidr="10.0.0.0/8")],
                      noise_profile=NoiseProfile.NORMAL)
         await db.save_campaign(c)
@@ -888,8 +901,8 @@ class TestEncryptionIntegrity:
     @pytest.mark.asyncio
     async def test_db_wrong_encryption_key_fails_decrypt(self, tmp_path):
         """Opening DB with wrong encryption key must fail to decrypt credentials."""
-        from ares.db.database import AresDatabase, DBCredential
         from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
+        from ares.db.database import AresDatabase, DBCredential
 
         db_path = str(tmp_path / "keytest.db")
         # Write with key A
@@ -922,8 +935,7 @@ class TestSecurityBoundaries:
 
     def test_scope_enforcement_prevents_out_of_scope_execution(self):
         """Module should refuse to execute against out-of-scope targets."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
-        from ares.core.noise import NoiseController
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         c = Campaign(name="Scoped", scope=[ScopeEntry(cidr="10.0.0.0/24")],
                      noise_profile=NoiseProfile.NORMAL)
         assert c.is_in_scope("10.0.0.1") is True
@@ -982,8 +994,9 @@ class TestSecurityBoundaries:
 
     def test_password_72_byte_limit_no_silent_truncation(self):
         """Passwords exceeding 72 UTF-8 bytes must raise ValueError, not silently truncate."""
-        from ares.core.security import hash_password, verify_password
         import pytest
+
+        from ares.core.security import hash_password, verify_password
 
         # 73-character password must raise ValueError on hash
         long_pass = "A" * 73
@@ -998,7 +1011,6 @@ class TestSecurityBoundaries:
     def test_api_key_prefix_validation(self):
         """API key verification must reject keys without ares_ prefix."""
         # This tests that random strings can't bypass the prefix check
-        from ares.core.security import hash_password
         # A valid bcrypt hash that would match if the prefix check wasn't there
         fake_key = "not_ares_prefix_but_valid_otherwise"
         # The verify_api_key method checks prefix first - we verify that pattern
@@ -1007,8 +1019,9 @@ class TestSecurityBoundaries:
     @pytest.mark.asyncio
     async def test_revoke_api_key_double_revoke_idempotent(self):
         """Revoking an already-revoked key should return False (not True)."""
-        from ares.db.database import AresDatabase
         import tempfile
+
+        from ares.db.database import AresDatabase
         with tempfile.TemporaryDirectory() as tmp:
             db = await AresDatabase.create(
                 f"{tmp}/revoke.db", "test-enc-key-32-chars-placeholder!")
@@ -1025,8 +1038,9 @@ class TestSecurityBoundaries:
     @pytest.mark.asyncio
     async def test_revoke_wrong_user_api_key_fails(self):
         """User A cannot revoke User B's API key."""
-        from ares.db.database import AresDatabase
         import tempfile
+
+        from ares.db.database import AresDatabase
         with tempfile.TemporaryDirectory() as tmp:
             db = await AresDatabase.create(
                 f"{tmp}/xuser.db", "test-enc-key-32-chars-placeholder!")

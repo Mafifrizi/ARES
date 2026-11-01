@@ -22,20 +22,26 @@ Credential extraction from vault is handled by BaseLateralModule.execute().
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import time
 from typing import Any
 
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
-from ares.modules.lateral.modules import (
-    BaseLateralModule, LateralResult, LateralTechnique, AuthStrategy,
-)
 from ares.modules.base import OpsecLevel
+from ares.modules.lateral.modules import (
+    BaseLateralModule,
+    LateralResult,
+    LateralTechnique,
+)
 from ares.modules.params import DCOMParams
 from ares.sdk import (
-    EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -79,15 +85,15 @@ class DCOMLateral(BaseLateralModule):
     MIN_NOISE_PROFILE  = "normal"   # blocked in stealth - creates remote process
     PARAMS_MODEL       = DCOMParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         DCOM (MMC20.Application / ShellWindows) is significantly stealthier than PsExec
         because it requires no service creation.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         base = await super().assess_feasibility(ctx)
         blockers = list(base.blockers)
@@ -241,13 +247,13 @@ class DCOMLateral(BaseLateralModule):
               target=target, technique="T1021.003")
 
         try:
-            from impacket.dcerpc.v5 import transport, dcomrt   # type: ignore[import]
-            from impacket.dcerpc.v5.dcomrt import (             # type: ignore[import]
-                DCOMConnection,
+            from impacket.dcerpc.v5 import dcomrt, transport  # noqa: F401
+            from impacket.dcerpc.v5.dcom import mmc, wmi
+            from impacket.dcerpc.v5.dcom.oaut import (
+                IDispatch,  # noqa: F401
             )
-            from impacket.dcerpc.v5.dcom import mmc, wmi       # type: ignore[import]
-            from impacket.dcerpc.v5.dcom.oaut import (          # type: ignore[import]
-                IDispatch,
+            from impacket.dcerpc.v5.dcomrt import (
+                DCOMConnection,
             )
         except ImportError:
             return LateralResult(

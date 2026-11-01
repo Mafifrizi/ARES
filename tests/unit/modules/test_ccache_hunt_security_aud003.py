@@ -3,8 +3,8 @@ Security and regression tests for AUD-003:
 Elimination of shell=True, safe subprocess invocation, native Python IO for /proc/keys,
 and strict validation of key_id in linux.ccache_hunt.
 """
-from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

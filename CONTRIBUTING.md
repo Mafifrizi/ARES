@@ -307,7 +307,7 @@ pytest tests/unit/ --cov=ares --cov-fail-under=82 -v  # with coverage
 
 ## Code Guidelines & Conventions
 
-- **Python 3.10+** - use `match`, `|` union types, `TypeAlias` where appropriate
+- **Python 3.11+** - use `match`, `|` union types, `TypeAlias` where appropriate
 - **Pydantic v2** for all settings and data models
 - **structlog** for all logging - never `print()` or stdlib `logging` directly
 - **asyncio** throughout - no blocking calls on the event loop

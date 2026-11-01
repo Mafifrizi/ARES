@@ -20,17 +20,17 @@ interface TacticalInspectorDrawerProps {
 
 export function TacticalInspectorDrawer({
   selection,
-  onClose,
-  campaignId
+  onClose
 }: TacticalInspectorDrawerProps) {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
 
-  if (!selection) return null;
-
-  const isNode = selection.kind === "node";
-  const node = isNode ? selection.value : null;
-  const edge = !isNode ? selection.value : null;
+  // Derivations are null-safe so the useMemo below runs unconditionally
+  // (React rules of hooks). The null-selection early return is placed after
+  // all hooks have run; the parent only mounts this with a selection anyway.
+  const isNode = selection?.kind === "node";
+  const node = selection && isNode ? selection.value : null;
+  const edge = selection && !isNode ? selection.value : null;
 
   const nodeInfo = node ? inferCobaltNodeData(node) : null;
   const metadata = (node?.metadata ?? edge?.metadata ?? {}) as Record<string, unknown>;
@@ -41,11 +41,9 @@ export function TacticalInspectorDrawer({
   const openPorts = Array.isArray(metadata.open_ports) ? (metadata.open_ports as (number | string)[]) : [];
   const serviceVersions = (metadata.service_versions ?? {}) as Record<string, string>;
   const findings = Array.isArray(metadata.findings) ? (metadata.findings as Record<string, unknown>[]) : [];
-  const riskScore = typeof metadata.risk_score === "number" ? metadata.risk_score : null;
   const cvssMax = typeof metadata.cvss_max === "number" ? metadata.cvss_max : null;
 
   const targetVal = targetIp || node?.label || "";
-  const isWindows = targetOs.toLowerCase().includes("win");
 
   // Deduplicate and group findings to present a clean, high-signal list
   const groupedFindings = useMemo(() => {
@@ -76,6 +74,9 @@ export function TacticalInspectorDrawer({
     return Array.from(map.values());
   }, [findings, targetVal]);
 
+  // All hooks have now run; safe to bail out when there is no selection.
+  if (!selection) return null;
+
   const hasPrivescFinding = findings.some((f) => {
     const title = String(f.title || f.label || "").toLowerCase();
     const tech = String(f.mitre_technique || f.mitre || "");
@@ -86,45 +87,6 @@ export function TacticalInspectorDrawer({
       title.includes("sudo") ||
       title.includes("privilege") ||
       (sev === "critical" && (title.includes("root") || title.includes("admin") || title.includes("binaries")))
-    );
-  });
-
-  const hasHarvestFinding = findings.some((f) => {
-    const title = String(f.title || f.label || "").toLowerCase();
-    const mod = String(f.module_id || "").toLowerCase();
-    const tech = String(f.mitre_technique || f.mitre || "").toLowerCase();
-    return (
-      mod.includes("ccache") ||
-      mod.includes("sssd") ||
-      mod.includes("secrets") ||
-      mod.includes("lsass") ||
-      mod.includes("lsa_secrets") ||
-      tech.includes("t1558") ||
-      tech.includes("t1552") ||
-      tech.includes("t1003") ||
-      title.includes("secret") ||
-      title.includes("credential") ||
-      title.includes("ticket") ||
-      title.includes("ccache") ||
-      title.includes("shadow") ||
-      title.includes("hash")
-    );
-  });
-
-  const hasLateralFinding = findings.some((f) => {
-    const title = String(f.title || f.label || "").toLowerCase();
-    const mod = String(f.module_id || "").toLowerCase();
-    const tech = String(f.mitre_technique || f.mitre || "").toLowerCase();
-    return (
-      mod.includes("ssh_pivot") ||
-      mod.includes("lateral") ||
-      mod.includes("wmiexec") ||
-      mod.includes("psexec") ||
-      mod.includes("smb") ||
-      tech.includes("t1021") ||
-      title.includes("lateral") ||
-      title.includes("pivot") ||
-      title.includes("ssh pivot")
     );
   });
 

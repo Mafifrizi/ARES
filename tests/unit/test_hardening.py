@@ -12,13 +12,11 @@ Run: pytest tests/unit/test_hardening.py -v
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import stat
 import sys
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -56,7 +54,7 @@ class TestNoPlaintextCredentials:
         BLOCKER-001: Finding description must NOT contain the actual password.
         OLD CODE WOULD FAIL: description was "Valid credentials found: CORP\\admin / P@ssw0rd!"
         """
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 
         real_password = "SuperSecret123!"
 
@@ -106,7 +104,7 @@ class TestNoPlaintextCredentials:
         BLOCKER-001: Full-text search across ALL DB columns must not find password.
         This catches any path where plaintext might leak.
         """
-        from ares.core.campaign import Campaign, Finding, Severity, NoiseProfile, ScopeEntry
+        from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 
         real_password = "MySecretP@ss99!"
 
@@ -196,8 +194,9 @@ class TestCredentialArtifactCleanup:
         """
         BLOCKER-002: Directories containing credential material must be 0o700.
         """
-        from ares.core.security import secure_mkdtemp
         import shutil
+
+        from ares.core.security import secure_mkdtemp
         path = secure_mkdtemp(prefix="test_hardening_")
         try:
             mode = os.stat(path).st_mode
@@ -216,9 +215,11 @@ class TestCredentialArtifactCleanup:
         cleanup_credential_artifacts must delete all tracked artifacts.
         """
         from ares.core.security import (
-            secure_mkstemp, secure_mkdtemp,
-            cleanup_credential_artifacts, _CREDENTIAL_ARTIFACTS,
-            _ARTIFACT_LOCK, _GLOBAL_SCOPE,
+            _ARTIFACT_LOCK,
+            _CREDENTIAL_ARTIFACTS,
+            cleanup_credential_artifacts,
+            secure_mkdtemp,
+            secure_mkstemp,
         )
 
         # Clear tracking from previous tests
@@ -328,6 +329,7 @@ class TestCredentialArtifactCleanup:
         """
         import builtins
         import types
+
         from ares.modules.windows import dpapi as dpapi_mod
 
         created = tmp_path / "dpapi-transfer.tmp"
@@ -399,6 +401,7 @@ class TestCredentialArtifactCleanup:
         even if copying into the temp file fails before sqlite opens it.
         """
         import shutil
+
         from ares.modules.windows import dpapi as dpapi_mod
 
         login_path = tmp_path / "Login Data"
@@ -517,7 +520,7 @@ class TestSubprocessTimeout:
         # Apply the same pattern as our fixed _spawn()
         try:
             await asyncio.wait_for(proc.communicate(), timeout=0.5)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, asyncio.CancelledError):
             proc.kill()
             await proc.wait()
 
@@ -527,7 +530,6 @@ class TestSubprocessTimeout:
 
         # Verify PID is not running anymore
         if os.name != "nt":
-            import signal
             try:
                 os.kill(pid, 0)  # signal 0 = check if alive
                 pytest.fail(f"HIGH-001 FAIL: PID {pid} still exists after kill")
@@ -619,7 +621,8 @@ class TestRegressionGuard:
 
     def test_no_circular_references_in_codebase(self):
         """BUG FIX: No raw[x] = raw patterns."""
-        import ast, glob
+        import ast
+        import glob
         for path in sorted(glob.glob("ares/**/*.py", recursive=True)):
             if "__pycache__" in path:
                 continue
@@ -665,8 +668,9 @@ class TestMarketplaceAndCrackerHardening:
 
     def test_marketplace_installer_fail_closed_without_signature(self, monkeypatch):
         """When verify_signature=True, modules without signature or hash must fail-closed."""
-        from ares.marketplace.installer import ModuleInstaller
         import httpx
+
+        from ares.marketplace.installer import ModuleInstaller
 
         installer = ModuleInstaller()
 
@@ -721,6 +725,7 @@ class TestMarketplaceAndCrackerHardening:
     def test_cracker_worker_cross_platform_tmpdir(self, tmp_path):
         import tempfile
         from unittest.mock import MagicMock
+
         from ares.credential.cracker import CrackingWorker
 
         vault = MagicMock()
@@ -825,6 +830,7 @@ class TestMarketplaceAndCrackerHardening:
     def test_marketplace_manifest_hash_without_ed25519_fails_closed_under_verify_signature(self, monkeypatch):
         """Under verify_signature=True, an unauthenticated manifest hash from same origin must NOT satisfy verification."""
         import httpx
+
         from ares.marketplace.installer import ModuleInstaller
 
         installer = ModuleInstaller()
@@ -832,7 +838,7 @@ class TestMarketplaceAndCrackerHardening:
 
         import hashlib
         sample_hash = hashlib.sha256(sample_code).hexdigest()
-        manifest_json = f'{{"id": "test.untrusted", "sha256": "{sample_hash}"}}'.encode("utf-8")
+        manifest_json = f'{{"id": "test.untrusted", "sha256": "{sample_hash}"}}'.encode()
 
         def mock_get(self, url, *args, **kwargs):
             req = httpx.Request("GET", url)
@@ -851,7 +857,6 @@ class TestMarketplaceAndCrackerHardening:
 
     def test_marketplace_deps_skipped_by_default_without_operator_flag(self, monkeypatch):
         """Dependencies must be skipped by default for supply chain isolation unless operator explicitly enables them."""
-        import os
         from ares.marketplace.installer import ModuleInstaller
 
         installer = ModuleInstaller()
@@ -895,7 +900,7 @@ class TestSandboxAndFirewallHardening:
         FINDING 6: Trusted-prefix matching must respect namespace boundaries.
         'ares.coreevil' and 'ares.dbsomething' must NOT bypass sandboxing.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(trusted_prefixes=["ares.core", "ares.db"])
         runner = SandboxRunner(policy=policy)
@@ -954,7 +959,8 @@ class TestSandboxAndFirewallHardening:
         """
         import asyncio
         from unittest.mock import MagicMock
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(allow_network=False, allow_write=False)
         runner = SandboxRunner(policy=policy)
@@ -1047,7 +1053,7 @@ class TestSecurityBoundariesAndLifecycle:
         Verify that _limits() never mutates parent process rlimits when invoked
         directly in-process, but calls setrlimit when running in a forked child.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(cpu_time_s=15, memory_mb=128, allow_network=True, allow_write=False)
         runner = SandboxRunner(policy=policy)
@@ -1076,7 +1082,7 @@ class TestSecurityBoundariesAndLifecycle:
         """
         FINDING A: allow_network=False must fail-closed if unshare(CLONE_NEWNET) fails.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(allow_network=False)
         runner = SandboxRunner(policy=policy)
@@ -1108,7 +1114,7 @@ class TestSecurityBoundariesAndLifecycle:
         """
         allow_network=True must not attempt unshare(CLONE_NEWNET).
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(allow_network=True)
         runner = SandboxRunner(policy=policy)
@@ -1126,7 +1132,8 @@ class TestSecurityBoundariesAndLifecycle:
         FINDING B: drop_privileges=True must abort execution if root fails to drop privileges.
         """
         import types
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(drop_privileges=True)
         runner = SandboxRunner(policy=policy)
@@ -1173,7 +1180,7 @@ class TestSecurityBoundariesAndLifecycle:
         """
         When running as non-root (euid != 0), drop_privileges=True is safe and no-op.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(drop_privileges=True)
         runner = SandboxRunner(policy=policy)
@@ -1188,7 +1195,8 @@ class TestSecurityBoundariesAndLifecycle:
         execution must be aborted fail-closed rather than silently ignored.
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
         from ares.core.scope_firewall import OSFirewallController
 
         policy = SandboxPolicy(drop_privileges=True)
@@ -1253,12 +1261,13 @@ class TestSecurityBoundariesAndLifecycle:
         must be reset back to its previous value (None).
         """
         import asyncio
+
         from ares.core.campaign import Campaign, ScopeEntry
         from ares.core.scope_firewall import (
-            scope_firewall_guard,
-            _current_firewall,
             OSFirewallController,
             ScopeFirewallBlockError,
+            _current_firewall,
+            scope_firewall_guard,
         )
 
         campaign = Campaign(name="test-camp", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -1286,12 +1295,13 @@ class TestSecurityBoundariesAndLifecycle:
         _current_firewall must restore the OUTER guard's context, not None!
         """
         import asyncio
+
         from ares.core.campaign import Campaign, ScopeEntry
         from ares.core.scope_firewall import (
-            scope_firewall_guard,
-            _current_firewall,
             OSFirewallController,
             ScopeFirewallBlockError,
+            _current_firewall,
+            scope_firewall_guard,
         )
 
         outer_campaign = Campaign(name="outer", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -1326,10 +1336,10 @@ class TestSecurityBoundariesAndLifecycle:
         """
         from ares.core.campaign import Campaign, ScopeEntry
         from ares.core.scope_firewall import (
-            scope_firewall_sync_guard,
-            _current_firewall,
             OSFirewallController,
             ScopeFirewallBlockError,
+            _current_firewall,
+            scope_firewall_sync_guard,
         )
 
         outer_campaign = Campaign(name="outer-sync", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -1358,8 +1368,9 @@ class TestSecurityBoundariesAndLifecycle:
         down to OSFirewallController.apply_rules.
         """
         import asyncio
+
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_guard, OSFirewallController
+        from ares.core.scope_firewall import OSFirewallController, scope_firewall_guard
 
         campaign = Campaign(name="test-uid", scope=[ScopeEntry(cidr="10.0.0.0/8")])
 
@@ -1395,7 +1406,7 @@ class TestSecurityBoundariesAndLifecycle:
 
         def mock_subprocess_run(cmd, *args, **kwargs):
             call_count[0] += 1
-            cmd_str = " ".join(cmd)
+            cmd_str = " ".join(cmd)  # noqa: F841
             # Second apply command fails
             if "-I" in cmd and call_count[0] == 2:
                 res = MagicMock()
@@ -1537,7 +1548,11 @@ class TestSecurityBoundariesAndLifecycle:
         state transitions through VERIFICATION_FAILED, rolls back rules, and fails closed.
         """
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import OSFirewallController, OSFirewallState, ScopeFirewallBlockError
+        from ares.core.scope_firewall import (
+            OSFirewallController,
+            OSFirewallState,
+            ScopeFirewallBlockError,
+        )
 
         campaign = Campaign(name="test-verif-fail", scope=[ScopeEntry(cidr="10.0.0.0/8")])
         monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
@@ -1673,8 +1688,8 @@ class TestSecurityBoundariesAndLifecycle:
         the elevated parent wraps child execution with scope_firewall_guard(enable_os_firewall=True, uid_owner=target_uid).
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
-        import ares.core.sandbox as sandbox_mod
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(tier=IsolationTier.SUBPROCESS, drop_privileges=True)
         runner = SandboxRunner(policy=policy)
@@ -1740,8 +1755,9 @@ class TestPostFed3098SecurityBoundaryProof:
         guaranteed by Python socket hooks. In strict mode, allow_network=True
         must be rejected unless caller explicitly allows unconfined binaries.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         # Strict mode + allow_network=True + allow_unconfined_docker_binaries=False
         policy = SandboxPolicy(
@@ -1764,8 +1780,9 @@ class TestPostFed3098SecurityBoundaryProof:
         Criterion 2 (Model B): When allow_network=False, Docker container is launched
         with network_mode="none", guaranteeing complete kernel network namespace isolation.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(
             tier=IsolationTier.DOCKER,
@@ -1791,8 +1808,9 @@ class TestPostFed3098SecurityBoundaryProof:
         Criterion 3: When Docker is unavailable and allow_tier_downgrade=False (default),
         SandboxRunner MUST abort fail-closed rather than silently downgrading to SUBPROCESS.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(
             tier=IsolationTier.DOCKER,
@@ -1817,8 +1835,9 @@ class TestPostFed3098SecurityBoundaryProof:
         Criterion 3: When allow_tier_downgrade=True, downgrade is permitted, but
         effective tier, downgrade reason, and lost guarantees are explicitly reported.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(
             tier=IsolationTier.DOCKER,
@@ -1866,9 +1885,10 @@ class TestPostFed3098SecurityBoundaryProof:
         - verification timeout
         All cases must rollback and transition to VERIFICATION_FAILED.
         """
+        import subprocess
+
         from ares.core.campaign import Campaign, ScopeEntry
         from ares.core.scope_firewall import OSFirewallController, OSFirewallState
-        import subprocess
 
         campaign = Campaign(name="test-fail-injection", scope=[ScopeEntry(cidr="10.0.0.0/8")])
         monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
@@ -1924,7 +1944,11 @@ class TestPostFed3098SecurityBoundaryProof:
         4. When ARES_REQUIRE_OS_FIREWALL=1, ScopeFirewallBlockError is raised fail-closed.
         """
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import OSFirewallController, OSFirewallState, ScopeFirewallBlockError
+        from ares.core.scope_firewall import (
+            OSFirewallController,
+            OSFirewallState,
+            ScopeFirewallBlockError,
+        )
 
         campaign = Campaign(name="test-fail-kernel-verif", scope=[ScopeEntry(cidr="10.0.0.0/8")])
         monkeypatch.setattr(OSFirewallController, "is_elevated", classmethod(lambda cls: True))
@@ -2031,7 +2055,7 @@ class TestPostFed3098SecurityBoundaryProof:
 
         OSFirewallController._active_rules.clear()
         rules = OSFirewallController.apply_rules(campaign, ["10.0.0.0/8"])
-        rule_name = rules[0]
+        rule_name = rules[0]  # noqa: F841
         assert OSFirewallController._state == OSFirewallState.VERIFIED_ACTIVE
 
         # Fail cleanup
@@ -2096,10 +2120,11 @@ class TestPostFed3098SecurityBoundaryProof:
         Criterion 5 & 16: Support sandbox_uid in SandboxPolicy for dedicated sandbox UID,
         verify fallback to nobody (65534) when unspecified, and verify collateral scope semantics.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
-        from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import OSFirewallController
         import asyncio
+
+        from ares.core.campaign import Campaign, ScopeEntry
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
+        from ares.core.scope_firewall import OSFirewallController
 
         monkeypatch.setattr("os.name", "posix")
         monkeypatch.setattr("os.geteuid", lambda: 0, raising=False)
@@ -2169,8 +2194,9 @@ class TestPostFed3098SecurityBoundaryProof:
         """
         import socket
         import threading
+
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError
+        from ares.core.scope_firewall import ScopeFirewallBlockError, scope_firewall_sync_guard
 
         # Start a local TCP echo server
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -2251,8 +2277,9 @@ class TestPostFed3098SecurityBoundaryProof:
         """
         Criterion 9: Verify read_only=True container configuration when allow_write=False.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(tier=IsolationTier.DOCKER, allow_write=False, allow_network=False)
         runner = SandboxRunner(policy=policy)
@@ -2278,8 +2305,9 @@ class TestPostFed3098SecurityBoundaryProof:
         - downgrade_reason
         - guarantees_lost
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
         import asyncio
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         # 1. Normal Subprocess
         policy_sub = SandboxPolicy(tier=IsolationTier.SUBPROCESS, allow_network=False)
@@ -2349,8 +2377,9 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         scope enforcement.
         """
         import socket
+
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError
+        from ares.core.scope_firewall import ScopeFirewallBlockError, scope_firewall_sync_guard
 
         monkeypatch.setenv("ARES_SCOPE_FIREWALL_ENABLED", "0")
         campaign = Campaign(name="test-strict-env", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -2368,7 +2397,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         ARES_OS_FIREWALL_ENABLED=0 must fail-closed with ScopeFirewallBlockError.
         """
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError
+        from ares.core.scope_firewall import ScopeFirewallBlockError, scope_firewall_sync_guard
 
         monkeypatch.setenv("ARES_OS_FIREWALL_ENABLED", "0")
         campaign = Campaign(name="test-os-env-reject", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -2397,7 +2426,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         and campaign scope is configured must raise ScopeFirewallBlockError.
         """
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError
+        from ares.core.scope_firewall import ScopeFirewallBlockError, scope_firewall_sync_guard
 
         campaign = Campaign(name="test-scope-disable-attempt", scope=[ScopeEntry(cidr="10.0.0.0/8")])
         with pytest.raises(ScopeFirewallBlockError, match="Cannot disable scope enforcement in strict mode"):
@@ -2410,7 +2439,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         in strict mode must raise ScopeFirewallBlockError.
         """
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError
+        from ares.core.scope_firewall import ScopeFirewallBlockError, scope_firewall_sync_guard
 
         monkeypatch.setenv("ARES_OS_FIREWALL_ENABLED", "0")
         campaign = Campaign(name="test-os-explicit-disable", scope=[ScopeEntry(cidr="10.0.0.0/8")])
@@ -2426,7 +2455,8 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         allow_unconfined_subprocess_binaries=True.
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         monkeypatch.setattr("os.name", "posix")
         monkeypatch.setattr("os.geteuid", lambda: 1000, raising=False)
@@ -2452,8 +2482,9 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         external binaries are strictly contained by Netfilter UID rule.
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+
         import ares.core.scope_firewall as scope_fw_mod
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         monkeypatch.setattr("os.name", "posix")
         monkeypatch.setattr("os.geteuid", lambda: 0, raising=False)
@@ -2504,7 +2535,8 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         In compat mode or allow_tier_downgrade=True: reports truthful downgrade metadata.
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         # Case 1: Strict mode without downgrade permission -> honors DOCKER
         policy_strict = SandboxPolicy(
@@ -2558,7 +2590,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         """
         Finding C: Requesting DOCKER for a trusted module is never silently converted to NONE.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(tier=IsolationTier.DOCKER, strict_mode=True, allow_tier_downgrade=False)
         runner = SandboxRunner(policy=policy)
@@ -2571,7 +2603,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         """
         Finding C: Requesting SUBPROCESS for a trusted module in strict mode honors SUBPROCESS.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(tier=IsolationTier.SUBPROCESS, strict_mode=True, allow_tier_downgrade=False, allow_network=False)
         runner = SandboxRunner(policy=policy)
@@ -2584,7 +2616,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         """
         Finding C: Requesting NONE for a trusted module runs in-process with requested_tier=NONE.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         policy = SandboxPolicy(tier=IsolationTier.NONE)
         runner = SandboxRunner(policy=policy)
@@ -2600,7 +2632,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         Verifies primary GID lookup via pwd.getpwuid, explicit sandbox_gid override,
         and fail-closed behavior when resolution fails in strict mode.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy
+        from ares.core.sandbox import SandboxPolicy, SandboxRunner
 
         calls = {"setgid": [], "setuid": [], "setgroups": []}
         current_id = [0]
@@ -2664,7 +2696,8 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         downgraded, downgrade_reason, guarantees_lost.
         """
         import asyncio
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         # Case 1: In-process NONE
         policy_none = SandboxPolicy(tier=IsolationTier.NONE, strict_mode=True)
@@ -2693,7 +2726,7 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         """
         Section 7: Canonical policy decision table verification across all matrix combinations.
         """
-        from ares.core.sandbox import SandboxRunner, SandboxPolicy, IsolationTier
+        from ares.core.sandbox import IsolationTier, SandboxPolicy, SandboxRunner
 
         # 1. SUBPROCESS, network=False -> allowed, boundary=network_namespace
         p1 = SandboxPolicy(tier=IsolationTier.SUBPROCESS, allow_network=False, strict_mode=True)
@@ -2758,8 +2791,13 @@ class TestStrictModeIntegrityAndTierTruthfulness:
         """
         import socket
         import threading
+
         from ares.core.campaign import Campaign, ScopeEntry
-        from ares.core.scope_firewall import scope_firewall_sync_guard, ScopeFirewallBlockError, OSFirewallController
+        from ares.core.scope_firewall import (
+            OSFirewallController,
+            ScopeFirewallBlockError,
+            scope_firewall_sync_guard,
+        )
 
         # Start local TCP test listener
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

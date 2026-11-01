@@ -2,15 +2,16 @@
 Unit tests for CloudScopeGuard and CloudScope campaign validation.
 Covers MOD-053 and MOD-063 architectural gap closure.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-from ares.core.campaign import Campaign, Severity
-from ares.core.errors import ScopeViolationError
-from ares.core.scope import CloudScope, CampaignScope
-from ares.modules.base import BaseModule, OpsecLevel
+import pytest
+
+from ares.core.campaign import Campaign
 from ares.core.config import AresSettings
+from ares.core.errors import ScopeViolationError
 from ares.core.noise import NoiseController
+from ares.core.scope import CloudScope
+from ares.modules.base import BaseModule
 
 
 class DummyCloudModule(BaseModule):

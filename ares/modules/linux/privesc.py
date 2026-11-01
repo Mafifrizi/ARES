@@ -7,10 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.core.errors import AuthenticationFailed, HostUnreachable, ModuleError, ModuleValidationError
+from ares.core.errors import (
+    AuthenticationFailed,
+    HostUnreachable,
+    ModuleError,
+    ModuleValidationError,
+)
 from ares.core.logger import get_logger
 from ares.core.security import sanitize_hostname
 from ares.core.tracing import trace_module
@@ -18,7 +24,6 @@ from ares.modules.params import LinuxPrivescParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -167,11 +172,11 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         privesc_target = host or "LinuxHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux Privilege Escalation & SUID Abuse\n"
-            f"// Monitors Syslog / auditd for sudo NOPASSWD abuse or anomalous setuid transitions\n"
-            f"Syslog\n"
-            f"| where ProcessName == \"sudo\" or SyslogMessage has \"NOPASSWD\" or SyslogMessage has \"setuid\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux Privilege Escalation & SUID Abuse\n"
+            "// Monitors Syslog / auditd for sudo NOPASSWD abuse or anomalous setuid transitions\n"
+            "Syslog\n"
+            "| where ProcessName == \"sudo\" or SyslogMessage has \"NOPASSWD\" or SyslogMessage has \"setuid\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Linux Sudo Misconfiguration / SUID Privilege Escalation ({privesc_target})\n"
@@ -292,7 +297,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
         try:
             import asyncssh
         except ImportError:
-            raise ModuleError("asyncssh not installed", module_id=self.MODULE_ID)
+            raise ModuleError("asyncssh not installed", module_id=self.MODULE_ID)  # noqa: B904
 
         kw: dict[str, Any] = {"host": host, "port": port, "username": user, "known_hosts": None}
         if key_path and os.path.exists(key_path):
@@ -329,7 +334,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
             return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout = b""
@@ -390,7 +395,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
             for sudoers_path in ["/etc/sudoers", "/etc/sudoers.d"]:
                 if os.path.isfile(sudoers_path) and os.access(sudoers_path, os.R_OK):
                     try:
-                        with open(sudoers_path, "r", encoding="utf-8", errors="replace") as f:
+                        with open(sudoers_path, encoding="utf-8", errors="replace") as f:
                             rules.extend([l.strip() for l in f if l.strip() and not l.strip().startswith("#")])
                     except OSError:
                         pass
@@ -398,7 +403,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                     try:
                         for entry in os.scandir(sudoers_path):
                             if entry.is_file() and os.access(entry.path, os.R_OK):
-                                with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                                with open(entry.path, encoding="utf-8", errors="replace") as f:
                                     rules.extend([l.strip() for l in f if l.strip() and not l.strip().startswith("#")])
                     except OSError:
                         pass
@@ -416,7 +421,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
             # Pure Python local inspection
             if os.path.exists("/etc/crontab") and os.access("/etc/crontab", os.R_OK):
                 try:
-                    with open("/etc/crontab", "r", encoding="utf-8", errors="replace") as f:
+                    with open("/etc/crontab", encoding="utf-8", errors="replace") as f:
                         crontabs.append(f.read())
                 except OSError:
                     pass
@@ -424,7 +429,7 @@ class LinuxPrivescModule(BaseModule[LinuxPrivescParams, ModuleResult]):
                 try:
                     for entry in os.scandir("/etc/cron.d"):
                         if entry.is_file() and os.access(entry.path, os.R_OK):
-                            with open(entry.path, "r", encoding="utf-8", errors="replace") as f:
+                            with open(entry.path, encoding="utf-8", errors="replace") as f:
                                 crontabs.append(f.read())
                 except OSError:
                     pass

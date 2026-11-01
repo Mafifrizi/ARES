@@ -11,7 +11,6 @@ import base64
 import hashlib
 import os
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -238,7 +237,7 @@ async def test_mcp_sse_non_loopback_allowed_with_header_or_query_key():
 
 @pytest.fixture
 def api_test_setup():
-    from ares.api.server import app, get_c_live_runtime, get_db, get_engine
+    from ares.api.server import app, get_db, get_engine
 
     db = MagicMock()
     db.is_access_token_revoked = AsyncMock(return_value=False)
@@ -456,7 +455,7 @@ async def test_api_key_team_lead_can_mint_admin(api_test_setup):
 @pytest.mark.asyncio
 async def test_mcp_database_scope_strict_enforcement():
     """Verify that real DB scope_json is strictly parsed and blocks out-of-scope targets."""
-    from ares.mcp.security import ConfirmationTokenManager, McpSecurityViolation
+    from ares.mcp.security import ConfirmationTokenManager
     from ares.mcp.tools import McpToolRegistry
 
     mock_db = MagicMock()

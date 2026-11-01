@@ -39,13 +39,11 @@ from ares.modules.params import ServiceHijackParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     OpsecLevel,
     ProcessPermission,
-    UntrustedTargetData,
     module_contract,
 )
 
@@ -109,7 +107,7 @@ def _parse_exec_start(unit_content: str) -> list[str]:
 )
 class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
     """
-    linux.service_hijack - Detect systemd/init services with writable binaries or unit files  - 
+    linux.service_hijack - Detect systemd/init services with writable binaries or unit files  -
     replacing the binary escalates privileges at next service restart
 
     OPSEC: LOW
@@ -226,11 +224,11 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         service_target = host or "LinuxHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux Systemd Service Unit / Binary Hijacking\n"
-            f"// Monitors Syslog / auditd for modifications to /etc/systemd/system/*.service or ExecStart binaries\n"
-            f"Syslog\n"
-            f"| where SyslogMessage has \"/etc/systemd/system\" or SyslogMessage has \"ExecStart\" or SyslogMessage has \"systemctl daemon-reload\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux Systemd Service Unit / Binary Hijacking\n"
+            "// Monitors Syslog / auditd for modifications to /etc/systemd/system/*.service or ExecStart binaries\n"
+            "Syslog\n"
+            "| where SyslogMessage has \"/etc/systemd/system\" or SyslogMessage has \"ExecStart\" or SyslogMessage has \"systemctl daemon-reload\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Linux Systemd Service Unit File / Executable Hijacking ({service_target})\n"
@@ -572,10 +570,10 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
         port: int,
     ) -> Any:
         try:
-            import asyncssh  # type: ignore[import]
+            import asyncssh
         except ImportError:
             from ares.core.errors import ModuleError
-            raise ModuleError("asyncssh not installed - pip install asyncssh",
+            raise ModuleError("asyncssh not installed - pip install asyncssh",  # noqa: B904
                               module_id=self.MODULE_ID)
 
         kw: dict = {"host": host, "port": port, "username": user, "known_hosts": None}
@@ -622,7 +620,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
     def _read_file_local(self, path: str) -> str:
         """Reads file content in pure Python without cat."""
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 return f.read()
         except OSError:
             return ""
@@ -659,7 +657,7 @@ class ServiceHijackModule(BaseModule[ServiceHijackParams, ModuleResult]):
             return ""
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             stdout = b""

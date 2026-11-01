@@ -32,9 +32,9 @@ class ScopeEnforcementInterceptor(BaseExecutionInterceptor):
         if not target and hasattr(ctx, "params"):
             params = ctx.params
             if hasattr(params, "target"):
-                target = getattr(params, "target")
+                target = params.target
             elif hasattr(params, "dc"):
-                target = getattr(params, "dc")
+                target = params.dc
             elif isinstance(params, dict):
                 target = params.get("target") or params.get("dc") or params.get("host") or ""
 

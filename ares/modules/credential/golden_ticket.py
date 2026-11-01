@@ -10,19 +10,23 @@ Requires: krbtgt NTLM hash (from ad.dcsync), domain SID.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
-import os
-import tempfile
 from typing import Any
 
-from ares.core.errors import ModuleExecutionError, ModuleValidationError
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.errors import ModuleExecutionError
+from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import GoldenTicketParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     FilesystemPermission,
     LockoutCircuitBreaker,
     ModuleResult,
@@ -30,7 +34,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.golden_ticket")
 
@@ -66,15 +69,15 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
     MITRE_TECHNIQUES   = ["T1558.001"]
     PARAMS_MODEL       = GoldenTicketParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates domain SID, krbtgt credentials (AES256 vs RC4), and DC PAC validation.
         Recommends Diamond Ticket or AES256 encryption if MDI (Defender for Identity) is active.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -142,9 +145,10 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
 
     async def validate(self, ctx: "Any") -> None:
         """Enforce domain, krbtgt hash, and domain SID before ticket forge."""
+        import re as _re
+
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        import re as _re
         if not isinstance(ctx, ExecutionContext):
             return
         if isinstance(ctx.params, dict) and not ctx.params.get("domain") and getattr(ctx, "domain", None):
@@ -184,8 +188,8 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                 module_id=self.MODULE_ID, field="domain_sid",
             )
         try:
-            from impacket.krb5.ticket import Ticket  # noqa: F401
             from impacket.krb5 import constants  # noqa: F401
+            from impacket.krb5.ticket import Ticket  # noqa: F401
             from impacket.krb5.types import Principal  # noqa: F401
         except ImportError as e:
             raise ModuleValidationError(
@@ -307,7 +311,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
         # Sanitize username before using in path - prevent path traversal in tempdir
         import re as _re_path
         username = _re_path.sub(r"[^\w.-]", "_", username)
-        target      = kwargs.get("target", "")
+        target      = kwargs.get("target", "")  # noqa: F841
         dry_run     = kwargs.get("dry_run", False)
         # Scope + rate-limit check - domain is the "target" for golden ticket
         if domain and not dry_run:
@@ -332,7 +336,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
 
         loop = asyncio.get_running_loop()
 
-        def _forge() -> tuple[bool, str, str]:
+        def _forge() -> tuple[bool, bytes, str]:
             """
             Forge Golden Ticket using impacket.krb5 library directly.
             Drops the old subprocess ticketer approach - unstable, PATH-dependent.
@@ -348,6 +352,7 @@ class GoldenTicketModule(BaseModule[GoldenTicketParams, ModuleResult]):
                 ccache_path = None
                 try:
                     from impacket.examples.ticketer import TICKETER
+
                     from ares.core.security import secure_mkstemp
                     ccache_path, _fd2 = secure_mkstemp(suffix=".ccache", prefix="ares_gt_")
                     _os.close(_fd2)

@@ -6,7 +6,7 @@ import hmac
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.cookies import _is_legal_key
 from typing import Any, Final
 from urllib.parse import urlsplit
@@ -198,10 +198,10 @@ def canonical_noncredentialed_origins(values: list[str]) -> list[str]:
 
 
 def remaining_cookie_seconds(absolute_expiry: datetime, *, now: datetime | None = None) -> int:
-    current = now or datetime.now(timezone.utc)
+    current = now or datetime.now(UTC)
     if absolute_expiry.tzinfo is None or absolute_expiry.utcoffset() is None:
         raise ValueError("family expiry must be timezone-aware")
-    delta = absolute_expiry.astimezone(timezone.utc) - current.astimezone(timezone.utc)
+    delta = absolute_expiry.astimezone(UTC) - current.astimezone(UTC)
     remaining = int(delta.total_seconds())
     return max(0, min(MAX_REFRESH_COOKIE_AGE_SECONDS, remaining))
 
@@ -219,7 +219,7 @@ def _set_cookie(
         key=name,
         value=value,
         max_age=max_age,
-        expires=datetime.now(timezone.utc) + timedelta(seconds=max_age),
+        expires=datetime.now(UTC) + timedelta(seconds=max_age),
         path="/",
         secure=secure,
         httponly=httponly,
@@ -278,7 +278,7 @@ def clear_session_cookies(response: Response, policy: BrowserSessionPolicy) -> N
             key=name,
             value="",
             max_age=0,
-            expires=datetime(1970, 1, 1, tzinfo=timezone.utc),
+            expires=datetime(1970, 1, 1, tzinfo=UTC),
             path="/",
             secure=policy.secure,
             httponly=httponly,

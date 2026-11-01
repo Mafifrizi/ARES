@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,7 +28,7 @@ def _run(coro):
 
 
 def _mock_campaign(findings=None, scope_cidrs=("10.0.0.0/8",), noise="normal"):
-    from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
     c = Campaign(
         name="strategic-test", client="test",
         scope=[ScopeEntry(cidr=s) for s in scope_cidrs],
@@ -170,8 +170,8 @@ class TestCoveragePredictor:
         assert "wait_recommendation" in CoveragePredictorModule.OUTPUTS
 
     def test_validate_requires_campaign(self):
-        from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
         mod, _ = _make_module(CoveragePredictorModule)
         ctx = _mock_ctx()
         ctx.campaign = None
@@ -179,8 +179,8 @@ class TestCoveragePredictor:
             _run(mod.validate(ctx))
 
     def test_execute_returns_module_result(self):
-        from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
         from ares.modules.base import ModuleResult
+        from ares.modules.opsec.coverage_predictor import CoveragePredictorModule
         mod, _ = _make_module(CoveragePredictorModule)
         result = _run(mod.execute(_mock_ctx(campaign=_mock_campaign())))
         assert isinstance(result, ModuleResult)
@@ -284,9 +284,9 @@ class TestEDRBypassAdaptive:
         assert "edr_vendor" in EDRAdaptiveBypassModule.OUTPUTS
 
     def test_validate_requires_edr_vendor_or_fingerprint(self):
-        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
+        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule
         mod, campaign = _make_module(EDRAdaptiveBypassModule)
         ctx = ExecutionContext(
             campaign_id=campaign.id,
@@ -325,9 +325,9 @@ class TestCloudFederationAbuse:
         assert result.status == "dry_run"
 
     def test_validate_requires_at_least_one_credential(self):
-        from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
+        from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
         mod, campaign = _make_module(CloudIdentityFederationModule)
         ctx = ExecutionContext(
             campaign_id=campaign.id,
@@ -405,6 +405,7 @@ class TestCloudFederationAbuse:
     def test_adfs_scope_check_before_request_called(self, monkeypatch):
         """MOD-050: before_request must be called with extracted target before outbound ADFS HTTP."""
         from unittest.mock import AsyncMock, MagicMock
+
         from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
         mod, _ = _make_module(CloudIdentityFederationModule)
         mod.before_request = AsyncMock()
@@ -425,6 +426,7 @@ class TestCloudFederationAbuse:
     def test_adfs_scope_check_blocks_out_of_scope(self, monkeypatch):
         """MOD-050: Out-of-scope ADFS target must raise ScopeViolationError and abort HTTP request."""
         from unittest.mock import AsyncMock, MagicMock
+
         from ares.core.errors import ScopeViolationError
         from ares.modules.cloud.identity_federation import CloudIdentityFederationModule
         mod, _ = _make_module(CloudIdentityFederationModule)
@@ -461,7 +463,6 @@ class TestAIAutonomousPlanner:
 
     def test_auto_approve_false_by_default(self):
         """auto_approve must default to False - operator review is required."""
-        from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
         from ares.modules.params import AIPlannerParams
         params = AIPlannerParams()
         assert params.auto_approve is False, "auto_approve must default to False"
@@ -537,9 +538,9 @@ class TestAIAutonomousPlanner:
 
     def test_validate_requires_api_key(self):
         """Validate must fail if Claude backend selected and no API key set."""
-        from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ai.autonomous_planner import AIAutonomousPlannerModule
         mod, campaign = _make_module(AIAutonomousPlannerModule)
         ctx = ExecutionContext(
             campaign_id=campaign.id,
@@ -598,8 +599,8 @@ class TestAIAutonomousPlanner:
 
     def test_ai_plan_to_execution_plan(self):
         """AIPlan.to_execution_plan() must produce valid ARES ExecutionPlan."""
-        from ares.modules.ai.autonomous_planner import AIPlan
         from ares.core.engine import ExecutionPlan
+        from ares.modules.ai.autonomous_planner import AIPlan
         plan = AIPlan(
             reasoning="test",
             stages=[
@@ -642,8 +643,11 @@ class TestNewModulesRegistered:
 
     def test_module_params_have_correct_types(self):
         from ares.modules.params import (
-            MODULE_PARAMS, CoveragePredictorParams, EDRBypassParams,
-            AIPlannerParams, CloudFederationParams,
+            MODULE_PARAMS,
+            AIPlannerParams,
+            CloudFederationParams,
+            CoveragePredictorParams,
+            EDRBypassParams,
         )
         assert MODULE_PARAMS["opsec.coverage_predictor"]        is CoveragePredictorParams
         assert MODULE_PARAMS["edr.bypass_adaptive"]             is EDRBypassParams
@@ -841,8 +845,9 @@ class TestSOCShiftModeling:
 
     def test_soc_healthcare_is_high_coverage(self):
         """Healthcare SOC operates 24/7 - factor should always be moderate-high."""
-        from ares.modules.opsec.coverage_predictor import _compute_soc_activity_factor
         import datetime
+
+        from ares.modules.opsec.coverage_predictor import _compute_soc_activity_factor
         # Test at 3am UTC (off-hours for most)
         early_morning = datetime.datetime(2025, 3, 15, 3, 0, 0)
         result = _compute_soc_activity_factor(target_type="healthcare", now_utc=early_morning)
@@ -850,8 +855,9 @@ class TestSOCShiftModeling:
 
     def test_soc_govt_weekend_is_low(self):
         """Government SOC on weekends should have very low factor."""
-        from ares.modules.opsec.coverage_predictor import _compute_soc_activity_factor
         import datetime
+
+        from ares.modules.opsec.coverage_predictor import _compute_soc_activity_factor
         # Saturday at 11am UTC
         saturday = datetime.datetime(2025, 3, 15, 11, 0, 0)  # Saturday
         result = _compute_soc_activity_factor(target_type=".gov", now_utc=saturday)
@@ -928,7 +934,7 @@ class TestStrategyEngine:
         assert rates == {}
 
     def test_engagement_result_dataclass(self):
-        from ares.strategy import EngagementResult, RoundResult
+        from ares.strategy import EngagementResult
         result = EngagementResult(
             goal="domain_admin", total_rounds=3, final_status="goal_achieved",
             rounds=[],
@@ -949,6 +955,7 @@ class TestStrategyEngine:
 
     def test_check_goal_achieved_domain_admin(self):
         from unittest.mock import MagicMock
+
         from ares.strategy import StrategyEngine
         engine = StrategyEngine(ares_engine=None, settings=None)
         campaign = _mock_campaign()
@@ -984,8 +991,8 @@ class TestOutcomeQuality:
         assert hasattr(r, "effective_quality")
 
     def test_effective_quality_success_with_findings(self):
-        from ares.modules.base import ModuleResult
         from ares.core.campaign import Finding, Severity
+        from ares.modules.base import ModuleResult
         f = Finding(title="test", description="d", severity=Severity.HIGH,
                     mitre_technique="T1001", mitre_tactic="x",
                     evidence={}, remediation="", host="h", confidence=1.0)
@@ -1020,8 +1027,8 @@ class TestOutcomeQuality:
 class TestTargetStateMap:
 
     def test_update_from_result_success(self):
-        from ares.strategy.target_state import TargetStateMap
         from ares.modules.base import ModuleResult
+        from ares.strategy.target_state import TargetStateMap
         tsm = TargetStateMap()
         r = ModuleResult(status="success", findings=[], raw={}, outcome_quality=1.0)
         tsm.update_from_result("ad.enum_users", "10.0.0.1", r)
@@ -1030,8 +1037,8 @@ class TestTargetStateMap:
         assert "ad.enum_users" in state.successful_modules
 
     def test_update_from_result_failure(self):
-        from ares.strategy.target_state import TargetStateMap
         from ares.modules.base import ModuleResult
+        from ares.strategy.target_state import TargetStateMap
         tsm = TargetStateMap()
         r = ModuleResult(status="failed", findings=[], raw={}, outcome_quality=0.0)
         tsm.update_from_result("lateral.psexec", "10.0.0.5", r)
@@ -1040,8 +1047,9 @@ class TestTargetStateMap:
         assert "lateral.psexec" not in state.successful_modules
 
     def test_to_llm_context_excludes_old_hosts(self):
-        from ares.strategy.target_state import TargetStateMap, TargetState
         import time
+
+        from ares.strategy.target_state import TargetState, TargetStateMap
         tsm = TargetStateMap()
         # Fresh host
         tsm._hosts["10.0.0.1"] = TargetState(host="10.0.0.1", last_seen=time.time())
@@ -1053,8 +1061,9 @@ class TestTargetStateMap:
         assert "10.0.0.2" not in ctx
 
     def test_to_llm_context_has_failed_note(self):
-        from ares.strategy.target_state import TargetStateMap, TargetState
         import time
+
+        from ares.strategy.target_state import TargetState, TargetStateMap
         tsm = TargetStateMap()
         tsm._hosts["10.0.0.3"] = TargetState(
             host="10.0.0.3",
@@ -1066,8 +1075,8 @@ class TestTargetStateMap:
         assert "psexec" in note or "SKIP" in note
 
     def test_open_ports_extracted_from_raw(self):
-        from ares.strategy.target_state import TargetStateMap
         from ares.modules.base import ModuleResult
+        from ares.strategy.target_state import TargetStateMap
         tsm = TargetStateMap()
         r = ModuleResult(status="success", findings=[],
                          raw={"open_ports": [22, 80, 443]}, outcome_quality=1.0)
@@ -1080,8 +1089,8 @@ class TestTargetStateMap:
 class TestConstitutionEnforcer:
 
     def test_blocks_unauthorized_dcsync(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(authorizations=[])
         plan = AIPlan(
             reasoning="test", confidence=0.8,
@@ -1093,8 +1102,8 @@ class TestConstitutionEnforcer:
         assert all("ad.dcsync" not in s.get("modules", []) for s in clean.stages)
 
     def test_allows_authorized_dcsync(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(authorizations=["ad.dcsync"])
         plan = AIPlan(
             reasoning="authorized", confidence=0.8,
@@ -1107,8 +1116,8 @@ class TestConstitutionEnforcer:
         assert not any(v.module_id == "ad.dcsync" for v in violations)
 
     def test_blocks_forbidden_module(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(forbidden_modules={"lateral.rdp"})
         plan = AIPlan(
             reasoning="test", confidence=0.8,
@@ -1123,8 +1132,8 @@ class TestConstitutionEnforcer:
         assert "lateral.psexec" in clean_mods
 
     def test_blocks_persistence_without_flag(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(allow_persistence=False)
         plan = AIPlan(
             reasoning="test", confidence=0.8,
@@ -1137,8 +1146,8 @@ class TestConstitutionEnforcer:
         assert "persistence.scheduled_task" in blocked
 
     def test_allows_persistence_with_flag(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(
             allow_persistence=True,
             authorizations=["persistence.scheduled_task"],
@@ -1154,8 +1163,8 @@ class TestConstitutionEnforcer:
         assert "persistence.scheduled_task" not in blocked
 
     def test_empty_plan_after_enforcement_handled(self):
-        from ares.strategy.enforcer import ConstitutionEnforcer
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.strategy.enforcer import ConstitutionEnforcer
         enforcer = ConstitutionEnforcer(authorizations=[])
         plan = AIPlan(
             reasoning="test", confidence=0.8,
@@ -1171,8 +1180,8 @@ class TestConstitutionEnforcer:
 class TestPlanValidator:
 
     def test_rejects_unknown_module(self):
-        from ares.modules.ai.plan_validator import PlanValidator
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.modules.ai.plan_validator import PlanValidator
         validator = PlanValidator()
         plan = AIPlan(
             reasoning="test", confidence=0.8,
@@ -1182,16 +1191,16 @@ class TestPlanValidator:
         assert any("Unknown module" in e or "fake.module" in e for e in errors)
 
     def test_rejects_low_confidence(self):
-        from ares.modules.ai.plan_validator import PlanValidator
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.modules.ai.plan_validator import PlanValidator
         validator = PlanValidator()
         plan = AIPlan(reasoning="test", confidence=0.20, stages=[])
         errors = validator.validate(plan, registry=None, campaign=_mock_campaign())
         assert any("confidence" in e.lower() or "20%" in e for e in errors)
 
     def test_valid_plan_no_errors(self):
-        from ares.modules.ai.plan_validator import PlanValidator
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.modules.ai.plan_validator import PlanValidator
         validator = PlanValidator()
         plan = AIPlan(
             reasoning="valid plan", confidence=0.80,
@@ -1201,8 +1210,8 @@ class TestPlanValidator:
         assert len(errors) == 0
 
     def test_adds_high_noise_warning(self):
-        from ares.modules.ai.plan_validator import PlanValidator
         from ares.modules.ai.autonomous_planner import AIPlan
+        from ares.modules.ai.plan_validator import PlanValidator
         validator = PlanValidator()
         plan = AIPlan(
             reasoning="test", confidence=0.80, warnings=[],
@@ -1217,31 +1226,35 @@ class TestPlanValidator:
 class TestDwellTimeDecay:
 
     def test_fresh_campaign_no_decay(self):
-        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         import time
+
+        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         now = time.time()
         result = _apply_dwell_time_decay(0.8, now - 3600, now)  # 1 hour old
         assert result == 0.8  # no decay
 
     def test_14_day_dwell_reduces_score(self):
-        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         import time
+
+        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         start = time.time() - (14 * 86400)  # 14 days ago
         result = _apply_dwell_time_decay(0.8, start)
         assert result < 0.8
         assert result == pytest.approx(0.8 * 0.65, abs=0.01)
 
     def test_30_day_dwell_max_reduction(self):
-        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         import time
+
+        from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
         start = time.time() - (35 * 86400)
         result = _apply_dwell_time_decay(0.8, start)
         assert result == pytest.approx(0.8 * 0.40, abs=0.01)
 
     def test_decay_reduces_overall_score(self):
         """Long-running campaign should have lower detection score than fresh one."""
-        from ares.modules.opsec.coverage_predictor import CoveragePredictor
         import time
+
+        from ares.modules.opsec.coverage_predictor import CoveragePredictor
         modules = [{"module_id": "ad.dcsync", "mitre_techniques": ["T1003.006"],
                     "opsec_level": "high_noise", "timestamp": 0}]
         pred_fresh = CoveragePredictor().predict(
@@ -1300,7 +1313,7 @@ class TestEDRProbe:
 
     def test_probe_safe_false_returns_true(self):
         """BYOVD techniques (probe_safe=False) always return True from _probe_technique."""
-        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule, BypassTechnique
+        from ares.modules.edr.bypass_adaptive import BypassTechnique, EDRAdaptiveBypassModule
         mod, _ = _make_module(EDRAdaptiveBypassModule)
         tech = BypassTechnique(
             technique_id="byovd-test", name="BYOVD", description="test",
@@ -1312,7 +1325,7 @@ class TestEDRProbe:
 
     def test_probe_no_runner_returns_true(self):
         """No SSH runner means we can't probe - fail open (return True)."""
-        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule, BypassTechnique
+        from ares.modules.edr.bypass_adaptive import BypassTechnique, EDRAdaptiveBypassModule
         mod, _ = _make_module(EDRAdaptiveBypassModule)
         tech = BypassTechnique(
             technique_id="amsi-patch-reflection", name="AMSI", description="test",
@@ -1346,7 +1359,7 @@ class TestBugRegressions:
             "_select_techniques_with_probe must exist"
 
     def test_probe_technique_no_runner_returns_true(self):
-        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule, BypassTechnique
+        from ares.modules.edr.bypass_adaptive import BypassTechnique, EDRAdaptiveBypassModule
         mod, _ = _make_module(EDRAdaptiveBypassModule)
         tech = BypassTechnique(
             technique_id="amsi-patch-reflection", name="AMSI", description="",
@@ -1365,7 +1378,7 @@ class TestBugRegressions:
         assert result["probed"] is False
 
     def test_byovd_probe_safe_false_always_true(self):
-        from ares.modules.edr.bypass_adaptive import EDRAdaptiveBypassModule, BypassTechnique
+        from ares.modules.edr.bypass_adaptive import BypassTechnique, EDRAdaptiveBypassModule
         mod, _ = _make_module(EDRAdaptiveBypassModule)
         tech = BypassTechnique(
             technique_id="byovd-iqvm64", name="BYOVD", description="",
@@ -1400,8 +1413,8 @@ class TestBugRegressions:
 
     # Bug 3 - AD modules use "dc" key, not "target"
     def test_target_hint_checks_dc_key(self):
-        from ares.strategy.target_state import TargetStateMap
         from ares.modules.base import ModuleResult
+        from ares.strategy.target_state import TargetStateMap
         tsm = TargetStateMap()
         r = ModuleResult(status="success", findings=[], raw={}, outcome_quality=1.0)
         tsm.update_from_result("ad.kerberoast", "10.0.0.1", r)
@@ -1411,8 +1424,9 @@ class TestBugRegressions:
 
     # Bug 4 - datetime.timestamp() must be used
     def test_dwell_decay_with_datetime_object(self):
+        import datetime
+
         from ares.modules.opsec.coverage_predictor import _apply_dwell_time_decay
-        import datetime, time
         # Simulate campaign created 10 days ago as datetime object
         campaign_start_dt = datetime.datetime.now() - datetime.timedelta(days=10)
         campaign_start_ts = campaign_start_dt.timestamp()
@@ -1465,7 +1479,7 @@ class TestBugRegressions:
         mod, _ = _make_module(CoveragePredictorModule)
         # wmiexec should NOT be in HIGH_NOISE (it's MEDIUM)
         result_with = mod.predict_planned_actions(["lateral.wmiexec"], 0.0)
-        result_without = mod.predict_planned_actions(["ad.enum_users"], 0.0)
+        result_without = mod.predict_planned_actions(["ad.enum_users"], 0.0)  # noqa: F841
         # wmiexec should NOT have +20% HIGH_NOISE penalty
         # (contribution should come only from MITRE techniques, not penalty)
         wmi_warnings = result_with.get("warnings", [])
@@ -1490,7 +1504,6 @@ class TestBugRegressions:
 
     # API Gap - /strategy/engage endpoint exists
     def test_strategy_engage_endpoint_registered(self):
-        import sys
         # Check that the endpoint is registered in server.py
         server_src = open(
             os.path.join(os.path.dirname(__file__), "..", "..", "ares", "api", "server.py"),

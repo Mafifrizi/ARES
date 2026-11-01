@@ -1,5 +1,5 @@
+
 import pytest
-from unittest.mock import MagicMock
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
@@ -7,7 +7,6 @@ from ares.core.context import ExecutionContext
 from ares.core.noise import NoiseController
 from ares.modules.exfil.secrets_scan import (
     SecretsScan,
-    _compute_dynamic_confidence,
     _is_placeholder_token,
     calculate_shannon_entropy,
     extract_secret_metadata,

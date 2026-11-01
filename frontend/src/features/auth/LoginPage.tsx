@@ -60,7 +60,7 @@ export function LoginPage() {
       } else {
         setSsoError("SSO is not configured for this organization. Contact your administrator.");
       }
-    } catch (exc) {
+    } catch {
       setSsoError("SSO is not configured for this organization. Contact your administrator.");
     } finally {
       setIsSsoLoading(false);
@@ -173,26 +173,45 @@ export function LoginPage() {
 
       </div>
 
-      {/* Right Column: Clean Premium Showcase with Living HD Mascot */}
-      <div className="hidden lg:flex flex-col items-center justify-center p-8 xl:p-12 border-l border-zinc-800/80 bg-black relative overflow-hidden select-none">
-        {/* Subtle Architectural Grid & Traveling Light Pulses Canvas */}
-        <BackgroundAnimationCanvas className="opacity-15" />
+      {/* Right Column: Clean Premium Showcase with Living HD Mascot.
+          No hairline divider between the columns: the panel's own
+          bg-black against the left column's #09090b is the tone step
+          that separates them. */}
+      <div className="hidden lg:flex flex-col items-center justify-center gap-10 p-8 xl:p-12 bg-black relative overflow-hidden select-none">
+        {/* Architectural Grid & Traveling Light Pulses Canvas */}
+        <BackgroundAnimationCanvas className="opacity-25" />
 
-        {/* Centerpiece Hero Mascot */}
-        <div className="relative z-10 flex flex-col items-center justify-center w-full max-w-2xl px-4">
-          <div className="relative w-full aspect-video flex items-center justify-center">
-            <video
-              src={brandMascotVideoPath}
-              poster={brandMascotPosterPath}
-              autoPlay
-              loop
-              muted
-              playsInline
-              preload="auto"
-              className="w-full h-auto max-h-[78vh] object-contain select-none pointer-events-none transition-transform duration-700"
-            />
-          </div>
+        {/* Centerpiece Hero Mascot. The source video is 16:9 with the
+            dragon occupying most of its height but only its centre ~80%
+            of width; a 16:9 box in a portrait panel left most of the
+            panel's height empty. Framing the box at ~1.55:1 and cropping
+            with object-cover (measured safe margins, not guessed) fills
+            far more of the panel without touching the animation's own
+            motion bounds across the full 10s loop. */}
+        <div className="relative z-10 w-full max-w-xl h-[52vh] max-h-[620px]">
+          <video
+            src={brandMascotVideoPath}
+            poster={brandMascotPosterPath}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            className="h-full w-full object-cover select-none pointer-events-none"
+            style={{ objectPosition: "46% 50%" }}
+          />
+          {/* Flat ground plinth: a step in tone, not a glow - grounds the
+              mascot instead of leaving it floating on flat black. */}
+          <div
+            aria-hidden="true"
+            className="absolute left-1/2 bottom-[6%] -translate-x-1/2 w-[58%] h-3 rounded-full bg-[#121216]"
+          />
         </div>
+
+        <p className="relative z-10 max-w-sm text-center text-sm leading-relaxed text-zinc-400">
+          Operator-directed red team orchestration &amp; continuous security
+          validation platform.
+        </p>
       </div>
 
     </div>

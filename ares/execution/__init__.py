@@ -10,9 +10,9 @@ from __future__ import annotations
 
 try:
     from ares.execution.executor import (  # noqa: F401
-        RemoteExecutor,
-        ExecutionResult,
         ExecutionMethod,
+        ExecutionResult,
+        RemoteExecutor,
     )
 except ImportError:
     pass  # Optional deps not installed

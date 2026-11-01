@@ -26,22 +26,14 @@ from ares.core.noise import NoiseController, ScopeViolationError
 from ares.modules.ad.adcs import ADCSModule
 from ares.modules.ad.coerce import CoerceModule
 from ares.modules.ad.sccm import SCCMModule
-from ares.modules.credential.reuse import CredentialReuseModule, _audit_oauth_posture_sync
+from ares.modules.credential.reuse import _audit_oauth_posture_sync
 from ares.modules.lateral.mssql import MSSQLModule
 from ares.modules.lateral.ntlm_relay import NTLMRelayModule
 from ares.modules.lateral.smb_relay import SMBRelayAuditModule
 from ares.modules.network.dns_enum import DnsEnumModule
 from ares.modules.network.http_fingerprint import HttpFingerprintModule
-from ares.modules.network.pivot import PivotModule
 from ares.modules.params import (
-    ADCSParams,
     CoerceParams,
-    CredentialReuseParams,
-    DNSEnumParams,
-    HTTPFingerprintParams,
-    MSSQLParams,
-    NTLMRelayParams,
-    PivotParams,
     SCCMParams,
     SMBRelayParams,
 )
@@ -242,8 +234,8 @@ async def test_mssql_linked_and_listener_scope_enforcement():
 @pytest.mark.asyncio
 async def test_pivot_reachable_subnets_scope_enforcement():
     """MOD-017: network.pivot filters out-of-scope reachable_subnets."""
+    from ares.modules.network.pivot import _PIVOT_MANAGERS, PivotModule
     from ares.pivot.infrastructure import TunnelState
-    from ares.modules.network.pivot import PivotModule, _PIVOT_MANAGERS
     settings, campaign, noise = _make_fixture("10.0.0.0/16")
     mod = PivotModule(settings=settings, campaign=campaign, noise=noise)
 

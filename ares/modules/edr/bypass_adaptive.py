@@ -28,23 +28,17 @@ OPSEC: MEDIUM - some detection tests may trigger EDR telemetry
 from __future__ import annotations
 
 import asyncio
-import platform
-import time
-from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
-from ares.fingerprint.engine import EDRVendor
+from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 from ares.modules.params import EDRBypassParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
-    NetworkPermission,
     ProcessPermission,
     module_contract,
 )
@@ -442,12 +436,12 @@ class EDRAdaptiveBypassModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         vendor_name = raw.get("edr_vendor", edr_vendor) or "GenericEDR"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect EDR Evasion, Unhooking & AMSI Patching\n"
-            f"// Detects in-memory modification of ntdll.dll .text section or amsi.dll/ntdll.dll hooking tampering\n"
-            f"SysmonEvent\n"
-            f"| where EventID in (7, 10, 25)\n"
-            f"| where ImageLoaded endswith \"amsi.dll\" or ImageLoaded endswith \"ntdll.dll\"\n"
-            f"| project TimeGenerated, Computer, Image, ImageLoaded, Hashes\n"
+            "// ARES Closed-Loop Telemetry: Detect EDR Evasion, Unhooking & AMSI Patching\n"
+            "// Detects in-memory modification of ntdll.dll .text section or amsi.dll/ntdll.dll hooking tampering\n"
+            "SysmonEvent\n"
+            "| where EventID in (7, 10, 25)\n"
+            "| where ImageLoaded endswith \"amsi.dll\" or ImageLoaded endswith \"ntdll.dll\"\n"
+            "| project TimeGenerated, Computer, Image, ImageLoaded, Hashes\n"
         )
         sigma_rule = (
             f"title: In-Memory EDR Hook Tampering / AMSI Patching ({vendor_name})\n"
@@ -802,7 +796,7 @@ class EDRAdaptiveBypassModule(BaseModule):
         viable  = result["viable_techniques"]
         byovd   = result.get("byovd_techniques", [])
         blinds  = result.get("blind_spots", [])
-        vendor  = result["vendor"]
+        vendor  = result["vendor"]  # noqa: F841
 
         if not viable:
             self.finding(
@@ -932,11 +926,12 @@ class EDRAdaptiveBypassModule(BaseModule):
         def _run_all():
             """Execute all probes via impacket WMI exec on target."""
             try:
-                from impacket.dcerpc.v5.dcomrt import DCOMConnection
+                import io
+
                 from impacket.dcerpc.v5.dcom import wmi as wmimod
+                from impacket.dcerpc.v5.dcomrt import DCOMConnection
                 from impacket.dcerpc.v5.dtypes import NULL
                 from impacket.smbconnection import SMBConnection
-                import io
 
                 lmhash, nthash = "", ""
                 smb = SMBConnection(target, target, timeout=15)
@@ -1109,6 +1104,6 @@ class EDRAdaptiveBypassModule(BaseModule):
                 loop.run_in_executor(None, _run_all),
                 timeout=120,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             results["error"] = "Deep probe timed out after 120s"
             return results

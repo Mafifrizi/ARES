@@ -17,11 +17,11 @@ import asyncio
 import time
 from typing import Any
 
-from ares.core.logger import get_logger
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import PortScanParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
@@ -276,7 +276,7 @@ async def _tcp_connect(host: str, port: int, timeout: float = 2.0) -> bool:
         except Exception:
             pass
         return True
-    except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+    except (TimeoutError, ConnectionRefusedError, OSError):
         return False
 
 

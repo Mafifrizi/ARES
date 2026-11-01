@@ -130,7 +130,7 @@ class ModuleParams(BaseModel):
                 return val.get_secret_value()
             return val
         except AttributeError:
-            raise KeyError(key)
+            raise KeyError(key)  # noqa: B904
 
     def __contains__(self, key: object) -> bool:
         if not isinstance(key, str):

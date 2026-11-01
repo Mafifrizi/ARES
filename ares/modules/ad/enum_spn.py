@@ -1,17 +1,26 @@
 """AD SPN Enumeration - Production ldap3 Implementation. MITRE: T1558.003, T1087.002"""
 from __future__ import annotations
+
 import datetime
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.enum_spn")
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
+from ares.core.errors import AresError, ModuleValidationError
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
+from ares.modules.ad.dependencies import (
+    ad_bind_dry_run_metadata,
+    build_ad_bind_plan,
+    classify_ad_ldap_bind_failure,
+    sanitize_ad_username,
+)
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -19,14 +28,7 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
-from ares.core.errors import AresError, ModuleValidationError
-from ares.modules.ad.dependencies import (
-    ad_bind_dry_run_metadata,
-    build_ad_bind_plan,
-    classify_ad_ldap_bind_failure,
-    sanitize_ad_username,
-)
+
 
 def _dn_to_base(domain):
     return ",".join(f"DC={p}" for p in domain.upper().split("."))
@@ -35,7 +37,7 @@ def _days_since_ts(ts):
     if not ts or str(ts) in ("0","9223372036854775807"): return None
     try:
         dt = datetime.datetime(1601,1,1) + datetime.timedelta(microseconds=int(str(ts))//10)
-        return max(0,(datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)-dt).days)
+        return max(0,(datetime.datetime.now(datetime.UTC).replace(tzinfo=None)-dt).days)
     except Exception: return None
 
 
@@ -141,12 +143,12 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         spn_target = dc or "DomainController"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Kerberoasting Reconnaissance / SPN Enumeration\n"
-            f"// Monitors Directory Service Event 1644 for LDAP queries searching for accounts with servicePrincipalName\n"
-            f"DirectoryServiceAccess\n"
-            f"| where EventID == 1644\n"
-            f"| where SearchFilter has \"servicePrincipalName=*\" and SearchFilter has \"!(userAccountControl:1.2.840.113556.1.4.803:=2)\"\n"
-            f"| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
+            "// ARES Closed-Loop Telemetry: Detect Kerberoasting Reconnaissance / SPN Enumeration\n"
+            "// Monitors Directory Service Event 1644 for LDAP queries searching for accounts with servicePrincipalName\n"
+            "DirectoryServiceAccess\n"
+            "| where EventID == 1644\n"
+            "| where SearchFilter has \"servicePrincipalName=*\" and SearchFilter has \"!(userAccountControl:1.2.840.113556.1.4.803:=2)\"\n"
+            "| project TimeGenerated, ClientIP, SearchFilter, AttributeList, ReturnedEntriesCount\n"
         )
         sigma_rule = (
             f"title: Active Directory SPN Query Reconnaissance ({spn_target})\n"
@@ -226,7 +228,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
         }
         # ISU-07: produce UserArtifact objects (is_kerberoastable=True)
         try:
-            from ares.normalize.artifacts import UserArtifact, ArtifactStore
+            from ares.normalize.artifacts import ArtifactStore, UserArtifact
             store = getattr(getattr(self, "campaign", None), "_artifact_store", None)
             if store is None:
                 store = ArtifactStore()
@@ -253,8 +255,9 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
         Issue #2 fix: conn.unbind() in try/finally - always closes even on exception.
         """
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, ALL, SUBTREE, Tls
+        from ldap3 import ALL, SUBTREE, Connection, Server, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         # Try LDAPS first, fallback to plain LDAP
@@ -267,12 +270,12 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL,
                                  connect_timeout=10)
-                conn_kwargs = dict(
-                    user=bind_plan.user,
-                    password=password,
-                    auto_bind=ldap3.AUTO_BIND_NONE,
-                    receive_timeout=30,
-                )
+                conn_kwargs = {
+                    "user": bind_plan.user,
+                    "password": password,
+                    "auto_bind": ldap3.AUTO_BIND_NONE,
+                    "receive_timeout": 30,
+                }
                 if bind_plan.mode == "ntlm":
                     conn_kwargs["authentication"] = ldap3.NTLM
                 conn = Connection(server, **conn_kwargs)
@@ -297,7 +300,7 @@ class ADEnumSPNModule(BaseModule[DomainAuthParams, ModuleResult]):
                     bind_plan=bind_plan,
                 )
                 if isinstance(last_error, ModuleValidationError):
-                    raise last_error
+                    raise last_error  # noqa: B904
                 conn = None
                 continue
 

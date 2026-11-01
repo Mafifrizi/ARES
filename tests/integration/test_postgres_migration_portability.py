@@ -16,7 +16,7 @@ import types
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -1921,7 +1921,7 @@ async def _seed_postgres_contract(connection: Any) -> None:
         """,
         "refresh-contract",
         "user-contract",
-        datetime(2099, 1, 1, tzinfo=timezone.utc),
+        datetime(2099, 1, 1, tzinfo=UTC),
     )
     await connection.execute(
         """
@@ -1930,7 +1930,7 @@ async def _seed_postgres_contract(connection: Any) -> None:
         """,
         "revoked-contract",
         "user-contract",
-        datetime(2099, 1, 1, tzinfo=timezone.utc),
+        datetime(2099, 1, 1, tzinfo=UTC),
     )
     await connection.execute(
         """
@@ -4828,7 +4828,7 @@ async def test_postgres_all_timestamp_columns_reject_infinity() -> None:
                 "revoked_access_tokens": ("jti", "revoked-contract"),
                 "rate_limit_events": ("id", 1),
             }
-            finite_value = datetime(2030, 1, 1, tzinfo=timezone.utc)
+            finite_value = datetime(2030, 1, 1, tzinfo=UTC)
             enforced_for_every_column = True
             for (table, column), (_name, nullable) in sorted(
                 _POSTGRES_FINITE_TIMESTAMP_CONSTRAINTS.items()
@@ -5831,7 +5831,7 @@ async def _seed_postgres_legacy_catalog(
         """,
         "legacy-refresh",
         "legacy-user",
-        datetime(2099, 1, 1, tzinfo=timezone.utc),
+        datetime(2099, 1, 1, tzinfo=UTC),
     )
     if revision >= "0003":
         await connection.execute(
@@ -5850,7 +5850,7 @@ async def _seed_postgres_legacy_catalog(
             """,
             "legacy-revoked",
             "legacy-user",
-            datetime(2099, 1, 1, tzinfo=timezone.utc),
+            datetime(2099, 1, 1, tzinfo=UTC),
         )
 
 

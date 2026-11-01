@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import time
 from enum import Enum
-from typing import Any
 
-from ares.core.errors import AresError, AccountLocked
+from ares.core.errors import AccountLocked, AresError
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.sdk.resilience")

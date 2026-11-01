@@ -9,15 +9,17 @@ from __future__ import annotations
 import json
 import secrets
 import time
-from typing import Any, Mapping
+import warnings
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-import warnings
 from authlib.deprecate import AuthlibDeprecationWarning
-warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
-from authlib.jose import JsonWebKey, jwt as authlib_jwt
 
+warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
+from authlib.jose import JsonWebKey
+from authlib.jose import jwt as authlib_jwt
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 

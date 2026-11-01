@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -151,14 +151,14 @@ def build_report_context(
     def _finding_time_key(f: Any) -> datetime:
         ts = getattr(f, "discovered_at", None)
         if isinstance(ts, datetime):
-            return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts.astimezone(timezone.utc)
+            return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
         if isinstance(ts, str):
             try:
                 parsed = datetime.fromisoformat(ts)
-                return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+                return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
             except Exception:
                 pass
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
 
     timeline = sorted(findings, key=_finding_time_key)
     mitre_map = _build_mitre_map(findings)
@@ -202,7 +202,7 @@ def build_report_context(
         "remediation_roadmap": _build_remediation_roadmap(sorted_finds),
         "summary": campaign.summary(),
         "risk_score": campaign.risk_score(),
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         "total_findings": len(sorted_finds),
         "fp_filtered": len([f for f in campaign.findings if f.false_positive]),
         "sla": REMEDIATION_SLA,
@@ -2356,7 +2356,7 @@ class ReportGenerator:
         campaign_id = (
             _re.sub(r"[^\w\-]", "_", campaign.id)[:64].strip("_") or "campaign"
         )
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M")
         return self.output_dir / f"{campaign_id}_{slug}_{ts}.{ext}"
 
     @staticmethod

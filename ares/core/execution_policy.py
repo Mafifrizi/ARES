@@ -135,7 +135,7 @@ class RequestFactsV1:
     bounded_shape_valid: bool
     shape_units: int
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -158,7 +158,7 @@ class DescriptorFactsV1:
     transport_ready: bool
     future_gateway_eligible: bool
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -189,7 +189,7 @@ class AuthorityFactsV1:
     budget_authority_current: bool
     budget_capacity_available: bool
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -200,7 +200,7 @@ class PolicyInputV1:
     descriptor: DescriptorFactsV1
     authority: AuthorityFactsV1
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 @dataclass(frozen=True, slots=True, repr=False, eq=False)
@@ -210,7 +210,7 @@ class PolicyDecisionV1:
     verdict: PolicyVerdict
     reasons: tuple[PolicyReason, ...]
 
-    __hash__ = None
+    __hash__ = None  # type: ignore[assignment]  # intentional: unhashable (eq=False dataclass)
 
 
 _ALL_CAPABILITIES: Final = (

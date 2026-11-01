@@ -8,13 +8,10 @@ Run: pytest tests/unit/test_final_hardening.py -v
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import stat
 import sys
 from pathlib import Path
-
-import pytest
 
 _ROOT = Path(__file__).parent.parent.parent.resolve()
 if str(_ROOT) not in sys.path:
@@ -25,7 +22,7 @@ class TestCampaignScopedCleanup:
     """Prove that artifact cleanup is campaign-isolated."""
 
     def _reset_tracking(self):
-        from ares.core.security import _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK
+        from ares.core.security import _ARTIFACT_LOCK, _CREDENTIAL_ARTIFACTS
         with _ARTIFACT_LOCK:
             _CREDENTIAL_ARTIFACTS.clear()
 
@@ -36,7 +33,8 @@ class TestCampaignScopedCleanup:
         New code: dict[campaign_id] → scoped cleanup.
         """
         from ares.core.security import (
-            secure_mkstemp, cleanup_credential_artifacts,
+            cleanup_credential_artifacts,
+            secure_mkstemp,
         )
         self._reset_tracking()
 
@@ -79,7 +77,8 @@ class TestCampaignScopedCleanup:
     def test_cleanup_all_cleans_every_campaign(self):
         """cleanup_all_credential_artifacts() must clean ALL campaigns."""
         from ares.core.security import (
-            secure_mkstemp, cleanup_all_credential_artifacts,
+            cleanup_all_credential_artifacts,
+            secure_mkstemp,
         )
         self._reset_tracking()
 
@@ -97,8 +96,11 @@ class TestCampaignScopedCleanup:
     def test_global_scope_isolation(self):
         """Artifacts created without campaign_id go to _GLOBAL scope."""
         from ares.core.security import (
-            secure_mkstemp, cleanup_credential_artifacts,
-            _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK, _GLOBAL_SCOPE,
+            _ARTIFACT_LOCK,
+            _CREDENTIAL_ARTIFACTS,
+            _GLOBAL_SCOPE,
+            cleanup_credential_artifacts,
+            secure_mkstemp,
         )
         self._reset_tracking()
 
@@ -120,13 +122,13 @@ class TestCleanupGuarantee:
     """Prove cleanup runs on ALL execution paths."""
 
     def _reset_tracking(self):
-        from ares.core.security import _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK
+        from ares.core.security import _ARTIFACT_LOCK, _CREDENTIAL_ARTIFACTS
         with _ARTIFACT_LOCK:
             _CREDENTIAL_ARTIFACTS.clear()
 
     def test_secure_mkstemp_reopenable_after_close(self):
         """Windows ACL hardening must not make the temp file unusable."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         p, fd = secure_mkstemp(suffix=".ccache", campaign_id="reopen-test")
@@ -141,7 +143,7 @@ class TestCleanupGuarantee:
 
     def test_secure_mkstemp_falls_back_when_fchmod_unavailable(self, monkeypatch):
         """Windows/Python builds without os.fchmod must still create secure temp files."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
         monkeypatch.delattr(os, "fchmod", raising=False)
 
@@ -158,7 +160,7 @@ class TestCleanupGuarantee:
 
     def test_cleanup_always_runs_on_success(self):
         """Cleanup works after successful operation."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         p, fd = secure_mkstemp(suffix=".ccache", campaign_id="success-test")
@@ -172,7 +174,7 @@ class TestCleanupGuarantee:
 
     def test_cleanup_always_runs_on_exception(self):
         """Cleanup works even when exception occurred between create and cleanup."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         p, fd = secure_mkstemp(suffix=".pfx", campaign_id="exc-test")
@@ -195,7 +197,7 @@ class TestCleanupGuarantee:
         Simulate a full module execution with try/finally pattern.
         Artifact must be deleted even if module raises.
         """
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         artifact_path = None
@@ -219,7 +221,7 @@ class TestCleanupGuarantee:
 
     def test_cleanup_idempotent(self):
         """Double cleanup must not crash or return wrong count."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         p, fd = secure_mkstemp(suffix=".test", campaign_id="idem-test")
@@ -236,7 +238,7 @@ class TestCleanupGuarantee:
 
     def test_cleanup_already_deleted_file(self):
         """If file was manually deleted before cleanup, cleanup must not crash."""
-        from ares.core.security import secure_mkstemp, cleanup_credential_artifacts
+        from ares.core.security import cleanup_credential_artifacts, secure_mkstemp
         self._reset_tracking()
 
         p, fd = secure_mkstemp(suffix=".test", campaign_id="preempt-test")
@@ -255,7 +257,7 @@ class TestLongRunningAccumulation:
     """Prove no artifact accumulation in 24/7 operation."""
 
     def _reset_tracking(self):
-        from ares.core.security import _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK
+        from ares.core.security import _ARTIFACT_LOCK, _CREDENTIAL_ARTIFACTS
         with _ARTIFACT_LOCK:
             _CREDENTIAL_ARTIFACTS.clear()
 
@@ -266,8 +268,10 @@ class TestLongRunningAccumulation:
         No accumulation.
         """
         from ares.core.security import (
-            secure_mkstemp, secure_mkdtemp, cleanup_credential_artifacts,
-            _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK,
+            _ARTIFACT_LOCK,
+            _CREDENTIAL_ARTIFACTS,
+            cleanup_credential_artifacts,
+            secure_mkstemp,
         )
         self._reset_tracking()
 
@@ -313,7 +317,8 @@ class TestLongRunningAccumulation:
         Each cleanup must only affect its own artifacts.
         """
         from ares.core.security import (
-            secure_mkstemp, cleanup_credential_artifacts,
+            cleanup_credential_artifacts,
+            secure_mkstemp,
         )
         self._reset_tracking()
 
@@ -406,7 +411,7 @@ class TestThreadSafety:
     """Prove artifact tracking is thread-safe."""
 
     def _reset_tracking(self):
-        from ares.core.security import _CREDENTIAL_ARTIFACTS, _ARTIFACT_LOCK
+        from ares.core.security import _ARTIFACT_LOCK, _CREDENTIAL_ARTIFACTS
         with _ARTIFACT_LOCK:
             _CREDENTIAL_ARTIFACTS.clear()
 

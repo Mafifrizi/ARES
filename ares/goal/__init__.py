@@ -10,13 +10,13 @@ from __future__ import annotations
 
 try:
     from ares.goal.engine import (  # noqa: F401
+        GOAL_DEFINITIONS,
+        CapabilityGraph,
         Goal,
-        GoalEngine,
         GoalAttackPlan,
         GoalAttackStep,
         GoalDefinition,
-        GOAL_DEFINITIONS,
-        CapabilityGraph,
+        GoalEngine,
     )
 except ImportError:
     pass  # Optional deps not installed
@@ -34,8 +34,8 @@ except ImportError:
 
 try:
     from ares.goal.adaptive import (  # noqa: F401
-        AdaptiveStrategy,
         FALLBACK_GRAPH,
+        AdaptiveStrategy,
     )
 except ImportError:
     pass

@@ -3,15 +3,15 @@ Campaign - tracks engagements, findings, scope, and audit trail.
 """
 from __future__ import annotations
 
+import ipaddress
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
-import ipaddress
 
-from ares.core.scope import CampaignScope, CloudScope
+from ares.core.scope import CloudScope
 
 
 class Severity(str, Enum):
@@ -51,13 +51,13 @@ class Finding(BaseModel):
     remediation: str = ""
     false_positive: bool = False
     validated: bool = False
-    discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("discovered_at", mode="after")
     @classmethod
     def _ensure_tz_aware(cls, v: datetime) -> datetime:
         if isinstance(v, datetime) and v.tzinfo is None:
-            return v.replace(tzinfo=timezone.utc)
+            return v.replace(tzinfo=UTC)
         return v
     host:        str | None = None
     module_id:   str = ""
@@ -125,7 +125,7 @@ class ScopeEntry(BaseModel):
 class AuditEntry(BaseModel):
     """Immutable audit log entry - tracks every action."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     actor: str = "system"
     action: str
     detail: str = ""
@@ -175,8 +175,8 @@ class Campaign(BaseModel):
     audit_log: list[AuditEntry] = Field(default_factory=list)
     notes: str = ""
     operator: str = "unknown"
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
     # ── AD campaign context ───────────────────────────────────────────────────
     domain:  str = Field(default="", description="Active Directory domain (e.g. corp.local)")
@@ -204,7 +204,7 @@ class Campaign(BaseModel):
             if not finding.validated:
                 finding = finding.model_copy(update={"validated": True})
             self.findings.append(finding)
-            self.updated_at = datetime.now(timezone.utc)
+            self.updated_at = datetime.now(UTC)
             self._audit("finding_added", f"[{finding.severity.value.upper()}] {finding.title}", finding.module_id)
 
     def _audit(self, action: str, detail: str = "", module_id: str | None = None) -> None:
@@ -253,8 +253,8 @@ class Campaign(BaseModel):
         }
 
         # Attempt DNS resolution first to verify resolved IP is in CIDR scope
-        import socket as _socket
         import logging as _logging
+        import socket as _socket
         _log = _logging.getLogger("ares.campaign")
         try:
             import concurrent.futures as _cf

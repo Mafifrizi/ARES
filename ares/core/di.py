@@ -30,7 +30,8 @@ Usage:
 """
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from ares.core.logger import get_logger
 
@@ -212,9 +213,9 @@ class AresContainer:
         """
         from ares.core.config import AresSettings
         from ares.core.plugin.loader import ModuleRegistry
-        from ares.telemetry.collector import TelemetryCollector
-        from ares.knowledge import AttackKnowledgeBase
         from ares.core.sandbox import SandboxRunner
+        from ares.knowledge import AttackKnowledgeBase
+        from ares.telemetry.collector import TelemetryCollector
 
         s = settings or AresSettings()
         c = cls()
@@ -239,8 +240,8 @@ class AresContainer:
         """
         from ares.core.config import AresSettings
         from ares.core.plugin.loader import ModuleRegistry
-        from ares.telemetry.collector import TelemetryCollector
         from ares.knowledge import AttackKnowledgeBase
+        from ares.telemetry.collector import TelemetryCollector
 
         c = cls()
         c.register("settings",  AresSettings())
@@ -254,7 +255,7 @@ class AresContainer:
         from ares.credential.vault import CredentialVault
         # Use the dedicated encryption key, not the JWT secret_key.
         # CredentialVault.__init__ handles key derivation internally.
-        raw_key = settings.encryption_key_value  # type: ignore[attr-defined]
+        raw_key = settings.encryption_key_value
         return CredentialVault(raw_key)
 
     def list_services(self) -> dict[str, str]:

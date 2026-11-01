@@ -28,6 +28,7 @@ import asyncio
 import json
 import os
 import sys as _sys
+
 if _sys.platform != "win32":
     import resource
 else:
@@ -431,9 +432,9 @@ class SandboxRunner:
         requested_tier: IsolationTier = IsolationTier.NONE,
     ) -> SandboxResult:
         """Direct in-process execution. For trusted core modules only."""
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.config import AresSettings
         from ares.core.noise import NoiseController
-        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.plugin.loader import ModuleRegistry
         from ares.core.scope_firewall import scope_firewall_guard
 
@@ -447,9 +448,10 @@ class SandboxRunner:
         # Do NOT default to 0.0.0.0/0 (wildcard) as that bypasses scope enforcement.
         scope_entries: list[ScopeEntry] = []
         try:
-            from ares.db.database import AresDatabase
-            from ares.core.config import get_settings as _gs
             import json as _j
+
+            from ares.core.config import get_settings as _gs
+            from ares.db.database import AresDatabase
             _s = _gs()
             async with await AresDatabase.create(
                 _s.ares_database_url, _s.encryption_key_value
@@ -517,9 +519,10 @@ class SandboxRunner:
             # Pass real campaign scope so child process respects it
             _scope_cidrs: list[str] = []
             try:
-                from ares.db.database import AresDatabase
-                from ares.core.config import get_settings as _gs
                 import json as _j
+
+                from ares.core.config import get_settings as _gs
+                from ares.db.database import AresDatabase
                 _s = _gs()
                 async with await AresDatabase.create(
                     _s.ares_database_url, _s.encryption_key_value
@@ -641,7 +644,7 @@ class SandboxRunner:
                         proc.communicate(payload.encode()),
                         timeout=self.policy.timeout_s,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
                     await proc.wait()
                     return SandboxResult(
@@ -719,7 +722,7 @@ class SandboxRunner:
 
         # 2. Check docker availability & client connection
         try:
-            import docker  # type: ignore[import-untyped]
+            import docker
         except ImportError:
             docker = None
 
@@ -814,9 +817,10 @@ class SandboxRunner:
         # Fetch real scope for Docker container (same as subprocess)
         _docker_scope: list[str] = []
         try:
-            from ares.db.database import AresDatabase
-            from ares.core.config import get_settings as _dgs
             import json as _dj
+
+            from ares.core.config import get_settings as _dgs
+            from ares.db.database import AresDatabase
             _ds = _dgs()
             async with await AresDatabase.create(
                 _ds.ares_database_url, _ds.encryption_key_value
@@ -931,7 +935,7 @@ class SandboxRunner:
                             f"unshare(CLONE_NEWNET) returned {ret} (errno={errno_val})"
                         )
                 except Exception as exc:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Mandatory security control failed: allow_network=False requires network namespace isolation: {exc}"
                     )
 
@@ -948,7 +952,7 @@ class SandboxRunner:
                                 drop_gid = pwd.getpwuid(target_uid).pw_gid
                             except Exception as e:
                                 if strict_mode:
-                                    raise RuntimeError(
+                                    raise RuntimeError(  # noqa: B904
                                         f"Cannot resolve primary GID for UID {target_uid} in strict mode; specify sandbox_gid explicitly: {e}"
                                     )
                                 drop_gid = target_uid
@@ -962,7 +966,7 @@ class SandboxRunner:
                     os.setuid(drop_uid)
                 except Exception as exc:
                     target_label = "nobody" if target_uid is None else str(target_uid)
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: B904
                         f"Mandatory security control failed: drop_privileges=True failed to drop root to {target_label}: {exc}"
                     )
                 if getattr(os, "geteuid", lambda: -1)() == 0 or getattr(os, "getuid", lambda: -1)() == 0:

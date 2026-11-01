@@ -22,22 +22,21 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ares.core.campaign import Campaign, Finding, Severity
+from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleExecutionError
 from ares.core.logger import audit, get_logger
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import (
     PsExecParams,
-    WmiExecParams,
-    WinRMParams,
-    SSHPivotParams,
     RDPLateralParams,
+    SSHPivotParams,
+    WinRMParams,
+    WmiExecParams,
 )
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -46,8 +45,7 @@ from ares.sdk import (
 )
 
 if TYPE_CHECKING:
-    from ares.credential.vault import CredentialVault, Credential
-    from ares.state.target_state import OperatorSession
+    from ares.modules.base import FeasibilityReport
 
 logger = get_logger("ares.lateral")
 
@@ -196,15 +194,16 @@ class BaseLateralModule(BaseModule):
             f"{self.__class__.__name__} must implement move()"
         )
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Default lateral movement feasibility evaluation:
         Checks target reachability, credentials, and noise profile compatibility.
         """
         import os
-        from ares.modules.base import FeasibilityReport
+
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -254,6 +253,7 @@ class BaseLateralModule(BaseModule):
         Applied to all lateral modules: psexec, wmiexec, dcom, winrm, rdp, ssh.
         """
         import os
+
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
         if not isinstance(ctx, ExecutionContext):
@@ -551,16 +551,16 @@ class PsExecLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1569.002", "T1021.002"]
     PARAMS_MODEL       = PsExecParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         PsExec installs a service (Event ID 7045) which is actively monitored by every
         modern enterprise EDR and blocked under STEALTH.
         Recommends stealthier alternatives: lateral.dcom, lateral.winrm, or lateral.wmiexec.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         base = await super().assess_feasibility(ctx)
         blockers = list(base.blockers)
@@ -608,7 +608,7 @@ class PsExecLateral(BaseLateralModule):
         logger.info("psexec_attempt", target=target, username=username, domain=domain)
 
         try:
-            from impacket.smbconnection import SMBConnection, SessionError
+            from impacket.smbconnection import SessionError, SMBConnection  # noqa: F401
         except ImportError:
             return LateralResult(
                 technique=LateralTechnique.PSEXEC,
@@ -634,7 +634,8 @@ class PsExecLateral(BaseLateralModule):
             Falls back to admin$ check if full exec fails.
             """
             import uuid as _uuid
-            from impacket.dcerpc.v5 import transport, svcctl, scmr
+
+            from impacket.dcerpc.v5 import scmr, transport
             svc_name = f"ARES{_uuid.uuid4().hex[:8].upper()}"
             svc_handle = None
             scm_handle = None
@@ -807,14 +808,14 @@ class WmiExecLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1047", "T1021.002"]
     PARAMS_MODEL       = WmiExecParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates WMI / Win32_Process.Create feasibility and RPC port 135 filtering.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         base = await super().assess_feasibility(ctx)
         blockers = list(base.blockers)
@@ -864,7 +865,7 @@ class WmiExecLateral(BaseLateralModule):
         logger.info("wmiexec_attempt", target=target, username=username, domain=domain)
 
         try:
-            from impacket.smbconnection import SMBConnection, SessionError
+            from impacket.smbconnection import SessionError, SMBConnection  # noqa: F401
         except ImportError:
             return LateralResult(
                 technique=LateralTechnique.WMIEXEC,
@@ -884,8 +885,8 @@ class WmiExecLateral(BaseLateralModule):
             Output captured by writing to a temp file then reading back via SMB.
             Timeout enforced on the overall sync block.
             """
-            import uuid as _uuid
             import time as _time
+            import uuid as _uuid
             tmp_id  = _uuid.uuid4().hex[:8].upper()
             tmp_out = f"\\Windows\\Temp\\WMI{tmp_id}.txt"
             wmi_cmd = f"cmd.exe /c {command} > {tmp_out} 2>&1"
@@ -893,8 +894,8 @@ class WmiExecLateral(BaseLateralModule):
             output  = ""
 
             try:
+                from impacket.dcerpc.v5.dcom import wmi as wmimod
                 from impacket.dcerpc.v5.dcomrt import DCOMConnection
-                from impacket.dcerpc.v5.dcom  import wmi as wmimod
                 from impacket.dcerpc.v5.dtypes import NULL
 
                 # Connect via DCOM with Kerberos support & NTLM fallback
@@ -981,7 +982,7 @@ class WmiExecLateral(BaseLateralModule):
                 loop.run_in_executor(None, _wmi_exec),
                 timeout=timeout_s + 5,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return LateralResult(
                 technique=LateralTechnique.WMIEXEC,
                 source_host="operator", target_host=target,
@@ -1042,13 +1043,13 @@ class WinRMLateral(BaseLateralModule):
     MITRE_TECHNIQUES   = ["T1021.006", "T1059.001"]
     PARAMS_MODEL       = WinRMParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         WinRM is the standard enterprise management protocol; blends into normal admin traffic.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         base = await super().assess_feasibility(ctx)
         blockers = list(base.blockers)
@@ -1127,7 +1128,7 @@ class WinRMLateral(BaseLateralModule):
                 )
                 r = session.run_cmd(command)
                 stdout = r.std_out.decode("utf-8", errors="replace").strip()
-                stderr = r.std_err.decode("utf-8", errors="replace").strip()
+                stderr = r.std_err.decode("utf-8", errors="replace").strip()  # noqa: F841
                 success = r.status_code == 0
                 priv = "SYSTEM" if "NT AUTHORITY\\SYSTEM" in stdout else (
                     "Administrator" if "Administrators" in stdout else "user"
@@ -1208,8 +1209,9 @@ class SSHPivot(BaseLateralModule):
         logger.info("ssh_pivot_attempt", target=target, port=port, username=username)
 
         try:
-            import paramiko
             import io
+
+            import paramiko
 
             known_hosts_file = kwargs.get("known_hosts_file") or None
             client = paramiko.SSHClient()
@@ -1469,14 +1471,14 @@ class RDPLateral(BaseLateralModule):
     MIN_NOISE_PROFILE  = "normal"
     PARAMS_MODEL       = RDPLateralParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         RDP creates interactive logons (Event ID 4624 type 10); high noise and blocked under STEALTH.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         base = await super().assess_feasibility(ctx)
         blockers = list(base.blockers)
@@ -1505,9 +1507,9 @@ class RDPLateral(BaseLateralModule):
     async def validate(self, ctx: "Any") -> None:
         """RDP lateral blocked in STEALTH - triggers EventID 4624/4625 immediately."""
         await super().validate(ctx)
+        from ares.core.campaign import NoiseProfile
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import NoiseProfile
         if not isinstance(ctx, ExecutionContext):
             return
         noise = getattr(getattr(ctx, "campaign", None), "noise_profile", None)
@@ -1520,7 +1522,8 @@ class RDPLateral(BaseLateralModule):
             )
 
     async def move(self, target, username, domain, secret, command="", **kwargs) -> LateralResult:
-        import time, socket
+        import socket
+        import time
         t0 = time.monotonic()
         port = kwargs.get("port", 3389)
 
@@ -1572,12 +1575,12 @@ class RDPLateral(BaseLateralModule):
                     if banner and banner[0] == 0x03:
                         return True, "rdp_port_open", ""
                     return False, "", "Unexpected banner response"
-                except (OSError, socket.timeout):
+                except (TimeoutError, OSError):
                     sock.close()
                     # Port open but no valid response - still likely RDP
                     return True, "rdp_port_open", ""
 
-            except (OSError, socket.timeout) as exc:
+            except (TimeoutError, OSError) as exc:
                 return False, "", f"Connection failed: {exc}"
 
         try:

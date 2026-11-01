@@ -5,7 +5,7 @@ import hashlib
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from ares.core.token_sessions import require_family_id
@@ -37,7 +37,7 @@ def normalize_utc_datetime(value: datetime) -> datetime:
     offset = value.utcoffset()
     if offset is None:
         raise ValueError("timestamp must have a UTC offset")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def format_sqlite_utc(value: datetime) -> str:

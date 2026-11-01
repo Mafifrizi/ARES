@@ -247,7 +247,7 @@ class CrackingWorker:
             # Also check stdout (show command)
             return await self._hashcat_show(job, hash_file, str(job.hashcat_mode))
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("hashcat_timeout", job_id=job.job_id)
             return None
         except Exception as exc:
@@ -311,7 +311,7 @@ class CrackingWorker:
                     parts = line.split(":", 2)
                     if len(parts) >= 2 and parts[1]:
                         return parts[1]
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("john_timeout", job_id=job.job_id)
         except Exception as exc:
             logger.warning("john_error", job_id=job.job_id, error=str(exc)[:100])

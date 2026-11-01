@@ -6,7 +6,8 @@ invariants in a clean, unified Python decorator (@module_contract).
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from ares.core.context import ExecutionContext
 from ares.modules.base import ModuleResult
@@ -17,7 +18,7 @@ from ares.sdk.pipeline.interceptors import (
     ScopeEnforcementInterceptor,
     SecretSanitizationInterceptor,
 )
-from ares.sdk.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerTripped
+from ares.sdk.resilience.circuit_breaker import CircuitBreaker
 from ares.sdk.security.permissions import CapabilitySandbox, SecurityPermission
 
 M = TypeVar("M")
@@ -80,7 +81,10 @@ def module_contract(
                     try:
                         res = await original_execute(self, c)
                         if cb is not None:
-                            from ares.sdk.resilience.circuit_breaker import LockoutCircuitBreaker, CircuitBreakerState
+                            from ares.sdk.resilience.circuit_breaker import (
+                                CircuitBreakerState,
+                                LockoutCircuitBreaker,
+                            )
                             if isinstance(cb, LockoutCircuitBreaker):
                                 raw_res = getattr(res, "raw", {}) or {}
                                 for acc in raw_res.get("locked_accounts", []):
@@ -97,7 +101,7 @@ def module_contract(
 
                 return await pipe.run(self, ctx, _inner_exec)
 
-            cls.execute = wrapped_execute  # type: ignore[assignment]
+            cls.execute = wrapped_execute
 
         return cls
 

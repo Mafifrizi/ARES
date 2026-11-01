@@ -22,7 +22,12 @@ Usage:
 """
 from __future__ import annotations
 
-import hashlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
 import os
 import time
 import uuid
@@ -307,10 +312,11 @@ class CredentialVault:
     _V2_PREFIX = "v2:"
 
     def __init__(self, encryption_key: bytes | str | None) -> None:
-        import base64, os as _os
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        import os as _os
+
         from cryptography.hazmat.primitives import hashes as _hashes
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         if encryption_key is None:
             # Auto-generate ephemeral key (in-memory vault, not persisted)
@@ -366,8 +372,9 @@ class CredentialVault:
         if salt in self._fernet_cache:
             return self._fernet_cache[salt]
         import base64
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
         from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         if self._raw_key is None:
             raise ValueError("Cannot derive key: vault uses ephemeral key")
         kdf = PBKDF2HMAC(
@@ -381,15 +388,15 @@ class CredentialVault:
             self._fernet_cache[salt] = cipher
         return cipher
 
-    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":
+    def _derive_aesgcm(self, salt: bytes) -> "AESGCM":  # noqa: F821
         """Derive an AES-256-GCM key from self._raw_key + salt (600k iter)."""
         if not hasattr(self, "_gcm_cache"):
             self._gcm_cache = {}
         if salt in self._gcm_cache:
             return self._gcm_cache[salt]
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         from cryptography.hazmat.primitives import hashes as _hashes
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         if self._raw_key is None:
             raise ValueError("Cannot derive key: vault uses ephemeral key")
         kdf = PBKDF2HMAC(

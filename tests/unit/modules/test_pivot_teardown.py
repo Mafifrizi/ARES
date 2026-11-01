@@ -10,7 +10,6 @@ Validates:
 """
 from __future__ import annotations
 
-import asyncio
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +19,7 @@ from ares.core.campaign import Campaign, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.engine import AresEngine, ExecutionPlan
 from ares.core.execution_admission import _mint_test_plan_context
-from ares.modules.network.pivot import PivotModule, _PIVOT_MANAGERS
+from ares.modules.network.pivot import _PIVOT_MANAGERS, PivotModule
 from ares.pivot.infrastructure import PivotManager, PivotTunnel, TunnelState
 
 
@@ -147,7 +146,7 @@ class TestPivotTeardown:
 
         # Mock manager whose teardown_all raises TimeoutError
         mock_pm = MagicMock(spec=PivotManager)
-        mock_pm.teardown_all = MagicMock(side_effect=asyncio.TimeoutError("Teardown timed out"))
+        mock_pm.teardown_all = MagicMock(side_effect=TimeoutError("Teardown timed out"))
         mock_pm.all_tunnels.return_value = []
 
         with patch.object(

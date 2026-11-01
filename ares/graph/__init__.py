@@ -15,9 +15,9 @@ from __future__ import annotations
 try:
     from ares.graph.attack_graph import (  # noqa: F401
         AttackGraph,
-        GraphNode,
-        GraphEdge,
         EdgeType,
+        GraphEdge,
+        GraphNode,
     )
 except ImportError:
     pass  # networkx not installed

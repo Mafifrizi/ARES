@@ -27,15 +27,13 @@ import shutil
 import ssl
 import subprocess
 import sys
-import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ares.core.logger import get_logger
 
@@ -167,7 +165,7 @@ def extract_all_module_ids(code: str) -> list[str]:
     return ids
 
 
-def validate_module_code(code: str, expected_module_id: Optional[str] = None) -> tuple[bool, str, Optional[str]]:
+def validate_module_code(code: str, expected_module_id: str | None = None) -> tuple[bool, str, str | None]:
     """
     Pre-flight AST analysis on Python code.
     Verifies valid Python syntax and presence of a valid BaseModule structure with MODULE_ID.
@@ -216,7 +214,7 @@ def atomic_write_file(target_path: Path, content: str | bytes, is_binary: bool =
     """
     target_path.parent.mkdir(parents=True, exist_ok=True)
     nonce = uuid.uuid4().hex[:8]
-    backup_path: Optional[Path] = None
+    backup_path: Path | None = None
 
     if target_path.exists():
         backup_path = target_path.with_name(f".{target_path.name}.bak.{nonce}")
@@ -292,7 +290,7 @@ class PlatformUpdateManager:
 
     def __init__(
         self,
-        project_root: Optional[Path] = None,
+        project_root: Path | None = None,
         github_repo: str = OFFICIAL_GITHUB_REPO,
         branch: str = DEFAULT_BRANCH,
     ) -> None:
@@ -499,7 +497,7 @@ class PlatformUpdateManager:
     def _download_and_install_module(
         self,
         rel_path: str,
-        expected_module_id: Optional[str] = None,
+        expected_module_id: str | None = None,
         dry_run: bool = False,
     ) -> tuple[bool, str]:
         """
@@ -527,7 +525,7 @@ class PlatformUpdateManager:
 
     def update_modules(
         self,
-        module_id: Optional[str] = None,
+        module_id: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -593,7 +591,7 @@ class PlatformUpdateManager:
 
     def upgrade_modules(
         self,
-        module_id: Optional[str] = None,
+        module_id: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -982,7 +980,7 @@ class PlatformUpdateManager:
                     try:
                         ast.parse(data.decode("utf-8", errors="replace"))
                     except SyntaxError as exc:
-                        raise SecurityViolationError(f"AST syntax validation failed for '{remote_path}': {exc}")
+                        raise SecurityViolationError(f"AST syntax validation failed for '{remote_path}': {exc}")  # noqa: B904
 
                 atomic_write_file(safe_target, data, is_binary=True)
                 updated_count += 1
@@ -1024,6 +1022,7 @@ class PlatformUpdateManager:
         try:
             import logging
             from types import SimpleNamespace
+
             from alembic import command as alembic_cmd
             from alembic.config import Config as AlembicConfig
 
@@ -1110,11 +1109,11 @@ class PlatformUpdateManager:
         """
         checks: list[dict[str, Any]] = []
 
-        # 1. Core Framework imports
+        # 1. Core Framework imports (probe: these imports must actually run)
         try:
-            import ares.core
-            import ares.api.server
-            import ares.mcp
+            import ares.api.server  # noqa: F401
+            import ares.core  # noqa: F401
+            import ares.mcp  # noqa: F401
             checks.append({"subsystem": "Core Platform Engine", "status": "PASS", "detail": "Core, API, and MCP imported cleanly"})
         except Exception as exc:
             checks.append({"subsystem": "Core Platform Engine", "status": "FAIL", "detail": str(exc)})
@@ -1123,7 +1122,7 @@ class PlatformUpdateManager:
         try:
             local_mods = self.get_local_modules()
             count = len(local_mods)
-            unique_files = len(set(item.relative_path for item in local_mods.values()))
+            unique_files = len({item.relative_path for item in local_mods.values()})
             detail_str = f"{count} modules discovered and validated ({unique_files} source files)"
             checks.append({"subsystem": "Attack Modules", "status": "PASS" if count > 0 else "WARN", "detail": detail_str})
         except Exception as exc:

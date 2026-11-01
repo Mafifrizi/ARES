@@ -27,17 +27,16 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Severity
-from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 from ares.modules.params import CoveragePredictorParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     ProcessPermission,
     module_contract,
 )
@@ -799,7 +798,7 @@ class CoveragePredictorModule(BaseModule):
                     modules_analyzed=prediction.modules_analyzed)
 
         # Generate findings based on risk level
-        findings = []
+        findings = []  # noqa: F841
         score_pct = int(prediction.overall_score * 100)
 
         if prediction.overall_score >= 0.9:

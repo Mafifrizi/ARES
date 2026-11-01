@@ -10,12 +10,12 @@ from __future__ import annotations
 
 try:
     from ares.state.target_state import (  # noqa: F401
-        HostState,
-        TargetHost,
-        OperatorSession,
-        CompromiseLevel,
-        ServiceEntry,
         AttackHistoryEntry,
+        CompromiseLevel,
+        HostState,
+        OperatorSession,
+        ServiceEntry,
+        TargetHost,
     )
 except ImportError:
     pass  # Optional deps not installed

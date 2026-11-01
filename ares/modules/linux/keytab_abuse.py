@@ -12,7 +12,7 @@ import asyncio
 import os
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module

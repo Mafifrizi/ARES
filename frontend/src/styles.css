@@ -320,9 +320,19 @@ button:disabled {
   min-width: 0;
 }
 
+/* Left cluster (holds the search) grows into the free space so the search can
+   reach its ~520px target on wide screens and shrink on narrow ones (F3). */
+.topbar-left {
+  flex: 1 1 auto;
+}
+
 .topbar-search {
   display: flex;
-  min-width: min(520px, 46vw);
+  /* Grows to fill the search slot and shrinks instead of overflowing. A hard
+     vw-based min-width here used to ignore the 248px sidebar and force horizontal
+     page overflow below ~1024px (F3). Width is now driven by the flex wrap. */
+  min-width: 0;
+  width: 100%;
   align-items: center;
   gap: 0.55rem;
   border: 1px solid #27272a;
@@ -342,6 +352,10 @@ button:disabled {
 
 .topbar-search-wrap {
   position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 520px;
 }
 
 .topbar-search input {

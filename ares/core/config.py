@@ -6,7 +6,6 @@ No hardcoded secrets - ever.
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator

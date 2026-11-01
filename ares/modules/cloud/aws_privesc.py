@@ -11,18 +11,24 @@ Checks for IAM privilege escalation paths using current credentials:
 Based on Rhino Security Labs IAM privesc research.
 """
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
-from functools import partial
 from typing import Any
-from ares.core.logger import get_logger
+
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.logger import get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AWSPrivescParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -106,7 +112,7 @@ class AWSPrivescModule(BaseModule):
                 module_id=self.MODULE_ID, field="access_key",
             )
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+).
         Thin adapter: extract params from ctx → call run() → return ModuleResult.
         """
@@ -167,11 +173,11 @@ class AWSPrivescModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         aws_region = pdict.get("region") or pdict.get("aws_region") or "us-east-1"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect AWS IAM Privilege Escalation Attempts\n"
-            f"// Monitors CloudTrail for high-risk IAM policy manipulation API calls\n"
-            f"AWSCloudTrail\n"
-            f"| where EventName in~ (\"PutUserPolicy\", \"AttachUserPolicy\", \"AttachRolePolicy\", \"CreateAccessKey\", \"UpdateAssumeRolePolicy\")\n"
-            f"| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, RequestParameters, AWSRegion\n"
+            "// ARES Closed-Loop Telemetry: Detect AWS IAM Privilege Escalation Attempts\n"
+            "// Monitors CloudTrail for high-risk IAM policy manipulation API calls\n"
+            "AWSCloudTrail\n"
+            "| where EventName in~ (\"PutUserPolicy\", \"AttachUserPolicy\", \"AttachRolePolicy\", \"CreateAccessKey\", \"UpdateAssumeRolePolicy\")\n"
+            "| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, RequestParameters, AWSRegion\n"
         )
         sigma_rule = (
             f"title: AWS IAM Privilege Escalation Policy Modification ({aws_region})\n"
@@ -237,7 +243,7 @@ class AWSPrivescModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            import boto3  # type: ignore[import]
+            import boto3
         except ImportError:
             return [], {"error": "boto3 not installed - pip install ares-redteam[cloud]"}
 

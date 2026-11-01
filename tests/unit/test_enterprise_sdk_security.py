@@ -32,7 +32,6 @@ from ares.sdk import (
     NetworkPermission,
     ProcessPermission,
     ScopeEnforcementInterceptor,
-    SecretParam,
     SecretSanitizationInterceptor,
     SecurityCapabilityViolation,
     Severity,
@@ -41,7 +40,6 @@ from ares.sdk import (
     module_contract,
     param,
 )
-
 
 # ── 1. Pipeline & Interceptor Tests ──────────────────────────────────────────
 
@@ -355,7 +353,7 @@ def test_network_permission_protocol_and_host_port():
 
 @pytest.mark.asyncio
 async def test_module_contract_trips_lockout_circuit_breaker_on_module_result():
-    from ares.sdk import module_contract, LockoutCircuitBreaker, CircuitBreakerTripped, ModuleParams
+    from ares.sdk import CircuitBreakerTripped, LockoutCircuitBreaker, ModuleParams, module_contract
 
     lockout_cb = LockoutCircuitBreaker()
 

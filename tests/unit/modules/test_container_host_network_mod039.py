@@ -7,6 +7,7 @@ Verifies:
 """
 
 from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

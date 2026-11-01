@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 from ares.core.logger import get_logger
 
 if TYPE_CHECKING:
-    from ares.modules.ai.autonomous_planner import AIPlan
     from ares.core.campaign import Campaign
+    from ares.modules.ai.autonomous_planner import AIPlan
 
 logger = get_logger("ares.modules.ai.plan_validator")
 
@@ -91,7 +91,7 @@ class PlanValidator:
 
                 if mod_params:
                     try:
-                        from ares.modules.params import validate_module_params, MODULE_PARAMS
+                        from ares.modules.params import MODULE_PARAMS, validate_module_params
                         if mid in MODULE_PARAMS:
                             validate_module_params(mid, mod_params)
                     except Exception as e:
@@ -101,7 +101,6 @@ class PlanValidator:
 
                 # 3. HIGH_NOISE modules must be warned about
                 try:
-                    from ares.modules.base import OpsecLevel
                     from ares.technique.library import _MODULE_TECHNIQUE_MAP
                     if mid in _MODULE_TECHNIQUE_MAP:
                         # Check for known HIGH_NOISE modules

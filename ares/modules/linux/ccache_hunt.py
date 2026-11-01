@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.errors import ModuleValidationError
 from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
@@ -330,7 +330,7 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             try:
                 val = int(s, 16)
             except ValueError:
-                raise ValueError(f"key_id must be a valid integer, got: {key_id!r}")
+                raise ValueError(f"key_id must be a valid integer, got: {key_id!r}")  # noqa: B904
 
         if val < 0:
             raise ValueError(f"key_id must be a non-negative integer, got: {key_id}")
@@ -411,7 +411,7 @@ class CcacheHuntModule(BaseModule[CcacheHuntParams, ModuleResult]):
             if os.path.exists("/proc/keys") or proc_keys_path.exists():
                 try:
                     # Native Python file read without spawning shell/subprocess
-                    with open("/proc/keys", "r", errors="replace") as f:
+                    with open("/proc/keys", errors="replace") as f:
                         raw_content = f.read()
                     proc_keys_content = "\n".join(
                         line for line in raw_content.splitlines()

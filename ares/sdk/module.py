@@ -6,23 +6,22 @@ Provides:
 """
 from __future__ import annotations
 
-import asyncio
-import functools
 import inspect
-from typing import Any, Callable, Generic, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
 from ares.core.campaign import Finding
 from ares.core.context import ExecutionContext
-from ares.core.errors import ModuleValidationError
 from ares.modules.base import (
     BaseModule as _CoreBaseModule,
+)
+from ares.modules.base import (
     ModuleResult,
     OpsecLevel,
     validate_module_class,
 )
-from ares.sdk.params import validate_params
 
 P = TypeVar("P", bound=Any)
 R = TypeVar("R", bound=Any)

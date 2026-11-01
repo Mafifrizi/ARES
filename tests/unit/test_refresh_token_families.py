@@ -1,7 +1,7 @@
 """Deterministic SQLite and contract coverage for refresh-token families."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -161,7 +161,7 @@ async def test_sqlite_logout_all_increments_epoch_and_is_read_only_afterward(
             "login did not create a family before logout-all",
         )
         family_id = issued.session.family_id
-        expires_at = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        expires_at = datetime(2099, 1, 1, tzinfo=UTC)
         revoked = await database.revoke_all_sessions(
             user_id=user_id,
             jti="fixed-logout-jti",
@@ -198,7 +198,7 @@ async def test_sqlite_issued_session_exposes_authoritative_absolute_expiry(tmp_p
         issued = await database.create_login_session(
             "cookie-user", "CookiePassword1!", _access_factory
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         _require(
             issued.session is not None
             and issued.session.absolute_expires_at.tzinfo is not None

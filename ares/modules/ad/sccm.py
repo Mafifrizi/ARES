@@ -38,11 +38,11 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
+from ares.core.tracing import trace_module
 from ares.modules.params import SCCMParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -50,7 +50,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.ad.sccm")
 
@@ -145,12 +144,12 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         sccm_target = ad["dc"] or "SCCMHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect SCCM / MECM Site Infrastructure Reconnaissance & NAA Extraction\n"
-            f"// Monitors Security Event 4688 and WMI queries on namespace root\\\\SMS\\\\site_*\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4688\n"
-            f"| where CommandLine has_any (\"SMS_Site\", \"SMS_SCI_SiteDefinition\", \"CCM_Client\", \"NAA_\")\n"
-            f"| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, CommandLine\n"
+            "// ARES Closed-Loop Telemetry: Detect SCCM / MECM Site Infrastructure Reconnaissance & NAA Extraction\n"
+            "// Monitors Security Event 4688 and WMI queries on namespace root\\\\SMS\\\\site_*\n"
+            "SecurityEvent\n"
+            "| where EventID == 4688\n"
+            "| where CommandLine has_any (\"SMS_Site\", \"SMS_SCI_SiteDefinition\", \"CCM_Client\", \"NAA_\")\n"
+            "| project TimeGenerated, Computer, SubjectUserName, ParentProcessName, CommandLine\n"
         )
         sigma_rule = (
             f"title: SCCM / MECM Site Infrastructure Abuse & NAA Credential Discovery ({sccm_target})\n"
@@ -388,9 +387,10 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         result: dict = {"error": None, "site_servers": [], "management_points": [],
                          "distribution_points": [], "site_code": ""}
         try:
-            import ldap3
             import ssl
-            tls = ldap3.Tls(validate=ssl.CERT_NONE)
+
+            import ldap3
+            tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
             server = ldap3.Server(dc, port=389, connect_timeout=10)
             conn = ldap3.Connection(
                 server, user=f"{domain.upper()}\\{username}",
@@ -503,8 +503,8 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         result: dict = {"naa_username": "", "naa_domain": "", "encrypted": True,
                          "error": None}
         try:
-            from impacket.dcerpc.v5.dcomrt import DCOMConnection
             from impacket.dcerpc.v5.dcom import wmi as wmimod
+            from impacket.dcerpc.v5.dcomrt import DCOMConnection
             from impacket.dcerpc.v5.dtypes import NULL
 
             lmhash, nthash = "", ""

@@ -9,7 +9,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import FrozenInstanceError, replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -108,7 +108,7 @@ async def _seed_identity(
         (api_key_id, user_id, scopes),
     )
     await connection.commit()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     family_id = _test_family_id(user_id)
     await connection.execute(
         "INSERT INTO refresh_token_families("
@@ -145,7 +145,7 @@ def _bearer_source(
         user_id=user_id,
         subject=username,
         jti=f"ticket-jti-{uuid4().hex}",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
         family_id=family_id or _test_family_id(user_id),
         auth_epoch=auth_epoch,
     )
@@ -612,7 +612,7 @@ def test_ticket_contract_is_canonical_and_sensitive_fields_are_not_represented()
 
 
 def test_bearer_ticket_source_preserves_identity_and_confidentiality() -> None:
-    expires_at = datetime(2035, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    expires_at = datetime(2035, 1, 2, 3, 4, 5, tzinfo=UTC)
     values = {
         "user_id": "synthetic-bearer-user",
         "subject": "synthetic-bearer-subject",
@@ -651,7 +651,7 @@ def test_api_key_ticket_source_preserves_identity_and_confidentiality() -> None:
 
 
 def test_consumed_ticket_preserves_identity_and_confidentiality() -> None:
-    bearer_expiry = datetime(2035, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+    bearer_expiry = datetime(2035, 2, 3, 4, 5, 6, tzinfo=UTC)
     bearer_values = {
         "campaign_id": "synthetic-bearer-campaign",
         "user_id": "synthetic-consumed-bearer-user",
@@ -1102,7 +1102,7 @@ async def test_sqlite_source_and_campaign_revalidation_is_authoritative(
                 source.jti,
                 user_id,
                 (
-                    datetime.now(timezone.utc) + timedelta(minutes=5)
+                    datetime.now(UTC) + timedelta(minutes=5)
                 ).isoformat(),
             ),
         )
@@ -1135,7 +1135,7 @@ async def test_sqlite_issue_revalidates_source_role_and_campaign_access(
                 source.jti,
                 user_id,
                 (
-                    datetime.now(timezone.utc) + timedelta(minutes=5)
+                    datetime.now(UTC) + timedelta(minutes=5)
                 ).isoformat(),
             ),
         )
@@ -1283,7 +1283,7 @@ async def test_sqlite_bearer_resolver_complete_authority_mutations(
                 source.jti,
                 user_id,
                 (
-                    datetime.now(timezone.utc) + timedelta(minutes=5)
+                    datetime.now(UTC) + timedelta(minutes=5)
                 ).isoformat(),
             ),
         )
@@ -1668,12 +1668,12 @@ async def test_sqlite_purge_removes_malformed_expiry_defensively(
         connection = database._require_connected()
         digest = hash_websocket_ticket(generate_websocket_ticket())
         canonical_now = (
-            datetime.now(timezone.utc)
+            datetime.now(UTC)
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z")
         )
         canonical_source_expiry = (
-            (datetime.now(timezone.utc) + timedelta(minutes=5))
+            (datetime.now(UTC) + timedelta(minutes=5))
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z")
         )

@@ -38,7 +38,6 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # ── Graph types ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -449,7 +448,7 @@ def build_campaign_graph(
                 "hostname":         tgt,
                 "compromise_level": c_level,
                 "is_dc":            is_dc,
-                "open_ports":       sorted(list(set(open_ports))),
+                "open_ports":       sorted(set(open_ports)),
                 "os_info":          os_detected,
                 "owned":            c_level in ("system", "domain_admin", "local_admin"),
             },
@@ -698,7 +697,7 @@ def build_campaign_graph(
 
     # ── Pivots ─────────────────────────────────────────────────────────────
     try:
-        from ares.pivot.infrastructure import PivotManager
+        from ares.pivot.infrastructure import PivotManager  # noqa: F401
         # Check if campaign has a pivot manager attached
         pm = getattr(campaign, "pivot_manager", None)
         if pm:

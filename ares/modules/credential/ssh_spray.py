@@ -12,16 +12,14 @@ Built-in lockout protection:
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.core.logger import audit, get_logger
+from ares.core.logger import get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import SSHSprayParams
 from ares.sdk import (
     BaseModule,
-    EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -29,7 +27,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.ssh_spray")
 
@@ -205,7 +202,7 @@ class SSHSprayModule(BaseModule[SSHSprayParams, ModuleResult]):
                                 await res
                     except (asyncssh.PermissionDenied, asyncssh.KeyExchangeFailed, asyncssh.Error):
                         success = False
-                    except (asyncio.TimeoutError, OSError) as exc:
+                    except (TimeoutError, OSError) as exc:
                         logger.debug("ssh_spray_connection_error", target=target, user=username, error=str(exc))
                         success = False
                     except Exception as exc:

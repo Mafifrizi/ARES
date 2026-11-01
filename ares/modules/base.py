@@ -29,20 +29,19 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 P = TypeVar("P", bound=Any)
 R = TypeVar("R", bound=Any)
 
 from ares.core.campaign import Campaign, Finding, Severity
 from ares.core.config import AresSettings
-from ares.core.errors import ModuleValidationError
 from ares.core.logger import bind_context, clear_context, get_logger
 from ares.core.noise import NoiseController
 from ares.core.opsec.opsec import OpSecProfile
 
 if TYPE_CHECKING:
-    from ares.core.context import ExecutionContext
+    pass
 
 logger = get_logger("ares.module")
 
@@ -543,8 +542,12 @@ class BaseModule(abc.ABC, Generic[P, R]):
             everything else         → NetworkError (retryable)
         """
         from ares.core.errors import (
-            AuthenticationFailed, HostUnreachable, ConnectionTimeout,
-            InsufficientPrivilege, RateLimited, NetworkError,
+            AuthenticationFailed,
+            ConnectionTimeout,
+            HostUnreachable,
+            InsufficientPrivilege,
+            NetworkError,
+            RateLimited,
         )
         msg = str(exc).lower()
 

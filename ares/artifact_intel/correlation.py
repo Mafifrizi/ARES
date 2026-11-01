@@ -43,9 +43,9 @@ from typing import Any
 
 from ares.core.logger import get_logger
 from ares.normalize.artifacts import (
-    ArtifactStore, CredentialArtifact, HashArtifact,
-    HostArtifact, PermissionArtifact, UserArtifact,
-    CloudResourceArtifact, ArtifactType,
+    ArtifactStore,
+    ArtifactType,
+    CloudResourceArtifact,
 )
 
 logger = get_logger("ares.artifact_intel.correlation")

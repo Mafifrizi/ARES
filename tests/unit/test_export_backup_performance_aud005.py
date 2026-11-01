@@ -5,6 +5,7 @@ Verifies that 100 campaigns are exported in exactly 3 batch queries instead of 2
 """
 import json
 from pathlib import Path
+
 import pytest
 
 from ares.db.database import AresDatabase
@@ -83,7 +84,7 @@ async def test_export_backup_executes_batch_queries_not_n_plus_one(tmp_path: Pat
 
         # 2. Verify output JSON structure and integrity
         assert Path(res_path).exists()
-        with open(res_path, "r", encoding="utf-8") as fh:
+        with open(res_path, encoding="utf-8") as fh:
             exported_data = json.load(fh)
 
         assert exported_data["export_version"] == "1.0"
@@ -115,7 +116,7 @@ async def test_export_backup_empty_db_structure(tmp_path: Path):
         export_file = str(tmp_path / "empty_backup.json")
         res_path = await db.export_backup(output_path=export_file)
 
-        with open(res_path, "r", encoding="utf-8") as fh:
+        with open(res_path, encoding="utf-8") as fh:
             exported_data = json.load(fh)
 
         assert exported_data["export_version"] == "1.0"

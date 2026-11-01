@@ -282,7 +282,7 @@ class EnvironmentFingerprinter:
                 w.close()
                 try:
                     await w.wait_closed()
-                except (OSError, asyncio.TimeoutError):
+                except (TimeoutError, OSError):
                     pass
 
                 if "ubuntu" in banner_str:
@@ -298,7 +298,7 @@ class EnvironmentFingerprinter:
 
                 result.services[port] = banner_str[:80]
                 result.methods_used.append(f"banner:{port}")
-            except (OSError, asyncio.TimeoutError, UnicodeDecodeError):
+            except (TimeoutError, OSError, UnicodeDecodeError):
                 pass
 
     async def _smb_fingerprint(

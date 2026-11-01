@@ -10,11 +10,11 @@ from __future__ import annotations
 
 try:
     from ares.telemetry.collector import (  # noqa: F401
-        TelemetryCollector,
-        MetricsCollector,
         ExecutionMetric,
-        WorkerHealthSnapshot,
+        MetricsCollector,
+        TelemetryCollector,
         TelemetrySnapshot,
+        WorkerHealthSnapshot,
         get_collector,
     )
 except ImportError:

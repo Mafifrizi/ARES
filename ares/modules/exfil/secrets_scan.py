@@ -19,15 +19,13 @@ import shlex
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import SecretsScanParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
     ProcessPermission,
@@ -60,6 +58,7 @@ _GREP_PATTERN = "|".join([
 
 import math
 from collections import Counter
+
 
 def calculate_shannon_entropy(data: str) -> float:
     """Calculate Shannon entropy for a given string."""
@@ -257,7 +256,7 @@ def _ssh_scan(target: str, username: str, password: str = "",
             verification. Strongly recommended in production. When omitted,
             AutoAddPolicy is used (MITM risk on untrusted networks).
     """
-    import paramiko  # type: ignore[import]
+    import paramiko
     _log = get_logger("ares.modules.exfil.secrets_scan")
     client = paramiko.SSHClient()
     if known_hosts_file:
@@ -321,7 +320,7 @@ def _ssh_scan(target: str, username: str, password: str = "",
 def _wmi_scan(target: str, username: str, password: str = "",
                domain: str = "", paths: str = _WIN_SCAN_PATHS) -> list[dict]:
     """Run PowerShell credential scan via impacket WMIEXEC."""
-    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]
+    from impacket.examples.wmiexec import WMIEXEC
 
     ps_script = (
         r"$paths = @('C:\\inetpub','C:\\Users','C:\\ProgramData'); "
@@ -611,13 +610,13 @@ class SecretsScan(BaseModule):
         try:
             if platform == "windows":
                 try:
-                    from impacket.examples.wmiexec import WMIEXEC  # type: ignore[import]
+                    from impacket.examples.wmiexec import WMIEXEC  # noqa: F401
                 except ImportError:
                     return [], {"error": "impacket_not_installed"}
                 hits = _wmi_scan(target, username, password, domain)
             else:
                 try:
-                    import paramiko  # type: ignore[import]
+                    import paramiko  # noqa: F401
                 except ImportError:
                     return [], {"error": "paramiko_not_installed"}
                 hits = _ssh_scan(target, username, password, key_path)
@@ -630,7 +629,7 @@ class SecretsScan(BaseModule):
             self.finding(
                 title       = f"Secrets found in filesystem on {target}",
                 description = (
-                    f"Found {len(hits)} potential credential(s) in {len(set(h['file'] for h in hits))} file(s):\n"
+                    f"Found {len(hits)} potential credential(s) in {len({h['file'] for h in hits})} file(s):\n"
                     + "\n".join(f"  [{h['pattern']}] {h['file']}:{h['line']}" for h in hits[:20])
                     + (f"\n...and {len(hits)-20} more" if len(hits) > 20 else "")
                 ),

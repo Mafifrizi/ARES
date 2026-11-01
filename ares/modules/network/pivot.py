@@ -26,16 +26,15 @@ import asyncio
 import inspect
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.errors import ModuleExecutionError
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import PivotParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -202,11 +201,11 @@ class PivotModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         pivot_host = target or "PivotHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect SSH Tunneling & SOCKS Proxy Pivoting\n"
-            f"// Monitors Linux auditd / Syslog for sshd port forwarding or ssh client running with -D or -L\n"
-            f"Syslog\n"
-            f"| where ProcessName in~ (\"sshd\", \"ssh\") and (SyslogMessage has \"forwarding\" or SyslogMessage has \"port 1080\" or SyslogMessage has \"direct-tcpip\")\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect SSH Tunneling & SOCKS Proxy Pivoting\n"
+            "// Monitors Linux auditd / Syslog for sshd port forwarding or ssh client running with -D or -L\n"
+            "Syslog\n"
+            "| where ProcessName in~ (\"sshd\", \"ssh\") and (SyslogMessage has \"forwarding\" or SyslogMessage has \"port 1080\" or SyslogMessage has \"direct-tcpip\")\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: SSH Dynamic Port Forwarding / SOCKS Pivot Established ({pivot_host})\n"
@@ -382,7 +381,7 @@ class PivotModule(BaseModule):
                             if inspect.iscoroutinefunction(getattr(proc, "wait", None)):
                                 await asyncio.wait_for(proc.wait(), timeout=5)
                             else:
-                                await asyncio.to_thread(lambda: proc.wait(timeout=5))
+                                await asyncio.to_thread(lambda p=proc: p.wait(timeout=5))
                         except Exception:
                             try:
                                 proc.kill()

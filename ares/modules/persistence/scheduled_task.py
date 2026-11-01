@@ -16,19 +16,22 @@ MITRE ATT&CK:
 """
 from __future__ import annotations
 
-import uuid as _uuid
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import xml.sax.saxutils as _xmlesc
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import RegistryRunParams, ScheduledTaskParams
 from ares.sdk import (
-    CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -70,7 +73,7 @@ def _tsch_register_sync(target: str, username: str, password: str,
                         domain: str, lmhash: str, nthash: str,
                         task_name: str, command: str) -> None:
     """Register a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
-    from impacket.dcerpc.v5 import transport, tsch     # type: ignore[import]
+    from impacket.dcerpc.v5 import transport, tsch
     from impacket.dcerpc.v5.dtypes import NULL
 
     string_binding = f"ncacn_np:{target}[\\pipe\\atsvc]"
@@ -104,7 +107,7 @@ def _tsch_delete_sync(target: str, username: str, password: str,
                       domain: str, lmhash: str, nthash: str,
                       task_name: str) -> None:
     """Delete a scheduled task via impacket tsch RPC. Sync - call from run_in_executor."""
-    from impacket.dcerpc.v5 import transport, tsch     # type: ignore[import]
+    from impacket.dcerpc.v5 import transport, tsch
 
     string_binding = f"ncacn_np:{target}[\\pipe\\atsvc]"
     rpctransport   = transport.DCERPCTransportFactory(string_binding)
@@ -160,15 +163,15 @@ class ScheduledTaskPersistence(BaseModule):
 
     OPSEC_LEVEL      = OpsecLevel.MEDIUM
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates task creation risks, Event ID 4698 logging, and noise profile.
         Recommends persistence.wmi_subscription under STEALTH for cleaner footprint.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -400,7 +403,7 @@ class ScheduledTaskPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import tsch  # type: ignore[import]
+            from impacket.dcerpc.v5 import tsch  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 
@@ -481,7 +484,7 @@ _RUN_KEY = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
 def _rrp_set_run_key(target: str, username: str, password: str,
                      domain: str, value_name: str, payload: str) -> None:
     """Write a Run key via impacket dcerpc rrp RPC."""
-    from impacket.dcerpc.v5 import transport, rrp      # type: ignore[import]
+    from impacket.dcerpc.v5 import rrp, transport
     from impacket.dcerpc.v5.dtypes import MAXIMUM_ALLOWED
 
     string_binding = f"ncacn_np:{target}[\\pipe\\winreg]"
@@ -675,7 +678,7 @@ class RegistryRunKeyPersistence(BaseModule):
             }
 
         try:
-            from impacket.dcerpc.v5 import rrp  # type: ignore[import]
+            from impacket.dcerpc.v5 import rrp  # noqa: F401
         except ImportError:
             return [], {"error": "impacket_not_installed", "persistence_established": False}
 

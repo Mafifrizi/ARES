@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -29,9 +28,9 @@ def _run(coro):
 
 
 def _ctx(params=None, target="10.0.0.1", noise="normal", dry_run=False):
+    from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
     from ares.core.config import AresSettings
     from ares.core.context import ExecutionContext
-    from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
     from ares.core.noise import NoiseController
 
     params = params or {}
@@ -82,8 +81,8 @@ class TestADEnumACL:
         assert "T1222.001" in ADEnumACLModule.MITRE_TECHNIQUES
 
     def test_validate_requires_dc(self):
-        from ares.modules.ad.enum_acl import ADEnumACLModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.ad.enum_acl import ADEnumACLModule
         mod, _ = _make_module(ADEnumACLModule)
         ctx = _ctx(params={"domain": "corp.local", "username": "u", "password": "p"})
         ctx.target = ""
@@ -149,8 +148,8 @@ class TestCredentialGoldenTicket:
         assert result.status == "dry_run"
 
     def test_validate_requires_krbtgt_hash(self):
-        from ares.modules.credential.golden_ticket import GoldenTicketModule
         from ares.core.errors import ModuleValidationError
+        from ares.modules.credential.golden_ticket import GoldenTicketModule
         mod, _ = _make_module(GoldenTicketModule)
         ctx = _ctx(params={"domain": "corp.local", "domain_sid": "S-1-5-21-111-222-333"})
         with pytest.raises((ModuleValidationError, Exception)):
@@ -594,6 +593,7 @@ class TestDashboardModuleSchemaContracts:
 
     def test_golden_ticket_form_fields_satisfy_shared_credential_requires(self):
         from unittest.mock import MagicMock, patch
+
         from ares.modules.credential.golden_ticket import GoldenTicketModule
 
         mod, _ = _make_module(GoldenTicketModule)

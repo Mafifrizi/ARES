@@ -139,8 +139,9 @@ class CheckpointManager:
 
     def __init__(self, encryption_key: bytes | str) -> None:
         import base64
-        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
         from cryptography.hazmat.primitives import hashes as _hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
         # Normalise to bytes
         if hasattr(encryption_key, "get_secret_value"):

@@ -9,7 +9,7 @@ import json
 import socket
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 DEFAULT_EVENT_PORT = 27890
 DEFAULT_EVENT_HOST = "127.0.0.1"
@@ -20,7 +20,7 @@ class McpEventBus:
     """Non-blocking event emitter for MCP server telemetry."""
 
     @staticmethod
-    def emit(event_type: str, data: Dict[str, Any]) -> None:
+    def emit(event_type: str, data: dict[str, Any]) -> None:
         """Emit telemetry event to local monitor over UDP loopback."""
         payload = {
             "timestamp": time.strftime("%H:%M:%S"),
@@ -51,12 +51,12 @@ class McpEventBus:
             pass
 
     @staticmethod
-    def get_token_decision(token: str) -> Optional[str]:
+    def get_token_decision(token: str) -> str | None:
         """Read operator decision for a token."""
         if not TOKEN_STATUS_FILE.exists():
             return None
         try:
-            with open(TOKEN_STATUS_FILE, "r", encoding="utf-8") as f:
+            with open(TOKEN_STATUS_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             if data.get("token") == token:
                 return data.get("decision")
@@ -71,7 +71,7 @@ class McpEventListener:
     def __init__(self, host: str = DEFAULT_EVENT_HOST, port: int = DEFAULT_EVENT_PORT) -> None:
         self.host = host
         self.port = port
-        self.sock: Optional[socket.socket] = None
+        self.sock: socket.socket | None = None
         self._bind()
 
     def _bind(self) -> None:
@@ -83,9 +83,9 @@ class McpEventListener:
         except Exception:
             self.sock = None
 
-    def poll_events(self) -> List[Dict[str, Any]]:
+    def poll_events(self) -> list[dict[str, Any]]:
         """Poll incoming UDP events without blocking."""
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         if not self.sock:
             return events
 
@@ -94,7 +94,7 @@ class McpEventListener:
                 data, _ = self.sock.recvfrom(65535)
                 event = json.loads(data.decode("utf-8"))
                 events.append(event)
-            except (BlockingIOError, socket.error):
+            except (OSError, BlockingIOError):
                 break
             except Exception:
                 break

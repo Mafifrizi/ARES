@@ -9,25 +9,23 @@ Run with: pytest tests/integration/ -v
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
-import time
-import uuid
-from typing import Any
 
 import pytest
 
-from ares.core.campaign import Campaign, Finding, NoiseProfile, Severity, ScopeEntry
+from ares.core.campaign import Campaign, Finding, NoiseProfile, ScopeEntry, Severity
 from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.di import AresContainer
 from ares.core.errors import (
-    AccountLocked, AuthenticationFailed, ModuleValidationError, ScopeError,
+    AccountLocked,
+    AuthenticationFailed,
+    ModuleValidationError,
+    ScopeError,
 )
 from ares.core.noise import NoiseController
 from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -365,32 +363,32 @@ class TestErrorHierarchy:
         return make_campaign()
 
     def test_account_locked_is_abort(self) -> None:
-        from ares.core.errors import resolve_action, AresError
+        from ares.core.errors import AresError, resolve_action
         err = AccountLocked("Account locked", username="alice", domain="CORP")
         assert resolve_action(err) == AresError.ABORT
 
     def test_auth_failed_is_retry(self) -> None:
-        from ares.core.errors import resolve_action, AresError
+        from ares.core.errors import AresError, resolve_action
         err = AuthenticationFailed("Bad password", username="alice")
         assert resolve_action(err) == AresError.RETRY
 
     def test_scope_error_is_abort(self) -> None:
-        from ares.core.errors import resolve_action, AresError
+        from ares.core.errors import AresError, resolve_action
         err = ScopeError("Out of scope", target="8.8.8.8")
         assert resolve_action(err) == AresError.ABORT
 
     def test_module_validation_error_is_abort(self) -> None:
-        from ares.core.errors import resolve_action, AresError
+        from ares.core.errors import AresError, resolve_action
         err = ModuleValidationError("Missing field", module_id="ad.kerberoast", field="domain")
         assert resolve_action(err) == AresError.ABORT
 
     def test_connection_refused_is_fallback(self) -> None:
-        from ares.core.errors import resolve_action, AresError, ConnectionRefused
+        from ares.core.errors import AresError, ConnectionRefused, resolve_action
         err = ConnectionRefused("Port 445 refused", port=445)
         assert resolve_action(err) == AresError.FALLBACK
 
     def test_rate_limited_is_pause(self) -> None:
-        from ares.core.errors import resolve_action, AresError, RateLimited
+        from ares.core.errors import AresError, RateLimited, resolve_action
         err = RateLimited("Too many requests", retry_after_s=60)
         assert resolve_action(err) == AresError.PAUSE
 
@@ -439,7 +437,7 @@ class TestEndToEndCampaignSimulation:
         Phase 2: kerberoast → get hashes
         Phase 3: verify vault has credentials
         """
-        from ares.credential.vault import CredentialVault, CredentialType
+        from ares.credential.vault import CredentialVault
         vault = CredentialVault(enc_key())
         container.override("vault", vault)
         telemetry = container.telemetry()
@@ -495,7 +493,7 @@ class TestEndToEndCampaignSimulation:
         lateral.psexec with HIGH_NOISE opsec level.
         Verifies: new hosts discovered are reported in ModuleResult.
         """
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
         vault = CredentialVault(enc_key())
         cred  = Credential(username="Administrator", domain="CORP",
                             cred_type=CredentialType.CLEARTEXT)
@@ -535,7 +533,7 @@ class TestEndToEndCampaignSimulation:
     @pytest.mark.asyncio
     async def test_account_locked_stops_campaign(self, campaign) -> None:
         """Simulates account lockout - engine behavior should abort."""
-        from ares.core.errors import AccountLocked, resolve_action, AresError
+        from ares.core.errors import AccountLocked, AresError, resolve_action
 
         def simulate_lockout():
             raise AccountLocked("svc_sql is locked after 5 failures",
@@ -556,7 +554,7 @@ class TestEndToEndCampaignSimulation:
         """Save and restore campaign state via checkpoint."""
         import ares.checkpoint.manager as cm_mod
         from ares.checkpoint.manager import CheckpointManager, build_checkpoint
-        from ares.state.target_state import OperatorSession, CompromiseLevel
+        from ares.state.target_state import CompromiseLevel, OperatorSession
 
         cm_mod.CHECKPOINT_DIR = tmp_path / "checkpoints"
 
@@ -639,8 +637,10 @@ class TestEndToEndCampaignSimulation:
         """Artifact correlation finds compound attack opportunities."""
         from ares.artifact_intel.correlation import ArtifactCorrelationEngine
         from ares.normalize.artifacts import (
-            ArtifactStore, CredentialArtifact, HostArtifact,
-            PermissionArtifact, UserArtifact,
+            ArtifactStore,
+            CredentialArtifact,
+            HostArtifact,
+            PermissionArtifact,
         )
 
         store = ArtifactStore()

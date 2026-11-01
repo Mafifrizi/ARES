@@ -202,8 +202,9 @@ def test_main_websocket_scrubs_query_before_actual_uvicorn_logging():
     import textwrap
     import warnings
 
-    from ares.api.server import campaign_events, _take_campaign_websocket_ticket
     from uvicorn.config import UvicornDeprecationWarning
+
+    from ares.api.server import _take_campaign_websocket_ticket, campaign_events
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
@@ -370,6 +371,7 @@ class TestDashboardAuthentication:
 
     def _client(self):
         import httpx
+
         from ares.api.dashboard.app import dashboard_app
 
         dashboard_app.state.db = _make_mock_db()
@@ -409,6 +411,7 @@ class TestDashboardAuthentication:
 
         async def _run_test():
             import httpx
+
             from ares.api.dashboard.app import dashboard_app
 
             db.is_access_token_revoked = AsyncMock(return_value=False)
@@ -433,6 +436,7 @@ class TestDashboardAuthentication:
 
         async def _run_test():
             import httpx
+
             from ares.api.dashboard.app import dashboard_app
 
             async with httpx.AsyncClient(
@@ -702,9 +706,9 @@ class TestCredentialVaultPersistence:
 
     def test_persist_vault_saves_to_db(self):
         """Engine _persist_vault_credentials() must call save_credential_preencrypted."""
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.engine import AresEngine
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
 
         db = MagicMock()
         db.save_credential_preencrypted = AsyncMock()
@@ -741,7 +745,7 @@ class TestCredentialVaultPersistence:
 
     def test_restore_from_db_records(self):
         """Credentials loaded from DB must be re-hydrated into vault correctly."""
-        from ares.credential.vault import CredentialVault, Credential, CredentialType
+        from ares.credential.vault import Credential, CredentialType, CredentialVault
 
         enc_key = "test-restore-vault-key-32chars!!"
 
@@ -795,9 +799,9 @@ class TestCredentialVaultPersistence:
 
     def test_empty_vault_persist_returns_zero(self):
         """_persist_vault_credentials on empty vault must return 0."""
-        from ares.credential.vault import CredentialVault
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.engine import AresEngine
+        from ares.credential.vault import CredentialVault
 
         db = MagicMock()
         db.save_credential_preencrypted = AsyncMock()
@@ -821,7 +825,7 @@ class TestCredentialVaultPersistence:
 
     def test_no_vault_on_campaign_is_safe(self):
         """Campaign without _vault attr must not crash _persist_vault_credentials."""
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.engine import AresEngine
 
         db = MagicMock()
@@ -852,11 +856,11 @@ class TestValidateEnforcement:
 
     def test_validate_called_before_execute(self):
         """validate() must be called; execute() must NOT run if validate fails."""
-        from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
-        from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.engine import AresEngine
+        from ares.core.errors import ModuleValidationError
         from ares.core.execution_admission import _mint_test_dispatch_context
+        from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 
         validate_calls: list[bool] = []
         execute_calls: list[bool] = []
@@ -924,11 +928,11 @@ class TestValidateEnforcement:
 
     def test_skip_validation_bypasses_validate(self):
         """skip_validation=True must bypass validate() and proceed to execute()."""
-        from ares.modules.base import BaseModule, OpsecLevel, ModuleResult
-        from ares.core.errors import ModuleValidationError
-        from ares.core.campaign import Campaign, ScopeEntry, NoiseProfile
+        from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
         from ares.core.engine import AresEngine
+        from ares.core.errors import ModuleValidationError
         from ares.core.execution_admission import _mint_test_dispatch_context
+        from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 
         validate_calls: list[bool] = []
         execute_calls: list[bool] = []
@@ -993,6 +997,7 @@ class TestValidateEnforcement:
     def test_targets_validation_rejects_path_traversal(self):
         """CampaignCreate must reject path traversal in targets."""
         from pydantic import ValidationError
+
         from ares.api.server import CampaignCreate
 
         with pytest.raises((ValidationError, ValueError)):
@@ -1004,6 +1009,7 @@ class TestValidateEnforcement:
     def test_targets_validation_rejects_null(self):
         """CampaignCreate must reject None values in targets list."""
         from pydantic import ValidationError
+
         from ares.api.server import CampaignCreate
 
         with pytest.raises((ValidationError, ValueError)):

@@ -7,8 +7,8 @@ and the CapabilitySandbox verifies that runtime parameters and actions conform.
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass, field
 import pathlib
+from dataclasses import dataclass, field
 from typing import Any
 
 from ares.core.errors import AresError
@@ -131,7 +131,7 @@ class FilesystemPermission(SecurityPermission):
 
         if is_write and self.read_only:
             raise SecurityCapabilityViolation(
-                f"Filesystem write operation prohibited: module is configured as read-only",
+                "Filesystem write operation prohibited: module is configured as read-only",
                 capability=self.name,
                 details={"read_only": True, "attempted_path": str(output_path) if output_path else None},
             )

@@ -7,17 +7,19 @@ escalation CVEs. Does NOT exploit - detection and suggestion only.
 Operator must obtain and compile the PoC separately.
 """
 from __future__ import annotations
-import asyncio, re
+
+import asyncio
+import re
 from typing import Any
-from ares.core.logger import get_logger
+
 from ares.core.campaign import Finding, Severity
 from ares.core.errors import ModuleValidationError
+from ares.core.logger import get_logger
 from ares.core.tracing import trace_module
 from ares.modules.params import KernelSuggesterParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -256,11 +258,11 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         kernel_target = target or "LinuxHost"
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect Linux Kernel Exploit Attempts (DirtyPipe / PwnKit)\n"
-            f"// Monitors Syslog / auditd for unexpected euid changes or pkexec exploitation\n"
-            f"Syslog\n"
-            f"| where ProcessName in~ (\"pkexec\", \"sudo\") or SyslogMessage has \"CVE-2022-0847\" or SyslogMessage has \"CVE-2021-4034\"\n"
-            f"| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
+            "// ARES Closed-Loop Telemetry: Detect Linux Kernel Exploit Attempts (DirtyPipe / PwnKit)\n"
+            "// Monitors Syslog / auditd for unexpected euid changes or pkexec exploitation\n"
+            "Syslog\n"
+            "| where ProcessName in~ (\"pkexec\", \"sudo\") or SyslogMessage has \"CVE-2022-0847\" or SyslogMessage has \"CVE-2021-4034\"\n"
+            "| project TimeGenerated, Computer, ProcessName, SyslogMessage\n"
         )
         sigma_rule = (
             f"title: Linux Kernel Exploit / PwnKit Invocation ({kernel_target})\n"
@@ -322,7 +324,7 @@ class KernelSuggesterModule(BaseModule[KernelSuggesterParams, ModuleResult]):
         await self.before_request(target, "ssh")  # scope check + jitter
 
         try:
-            import paramiko  # type: ignore[import]
+            import paramiko
         except ImportError:
             return [], {"error": "paramiko not installed"}
 

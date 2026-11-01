@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from ares.modules.network.service_detect import _grab_banner
@@ -11,7 +11,7 @@ from ares.modules.network.service_detect import _grab_banner
 async def test_service_detect_socket_cleanup_on_timeout():
     """MOD-060: socket writer is closed and wait_closed is called even if TimeoutError occurs during read."""
     mock_reader = AsyncMock()
-    mock_reader.read.side_effect = asyncio.TimeoutError("Read timed out")
+    mock_reader.read.side_effect = TimeoutError("Read timed out")
 
     mock_writer = MagicMock()
     mock_writer.drain = AsyncMock()

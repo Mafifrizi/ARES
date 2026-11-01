@@ -2,6 +2,7 @@
 import os
 import tempfile
 from unittest.mock import MagicMock
+
 import pytest
 
 from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry

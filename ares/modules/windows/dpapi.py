@@ -20,19 +20,24 @@ OPSEC: MEDIUM - file access only, no process injection.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 import os
 from typing import Any
 
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, secure_mkstemp
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import DPAPIParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -77,7 +82,7 @@ class DPAPIModule(BaseModule):
     ENABLED            = False
     DISABLED_REASON    = "module disabled: DPAPI decryption not implemented, stub only - false credential injection risk (MOD-029)"
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """Pre-flight Defense Feasibility Assessment: Disabled under MOD-029."""
         from ares.modules.base import FeasibilityReport
         return FeasibilityReport(
@@ -379,6 +384,7 @@ class DPAPIModule(BaseModule):
         Returns {logical_name: local_temp_path}.
         """
         import io
+
         from impacket.smbconnection import SMBConnection
 
         local_files: dict[str, str] = {}
@@ -456,8 +462,9 @@ class DPAPIModule(BaseModule):
                           target_user: str, domain: str) -> list[dict]:
         """Derive DPAPI master key from NT hash and decrypt blobs."""
         try:
-            from impacket.dpapi import MasterKey, Credential
             import hashlib
+
+            from impacket.dpapi import Credential, MasterKey  # noqa: F401
 
             # SHA1(NT_HASH) = DPAPI user key derivation
             nt_bytes = bytes.fromhex(nt_hash) if len(nt_hash) == 32 else b""
@@ -467,7 +474,7 @@ class DPAPIModule(BaseModule):
             try:
                 sha1_key = hashlib.sha1(nt_bytes, usedforsecurity=False).digest()
             except TypeError:
-                sha1_key = hashlib.sha1(nt_bytes).digest()  # nosec: B324
+                sha1_key = hashlib.sha1(nt_bytes).digest()  # nosec: B324  # noqa: F841
             creds: list[dict] = []
 
             # Try to decrypt Windows Credential files
@@ -475,7 +482,7 @@ class DPAPIModule(BaseModule):
             if cred_path and os.path.isfile(cred_path):
                 try:
                     with open(cred_path, "rb") as cred_fh:
-                        cred_obj = Credential(cred_fh.read())
+                        cred_obj = Credential(cred_fh.read())  # noqa: F841
                     # decryption would go here with derived key
                     creds.append({
                         "source":   "credential_manager",
@@ -497,8 +504,8 @@ class DPAPIModule(BaseModule):
                                   backup_key: str) -> list[dict]:
         """Decrypt DPAPI blobs using domain backup key (from lsa_secrets)."""
         try:
-            from impacket.dpapi import MasterKey
-            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key
+            from impacket.dpapi import MasterKey  # noqa: F401
+            key_bytes = backup_key.encode() if isinstance(backup_key, str) else backup_key  # noqa: F841
             creds: list[dict] = []
             # Domain backup key decryption logic
             # impacket.dpapi supports this via CredentialFile + MasterKey.decrypt()

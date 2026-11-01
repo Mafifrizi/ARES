@@ -11,8 +11,8 @@ import re
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -710,7 +710,7 @@ async def _seed_identity(
                 (other_campaign_id, "Other campaign", username),
             ),
         )
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await connection.execute(
             """
             INSERT INTO refresh_token_families(
@@ -744,7 +744,7 @@ def _bearer_source(user_id: str, username: str) -> BearerTicketSource:
         user_id=user_id,
         subject=username,
         jti=f"ticket-jti-{uuid4().hex}",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
         family_id=_test_family_id(user_id),
         auth_epoch=1,
     )
@@ -1620,7 +1620,7 @@ async def test_postgres_catalog_issue_consume_replay_and_revalidation() -> None:
                 """,
                 source.jti,
                 user_id,
-                datetime.now(timezone.utc) + timedelta(minutes=5),
+                datetime.now(UTC) + timedelta(minutes=5),
             )
         revoked = (
             await database.resolve_websocket_ticket_principal(consumed)
@@ -2739,7 +2739,7 @@ class _PureTicketConnection:
             "credential_kind": "bearer",
             "bearer_subject": "synthetic-subject",
             "bearer_jti": "synthetic-jti",
-            "bearer_expires_at": datetime.now(timezone.utc)
+            "bearer_expires_at": datetime.now(UTC)
             + timedelta(minutes=1),
             "bearer_family_id": _test_family_id("synthetic-user"),
             "bearer_auth_epoch": 1,

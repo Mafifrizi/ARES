@@ -40,16 +40,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ares.core.logger import get_logger
 from ares.goal.engine import Goal
 
 if TYPE_CHECKING:
     from ares.core.plugin.loader import ModuleRegistry
-    from ares.state.target_state import OperatorSession
     from ares.credential.vault import CredentialVault
     from ares.knowledge.base import AttackKnowledgeBase
+    from ares.state.target_state import OperatorSession
 
 logger = get_logger("ares.goal.planner")
 
@@ -216,7 +216,7 @@ class AttackPlanner:
 
         for module_cls in candidates:
             for target in ctx.targets:
-                trial_key = f"{module_cls.MODULE_ID}:{target}"
+                trial_key = f"{module_cls.MODULE_ID}:{target}"  # noqa: F841
                 scored = self._score_module(module_cls, target, ctx)
                 if scored is not None:
                     suggestions.append(scored)

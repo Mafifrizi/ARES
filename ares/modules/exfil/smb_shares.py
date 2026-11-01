@@ -17,14 +17,12 @@ import fnmatch
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
-from ares.core.logger import get_logger, audit
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import SmbSharesParams
 from ares.sdk import (
-    CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -246,7 +244,7 @@ class SmbSharesExfil(BaseModule):
                  "sensitive_file_paths": mock_files, "sensitive_data_found": True}
 
         try:
-            from impacket.smbconnection import SMBConnection  # type: ignore[import]
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             return [], {"error": "impacket_not_installed"}
 

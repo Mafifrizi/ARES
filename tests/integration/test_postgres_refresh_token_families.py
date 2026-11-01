@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -149,7 +149,7 @@ async def test_real_postgres_logout_all_advances_epoch_across_pools() -> None:
             revoked = await primary.revoke_all_sessions(
                 user_id=user_id,
                 jti="fixed-epoch-jti",
-                expires_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+                expires_at=datetime(2099, 1, 1, tzinfo=UTC),
             )
             authority = await observer.resolve_access_token_principal(
                 "family-epoch-user",
@@ -184,7 +184,7 @@ async def test_real_postgres_cookie_logout_expiry_and_replay_contract() -> None:
         predecessor = issued.session.refresh_token
         expiry_is_authoritative = (
             issued.session.absolute_expires_at.tzinfo is not None
-            and issued.session.absolute_expires_at > datetime.now(timezone.utc)
+            and issued.session.absolute_expires_at > datetime.now(UTC)
         )
         rotated = await database.rotate_refresh_session(predecessor, _access_factory)
         _require(rotated.session is not None, "PostgreSQL cookie successor missing")

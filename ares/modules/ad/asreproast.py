@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import asyncio
 import re
+
 """
 ASREPRoasting - impacket.krb5.kerberosv5 low-level API (impacket >=0.11 compatible)
 MITRE: T1558.004 - Works fully unauthenticated with username list.
@@ -16,32 +18,31 @@ Fix Bug 2: Implement all 3 modes. No credentials required for userfile/usernames
 Fix Bug 3: Per-request jitter via noise.jitter.sleep(), not post-hoc batch sleep.
 """
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.ad.asreproast")
-from ares.core.campaign import Finding, Severity
+from ares.core.campaign import Severity
+from ares.core.errors import AresError, ModuleValidationError
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
-from ares.core.errors import AresError, ModuleValidationError
-from ares.modules.params import ASREPRoastParams
-from ares.sdk import (
-    BaseModule,
-    EvidenceRecord,
-    ExecutionContext,
-    LockoutCircuitBreaker,
-    ModuleResult,
-    NetworkPermission,
-    OpsecLevel,
-    ProcessPermission,
-    UntrustedTargetData,
-    module_contract,
-)
 from ares.modules.ad.dependencies import (
     ad_bind_dry_run_metadata,
     build_ad_bind_plan,
     classify_ad_ldap_bind_failure,
     ensure_ad_dependencies,
     sanitize_ad_username,
+)
+from ares.modules.params import ASREPRoastParams
+from ares.sdk import (
+    BaseModule,
+    EvidenceRecord,
+    LockoutCircuitBreaker,
+    ModuleResult,
+    NetworkPermission,
+    OpsecLevel,
+    ProcessPermission,
+    module_contract,
 )
 
 
@@ -372,29 +373,29 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
 
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect AS-REP Roasting (Kerberos Pre-Auth Disabled)\n"
-            f"SecurityEvent\n"
-            f"| where EventID == 4768\n"
-            f"| where PreAuthType == 0 // Pre-authentication not required\n"
-            f"| project TimeGenerated, Computer, TargetUserName, ServiceName, TicketOptions, TicketEncryptionType, IpAddress\n"
+            "// ARES Closed-Loop Telemetry: Detect AS-REP Roasting (Kerberos Pre-Auth Disabled)\n"
+            "SecurityEvent\n"
+            "| where EventID == 4768\n"
+            "| where PreAuthType == 0 // Pre-authentication not required\n"
+            "| project TimeGenerated, Computer, TargetUserName, ServiceName, TicketOptions, TicketEncryptionType, IpAddress\n"
         )
         sigma_rule = (
-            f"title: Kerberos TGT Request Without Pre-Authentication (ASREPRoast)\n"
-            f"id: 8f1a2b3c-ares-4768-asrep\n"
-            f"status: experimental\n"
-            f"description: Detects Kerberos TGT negotiation with PreAuthType=0 associated with AS-REP roasting\n"
-            f"logsource:\n"
-            f"  product: windows\n"
-            f"  service: security\n"
-            f"detection:\n"
-            f"  selection:\n"
-            f"    EventID: 4768\n"
-            f"    PreAuthType: 0\n"
-            f"  condition: selection\n"
-            f"level: high\n"
-            f"tags:\n"
-            f"  - attack.credential_access\n"
-            f"  - attack.t1558.004\n"
+            "title: Kerberos TGT Request Without Pre-Authentication (ASREPRoast)\n"
+            "id: 8f1a2b3c-ares-4768-asrep\n"
+            "status: experimental\n"
+            "description: Detects Kerberos TGT negotiation with PreAuthType=0 associated with AS-REP roasting\n"
+            "logsource:\n"
+            "  product: windows\n"
+            "  service: security\n"
+            "detection:\n"
+            "  selection:\n"
+            "    EventID: 4768\n"
+            "    PreAuthType: 0\n"
+            "  condition: selection\n"
+            "level: high\n"
+            "tags:\n"
+            "  - attack.credential_access\n"
+            "  - attack.t1558.004\n"
         )
         loot_items: list[dict[str, Any]] = raw.get("loot", [])
         if not any(l.get("loot_type") == "detection_rule_kql" for l in loot_items):
@@ -506,9 +507,6 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
             ("impacket", "pyasn1", "pyasn1_modules"),
             module_id=self.MODULE_ID,
         )
-        from impacket.krb5.kerberosv5 import getKerberosTGT
-        from impacket.krb5.types import Principal
-        from impacket.krb5 import constants
 
         # Build target list
         targets: list[str] = []
@@ -517,7 +515,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
             logger.info("asreproast_ldap_targets", count=len(targets))
         elif mode == "userfile":
             try:
-                with open(userfile, "r", errors="replace") as fh:
+                with open(userfile, errors="replace") as fh:
                     targets = [ln.strip() for ln in fh if ln.strip()]
             except OSError as exc:
                 raise ValueError(f"Cannot read userfile {userfile!r}: {exc}") from exc
@@ -616,8 +614,9 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         """Query LDAP for accounts with DONT_REQUIRE_PREAUTH enabled."""
         ensure_ad_dependencies(("ldap3",), module_id=self.MODULE_ID)
         import ssl
+
         import ldap3
-        from ldap3 import Server, Connection, SUBTREE, Tls, ALL
+        from ldap3 import ALL, SUBTREE, Connection, Server, Tls
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)
@@ -628,12 +627,12 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
                 tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
-                conn_kwargs = dict(
-                    user=bind_plan.user,
-                    password=password,
-                    auto_bind=ldap3.AUTO_BIND_NONE,
-                    receive_timeout=30,
-                )
+                conn_kwargs = {
+                    "user": bind_plan.user,
+                    "password": password,
+                    "auto_bind": ldap3.AUTO_BIND_NONE,
+                    "receive_timeout": 30,
+                }
                 if bind_plan.mode == "ntlm":
                     conn_kwargs["authentication"] = ldap3.NTLM
                 conn = Connection(server, **conn_kwargs)
@@ -661,7 +660,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
                     bind_plan=bind_plan,
                 )
                 if isinstance(last_error, ModuleValidationError):
-                    raise last_error
+                    raise last_error  # noqa: B904
                 conn = None
 
         if conn is None:

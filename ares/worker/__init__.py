@@ -13,8 +13,8 @@ try:
         ClusterController,
         ClusterTask,
         InProcessTaskQueue,
-        WorkerRegistration,
         TaskState,
+        WorkerRegistration,
     )
 except ImportError:
     pass  # Optional deps not installed

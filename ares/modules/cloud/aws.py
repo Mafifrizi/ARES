@@ -1,19 +1,26 @@
 """AWS Recon - boto3 implementation. IAM, S3, Security Groups, IMDS. MITRE: T1526, T1530, T1552.005, T1580"""
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import ModuleResult
+
+
 import asyncio
 from functools import partial
 from typing import Any
+
 from ares.core.logger import get_logger
 
 logger = get_logger("ares.modules.cloud.aws")
-from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.campaign import Severity
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import AWSParams
 from ares.sdk import (
     CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     NetworkPermission,
     ProcessPermission,
     module_contract,
@@ -48,6 +55,7 @@ class AWSEnumModule(BaseModule):
     async def validate(self, ctx: "Any") -> None:
         """Pre-flight param checks before any network call."""
         import importlib.util
+
         from ares.core.errors import ModuleValidationError
 
         try:
@@ -83,7 +91,7 @@ class AWSEnumModule(BaseModule):
         if pdict.get("account_id"):
             self.validate_cloud_scope(pdict.get("account_id"), "aws")
 
-    async def execute(self, ctx: "Any") -> "ModuleResult":
+    async def execute(self, ctx: "Any") -> "ModuleResult":  # noqa: F821
         """ExecutionContext-based entry point (v0.9.0+)."""
         from ares.modules.base import ModuleResult
         if getattr(ctx, "dry_run", False):
@@ -144,11 +152,11 @@ class AWSEnumModule(BaseModule):
         # Closed-Loop Purple Telemetry: KQL & Sigma rule synthesis
         aws_region = pdict.get("region", "us-east-1")
         kql_query = (
-            f"// ARES Closed-Loop Telemetry: Detect AWS IAM & Resource Reconnaissance via CloudTrail\n"
-            f"// Monitors CloudTrail for rapid API calls: GetCallerIdentity, ListBuckets, ListRoles, ListUsers\n"
-            f"AWSCloudTrail\n"
-            f"| where EventName in~ (\"GetCallerIdentity\", \"ListUsers\", \"ListRoles\", \"ListBuckets\", \"DescribeSecurityGroups\")\n"
-            f"| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, UserAgent, AWSRegion\n"
+            "// ARES Closed-Loop Telemetry: Detect AWS IAM & Resource Reconnaissance via CloudTrail\n"
+            "// Monitors CloudTrail for rapid API calls: GetCallerIdentity, ListBuckets, ListRoles, ListUsers\n"
+            "AWSCloudTrail\n"
+            "| where EventName in~ (\"GetCallerIdentity\", \"ListUsers\", \"ListRoles\", \"ListBuckets\", \"DescribeSecurityGroups\")\n"
+            "| project TimeGenerated, SourceIpAddress, UserIdentityArn, EventName, UserAgent, AWSRegion\n"
         )
         sigma_rule = (
             f"title: AWS IAM & Cloud Infrastructure Reconnaissance ({aws_region})\n"
@@ -282,7 +290,7 @@ class AWSEnumModule(BaseModule):
             for page in iam.get_paginator("list_users").paginate():
                 for user in page["Users"]:
                     for key in iam.list_access_keys(UserName=user["UserName"])["AccessKeyMetadata"]:
-                        age = (datetime.datetime.now(datetime.timezone.utc)-key["CreateDate"]).days
+                        age = (datetime.datetime.now(datetime.UTC)-key["CreateDate"]).days
                         if age > 90 and key["Status"] == "Active":
                             stale.append({"user":user["UserName"],"age_days":age})
             r["stale_access_keys"] = stale[:20]

@@ -9,17 +9,23 @@ Extremely stealthy - survives reboots, not visible in Autoruns by default.
 Requires: local admin on target.
 """
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ares.modules.base import FeasibilityReport
+
+
 import asyncio
 from typing import Any
-from ares.core.logger import get_logger, audit
+
 from ares.core.campaign import Finding, Severity
-from ares.modules.base import BaseModule, OpsecLevel
+from ares.core.logger import audit, get_logger
 from ares.core.tracing import trace_module
+from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import WMISubscriptionParams
 from ares.sdk import (
-    CircuitBreaker,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -39,7 +45,7 @@ logger = get_logger("ares.modules.persistence.wmi_subscription")
 )
 class WMISubscriptionModule(BaseModule):
     """
-    persistence.wmi_subscription - Create a WMI FilterToConsumerBinding that executes a command on event trigger - highly stealthy 
+    persistence.wmi_subscription - Create a WMI FilterToConsumerBinding that executes a command on event trigger - highly stealthy
 
     OPSEC: MEDIUM
     MITRE: "T1546.003"
@@ -60,15 +66,15 @@ class WMISubscriptionModule(BaseModule):
     MITRE_TECHNIQUES   = ["T1546.003"]
     PARAMS_MODEL       = WMISubscriptionParams
 
-    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":
+    async def assess_feasibility(self, ctx: "Any") -> "FeasibilityReport":  # noqa: F821
         """
         Pre-flight Defense Feasibility Assessment:
         Evaluates WMI event subscription persistence feasibility (survives reboot, stealthy).
         Checks Sysmon Event ID 19/20/21 and WMI monitoring on target.
         """
-        from ares.modules.base import FeasibilityReport
         from ares.core.campaign import NoiseProfile
         from ares.core.security import sanitize_hostname
+        from ares.modules.base import FeasibilityReport
 
         blockers: list[str] = []
         recommendations: list[str] = []
@@ -263,9 +269,9 @@ class WMISubscriptionModule(BaseModule):
         await self.before_request(target, "wmi")  # scope check + jitter
 
         try:
-            from impacket.dcerpc.v5 import transport         # type: ignore[import]
-            from impacket.dcerpc.v5.dcom import wmi           # type: ignore[import]
-            from impacket.dcerpc.v5.dcomrt import DCOMConnection # type: ignore[import]
+            from impacket.dcerpc.v5 import transport  # noqa: F401
+            from impacket.dcerpc.v5.dcom import wmi
+            from impacket.dcerpc.v5.dcomrt import DCOMConnection
         except ImportError:
             return [], {"error": "impacket not installed"}
 
@@ -366,8 +372,8 @@ class WMISubscriptionModule(BaseModule):
         def _remove() -> tuple[bool, str]:
             dcom = None
             try:
+                from impacket.dcerpc.v5.dcom import wmi as wmimod
                 from impacket.dcerpc.v5.dcomrt import DCOMConnection
-                from impacket.dcerpc.v5.dcom  import wmi as wmimod
                 from impacket.dcerpc.v5.dtypes import NULL
 
                 dcom = DCOMConnection(target, username=username, password=password,

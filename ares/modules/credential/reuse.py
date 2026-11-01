@@ -14,11 +14,12 @@ import asyncio
 from typing import Any
 
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
+from ares.core.tracing import trace_module
 from ares.modules.params import CredentialReuseParams
 from ares.sdk import (
     BaseModule,
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -26,8 +27,6 @@ from ares.sdk import (
     ProcessPermission,
     module_contract,
 )
-from ares.core.logger import get_logger, audit
-from ares.core.tracing import trace_module
 
 logger = get_logger("ares.modules.credential.reuse")
 
@@ -37,9 +36,9 @@ def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
     Non-destructive probe of OAuth 2.0 Device Code Flow / Identity Posture.
     Checks whether target exposes or permits unrestricted Device Authorization Grant (T1528 / T1550).
     """
-    import urllib.request
-    import urllib.error
     import ssl
+    import urllib.error
+    import urllib.request
 
     result: dict[str, Any] = {
         "device_code_endpoint_active": False,
@@ -296,7 +295,7 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
             )
 
         try:
-            from ares.credential.reuse import ReuseEngine, ReuseProtocol
+            from ares.credential.reuse import ReuseEngine
             engine = ReuseEngine(vault=vault)
             await self.before_request(target, "default")
             results = await engine.spray(target_hosts=[target])

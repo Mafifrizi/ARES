@@ -7,15 +7,15 @@ Verification suite for Phase 2 comprehensive audit:
 - Hypothesis 4: Service intelligence declarative scope enforcement
 - Hypothesis 5: Scrubbing disabled & phantom module references across templates and KB
 """
-import pytest
-from unittest.mock import MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
 
 # ── Hypothesis 1: Replay Event Attribution & Deduplication ───────────────────
 
 def test_replay_multihost_finding_attribution():
-    from ares.replay.engine import CampaignReplay, ReplayMode
+    from ares.replay.engine import CampaignReplay
     from ares.state.target_state import AttackHistoryEntry
 
     h1 = AttackHistoryEntry(module_id="network.port_scan", target_host="10.0.0.1", timestamp=100.0, success=True)
@@ -70,7 +70,7 @@ def test_replay_unassigned_finding_attached_once():
 # ── Hypothesis 2: Attack Graph Multi-Target DA & UTF-8 DOT ───────────────────
 
 def test_attack_graph_multi_target_da_pathfinding():
-    from ares.graph.attack_graph import AttackGraph, GraphNode, GraphEdge
+    from ares.graph.attack_graph import AttackGraph, GraphEdge, GraphNode
 
     g = AttackGraph()
     g._add_node(GraphNode(node_id="user:alice", label="alice", node_type="user"))
@@ -127,10 +127,10 @@ def test_collab_target_lock_active_targets_preservation():
 
 @pytest.mark.asyncio
 async def test_service_intel_scope_guard_enforcement():
-    from ares.service_intel.engine import ServiceIntelEngine
     from ares.core.campaign import Campaign, ScopeEntry
-    from ares.core.noise import ScopeGuard
     from ares.core.errors import ScopeViolationError
+    from ares.core.noise import ScopeGuard
+    from ares.service_intel.engine import ServiceIntelEngine
 
     campaign = Campaign(
         id="test_scope",
@@ -152,8 +152,8 @@ async def test_service_intel_scope_guard_enforcement():
 
 def test_catalog_and_template_scrubbed_from_disabled_modules():
     from ares.core.engine import CAMPAIGN_TEMPLATES
-    from ares.marketplace.installer import _BUNDLED_INDEX
     from ares.knowledge.base import _KB_ENTRIES
+    from ares.marketplace.installer import _BUNDLED_INDEX
 
     # 1. assumed_breach template uses windows.lsa_secrets, not windows.dpapi
     win_template = CAMPAIGN_TEMPLATES["assumed_breach"]

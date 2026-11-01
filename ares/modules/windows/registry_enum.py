@@ -31,19 +31,16 @@ Object Access auditing is enabled, which is rare on workstations).
 from __future__ import annotations
 
 import asyncio
-import base64
-import struct
 from typing import Any
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import RegistryEnumParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -66,7 +63,7 @@ def _decode_vnc_password(enc: bytes) -> str:
         try:
             from cryptography.hazmat.decrepit.ciphers.algorithms import TripleDES
         except ImportError:
-            from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES  # type: ignore[no-redef]
+            from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
         from cryptography.hazmat.primitives.ciphers import Cipher, modes
         cipher = Cipher(TripleDES(vnc_key * 3), modes.ECB())  # nosec: B304
         decryptor = cipher.decryptor()
@@ -78,7 +75,7 @@ def _decode_vnc_password(enc: bytes) -> str:
         return f"<decode_error: {enc.hex()}>"
 
     try:
-        from Crypto.Cipher import DES  # type: ignore[import] # nosec: B413
+        from Crypto.Cipher import DES  # nosec: B413
         cipher = DES.new(vnc_key, DES.MODE_ECB)  # nosec: B304
         decoded = cipher.decrypt(padded)
         return decoded.rstrip(b"\x00").decode("latin-1", errors="replace")
@@ -391,14 +388,18 @@ class RegistryEnumModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.smbconnection import SMBConnection            # type: ignore[import]
-            from impacket.dcerpc.v5 import transport, rrp               # type: ignore[import]
-            from impacket.dcerpc.v5.rrp import (                        # type: ignore[import]
-                hOpenLocalMachine, hOpenCurrentUser,
-                hBaseRegOpenKey, hBaseRegQueryValue,
-                hBaseRegQueryInfoKey, hBaseRegEnumValue,
-                hBaseRegCloseKey, DCERPCException,
+            from impacket.dcerpc.v5 import rrp, transport
+            from impacket.dcerpc.v5.rrp import (
+                DCERPCException,
+                hBaseRegCloseKey,
+                hBaseRegEnumValue,
+                hBaseRegOpenKey,
+                hBaseRegQueryInfoKey,
+                hBaseRegQueryValue,
+                hOpenCurrentUser,
+                hOpenLocalMachine,
             )
+            from impacket.smbconnection import SMBConnection
         except ImportError:
             logger.warning("registry_enum_impacket_missing", target=target)
             return [], {"error": "impacket not installed - pip install ares-redteam[ad]"}
@@ -461,7 +462,7 @@ class RegistryEnumModule(BaseModule):
                                     ev   = hBaseRegEnumValue(dce, hkey, i)
                                     vn   = ev["lpValueNameOut"].rstrip("\x00")
                                     vd   = ev["lpData"]
-                                    vt   = ev["lpType"]
+                                    vt   = ev["lpType"]  # noqa: F841
                                     if isinstance(vd, bytes):
                                         try:
                                             vd = vd.rstrip(b"\x00").decode("utf-16-le")
@@ -506,7 +507,7 @@ class RegistryEnumModule(BaseModule):
                         info  = hBaseRegQueryInfoKey(dce, hbase)
                         count = info["lpcSubKeys"]
 
-                        from impacket.dcerpc.v5.rrp import hBaseRegEnumKey  # type: ignore[import]
+                        from impacket.dcerpc.v5.rrp import hBaseRegEnumKey
                         for i in range(count):
                             try:
                                 ek       = hBaseRegEnumKey(dce, hbase, i)

@@ -11,11 +11,11 @@ Validates:
 8. SAML & OIDC error and callback handling
 """
 
-import asyncio
 import json
 import os
 import secrets
 from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -26,8 +26,8 @@ os.environ.setdefault("ARES_DEFAULT_ADMIN_PASSWORD", "TestSsoPass1!")
 os.environ.setdefault("ARES_DEBUG", "true")
 os.environ.setdefault("ARES_BROWSER_ORIGIN", "http://localhost:5173")
 
-from ares.core.config import AresSettings, get_settings
-from ares.core.security import DataEncryptor, hash_password
+from ares.core.config import AresSettings
+from ares.core.security import DataEncryptor
 from ares.core.sso import (
     decrypt_sso_secret,
     encrypt_sso_secret,
@@ -109,7 +109,7 @@ async def test_database_sso_schema_and_operations(tmp_path, test_settings):
         assert org["slug"] == "default"
 
         # 2. SSO configuration saving & retrieval
-        cert_enc = encrypt_sso_secret("MOCK_CERT", test_settings)
+        cert_enc = encrypt_sso_secret("MOCK_CERT", test_settings)  # noqa: F841
         sec_enc = encrypt_sso_secret("MOCK_SECRET", test_settings)
 
         sso_id = await db.save_sso_config(
@@ -370,6 +370,7 @@ async def test_oidc_callback_replay_and_state_validation(tmp_path, test_settings
 async def test_saml_acs_replay_and_in_response_to_validation(tmp_path, test_settings):
     """Verify SAML ACS callback validates InResponseTo, rejects cross-site replay without CSRF header check."""
     import base64
+
     from ares.api.server import app, get_db
 
     db_file = tmp_path / "test_saml_acs.db"

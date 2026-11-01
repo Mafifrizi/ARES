@@ -10,8 +10,8 @@ from __future__ import annotations
 
 try:
     from ares.api.dashboard.app import (  # noqa: F401
-        dashboard_app,
         broadcast_finding,
+        dashboard_app,
         live_connections,
     )
 except ImportError:

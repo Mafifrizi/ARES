@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import Mock
 from urllib.parse import quote
@@ -791,7 +791,7 @@ async def test_postgres_inactive_owner_api_key_is_denied_without_usage() -> None
             "expected active-owner API key verification to succeed",
         )
 
-        usage_marker = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        usage_marker = datetime(2000, 1, 1, tzinfo=UTC)
         async with database._pool.acquire() as connection:
             await connection.execute(
                 "UPDATE api_keys SET last_used=$1 WHERE id=$2",
@@ -1228,7 +1228,7 @@ async def test_postgres_access_token_timestamp_adapter_round_trip() -> None:
         database = harness.database
         user_id = await _insert_user(database)
         naive_expiry = (
-            datetime.now(timezone.utc) + timedelta(hours=2)
+            datetime.now(UTC) + timedelta(hours=2)
         ).replace(microsecond=0)
         aware_expiry = naive_expiry.astimezone(
             timezone(timedelta(hours=5, minutes=30))
@@ -1967,7 +1967,7 @@ async def test_postgres_c_live_trusted_store_factory_is_coordinator_only(
                 user_id=user_id,
                 subject=subject,
                 jti="10000000-0000-4000-8000-000000000003",
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+                expires_at=datetime.now(UTC) + timedelta(minutes=5),
                 family_id=family_id,
                 auth_epoch=1,
             ),

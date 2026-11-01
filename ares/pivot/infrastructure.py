@@ -215,7 +215,10 @@ class PivotManager:
         except ImportError:
             # Fallback: paramiko with SSH -D subprocess
             try:
-                import paramiko, subprocess, shutil
+                import shutil
+                import subprocess
+
+                import paramiko  # noqa: F401
 
                 if shutil.which("ssh"):
                     # Use system ssh -D (most reliable for SOCKS5)
@@ -344,7 +347,8 @@ class PivotManager:
                         local_port=local_port, remote=f"{remote_host}:{remote_port}")
 
         except ImportError:
-            import shutil, subprocess
+            import shutil
+            import subprocess
             if shutil.which("ssh"):
                 cmd = [
                     "ssh", "-N",
@@ -378,7 +382,7 @@ class PivotManager:
                     tunnel.state = TunnelState.ACTIVE
             else:
                 tunnel.state = TunnelState.DEAD
-                raise ModuleExecutionError(
+                raise ModuleExecutionError(  # noqa: B904
                     "No SSH backend available: asyncssh not installed and "
                     "no 'ssh' binary found in PATH. Cannot establish tunnel. "
                     "Install: pip install asyncssh"

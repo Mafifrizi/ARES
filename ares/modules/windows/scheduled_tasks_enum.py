@@ -29,15 +29,14 @@ except ImportError:
     import xml.etree.ElementTree as ET  # nosec B405
     from xml.etree.ElementTree import fromstring as _xml_fromstring  # nosec B405, B314
 
-from ares.core.logger import get_logger, audit
 from ares.core.campaign import Finding, Severity
+from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
+from ares.core.tracing import trace_module
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import ScheduledTasksEnumParams
-from ares.core.tracing import trace_module
 from ares.sdk import (
     EvidenceRecord,
-    ExecutionContext,
     LockoutCircuitBreaker,
     ModuleResult,
     NetworkPermission,
@@ -344,10 +343,12 @@ class ScheduledTasksEnumModule(BaseModule):
             return [], {"dry_run": True}
 
         try:
-            from impacket.dcerpc.v5 import transport, tsch               # type: ignore[import]
-            from impacket.dcerpc.v5.tsch import (                        # type: ignore[import]
-                hSchRpcEnumFolders, hSchRpcEnumTasks, hSchRpcRetrieveTask,
+            from impacket.dcerpc.v5 import transport, tsch
+            from impacket.dcerpc.v5.tsch import (
                 TASK_ENUM_HIDDEN,
+                hSchRpcEnumFolders,
+                hSchRpcEnumTasks,
+                hSchRpcRetrieveTask,
             )
         except ImportError:
             logger.warning("scheduled_tasks_enum_impacket_missing", target=target)
