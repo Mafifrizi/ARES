@@ -634,57 +634,60 @@ export function getTailoredFindingDetails(finding: Finding) {
   const isRedis = title.includes("REDIS") || port === 6379;
   const isAttackSurface = title.includes("ATTACK SURFACE");
 
+  // serviceTag names the service; serviceCategory the role. Both are sentence-case
+  // (the meta line already prints port and MITRE separately, and the old
+  // "PORT N / KERBEROS KDC / TIER-0 DC" strings read as terminal theatre).
   let serviceTag = typeof evidence.role === "string" && evidence.role ? evidence.role : "";
-  let serviceCategory = typeof evidence.service === "string" && evidence.service ? String(evidence.service).toUpperCase() : "";
+  let serviceCategory = typeof evidence.service === "string" && evidence.service ? String(evidence.service) : "";
   let tailoredRemediation = String(finding.remediation ?? "");
 
   if (isKerberos) {
-    serviceTag = serviceTag || "PORT 88 / KERBEROS KDC / TIER-0 DC";
-    serviceCategory = serviceCategory || "Active Directory Authentication";
+    serviceTag = serviceTag || "Kerberos KDC · Tier-0 DC";
+    serviceCategory = serviceCategory || "Active Directory authentication";
     tailoredRemediation = tailoredRemediation || "Enforce AES-256 Kerberos encryption (disable RC4-HMAC), audit service accounts for SPNs to mitigate Kerberoasting, and monitor Event ID 4769 for abnormal TGS requests.";
   } else if (isLdaps) {
-    serviceTag = serviceTag || "PORT 636 / LDAPS SECURE / TIER-0 DC";
-    serviceCategory = serviceCategory || "Encrypted Directory Service";
+    serviceTag = serviceTag || "LDAPS · Tier-0 DC";
+    serviceCategory = serviceCategory || "Encrypted directory service";
     tailoredRemediation = tailoredRemediation || "Enforce strong TLS cipher suites, validate CA trust chains, and ensure LDAP channel binding is strictly enforced (LdapEnforceChannelBinding=2).";
   } else if (isLdap) {
-    serviceTag = serviceTag || "PORT 389 / LDAP DIRECTORY";
-    serviceCategory = serviceCategory || "Active Directory Service";
+    serviceTag = serviceTag || "LDAP directory";
+    serviceCategory = serviceCategory || "Active Directory service";
     tailoredRemediation = tailoredRemediation || "Require LDAP signing (LDAPServerIntegrity=2) and upgrade clients to LDAPS (port 636) to prevent NTLM relay and credential harvesting.";
   } else if (isSmb) {
-    serviceTag = serviceTag || "PORT 445 / SMB SERVICE";
-    serviceCategory = serviceCategory || "Core Windows File Sharing & Remote Admin";
+    serviceTag = serviceTag || "SMB service";
+    serviceCategory = serviceCategory || "Windows file sharing & remote admin";
     tailoredRemediation = tailoredRemediation || "Require SMB signing (RequireSecuritySignature=1), disable legacy SMBv1, and restrict port 445 inbound access to management subnets.";
   } else if (isWinrm) {
-    serviceTag = serviceTag || `PORT ${port || 5985} / WINRM REMOTE MGMT`;
-    serviceCategory = serviceCategory || "Windows Remote Management (PowerShell Remoting)";
+    serviceTag = serviceTag || "WinRM remote management";
+    serviceCategory = serviceCategory || "Windows remote management (PowerShell remoting)";
     tailoredRemediation = tailoredRemediation || "Disable WinRM plaintext HTTP listeners, transition management traffic to WinRM HTTPS (port 5986), and enforce GPO firewall restrictions.";
   } else if (isMssql) {
-    serviceTag = serviceTag || "PORT 1433 / MSSQL DATABASE";
-    serviceCategory = serviceCategory || "Enterprise Relational Database";
+    serviceTag = serviceTag || "MSSQL database";
+    serviceCategory = serviceCategory || "Enterprise relational database";
     tailoredRemediation = tailoredRemediation || "Disable 'sa' account, enforce Windows Authentication only, and keep xp_cmdshell disabled in configuration.";
   } else if (isRdp) {
-    serviceTag = serviceTag || "PORT 3389 / RDP REMOTE DESKTOP";
-    serviceCategory = serviceCategory || "Interactive Terminal Services";
+    serviceTag = serviceTag || "RDP · remote desktop";
+    serviceCategory = serviceCategory || "Interactive terminal services";
     tailoredRemediation = tailoredRemediation || "Enforce Network Level Authentication (NLA) and restrict RDP access to management VPN jump hosts.";
   } else if (isDocker) {
-    serviceTag = serviceTag || "PORT 2375 / DOCKER DAEMON API";
-    serviceCategory = serviceCategory || "Unauthenticated Container Engine";
+    serviceTag = serviceTag || "Docker daemon API";
+    serviceCategory = serviceCategory || "Unauthenticated container engine";
     tailoredRemediation = tailoredRemediation || "Disable unauthenticated TCP socket; bind to local Unix socket or require mutual TLS authentication on port 2376.";
   } else if (isRedis) {
-    serviceTag = serviceTag || "PORT 6379 / REDIS MEMORY STORE";
-    serviceCategory = serviceCategory || "In-Memory Cache & Key-Value Store";
+    serviceTag = serviceTag || "Redis memory store";
+    serviceCategory = serviceCategory || "In-memory cache & key-value store";
     tailoredRemediation = tailoredRemediation || "Enable requirepass authentication and bind Redis listener strictly to 127.0.0.1.";
   } else if (isDns) {
-    serviceTag = serviceTag || "PORT 53 / MICROSOFT DNS";
-    serviceCategory = serviceCategory || "Domain Name Resolution";
+    serviceTag = serviceTag || "Microsoft DNS";
+    serviceCategory = serviceCategory || "Domain name resolution";
     tailoredRemediation = tailoredRemediation || "Restrict DNS zone transfers (AXFR) to designated secondary nameservers only, and enable DNSSEC validation.";
   } else if (isRpc) {
-    serviceTag = serviceTag || "PORT 135 / MSRPC ENDPOINT";
-    serviceCategory = serviceCategory || "RPC Endpoint Mapper";
+    serviceTag = serviceTag || "MSRPC endpoint";
+    serviceCategory = serviceCategory || "RPC endpoint mapper";
     tailoredRemediation = tailoredRemediation || "Restrict RPC endpoint mapper via host-based firewall to prevent unauthenticated RPC enumeration and coercions.";
   } else if (isAttackSurface) {
-    serviceTag = "HOST ATTACK SURFACE SUMMARY";
-    serviceCategory = "Exposed Network Services";
+    serviceTag = "Host attack-surface summary";
+    serviceCategory = "Exposed network services";
     tailoredRemediation = tailoredRemediation || "Audit all listening ports against the enterprise baseline and enforce host-based micro-segmentation with Windows Defender Firewall.";
   }
 
