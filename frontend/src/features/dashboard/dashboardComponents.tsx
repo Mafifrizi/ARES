@@ -748,9 +748,10 @@ export function DiscoveredPerimeterCard({
 
   return (
     <div className="space-y-2 mt-3">
-      {/* 1. Defensive Telemetry & Purple Loot (Collapsible Progressive Disclosure) */}
+      {/* 1. Synthesized detection rules (collapsible). Wrapper stays sans; the
+          <pre> block is mono where it matters. */}
       {loot.length > 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm overflow-hidden text-xs">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md overflow-hidden text-xs">
           <button
             type="button"
             onClick={() => setShowLoot((prev) => !prev)}
@@ -759,20 +760,20 @@ export function DiscoveredPerimeterCard({
             <div className="flex items-center gap-2">
               <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
               <span className="font-semibold text-zinc-200 text-xs">
-                Synthesized Detection Rules ({loot.length})
+                Synthesized detection rules ({loot.length})
               </span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded font-mono">
-                KQL & Sigma
+              <span className="text-[10px] px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded">
+                KQL &amp; Sigma
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <span className="text-[11px]">{showLoot ? "Hide Rules" : "Show Rules"}</span>
+              <span className="text-[11px]">{showLoot ? "Hide" : "Show"}</span>
               <ChevronDown size={14} className={`transform transition-transform duration-200 ${showLoot ? "rotate-180" : ""}`} />
             </div>
           </button>
 
           {showLoot && (
-            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50 font-mono">
+            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50">
               {loot.map((item, idx) => {
                 const name = String(item.name ?? `Artifact #${idx + 1}`);
                 const lootType = String(item.loot_type ?? "rule");
@@ -792,17 +793,19 @@ export function DiscoveredPerimeterCard({
                 };
 
                 return (
-                  <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 space-y-1.5">
+                  <div key={idx} className="p-2.5 rounded-md border border-zinc-800 bg-zinc-900/60 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 truncate">
                         <Terminal size={12} className="text-zinc-400 shrink-0" />
-                        <strong className="text-zinc-200 text-xs truncate">{name}</strong>
-                        <span className="badge text-[10px] py-0 px-1.5 uppercase">{lootType}</span>
+                        <strong className="text-zinc-200 text-xs truncate font-medium">{name}</strong>
+                        <span className="text-[11px] px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400">
+                          {lootType}
+                        </span>
                       </div>
                       <button
                         type="button"
                         onClick={handleCopyRule}
-                        className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
+                        className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 shrink-0"
                         title="Copy detection rule query"
                       >
                         {copiedLootIdx === idx ? (
@@ -813,12 +816,12 @@ export function DiscoveredPerimeterCard({
                         ) : (
                           <>
                             <Copy size={11} />
-                            <span>Copy Rule</span>
+                            <span>Copy rule</span>
                           </>
                         )}
                       </button>
                     </div>
-                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
+                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-md overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
                       {ruleText}
                     </pre>
                   </div>
@@ -829,27 +832,28 @@ export function DiscoveredPerimeterCard({
         </div>
       )}
 
-      {/* 2. Perimeter Inventory Bar (Clean, non-redundant when findings are present) */}
+      {/* 2. Perimeter inventory bar (shown alongside findings). Labels sans;
+          port values stay mono because that's canonical. */}
       {hasPerimeter && findingsCount > 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             <Radio size={13} className="text-emerald-400 shrink-0" />
-            <span className="font-semibold text-zinc-300 text-[11px]">
-              Surface Inventory:
+            <span className="font-medium text-zinc-300 text-[11px]">
+              Surface inventory
             </span>
             {target && (
               <span className="text-zinc-400">
-                Host <strong className="text-zinc-100">{target}</strong>
+                Host <strong className="text-zinc-100 font-mono text-[11px]">{target}</strong>
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-zinc-400 text-[11px]">
-            {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
-            {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+          <div className="flex items-center gap-3 text-zinc-400 text-[11px] flex-wrap">
+            {totalScanned !== null && <span className="tabular-nums">Scanned: {totalScanned} ports</span>}
+            {scanMs !== null && <span className="tabular-nums">Latency: {scanMs} ms</span>}
             <div className="flex items-center gap-1.5">
               {openPorts.map((port) => (
-                <span key={String(port)} className="px-1.5 py-0.5 rounded-sm bg-zinc-900 border border-zinc-700/80 text-emerald-400 font-semibold text-[10px]">
-                  {String(port)}/TCP ({serviceMap[String(port)] ?? "active"})
+                <span key={String(port)} className="px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700/80 text-emerald-400 text-[11px] font-mono tabular-nums">
+                  {String(port)}/TCP <span className="text-zinc-500">({serviceMap[String(port)] ?? "active"})</span>
                 </span>
               ))}
             </div>
@@ -857,24 +861,24 @@ export function DiscoveredPerimeterCard({
         </div>
       )}
 
-      {/* 3. Discovered Services Grid (Rendered only if no findings exist, avoiding duplicate cards) */}
+      {/* 3. Discovered services grid (shown instead of inventory bar when no findings). */}
       {hasPerimeter && findingsCount === 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3 space-y-2.5 font-mono text-xs">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md p-3 space-y-2.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
             <div className="flex items-center gap-2">
               <Radio size={14} className="text-emerald-400 shrink-0" />
-              <span className="font-semibold text-zinc-200 text-xs">
-                Discovered Target Services
+              <span className="font-medium text-zinc-200 text-xs">
+                Discovered target services
               </span>
               {target && (
-                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm text-[11px]">
-                  Host: <strong className="text-zinc-100">{target}</strong>
+                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-md text-[11px]">
+                  Host <strong className="text-zinc-100 font-mono">{target}</strong>
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+            <div className="flex items-center gap-3 text-[11px] text-zinc-400 tabular-nums">
               {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
-              {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+              {scanMs !== null && <span>Latency: {scanMs} ms</span>}
             </div>
           </div>
 
@@ -890,52 +894,49 @@ export function DiscoveredPerimeterCard({
               return (
                 <div
                   key={portStr}
-                  className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-1.5 transition-colors"
+                  className="p-3 rounded-md border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-2 transition-colors"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-zinc-100 bg-zinc-950 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                      PORT {portStr}/TCP
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-zinc-100 text-[13px] font-medium tabular-nums">
+                      {portStr}/TCP
                     </span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-semibold flex items-center gap-1">
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                      OPEN ({service})
+                      <span>Open</span>
+                      <span className="text-zinc-500">· {service}</span>
                     </span>
                   </div>
 
                   {banner && (
-                    <div className="text-[10px] text-zinc-400 truncate bg-zinc-950/70 p-1 rounded-sm border border-zinc-800/40">
-                      <span className="text-zinc-500 font-semibold">Banner: </span>
+                    <div className="text-[11px] text-zinc-400 truncate bg-zinc-950/70 p-1.5 rounded border border-zinc-800/40">
+                      <span className="text-zinc-500">Banner </span>
                       <span className="text-zinc-300 font-mono">{banner}</span>
                     </div>
                   )}
 
-                  {onSelectModule && (
-                    <div className="pt-1 flex items-center gap-1 flex-wrap">
-                      {portStr === "22" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Fingerprint SSH
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            SSH Pivot
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("linux.privesc", { target })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Privesc Audit
-                          </button>
-                        </>
-                      )}
+                  {onSelectModule && portStr === "22" && (
+                    <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        Fingerprint SSH
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        SSH pivot
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("linux.privesc", { target })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        Privesc audit
+                      </button>
                     </div>
                   )}
                 </div>
