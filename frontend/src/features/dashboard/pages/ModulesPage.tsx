@@ -588,11 +588,11 @@ export function ModulesPage() {
                   setLastRunRecord(null);
                   run.reset();
                 }}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-mono transition-colors"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs transition-colors"
                 title="Dismiss and close this run result"
               >
                 <X size={12} />
-                <span>Close Result</span>
+                <span>Close result</span>
               </button>
             )}
           </div>

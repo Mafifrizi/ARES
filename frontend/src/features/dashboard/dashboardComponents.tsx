@@ -1591,57 +1591,80 @@ export function ModuleRunSummary({
             const hashes = Array.isArray(evidence.hashes) ? (evidence.hashes as Record<string, unknown>[]) : [];
             const tickets = Array.isArray(evidence.tickets) ? (evidence.tickets as Record<string, unknown>[]) : [];
 
+            const severityLabel = (() => {
+              const s = String(finding.severity ?? "info").toLowerCase();
+              if (s.includes("crit")) return "Critical";
+              if (s.includes("high")) return "High";
+              if (s.includes("med")) return "Medium";
+              if (s.includes("low")) return "Low";
+              return "Info";
+            })();
+            const severityDotClass =
+              normSev.includes("crit") || normSev.includes("high")
+                ? "bg-rose-500"
+                : normSev.includes("med")
+                ? "bg-amber-500"
+                : normSev.includes("low")
+                ? "bg-zinc-500"
+                : "bg-zinc-600";
+
             return (
               <div
-                className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-3.5 space-y-2.5 rounded-sm`}
+                className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-4 space-y-3 rounded-md`}
                 key={finding.id ?? index}
               >
-                {/* Header Row: Endpoint Port, Mitre, Host, Severity & Confidence */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono pb-2 border-b border-zinc-800/50">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {details.port ? (
-                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                        PORT {details.port}/TCP
-                      </span>
-                    ) : details.serviceTag ? (
-                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                        {details.serviceTag}
-                      </span>
-                    ) : null}
-                    {details.serviceCategory && (
-                      <span className="text-[11px] text-zinc-400 font-sans">
-                        {details.serviceCategory}
-                      </span>
-                    )}
-                    {finding.host && (
-                      <span className="text-[11px] text-zinc-500">
-                        TARGET: <strong className="text-zinc-300 font-mono">{finding.host}</strong>
-                      </span>
-                    )}
-                    {finding.mitre_technique && (
-                      <span className="text-[10px] text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded-sm">
-                        {finding.mitre_technique}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <span className={details.isHighConf ? "text-emerald-400 font-mono text-[11px] flex items-center gap-1 font-medium" : "text-zinc-400 font-mono text-[11px]"}>
-                      {details.isHighConf && <CheckCircle2 size={12} className="text-emerald-400" />}
-                      {details.confidenceText}
-                    </span>
-                    <span className={opsecBadge(finding.severity)}>
-                      {finding.severity ? String(finding.severity).toUpperCase() : "INFO"}
+                {/* Header: severity + confidence (compact meta, no terminal theatre) */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-zinc-200">
+                      <span className={`w-1.5 h-1.5 rounded-full ${severityDotClass}`} aria-hidden />
+                      {severityLabel}
                     </span>
                   </div>
+                  <span className={details.isHighConf ? "inline-flex items-center gap-1 text-emerald-400 font-medium" : "text-zinc-400"}>
+                    {details.isHighConf && <CheckCircle2 size={12} className="text-emerald-400" />}
+                    {details.confidenceText}
+                  </span>
                 </div>
 
-                {/* Finding Title & Concise Narrative */}
+                {/* Finding Title (hero) */}
                 <div>
-                  <h3 className="font-sans font-semibold text-sm text-zinc-100 tracking-tight">
+                  <h3 className="font-sans font-semibold text-[15px] text-zinc-100 tracking-tight leading-snug">
                     {finding.title ?? `Observation #${index + 1}`}
                   </h3>
-                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
+                  {/* Meta line: host · port · service · MITRE — sans, dot-separated, no mono */}
+                  {(finding.host || details.port || details.serviceTag || details.serviceCategory || finding.mitre_technique) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-zinc-500">
+                      {finding.host && (
+                        <span className="text-zinc-300 tabular-nums">{finding.host}</span>
+                      )}
+                      {details.port && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>port <span className="text-zinc-300 tabular-nums">{details.port}/TCP</span></span>
+                        </>
+                      )}
+                      {!details.port && details.serviceTag && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="text-zinc-300">{details.serviceTag}</span>
+                        </>
+                      )}
+                      {details.serviceCategory && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>{details.serviceCategory}</span>
+                        </>
+                      )}
+                      {finding.mitre_technique && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="tabular-nums">{finding.mitre_technique}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
                     {String(finding.description ?? "")}
                   </p>
                 </div>
@@ -1661,33 +1684,31 @@ export function ModuleRunSummary({
                   <DiscoveredTicketsEvidenceViewer tickets={tickets} />
                 )}
 
-                {/* Technical Remediation */}
+                {/* Remediation */}
                 {details.tailoredRemediation && (
-                  <div className="pt-2 border-t border-zinc-800/50 text-xs font-mono text-zinc-400 flex items-start gap-2">
-                    <span className="text-zinc-500 shrink-0 text-[10px] uppercase font-semibold">[MITIGATION]</span>
-                    <span className="font-sans text-xs text-zinc-300 leading-relaxed">
+                  <div className="pt-3 border-t border-zinc-800/60">
+                    <div className="text-[11px] font-medium text-zinc-500 mb-1">Remediation</div>
+                    <p className="text-xs text-zinc-300 leading-relaxed font-sans">
                       {details.tailoredRemediation}
-                    </span>
+                    </p>
                   </div>
                 )}
 
-                {/* Next Actions */}
+                {/* Next actions */}
                 {details.nextModules.length > 0 && onSelectModule && (
-                  <div className="pt-2 border-t border-zinc-800/50 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider shrink-0">
-                      Next Actions:
-                    </span>
+                  <div className="pt-3 border-t border-zinc-800/60">
+                    <div className="text-[11px] font-medium text-zinc-500 mb-1.5">Next actions</div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {details.nextModules.map((nextMod) => (
                         <button
                           key={nextMod}
                           type="button"
                           onClick={() => onSelectModule(nextMod, { target: finding.host })}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700/80 bg-zinc-900/90 hover:border-zinc-500 hover:bg-zinc-800 text-zinc-200 font-mono text-[11px] transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-zinc-700/80 bg-zinc-900/60 hover:border-zinc-600 hover:bg-zinc-800 text-zinc-200 text-[12px] transition-colors"
                           title={`Arm and execute ${nextMod} on ${finding.host}`}
                         >
                           <Terminal size={11} className="text-zinc-400" />
-                          <span>Execute: <strong className="text-zinc-100">{nextMod}</strong></span>
+                          <span>Run <span className="text-zinc-100 font-medium">{nextMod}</span></span>
                           <ArrowRight size={11} className="text-zinc-400" />
                         </button>
                       ))}
@@ -1705,7 +1726,7 @@ export function ModuleRunSummary({
       {filteredCount > 0 && (
         <div
           data-testid="filtered-findings-notice"
-          className="flex items-center gap-2 px-3 py-2 rounded-sm border border-zinc-800 bg-zinc-900/60 text-xs font-mono text-zinc-400 mt-2"
+          className="flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400 mt-2"
         >
           <Info size={13} className="text-zinc-500 shrink-0" />
           <span>
