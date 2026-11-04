@@ -481,10 +481,10 @@ export function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
     <section className="panel p-4 cvss-card">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Risk Assessment</div>
-          <h3 className="text-base font-semibold text-white">CVSS Metrics</h3>
+          <h3 className="text-base font-semibold text-white">CVSS metrics</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Risk assessment and attack vector</p>
         </div>
-        <span className={`${opsecBadge(severity)} font-semibold uppercase text-xs px-2.5 py-1`}>
+        <span className={`${opsecBadge(severity)} font-medium text-xs px-2.5 py-1 capitalize`}>
           {severity}
         </span>
       </div>
@@ -512,8 +512,8 @@ export function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
     <section className="panel p-4 diff-card">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Delta Analysis</div>
-          <h3 className="text-base font-semibold text-white">Campaign Comparison</h3>
+          <h3 className="text-base font-semibold text-white">Campaign comparison</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Delta between two campaign scopes</p>
         </div>
         <span className="badge badge-low text-xs">Compared</span>
       </div>
@@ -1805,7 +1805,7 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-white tracking-tight">{campaign.name}</h3>
-          <p className="text-xs text-zinc-400 mt-0.5">{campaign.client ?? "No client"} &middot; <span className="text-emerald-400 uppercase font-mono text-[11px]">{campaign.status ?? "created"}</span></p>
+          <p className="text-xs text-zinc-400 mt-0.5">{campaign.client ?? "No client"} &middot; <span className="text-emerald-400 capitalize text-[11px]">{campaign.status ?? "created"}</span></p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1830,8 +1830,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
       <div className="mt-4 space-y-3">
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Authorized IP Ranges &amp; CIDRs</span>
-            <span className="badge font-mono text-[10px]">{scope.length} range{scope.length === 1 ? "" : "s"}</span>
+            <span className="text-xs font-medium text-zinc-200">Authorized IP ranges &amp; CIDRs</span>
+            <span className="badge text-[11px] tabular-nums">{scope.length} range{scope.length === 1 ? "" : "s"}</span>
           </div>
           {scope.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1853,8 +1853,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
         {targets.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Target Hosts</span>
-              <span className="badge font-mono text-[10px]">{targets.length} host{targets.length === 1 ? "" : "s"}</span>
+              <span className="text-xs font-medium text-zinc-200">Target hosts</span>
+              <span className="badge text-[11px] tabular-nums">{targets.length} host{targets.length === 1 ? "" : "s"}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {targets.map((tgt) => (
@@ -1872,8 +1872,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
 
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Excluded Hosts / Out-of-Scope</span>
-            <span className="badge font-mono text-[10px]">{excluded.length} excluded</span>
+            <span className="text-xs font-medium text-zinc-200">Excluded hosts / out-of-scope</span>
+            <span className="badge text-[11px] tabular-nums">{excluded.length} excluded</span>
           </div>
           {excluded.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1971,7 +1971,7 @@ export function NoiseProfileBadge({ noise }: { noise?: string }) {
   const isStealth = normalized.includes("stealth") || normalized.includes("low");
   const badgeClass = isNoisy ? "badge badge-high" : isEvasive ? "badge badge-medium" : isStealth ? "badge badge-low" : "badge";
   return (
-    <span className={`${badgeClass} font-mono text-[11px] uppercase tracking-wider`}>
+    <span className={`${badgeClass} text-[11px] capitalize`}>
       {noise ?? "stealth"}
     </span>
   );

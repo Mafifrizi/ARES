@@ -108,7 +108,7 @@ function StrategyActiveView({
                   <div className="font-semibold text-sm text-zinc-100 flex items-center gap-2">
                     <span>{st.name}</span>
                     {st.status === "active" && (
-                      <span className="badge badge-low text-[10px] uppercase font-mono">Running</span>
+                      <span className="badge badge-low text-[11px]">Running</span>
                     )}
                   </div>
                   <div className="text-xs text-zinc-400 mt-0.5">{st.desc}</div>

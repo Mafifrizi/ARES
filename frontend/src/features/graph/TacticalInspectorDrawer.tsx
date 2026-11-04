@@ -140,8 +140,8 @@ export function TacticalInspectorDrawer({
                 {copied ? <CheckCircle2 size={11} className="text-emerald-400" /> : <Copy size={11} />}
               </button>
             </h3>
-            <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
-              {isNode ? `TYPE: ${node?.type}` : `HOP: ${edge?.source} → ${edge?.target}`}
+            <span className="text-[11px] text-zinc-400 block">
+              {isNode ? `Node · ${node?.type}` : `${edge?.source} → ${edge?.target}`}
             </span>
           </div>
         </div>
@@ -160,31 +160,31 @@ export function TacticalInspectorDrawer({
       <div className="cobalt-inspector-body">
         {/* Tactical Status & Metrics Banner */}
         {isNode && (
-          <div className="grid grid-cols-2 gap-2 bg-zinc-900/80 p-2.5 rounded-sm border border-zinc-800 text-xs font-mono">
+          <div className="grid grid-cols-2 gap-2 bg-zinc-900/80 p-2.5 rounded-md border border-zinc-800 text-xs">
             <div>
-              <span className="text-[10px] text-zinc-500 uppercase block">COMPROMISE STATE</span>
-              <span className={`font-semibold text-[11px] ${isCompromised ? "text-red-400" : "text-emerald-400"}`}>
-                {isCompromised ? "COMPROMISED (ACTIVE)" : "RECON TARGET"}
+              <span className="text-[11px] text-zinc-500 block">Compromise state</span>
+              <span className={`font-medium text-[12px] ${isCompromised ? "text-rose-400" : "text-emerald-400"}`}>
+                {isCompromised ? "Compromised" : "Recon target"}
               </span>
             </div>
             <div>
-              <span className="text-[10px] text-zinc-500 uppercase block">OPERATING SYSTEM</span>
-              <span className="font-semibold text-zinc-200 text-[11px] truncate block">
+              <span className="text-[11px] text-zinc-500 block">Operating system</span>
+              <span className="font-medium text-zinc-200 text-[12px] truncate block">
                 {targetOs}
               </span>
             </div>
             {openPorts.length > 0 && (
               <div>
-                <span className="text-[10px] text-zinc-500 uppercase block">PERIMETER ACCESS</span>
-                <span className="font-semibold text-cyan-400 text-[11px]">
-                  {openPorts.length} Open {openPorts.length === 1 ? "Port" : "Ports"}
+                <span className="text-[11px] text-zinc-500 block">Perimeter access</span>
+                <span className="font-medium text-zinc-200 text-[12px] tabular-nums">
+                  {openPorts.length} open {openPorts.length === 1 ? "port" : "ports"}
                 </span>
               </div>
             )}
             {cvssMax !== null && (
               <div>
-                <span className="text-[10px] text-zinc-500 uppercase block">CVSS SEVERITY</span>
-                <span className="font-semibold text-amber-400 text-[11px]">
+                <span className="text-[11px] text-zinc-500 block">CVSS severity</span>
+                <span className="font-medium text-amber-400 text-[12px] tabular-nums">
                   {cvssMax.toFixed(1)} / 10.0
                 </span>
               </div>
@@ -196,9 +196,9 @@ export function TacticalInspectorDrawer({
         {/* Discovered Open Ports Matrix */}
         {openPorts.length > 0 && (
           <div className="space-y-1.5">
-            <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-1 font-semibold">
+            <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 font-medium">
               <Wifi size={11} className="text-cyan-400" />
-              DISCOVERED PERIMETER PORTS ({openPorts.length})
+              Discovered perimeter ports ({openPorts.length})
             </span>
             <div className="flex flex-wrap gap-1.5">
               {openPorts.map((p) => {
@@ -224,9 +224,9 @@ export function TacticalInspectorDrawer({
         {/* Associated Findings */}
         {findings.length > 0 && (
           <div className="space-y-1.5">
-            <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-1 font-semibold">
+            <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 font-medium">
               <ShieldAlert size={11} className="text-rose-400" />
-              CONFIRMED VULNERABILITIES & FINDINGS ({findings.length})
+              Confirmed findings ({findings.length})
             </span>
             <div className="space-y-2">
               {groupedFindings.map(({ finding: f, count }, idx) => {
@@ -246,14 +246,14 @@ export function TacticalInspectorDrawer({
                     key={idx}
                     className="p-2.5 bg-zinc-900/80 border border-zinc-800 rounded-sm space-y-1.5 hover:border-zinc-700 transition-colors"
                   >
-                    <div className="flex items-center justify-between gap-1 text-[10px] font-mono">
+                    <div className="flex items-center justify-between gap-1 text-[11px]">
                       <div className="flex items-center gap-1.5">
-                        <span className={`px-1.5 py-0.5 rounded border uppercase font-bold text-[9px] tracking-wide ${sevBadge}`}>
+                        <span className={`px-1.5 py-0.5 rounded border font-medium text-[11px] capitalize ${sevBadge}`}>
                           {sev}
                         </span>
                         {count > 1 && (
                           <span
-                            className="px-1.5 py-0.2 rounded border border-zinc-700/80 bg-zinc-800/90 text-zinc-300 font-mono text-[9px]"
+                            className="px-1.5 py-0.5 rounded border border-zinc-700/80 bg-zinc-800/90 text-zinc-300 text-[11px] tabular-nums"
                             title={`${count} instances detected`}
                           >
                             ×{count}
@@ -261,7 +261,7 @@ export function TacticalInspectorDrawer({
                         )}
                       </div>
                       {Boolean(f.mitre_technique) && (
-                        <span className="text-zinc-300 bg-zinc-950 border border-zinc-700/80 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                        <span className="text-zinc-300 bg-zinc-950 border border-zinc-700/80 px-1.5 py-0.5 rounded font-mono text-[10px] tabular-nums">
                           {String(f.mitre_technique)}
                         </span>
                       )}
@@ -283,34 +283,34 @@ export function TacticalInspectorDrawer({
 
         {/* Edge Hop Details */}
         {!isNode && edge && (
-          <div className="bg-zinc-900/80 p-3 rounded-sm border border-zinc-800 space-y-2 text-xs font-mono">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider block font-semibold">
-              LATERAL TRAVERSAL DETAILS
+          <div className="bg-zinc-900/80 p-3 rounded-md border border-zinc-800 space-y-2 text-xs">
+            <span className="text-[11px] text-zinc-400 block font-medium">
+              Lateral traversal
             </span>
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-zinc-400">SOURCE:</span>
-              <span className="text-zinc-200 font-semibold">{edge.source}</span>
+              <span className="text-zinc-500">Source</span>
+              <span className="text-zinc-200 font-mono tabular-nums">{edge.source}</span>
             </div>
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-zinc-400">TARGET:</span>
-              <span className="text-zinc-200 font-semibold">{edge.target}</span>
+              <span className="text-zinc-500">Target</span>
+              <span className="text-zinc-200 font-mono tabular-nums">{edge.target}</span>
             </div>
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-zinc-400">EDGE TYPE:</span>
-              <span className="text-cyan-400 font-semibold uppercase">{edge.type || "pivot"}</span>
+              <span className="text-zinc-500">Edge type</span>
+              <span className="text-cyan-400 font-medium capitalize">{edge.type || "pivot"}</span>
             </div>
           </div>
         )}
 
         {/* Structured Node/Edge Telemetry via StructuredJsonViewer */}
         <div className="space-y-1.5">
-          <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider flex items-center gap-1 font-semibold">
+          <span className="text-[11px] text-zinc-400 flex items-center gap-1.5 font-medium">
             <Layers size={11} className="text-zinc-400" />
-            TELEMETRY & ATTRIBUTES
+            Node telemetry &amp; attributes
           </span>
           <StructuredJsonViewer
             data={metadata}
-            title={isNode ? "Node Attributes" : "Link Attributes"}
+            title={isNode ? "Node attributes" : "Link attributes"}
             defaultExpandedDepth={1}
             maxHeightClass="max-h-64"
             showSummaryStrip={false}

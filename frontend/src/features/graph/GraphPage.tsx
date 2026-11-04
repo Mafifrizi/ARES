@@ -529,8 +529,8 @@ function CobaltGraphInner({
         <div className="cobalt-track-hud" role="status" aria-live="polite">
           <div className="flex items-center gap-2 text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-amber-300 font-bold uppercase tracking-wider">
-              PATHWAY LOCKED:
+            <span className="text-amber-300 font-medium">
+              Pathway locked
             </span>
             <span className="text-white font-semibold">
               {activeNodeData?.label || activeFocusNodeId}
