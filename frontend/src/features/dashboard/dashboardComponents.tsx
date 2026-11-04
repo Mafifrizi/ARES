@@ -563,7 +563,7 @@ export function DataPanel({
               <span>Dismiss</span>
             </button>
           )}
-          <span className="badge badge-high shrink-0 text-[10px] uppercase font-mono">Error</span>
+          <span className="badge badge-high shrink-0 text-[11px] font-medium">Error</span>
         </div>
       </div>
     );
