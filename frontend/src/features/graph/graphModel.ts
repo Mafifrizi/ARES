@@ -322,8 +322,10 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     os = hasPort22 ? "linux" : "windows";
   }
 
-  // 2. Detect Accurate Privilege Tier (SYSTEM * vs ADMIN vs USER / BEACON vs TARGET)
-  let privilege: "system" | "admin" | "user" | "uncompromised" = "user";
+  // 2. Detect Accurate Privilege Tier (SYSTEM * vs ADMIN vs USER / BEACON vs TARGET).
+  // Default is "uncompromised": a host is not claimed as a live/compromised beacon
+  // until there is real evidence (metadata, compromise level, findings/severity below).
+  let privilege: "system" | "admin" | "user" | "uncompromised" = "uncompromised";
   const cLevel = String(meta.compromise_level || "").toLowerCase();
   const isDc = typeLower.includes("dc") || Boolean(meta.is_dc) || labelLower.includes("dc01") || labelLower.includes("domain controller");
   const isServer = os === "windows-server" || labelLower.includes("sql") || labelLower.includes("fs01");
@@ -381,10 +383,21 @@ export function inferCobaltNodeData(node: SafeGraphNode): CobaltNodeInference {
     finalSubLabel = finalSubLabel.slice(0, 26) + "…";
   }
 
+  // Honest status: a node is "active" (a live/compromised beacon) only when there is
+  // real evidence of it — a non-uncompromised privilege, an owned flag, an upstream
+  // active status, or a high/critical finding. Everything else is "mapped": in scope
+  // and drawn, but not claimed as a live session.
+  const isLive =
+    privilege !== "uncompromised" ||
+    Boolean(meta.owned || meta.is_owned) ||
+    meta.status === "active" ||
+    node.severity === "critical" ||
+    node.severity === "high";
+
   return {
     os,
     privilege,
-    status: "active",
+    status: isLive ? "active" : "mapped",
     ip,
     process,
     pid,
@@ -480,7 +493,10 @@ export function adaptApiGraphToCobalt(
           metadata: {
             os: isDc ? "windows-server" : (isLinux ? "linux" : "windows"),
             privilege,
-            status: "active",
+            // Honest status: only "active" (compromised beacon) when the host has real
+            // findings. A target derived purely from campaign scope is "mapped" — in
+            // scope and drawn, but not claimed as a live/compromised session.
+            status: hostFindings.length > 0 ? "active" : "mapped",
             ip: tgt,
             subLabel: isDc ? "DOMAIN CONTROLLER" : "TARGET HOST",
           }

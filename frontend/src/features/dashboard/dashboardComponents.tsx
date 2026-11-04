@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Copy,
   Eye,
   EyeOff,
@@ -205,7 +206,6 @@ export function Page({
       <section className="page-header">
         <div className="page-heading">
           <div>
-            <p className="page-eyebrow">{meta.eyebrow}</p>
             <h1>{title}</h1>
             <p className="page-subtitle">{subtitle ?? meta.description}</p>
           </div>
@@ -528,11 +528,13 @@ export function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
 export function DataPanel({
   title,
   data,
-  onClear
+  onClear,
+  collapsible = false
 }: {
   title: string;
   data: unknown;
   onClear?: () => void;
+  collapsible?: boolean;
 }) {
   if (!data) {
     return null;
@@ -564,6 +566,31 @@ export function DataPanel({
           <span className="badge badge-high shrink-0 text-[10px] uppercase font-mono">Error</span>
         </div>
       </div>
+    );
+  }
+
+  if (collapsible) {
+    return (
+      <details className="raw-disclosure mb-3">
+        <summary className="raw-disclosure-summary">
+          <ChevronRight size={14} className="raw-disclosure-chevron shrink-0" />
+          <span>Raw telemetry</span>
+          <span className="raw-disclosure-hint">JSON</span>
+          {onClear && (
+            <button
+              className="raw-disclosure-clear"
+              onClick={(e) => { e.preventDefault(); onClear(); }}
+              type="button"
+              title="Clear payload preview"
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
+        </summary>
+        <div className="raw-disclosure-body">
+          <StructuredJsonViewer data={data} title={`${title} Telemetry`} maxHeightClass="max-h-96" defaultExpandedDepth={1} />
+        </div>
+      </details>
     );
   }
 
@@ -1396,12 +1423,12 @@ export function ModuleRunSummary({
   }
   if (error) {
     return (
-      <div className="border border-rose-900/60 bg-rose-950/20 p-3.5 rounded mt-4 font-mono text-xs text-rose-300" role="alert">
+      <div className="border border-rose-900/60 bg-rose-950/20 p-3.5 rounded mt-4 text-sm text-rose-300" role="alert">
         <div className="flex items-center gap-2 font-semibold text-rose-400 mb-1">
           <AlertTriangle size={15} />
-          <span>[EXECUTION_FAILED]</span>
+          <span>Execution failed</span>
         </div>
-        <p>{error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}</p>
+        <p className="text-xs">{error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}</p>
       </div>
     );
   }
@@ -1459,61 +1486,61 @@ export function ModuleRunSummary({
   return (
     <section className="mt-4 space-y-3 font-sans">
       {/* Tactical Telemetry Strip (Replacing bulky cards & notice clutter) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/80 border border-zinc-800 rounded-sm overflow-hidden text-xs font-mono">
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">MODULE / OPERATION</span>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/80 border border-zinc-800 rounded-md overflow-hidden text-sm">
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Module</span>
           <span className="font-semibold text-zinc-200">{moduleId}</span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">EXECUTION OUTCOME</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Outcome</span>
           <span className={hasOutcomeError ? "text-rose-400 font-semibold" : "text-emerald-400 font-semibold"}>
             {displayOutcome}
           </span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">OBSERVATIONS / AUDIT</span>
-          <span className="font-semibold text-zinc-100">
-            {findings.length} findings <span className="text-zinc-500 text-[11px]">({validationCount} verified)</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Observations</span>
+          <span className="font-semibold text-zinc-100 tnum">
+            {findings.length} findings <span className="text-zinc-500 text-xs">({validationCount} verified)</span>
           </span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">DURATION</span>
-          <span className="font-semibold text-zinc-300">{duration}</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Duration</span>
+          <span className="font-semibold text-zinc-300 tnum">{duration}</span>
         </div>
       </div>
 
       {provenanceHash && (
-        <div className="px-3 py-1.5 rounded-sm border border-zinc-800/80 bg-zinc-950/80 flex items-center justify-between gap-3 text-xs font-mono">
+        <div className="px-3 py-2 rounded-md border border-zinc-800/80 bg-zinc-950/80 flex items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 text-zinc-400 truncate">
             <ShieldCheck size={13} className="text-emerald-400 shrink-0" />
-            <span className="text-zinc-500 font-semibold">AUDIT PROVENANCE:</span>
-            <code className="text-zinc-300 truncate text-[11px] select-all">{provenanceHash}</code>
+            <span className="text-zinc-500 font-medium">Audit provenance</span>
+            <code className="text-zinc-300 truncate text-[11px] font-mono select-all">{provenanceHash}</code>
           </div>
-          <span className="text-[10px] text-emerald-400/90 uppercase tracking-wider shrink-0 font-semibold">[IMMUTABLE RECORD]</span>
+          <span className="text-[11px] text-emerald-400/90 shrink-0 font-medium">Immutable record</span>
         </div>
       )}
 
       {rawError && (
-        <div className="p-3 rounded-sm border border-amber-900/50 bg-amber-950/20 text-xs font-mono text-amber-300 flex items-start gap-2" role="alert">
+        <div className="p-3 rounded-md border border-amber-900/50 bg-amber-950/20 text-xs text-amber-300 flex items-start gap-2" role="alert">
           <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-400" />
           <div>
-            <span className="font-semibold">[EXECUTION NOTICE: {rawError.replace(/_/g, " ").toUpperCase()}]</span>
+            <span className="font-semibold">Execution notice: {rawError.replace(/_/g, " ")}</span>
             {rawHint && <p className="mt-0.5 text-zinc-400">{rawHint}</p>}
           </div>
         </div>
       )}
 
       {(outcomeMessage || runError) && !rawError && hasOutcomeError && (
-        <div className="p-3 rounded-sm border border-rose-900/60 bg-rose-950/20 text-xs font-mono text-rose-300 flex items-center gap-2" role="alert">
+        <div className="p-3 rounded-md border border-rose-900/60 bg-rose-950/20 text-xs text-rose-300 flex items-center gap-2" role="alert">
           <AlertTriangle size={14} className="shrink-0 text-rose-400" />
           <span>{outcomeMessage || runError}</span>
         </div>
       )}
 
       {warnings.length > 0 && (
-        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
-          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
-            [{dryRun ? "SIMULATION NOTES" : "OPERATION NOTES"}]
+        <div className="p-3 rounded-md border border-zinc-800 bg-zinc-950/60 text-xs text-zinc-400">
+          <span className="text-zinc-300 font-semibold block mb-1">
+            {dryRun ? "Simulation notes" : "Operation notes"}
           </span>
           <ul className="list-disc pl-4 space-y-0.5">
             {warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -1522,9 +1549,9 @@ export function ModuleRunSummary({
       )}
 
       {nextSteps.length > 0 && (
-        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
-          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
-            [OPERATOR NEXT STEPS]
+        <div className="p-3 rounded-md border border-zinc-800 bg-zinc-950/60 text-xs text-zinc-400">
+          <span className="text-zinc-300 font-semibold block mb-1">
+            Operator next steps
           </span>
           <ul className="list-disc pl-4 space-y-0.5">
             {nextSteps.map((step) => <li key={step}>{step}</li>)}

@@ -382,8 +382,8 @@ export function ModulesPage() {
       {activeTab === "Run Panel" && (
         <section className="panel p-4">
           <SectionHeader
-            title="Run Panel"
-            eyebrow={selected ? selected.id : "Select module"}
+            title={selected ? selected.id : "Run Panel"}
+            description={selected ? undefined : "Configure and execute a validation module."}
             action={selected ? <span className={opsecBadge(selected.opsec_level)}>{selected.opsec_level || "n/a"}</span> : null}
           />
           {selected?.description && <p className="text-sm text-zinc-300">{selected.description}</p>}
@@ -405,9 +405,9 @@ export function ModulesPage() {
               <span>Dry-run preview is unavailable for this module.</span>
             </p>
           )}
-          <div className="mt-3 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30">
-            <label htmlFor="module-campaign-select" className="block text-xs font-mono text-zinc-300 mb-1.5 font-medium">
-              Target Campaign
+          <div className="mt-4 pt-4 border-t border-zinc-800/60">
+            <label htmlFor="module-campaign-select" className="block text-xs text-zinc-400 mb-1.5 font-medium">
+              Target campaign
             </label>
             <CampaignPicker
               id="module-campaign-select"
@@ -438,7 +438,7 @@ export function ModulesPage() {
           {selected ? (
             <form
               aria-busy={run.isPending}
-              className="mt-4 grid gap-4 p-3.5 rounded-lg border border-zinc-800/80 bg-zinc-900/30"
+              className="mt-4 grid gap-4 pt-4 border-t border-zinc-800/60"
               autoComplete="off"
               data-lpignore="true"
               data-form-type="other"
@@ -455,20 +455,20 @@ export function ModulesPage() {
                 run.mutate();
               }}
             >
-              <div className="text-xs font-mono text-zinc-400 font-medium pb-2 border-b border-zinc-800/60 flex items-center justify-between">
-                <span>Module Parameters</span>
-                <span className="text-[11px] text-zinc-500 font-sans">{Object.keys(selected.param_schema || {}).length} field(s)</span>
+              <div className="text-xs text-zinc-400 font-medium pb-2 border-b border-zinc-800/60 flex items-center justify-between">
+                <span>Module parameters</span>
+                <span className="text-[11px] text-zinc-500">{Object.keys(selected.param_schema || {}).length} field(s)</span>
               </div>
 
               {/* Quick Target Selector for In-Scope Campaign Hosts */}
               {((selectedCampaign?.targets && selectedCampaign.targets.length > 0) || (selectedCampaign?.scope_cidrs && selectedCampaign.scope_cidrs.length > 0)) && (
                 <div className="p-2.5 rounded-sm bg-zinc-900/60 border border-zinc-800 space-y-1.5 text-xs font-mono">
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5 font-semibold">
-                      <Target size={12} className="text-cyan-400 shrink-0" />
-                      QUICK ENGAGEMENT TARGETS:
+                    <span className="text-zinc-300 text-xs flex items-center gap-1.5 font-semibold">
+                      <Target size={13} className="text-cyan-400 shrink-0" />
+                      Quick engagement targets
                     </span>
-                    <span className="text-[10px] text-zinc-500 font-sans">1-click populate</span>
+                    <span className="text-[11px] text-zinc-500">1-click populate</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {selectedCampaign?.targets?.map((tgt) => (
@@ -539,7 +539,7 @@ export function ModulesPage() {
 
                 <div className="pt-2">
                   <button
-                    className="btn btn-primary w-full py-2.5 text-xs font-mono font-medium tracking-wide flex items-center justify-center gap-2"
+                    className="btn btn-primary w-full py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
                     type="submit"
                     disabled={!selectedId || run.isPending || (campaignId ? !executionConditionBlocked : false)}
                   >
@@ -570,18 +570,16 @@ export function ModulesPage() {
         <section className="panel p-4">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-zinc-800/80">
             <div>
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider block">
-                {activeRun?.moduleId ? `Module: ${activeRun.moduleId}` : (selected ? selected.id : "Execution")}
-              </span>
-              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <span>Run Results</span>
+              <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <span>{activeRun?.moduleId || (selected ? selected.id : "Run")} results</span>
                 {activeRun && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-zinc-800 text-zinc-300 border border-zinc-700">
                     <Lock size={10} className="text-amber-400" />
-                    <span>Locked View</span>
+                    <span>Locked view</span>
                   </span>
                 )}
               </h2>
+              <p className="text-xs text-zinc-500 mt-0.5">Module execution output and audit telemetry.</p>
             </div>
             {activeRun && (
               <button
@@ -611,7 +609,9 @@ export function ModulesPage() {
                   setActiveTab("Run Panel");
                 }}
               />
-              <DataPanel title={runError ? "Run Error" : "Run Result"} data={runError ?? runResult} />
+              {runError
+                ? <DataPanel title="Run Error" data={runError} />
+                : <DataPanel title="Run Result" data={runResult} collapsible />}
             </>
           ) : (
             <EmptyState text="Run a selected module to see results here." />
