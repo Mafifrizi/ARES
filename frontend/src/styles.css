@@ -1675,16 +1675,16 @@ textarea.field {
   align-items: center;
   justify-content: space-between;
   gap: 0.65rem;
-  border: 1px solid #27272a;
-  border-radius: 6px;
-  background: #18181b;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
   padding: 0.6rem;
 }
 
 .mini-stat span,
 .mini-stat small {
   display: block;
-  color: #71717a;
+  color: var(--ink-3);
   font-size: 0.72rem;
   font-weight: 500;
 }
@@ -1692,11 +1692,13 @@ textarea.field {
 .mini-stat strong {
   display: block;
   margin-top: 0.12rem;
-  color: #f4f4f5;
-  font-size: 0.95rem;
+  color: var(--ink);
+  font-size: 1.05rem;
   font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  line-height: 1.1;
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.005em;
+  line-height: 1.15;
 }
 
 .mini-stat small {
@@ -1710,9 +1712,9 @@ textarea.field {
   width: 32px;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  background: #27272a;
-  color: #f4f4f5;
+  border-radius: var(--r-md);
+  background: var(--chrome);
+  color: var(--ink);
 }
 
 .highlight-list {
