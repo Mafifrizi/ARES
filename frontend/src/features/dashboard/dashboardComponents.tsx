@@ -1360,12 +1360,12 @@ export function DiscoveredTicketsEvidenceViewer({
         className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
       >
         <div className="flex items-center gap-2">
-          <Key size={13} className="text-cyan-400 shrink-0" />
+          <Key size={13} className="text-zinc-400 shrink-0" />
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({tickets.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/60 text-cyan-300 font-semibold">
-            KERBEROS CREDENTIAL CACHE
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/60 text-zinc-400 font-medium">
+            Kerberos credential cache
           </span>
         </div>
         <div className="flex items-center gap-1 text-zinc-400 text-xs">
@@ -1818,7 +1818,7 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
                   key={cidr}
                   className="badge badge-info font-mono text-xs px-2.5 py-1 flex items-center gap-1.5"
                 >
-                  <Radio size={11} className="text-cyan-400" />
+                  <Radio size={11} className="opacity-70" />
                   <span>{cidr}</span>
                 </span>
               ))}

@@ -76,7 +76,7 @@ function EdrStatsSummary({
               />
             </div>
             <div className="mt-3 p-3 rounded border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-300 flex items-center gap-2">
-              <ShieldCheck size={14} className="text-cyan-400 shrink-0" />
+              <ShieldCheck size={14} className="text-zinc-400 shrink-0" />
               <span>{message}</span>
             </div>
           </section>

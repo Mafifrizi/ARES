@@ -15,7 +15,7 @@ export interface BeaconSession {
 // No fabricated/demo sessions. Sessions are derived ONLY from real in-scope nodes
 // (see the activeNodes-driven builders below). When there is no real session data,
 // the dock shows an honest standby empty-state instead of invented beacon output.
-const DEFAULT_SESSIONS: BeaconSession[] = [];
+const DEFAULT_SESSIONS: BeaconSession[] = []; // derived at runtime from in-scope nodes
 
 export function CobaltSessionDock({
   selectedNodeId,
