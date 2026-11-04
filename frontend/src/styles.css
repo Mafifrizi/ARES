@@ -1876,7 +1876,13 @@ textarea.field {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.overview-quick-actions .btn {
+  padding-inline: 0.7rem;
 }
 
 .hud-bento-grid {
