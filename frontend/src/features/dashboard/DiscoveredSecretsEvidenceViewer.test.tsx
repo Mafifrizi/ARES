@@ -78,8 +78,10 @@ describe("DiscoveredSecretsEvidenceViewer & Credential Helpers", () => {
 
       // Title & count
       expect(screen.getByText(/Discovered Secrets & Hardcoded Credentials \(2\)/)).not.toBeNull();
-      expect(screen.getByText("LOOT EXTRACTED")).not.toBeNull();
-      expect(screen.getByText("SAMPLE / TEST IDENTIFIED")).not.toBeNull();
+      // Note: redesign dropped the "LOOT EXTRACTED" theatrical pill; title + count
+      // already conveys "secrets discovered". The placeholder-present banner was
+      // sentence-cased to "Includes test samples".
+      expect(screen.getByTestId("secrets-placeholder-notice").textContent).toBe("Includes test samples");
 
       // Files & lines
       expect(screen.getByText(/web\.config/)).not.toBeNull();

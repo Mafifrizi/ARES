@@ -1034,7 +1034,7 @@ export function DiscoveredSecretsEvidenceViewer({
   };
 
   return (
-    <div className="mt-2.5 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2.5 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       {/* Header */}
       <div
         role="button"
@@ -1053,12 +1053,12 @@ export function DiscoveredSecretsEvidenceViewer({
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({hits.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 font-semibold">
-            LOOT EXTRACTED
-          </span>
           {hits.some((h) => h.is_placeholder) && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
-              SAMPLE / TEST IDENTIFIED
+            <span
+              data-testid="secrets-placeholder-notice"
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400"
+            >
+              Includes test samples
             </span>
           )}
         </div>
@@ -1067,14 +1067,14 @@ export function DiscoveredSecretsEvidenceViewer({
           <button
             type="button"
             onClick={handleToggleRevealAll}
-            className="text-[11px] font-mono px-2 py-0.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
+            className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
             title={revealAll ? "Mask all discovered secret values" : "Reveal all discovered secret values"}
           >
             {revealAll ? <EyeOff size={11} className="text-zinc-400" /> : <Eye size={11} className="text-zinc-400" />}
-            <span>{revealAll ? "Mask All" : "Reveal All"}</span>
+            <span>{revealAll ? "Mask all" : "Reveal all"}</span>
           </button>
           <div className="flex items-center gap-1 text-zinc-400 text-xs">
-            <span className="text-[11px] font-sans">{isExpanded ? "Hide Details" : "Show Details"}</span>
+            <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
             <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
           </div>
         </div>
@@ -1085,11 +1085,11 @@ export function DiscoveredSecretsEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3 font-medium">Source File & Line</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Source file &amp; line</th>
                 <th className="py-2 px-3 font-medium">Pattern</th>
-                <th className="py-2 px-3 font-medium">Discovered Credential / Value</th>
-                <th className="py-2 px-3 font-medium">Shannon Entropy</th>
+                <th className="py-2 px-3 font-medium">Discovered credential / value</th>
+                <th className="py-2 px-3 font-medium">Shannon entropy</th>
                 <th className="py-2 px-3 font-medium">Confidence</th>
               </tr>
             </thead>
@@ -1131,7 +1131,7 @@ export function DiscoveredSecretsEvidenceViewer({
 
                     {/* Pattern Badge */}
                     <td className="py-2.5 px-3 whitespace-nowrap">
-                      <span className={`text-[10px] px-2 py-0.5 rounded border uppercase font-medium ${getPatternBadgeClass(patternName)}`}>
+                      <span className={`text-[11px] px-2 py-0.5 rounded border font-medium ${getPatternBadgeClass(patternName)}`}>
                         {patternName.replace(/_/g, " ")}
                       </span>
                     </td>
@@ -1186,7 +1186,7 @@ export function DiscoveredSecretsEvidenceViewer({
                           </span>
                           <span className="text-[10px] text-zinc-500">bits</span>
                           <span
-                            className="text-[9px] px-1 py-0.2 rounded uppercase border text-zinc-400 border-zinc-800"
+                            className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-400 border-zinc-800 font-medium"
                             title={
                               entropyVal >= 3.5
                                 ? "High entropy (Likely true random credential/key)"
@@ -1195,7 +1195,7 @@ export function DiscoveredSecretsEvidenceViewer({
                                 : "Low entropy (Dictionary word or placeholder)"
                             }
                           >
-                            {entropyVal >= 3.5 ? "HIGH" : entropyVal >= 2.5 ? "MED" : "LOW"}
+                            {entropyVal >= 3.5 ? "High" : entropyVal >= 2.5 ? "Med" : "Low"}
                           </span>
                         </div>
                       ) : (
@@ -1208,23 +1208,23 @@ export function DiscoveredSecretsEvidenceViewer({
                       <div className="flex items-center gap-1.5">
                         {confVal !== null ? (
                           <span
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-medium font-mono ${
+                            className={`px-1.5 py-0.5 rounded-md border text-[11px] font-medium tabular-nums ${
                               confVal >= 0.85
-                                ? "text-emerald-300 bg-emerald-950/50 border-emerald-800/60"
+                                ? "text-emerald-300 bg-zinc-900/60 border-emerald-900/50"
                                 : confVal >= 0.60
-                                ? "text-amber-300 bg-amber-950/50 border-amber-800/60"
-                                : "text-rose-300 bg-rose-950/50 border-rose-800/60"
+                                ? "text-amber-300 bg-zinc-900/60 border-amber-900/50"
+                                : "text-rose-300 bg-zinc-900/60 border-rose-900/50"
                             }`}
                           >
                             {confVal >= 0.95 ? "100% Confirmed" : `${Math.round(confVal * 100)}%`}
                           </span>
                         ) : (
-                          <span className="text-zinc-500 text-[10px]">Standard</span>
+                          <span className="text-zinc-500 text-[11px]">Standard</span>
                         )}
 
                         {hit.is_placeholder && (
                           <span
-                            className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 uppercase tracking-tight"
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-400"
                             title="Identified as test sample or mock placeholder"
                           >
                             Placeholder
@@ -1262,20 +1262,17 @@ export function DiscoveredHashesEvidenceViewer({
   };
 
   return (
-    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded((p) => !p)}
         className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
       >
         <div className="flex items-center gap-2">
-          <Key size={13} className="text-purple-400 shrink-0" />
+          <Key size={13} className="text-zinc-400 shrink-0" />
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({hashes.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-950/50 border border-purple-800/60 text-purple-300 font-semibold">
-            HASH REPOSITORY
-          </span>
         </div>
         <div className="flex items-center gap-1 text-zinc-400 text-xs">
           <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
@@ -1287,11 +1284,11 @@ export function DiscoveredHashesEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3">Principal / Account</th>
-                <th className="py-2 px-3">Type</th>
-                <th className="py-2 px-3">Extracted Hash</th>
-                <th className="py-2 px-3">Privilege</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Principal / account</th>
+                <th className="py-2 px-3 font-medium">Type</th>
+                <th className="py-2 px-3 font-medium">Extracted hash</th>
+                <th className="py-2 px-3 font-medium">Privilege</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -1303,15 +1300,15 @@ export function DiscoveredHashesEvidenceViewer({
 
                 return (
                   <tr key={idx} className="hover:bg-zinc-900/40">
-                    <td className="py-2 px-3 font-semibold text-zinc-200">{user}</td>
+                    <td className="py-2 px-3 font-medium text-zinc-200 font-mono text-[11px]">{user}</td>
                     <td className="py-2 px-3">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 uppercase">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 font-mono uppercase">
                         {type}
                       </span>
                     </td>
                     <td className="py-2 px-3">
                       <div className="flex items-center gap-1.5 max-w-md">
-                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1">
+                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1 font-mono">
                           {hash}
                         </code>
                         <button
@@ -1326,11 +1323,11 @@ export function DiscoveredHashesEvidenceViewer({
                     </td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {isAdmin ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 font-semibold">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-zinc-900/60 border border-rose-900/50 text-rose-300 font-medium">
                           Domain Admin
                         </span>
                       ) : (
-                        <span className="text-zinc-500 text-[10px]">Standard User</span>
+                        <span className="text-zinc-500 text-[11px]">Standard user</span>
                       )}
                     </td>
                   </tr>
@@ -1356,7 +1353,7 @@ export function DiscoveredTicketsEvidenceViewer({
   if (!tickets || tickets.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded((p) => !p)}
@@ -1367,7 +1364,7 @@ export function DiscoveredTicketsEvidenceViewer({
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({tickets.length})
           </strong>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/60 text-zinc-400 font-medium">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/60 text-zinc-400">
             Kerberos credential cache
           </span>
         </div>
@@ -1381,11 +1378,11 @@ export function DiscoveredTicketsEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3">Client Principal</th>
-                <th className="py-2 px-3">Service Principal</th>
-                <th className="py-2 px-3">Expiry</th>
-                <th className="py-2 px-3">Cache Path / Origin</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Client principal</th>
+                <th className="py-2 px-3 font-medium">Service principal</th>
+                <th className="py-2 px-3 font-medium">Expiry</th>
+                <th className="py-2 px-3 font-medium">Cache path / origin</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -1397,9 +1394,9 @@ export function DiscoveredTicketsEvidenceViewer({
 
                 return (
                   <tr key={idx} className="hover:bg-zinc-900/40">
-                    <td className="py-2 px-3 font-semibold text-zinc-200">{client}</td>
-                    <td className="py-2 px-3 text-zinc-300">{server}</td>
-                    <td className="py-2 px-3 text-zinc-400 text-[11px]">{expiry}</td>
+                    <td className="py-2 px-3 font-medium text-zinc-200 font-mono text-[11px]">{client}</td>
+                    <td className="py-2 px-3 text-zinc-300 font-mono text-[11px]">{server}</td>
+                    <td className="py-2 px-3 text-zinc-400 text-[11px] tabular-nums">{expiry}</td>
                     <td className="py-2 px-3 text-zinc-500 font-mono text-[11px]">{path}</td>
                   </tr>
                 );
