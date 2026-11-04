@@ -128,7 +128,7 @@ describe("ReportsPage Library Tab CampaignPicker (REP-01)", () => {
 
     // Verify CampaignPicker is visible in the Library tab
     await waitFor(() => {
-      const picker = screen.getByLabelText("Target Campaign");
+      const picker = screen.getByLabelText("Target campaign");
       expect(picker).toBeInTheDocument();
       expect(picker).toHaveAttribute("id", "library-campaign-select");
     });
@@ -147,7 +147,7 @@ describe("ReportsPage Library Tab CampaignPicker (REP-01)", () => {
       expect(screen.getAllByText("Operation Alpha").length).toBeGreaterThanOrEqual(1);
     });
 
-    const picker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const picker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     fireEvent.change(picker, { target: { value: "cmp-alpha" } });
 
     // Reports for cmp-alpha should appear and empty state should disappear
@@ -167,7 +167,7 @@ describe("ReportsPage Library Tab CampaignPicker (REP-01)", () => {
       expect(screen.getAllByText("Operation Alpha").length).toBeGreaterThanOrEqual(1);
     });
 
-    const libraryPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const libraryPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     fireEvent.change(libraryPicker, { target: { value: "cmp-alpha" } });
 
     await waitFor(() => {
@@ -178,13 +178,13 @@ describe("ReportsPage Library Tab CampaignPicker (REP-01)", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Generate" }));
 
     await waitFor(() => {
-      const generatePicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const generatePicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       expect(generatePicker.id).toBe("report-campaign-select");
       expect(generatePicker.value).toBe("cmp-alpha");
     });
 
     // 3. In Generate tab, change selection to cmp-beta
-    const generatePicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const generatePicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     fireEvent.change(generatePicker, { target: { value: "cmp-beta" } });
     expect(generatePicker.value).toBe("cmp-beta");
 
@@ -192,7 +192,7 @@ describe("ReportsPage Library Tab CampaignPicker (REP-01)", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Library" }));
 
     await waitFor(() => {
-      const updatedLibraryPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const updatedLibraryPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       expect(updatedLibraryPicker.id).toBe("library-campaign-select");
       expect(updatedLibraryPicker.value).toBe("cmp-beta");
       expect(screen.getByText("ares-report-beta.pdf")).toBeInTheDocument();

@@ -126,7 +126,7 @@ describe("Loading & Empty State Non-Alarmist Color Consistency (ITEM 5)", () => 
     fireEvent.click(screen.getByRole("tab", { name: "Run Panel" }));
 
     // Select campaign
-    const campaignPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const campaignPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     fireEvent.change(campaignPicker, { target: { value: "cmp-1" } });
 
     await waitFor(() => {

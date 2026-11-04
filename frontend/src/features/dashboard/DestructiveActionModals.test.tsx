@@ -167,7 +167,7 @@ describe("Item 7: Destructive Action ConfirmModal Consistency", () => {
       fireEvent.click(screen.getByRole("tab", { name: "Scope" }));
 
       // Select target campaign
-      const picker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const picker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       expect(picker).toBeInTheDocument();
       fireEvent.change(picker, { target: { value: "camp-alpha" } });
 
@@ -211,7 +211,7 @@ describe("Item 7: Destructive Action ConfirmModal Consistency", () => {
       // Switch to Scope tab
       fireEvent.click(screen.getByRole("tab", { name: "Scope" }));
 
-      const picker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const picker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       fireEvent.change(picker, { target: { value: "camp-alpha" } });
 
       const deleteBtn = screen.getByRole("button", { name: "Delete" });
