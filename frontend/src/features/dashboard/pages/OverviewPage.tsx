@@ -116,7 +116,7 @@ export function OverviewPage() {
               <span><strong className="text-zinc-200">Worker Pool:</strong> {metricNumber(snapshot?.workers, "active")} active</span>
               <span><strong className="text-zinc-200">Task Queue:</strong> {metricNumber(snapshot?.queue, "depth")} queued</span>
             </div>
-            <span className="text-zinc-500 font-mono text-[11px]">Awaiting first engagement initialization</span>
+            <span className="text-zinc-500 text-[11px]">Awaiting first engagement initialization</span>
           </div>
         </div>
       </Page>
@@ -255,10 +255,10 @@ export function OverviewPage() {
           <div className="overview-content-card">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-                  Execution Telemetry
+                <span className="text-xs font-medium text-zinc-300">
+                  Execution telemetry
                 </span>
-                <span className="font-mono text-[11px] text-zinc-500">
+                <span className="text-[11px] text-zinc-500 tabular-nums">
                   {snapshot?.timestamp ? formatReportTime(snapshot.timestamp) : "Standby"}
                 </span>
               </div>
@@ -326,10 +326,10 @@ export function OverviewPage() {
           <div className="overview-content-card">
             <div>
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-                  Activity Pulse
+                <span className="text-xs font-medium text-zinc-300">
+                  Activity pulse
                 </span>
-                <span className="font-mono text-[11px] text-zinc-300">
+                <span className="text-[11px] text-zinc-400 tabular-nums">
                   {monthlyTotal} signals total
                 </span>
               </div>
@@ -344,8 +344,8 @@ export function OverviewPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-zinc-400 pt-2 border-t border-zinc-800/60 font-mono text-[11px]">
-              <span>Telemetry: {isIngestionActive ? "Ingestion Active" : "Standby"}</span>
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 text-[11px] text-zinc-400 tabular-nums">
+              <span>Telemetry: {isIngestionActive ? "Ingestion active" : "Standby"}</span>
               <span>{hostsDiscovered} hosts mapped</span>
             </div>
           </div>

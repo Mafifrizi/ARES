@@ -1925,9 +1925,8 @@ textarea.field {
 .hud-card-title {
   color: var(--ink-3);
   font-size: var(--fs-label);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .hud-card-value {
@@ -1997,9 +1996,8 @@ textarea.field {
 .pulse-stat-label {
   font-size: var(--fs-label);
   color: var(--ink-3);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .pulse-stat-value {
