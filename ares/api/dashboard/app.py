@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ares.db.database import AresDatabase
+    from ares.db.postgres import PostgresDatabase
 
 
 from collections.abc import AsyncIterator
@@ -60,14 +61,19 @@ async def _require_dashboard_auth(
     from ares.core.config import get_settings
     from ares.db.database import AresDatabase
 
+    # AresDatabase.create() returns AresDatabase | PostgresDatabase at runtime,
+    # and dashboard_app.state.db may be either (depending on ARES_DATABASE_URL).
+    # Use a union type to avoid mypy assignment / union-attr errors.
+    DbHandle = "AresDatabase | PostgresDatabase | None"  # noqa: F821
+
     settings = get_settings()
 
-    def _resolve_db() -> "AresDatabase | None":  # noqa: F821
+    def _resolve_db() -> DbHandle:  # type: ignore[valid-type]
         return getattr(dashboard_app.state, "db", None)
 
     # Check bearer JWT first
     if credentials and credentials.credentials:
-        shared_db = _resolve_db()
+        shared_db: "AresDatabase | PostgresDatabase | None" = _resolve_db()  # noqa: F821
         close_after = False
         if shared_db is None:
             # Standalone mode (dashboard not mounted beside the main app): open a
@@ -83,6 +89,10 @@ async def _require_dashboard_auth(
                     status_code=503,
                     detail="Authentication service temporarily unavailable.",
                 )
+        # shared_db is guaranteed non-None here: either the initial resolve
+        # returned a handle, or the AresDatabase.create() above produced one
+        # (the except always raises HTTPException, never falls through).
+        assert shared_db is not None
         try:
             decision = await resolve_bearer_principal(
                 credentials.credentials,
@@ -109,21 +119,22 @@ async def _require_dashboard_auth(
     # Check X-API-Key header
     api_key = request.headers.get("X-API-Key")
     if api_key:
-        shared_db = _resolve_db()
+        shared_db2: "AresDatabase | PostgresDatabase | None" = _resolve_db()  # noqa: F821
         close_after = False
+        user = None
         try:
-            if shared_db is None:
-                shared_db = await AresDatabase.create(
+            if shared_db2 is None:
+                shared_db2 = await AresDatabase.create(
                     settings.ares_database_url, settings.encryption_key_value
                 )
                 close_after = True
-            user = await shared_db.verify_api_key(api_key)
+            user = await shared_db2.verify_api_key(api_key)
         except Exception:
             user = None
         finally:
-            if close_after and shared_db is not None:
+            if close_after and shared_db2 is not None:
                 try:
-                    await shared_db.close()
+                    await shared_db2.close()
                 except Exception:  # pragma: no cover - best-effort cleanup
                     pass
         if user:
