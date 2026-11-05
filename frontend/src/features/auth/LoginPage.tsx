@@ -55,8 +55,13 @@ export function LoginPage() {
     setIsSsoLoading(true);
     try {
       const res = await initiateSso("default");
-      if (res?.redirect_url) {
-        window.location.href = res.redirect_url;
+      // Only navigate to http(s) URLs. The server-supplied redirect_url MUST NOT be
+      // trusted blindly: a 'javascript:…' or 'data:text/html,…' value would execute
+      // in the login origin as reflected XSS, and arbitrary cross-origin navigation
+      // is also an open-redirect vector. (AUDIT run-1 H19)
+      const url = typeof res?.redirect_url === "string" ? res.redirect_url : "";
+      if (url && /^https?:\/\//i.test(url)) {
+        window.location.href = url;
       } else {
         setSsoError("SSO is not configured for this organization. Contact your administrator.");
       }
