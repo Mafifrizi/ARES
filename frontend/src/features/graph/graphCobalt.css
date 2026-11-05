@@ -9,12 +9,12 @@
   height: calc(100vh - 74px);
   max-height: calc(100vh - 74px);
   min-height: 480px;
-  background: #020305;
-  border: 1px solid #3c434f;
-  border-radius: 0px; /* Zero border-radius: mechanical rigidity */
+  background: var(--ground, #08090c);
+  border: 1px solid var(--line, rgba(255,255,255,0.06));
+  border-radius: var(--r-md, 8px);
   overflow: hidden;
   position: relative;
-  font-family: Tahoma, "Segoe UI", sans-serif;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
 }
 
 /* ── Authentic Desktop Window Title Bar ──────────────────────────────────── */
@@ -22,12 +22,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(180deg, #3c4046 0%, #292c31 100%);
-  border-bottom: 1px solid #1a1c20;
-  padding: 2px 6px;
-  color: #ffffff;
-  font-family: Tahoma, "Segoe UI", sans-serif;
-  font-size: 11px;
+  background: var(--chrome, #0e1014);
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  padding: 6px 12px;
+  color: var(--ink, #f3f4f7);
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  font-size: 12px;
   user-select: none;
   z-index: 25;
   flex-shrink: 0;
@@ -36,45 +36,44 @@
 .cobalt-window-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-weight: bold;
-  color: #e4e4e7;
-  letter-spacing: 0.02em;
+  gap: 8px;
+  font-weight: 650;
+  color: var(--ink, #f3f4f7);
+  letter-spacing: -0.01em;
 }
 
 .cobalt-window-title svg {
-  color: #ef4444;
+  color: var(--accent, #dc2626);
 }
 
 .cobalt-window-controls {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .cobalt-win-btn {
-  width: 18px;
-  height: 16px;
+  width: 22px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  background: #3e4248;
-  border-top: 1px solid #5a5f68;
-  border-left: 1px solid #5a5f68;
-  border-right: 1px solid #202226;
-  border-bottom: 1px solid #202226;
-  color: #cccccc;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs, 4px);
+  color: var(--ink-3, #777b86);
   cursor: pointer;
+  transition: background 110ms ease, color 110ms ease;
 }
 
 .cobalt-win-btn:hover {
-  background: #50555e;
-  color: #ffffff;
+  background: var(--panel-2, #171a20);
+  color: var(--ink, #f3f4f7);
 }
 
 .cobalt-win-btn.close:hover {
-  background: #cc2222;
+  background: var(--accent, #dc2626);
   color: #ffffff;
 }
 
@@ -83,12 +82,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #d4d0c8;
-  border-bottom: 1px solid #808080;
-  color: #000000;
-  font-family: Tahoma, "Segoe UI", sans-serif;
-  font-size: 11px;
-  padding: 1px 6px;
+  background: var(--chrome-2, #14161c);
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  color: var(--ink-2, #abaeb8);
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  font-size: 12.5px;
+  padding: 2px 8px;
   user-select: none;
   z-index: 24;
   flex-shrink: 0;
@@ -97,27 +96,46 @@
 .cobalt-menubar-items {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 2px;
+}
+
+.cobalt-menu-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 12px 2px 4px;
+  margin-right: 6px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink, #f3f4f7);
+  border-right: 1px solid var(--line, rgba(255,255,255,0.06));
+}
+
+.cobalt-menu-brand svg {
+  color: var(--accent, #dc2626);
 }
 
 .cobalt-menu-item {
-  padding: 2px 6px;
+  padding: 4px 9px;
+  border-radius: var(--r-xs, 4px);
   cursor: pointer;
-  color: #000000;
+  color: var(--ink-2, #abaeb8);
   font-weight: 500;
+  transition: background 110ms ease, color 110ms ease;
 }
 
 .cobalt-menu-item:hover {
-  background: #316ac5;
-  color: #ffffff;
+  background: var(--accent-wash, rgba(220,38,38,0.13));
+  color: var(--ink, #f3f4f7);
 }
 
 .cobalt-menubar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-family: Consolas, monospace;
+  gap: 10px;
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
   font-size: 11px;
+  color: var(--ink-3, #777b86);
 }
 
 /* ── Cobalt Strike Action Icon Toolbar ────────────────────────────────────── */
@@ -125,10 +143,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #ece9d8;
-  border-bottom: 2px groove #ffffff;
-  padding: 2px 6px;
-  color: #000000;
+  background: var(--chrome, #0e1014);
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  padding: 5px 8px;
+  color: var(--ink-2, #abaeb8);
   user-select: none;
   z-index: 23;
   flex-shrink: 0;
@@ -138,86 +156,81 @@
 .cobalt-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .cobalt-tool-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 1px 5px;
-  background: #ece9d8;
-  border-top: 1px solid #ffffff;
-  border-left: 1px solid #ffffff;
-  border-right: 1px solid #707070;
-  border-bottom: 1px solid #707070;
-  border-radius: 0px;
-  color: #000000;
+  min-width: 26px;
+  height: 26px;
+  padding: 2px 7px;
+  background: var(--panel-2, #171a20);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-sm, 6px);
+  color: var(--ink-2, #abaeb8);
   font-size: 11px;
-  font-family: Tahoma, sans-serif;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
   cursor: pointer;
+  transition: background 110ms ease, border-color 110ms ease, color 110ms ease;
 }
 
 .cobalt-tool-btn:hover {
-  background: #f5f3e9;
+  background: var(--panel-3, #1e2127);
+  border-color: var(--line-strong, rgba(255,255,255,0.16));
+  color: var(--ink, #f3f4f7);
 }
 
 .cobalt-tool-btn:active,
 .cobalt-tool-btn.active {
-  background: #dedad0;
-  border-top: 1px solid #707070;
-  border-left: 1px solid #707070;
-  border-right: 1px solid #ffffff;
-  border-bottom: 1px solid #ffffff;
+  background: var(--accent-wash, rgba(220,38,38,0.13));
+  border-color: var(--accent-line, rgba(220,38,38,0.40));
+  color: var(--accent-hover, #ef4444);
 }
 
 .cobalt-toolbar-sep {
   width: 1px;
   height: 18px;
-  background: #aca899;
-  border-right: 1px solid #ffffff;
-  margin: 0 3px;
+  background: var(--line-2, rgba(255,255,255,0.10));
+  margin: 0 5px;
 }
 
 .cobalt-badge-legend {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-size: 11px;
-  font-family: Consolas, monospace;
-  color: #333333;
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  color: var(--ink-3, #777b86);
 }
 
 .cobalt-legend-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .cobalt-legend-dot {
   width: 8px;
   height: 8px;
+  border-radius: 2px;
 }
 
 .cobalt-legend-dot.system {
-  background: #ff2222;
-  box-shadow: 0 0 5px #ff2222;
+  background: #ff4444;
 }
 
 .cobalt-legend-dot.beacon {
-  background: #00d4ff;
-  box-shadow: 0 0 5px #00d4ff;
+  background: #38bdf8;
 }
 
 .cobalt-legend-dot.pivot {
-  background: #ff9900;
-  box-shadow: 0 0 5px #ff9900;
+  background: #f59e0b;
 }
 
 .cobalt-legend-dot.gateway {
-  background: #e11d48;
+  background: var(--accent, #dc2626);
 }
 
 /* ── Split Canvas & Terminal Area ────────────────────────────────────────── */
@@ -233,27 +246,11 @@
   flex: 1;
   min-height: 350px;
   background:
-    radial-gradient(circle, #1a1e26 0.6px, transparent 0.6px)
-    0 0 / 18px 18px,
-    #020305;
+    radial-gradient(circle, rgba(255,255,255,0.05) 0.6px, transparent 0.6px)
+    0 0 / 20px 20px,
+    var(--surface, #0c0e12);
   position: relative;
   overflow: hidden;
-}
-
-/* CRT Scanline Overlay - Industrial-Brutalist requirement */
-.cobalt-canvas-area::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent 0px,
-    transparent 2px,
-    rgba(0, 0, 0, 0.12) 2px,
-    rgba(0, 0, 0, 0.12) 4px
-  );
-  pointer-events: none;
-  z-index: 1;
 }
 
 /* ── Cobalt Strike Custom Node: Monitor & Firewall ──────────────────────── */
@@ -299,8 +296,8 @@
 }
 
 .cobalt-node-wrapper:hover .cobalt-monitor-housing {
-  box-shadow: 0 0 16px rgba(0, 212, 255, 0.75), inset 0 0 4px rgba(0, 212, 255, 0.4);
-  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 1px var(--accent-line, rgba(220,38,38,0.40)), var(--shadow-pop, 0 12px 32px -10px rgba(0,0,0,.65));
+  border-color: var(--accent, #dc2626) !important;
   cursor: pointer;
 }
 
@@ -357,22 +354,7 @@
   justify-content: center;
 }
 
-/* Phosphor green CRT glow on screen content */
-.cobalt-monitor-screen > svg {
-  filter: drop-shadow(0 0 3px rgba(0, 255, 65, 0.25));
-}
-
-/* Glass reflection shine */
-.cobalt-monitor-screen::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 48%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 100%);
-  pointer-events: none;
-}
+/* Screen content sits flat — no phosphor glow, no glass shine (anti-slop) */
 
 /* Monitor Chin & Stand */
 .cobalt-monitor-chin {
@@ -414,15 +396,14 @@
   font-family: Consolas, "Cascadia Code", "Courier New", monospace;
   font-size: 11px;
   line-height: 1.35;
-  color: #ffffff;
+  color: var(--ink, #f3f4f7);
   min-width: 115px;
   max-width: 185px;
-  background: rgba(12, 16, 22, 0.92);
-  border: 1px solid rgba(80, 88, 102, 0.5);
-  border-radius: 4px;
+  background: var(--panel, #121419);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-xs, 4px);
   padding: 3px 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-pop, 0 8px 20px -8px rgba(0,0,0,.7));
   user-select: none;
   pointer-events: none;
 }
@@ -437,23 +418,19 @@
 }
 
 .cobalt-node-privilege.system {
-  color: #ff3333;
-  text-shadow: 0 0 6px rgba(255, 51, 51, 0.45);
+  color: #ff4444;
 }
 
 .cobalt-node-privilege.admin {
   color: #fbbf24;
-  text-shadow: 0 0 6px rgba(251, 191, 36, 0.45);
 }
 
 .cobalt-node-privilege.user {
-  color: #00d4ff;
-  text-shadow: 0 0 6px rgba(0, 212, 255, 0.35);
+  color: #38bdf8;
 }
 
 .cobalt-node-privilege.neutral {
   color: #f59e0b;
-  text-shadow: 0 0 6px rgba(245, 158, 11, 0.35);
 }
 
 .cobalt-node-subtext {
@@ -551,13 +528,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(10, 12, 16, 0.94);
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.85), 0 0 14px rgba(245, 158, 11, 0.25);
-  border-radius: 4px;
-  padding: 6px 14px;
+  background: var(--panel, #121419);
+  border: 1px solid var(--warn-line, rgba(245,185,66,0.34));
+  box-shadow: var(--shadow-pop, 0 12px 32px -10px rgba(0,0,0,.65));
+  border-radius: var(--r-md, 8px);
+  padding: 8px 14px;
   z-index: 50;
-  backdrop-filter: blur(10px);
   pointer-events: auto;
   animation: cobaltHudFadeIn 0.2s ease-out;
 }
@@ -574,23 +550,22 @@
 }
 
 .cobalt-hud-unlock-btn {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
   font-size: 11px;
   font-weight: 600;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.5);
-  border-radius: 3px;
-  padding: 3px 8px;
+  color: var(--warn, #f5b942);
+  background: var(--warn-wash, rgba(245,185,66,0.13));
+  border: 1px solid var(--warn-line, rgba(245,185,66,0.34));
+  border-radius: var(--r-xs, 4px);
+  padding: 4px 9px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .cobalt-hud-unlock-btn:hover {
-  background: rgba(245, 158, 11, 0.25);
+  background: var(--warn-wash, rgba(245,185,66,0.22));
   color: #ffffff;
-  border-color: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  border-color: var(--warn, #f5b942);
 }
 
 /* ── Bottom Half: Classic Java Swing / Cobalt Strike Tabbed Terminal Dock ── */
@@ -599,16 +574,16 @@
   display: flex;
   flex-direction: column;
   background: #000000;
-  border-top: 1px solid #11141a;
+  border-top: 1px solid var(--line, rgba(255,255,255,0.06));
   z-index: 5;
 }
 
-/* Authentic Draggable Splitter Bar with Ripple Grip */
+/* Draggable Splitter Bar with grip */
 .cobalt-splitter-bar {
-  height: 7px;
-  background: #7a8898;
-  border-top: 1px solid #9fb0c0;
-  border-bottom: 1px solid #4a5460;
+  height: 8px;
+  background: var(--chrome-2, #14161c);
+  border-top: 1px solid var(--line, rgba(255,255,255,0.06));
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -624,88 +599,88 @@
 .cobalt-splitter-grip span {
   width: 14px;
   height: 2px;
-  background: #2b3440;
-  box-shadow: 0 1px 0 #b0c0d0;
+  border-radius: 1px;
+  background: var(--line-strong, rgba(255,255,255,0.16));
 }
 
-/* Authentic Multi-Row Java Swing Metal Tab Bar */
+/* Session Tab Bar */
 .cobalt-tab-strip-wrapper {
   display: flex;
   flex-direction: column;
-  background: #9ea8b4;
-  border-bottom: 2px solid #4a5666;
+  background: var(--chrome, #0e1014);
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
 }
 
 .cobalt-tab-bar {
   display: flex;
   align-items: center;
-  padding: 2px 6px 0 6px;
+  padding: 4px 6px 0 6px;
   gap: 3px;
   overflow-x: auto;
   user-select: none;
 }
 
 .cobalt-tab-bar.row-1 {
-  border-bottom: 1px solid #8899aa;
-  padding-bottom: 1px;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  padding-bottom: 2px;
 }
 
 .cobalt-tab-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 10px;
-  font-family: Tahoma, "Segoe UI", sans-serif;
-  font-size: 11px;
-  color: #101824;
-  background: #a8b0bc;
-  border-top: 1px solid #d0d4da;
-  border-left: 1px solid #d0d4da;
-  border-right: 1px solid #5a6272;
+  padding: 5px 11px;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  font-size: 12px;
+  color: var(--ink-2, #abaeb8);
+  background: var(--panel, #121419);
+  border: 1px solid var(--line, rgba(255,255,255,0.06));
   border-bottom: none;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--r-sm, 6px) var(--r-sm, 6px) 0 0;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 100ms ease;
+  transition: background 110ms ease, color 110ms ease;
 }
 
 .cobalt-tab-item:hover {
-  background: #d8e4f0;
+  background: var(--panel-2, #171a20);
+  color: var(--ink, #f3f4f7);
 }
 
 .cobalt-tab-item.active {
-  background: #d6dae0;
-  border-top: 2px solid #3b6ea8;
-  border-left: 1px solid #d0d4da;
-  border-right: 1px solid #4a5a6a;
-  border-bottom: 2px solid #d6dae0;
-  color: #000000;
-  font-weight: 700;
-  margin-bottom: -2px;
+  background: var(--panel-3, #1e2127);
+  border-color: var(--line-2, rgba(255,255,255,0.10));
+  border-top: 2px solid var(--accent, #dc2626);
+  border-bottom: none;
+  color: var(--ink, #f3f4f7);
+  font-weight: 600;
+  margin-bottom: -1px;
 }
 
 .cobalt-tab-beacon-dot {
   width: 7px;
   height: 7px;
-  background: #00dd00;
-  border: 1px solid #007700;
+  border-radius: 50%;
+  background: var(--live, #34d399);
 }
 
 .cobalt-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
-  color: #333333;
+  width: 15px;
+  height: 15px;
+  border-radius: var(--r-xs, 4px);
+  color: var(--ink-3, #777b86);
   font-size: 11px;
   font-weight: bold;
   cursor: pointer;
+  transition: background 110ms ease, color 110ms ease;
 }
 
 .cobalt-tab-close:hover {
   color: #ffffff;
-  background: #cc2222;
+  background: var(--accent, #dc2626);
 }
 
 /* Status Bar Directly Above Terminal Console */
@@ -713,23 +688,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 10px;
-  background: #b0aead;
-  border-top: 1px solid #c8c6c4;
-  border-bottom: 1px solid #6e6c6a;
-  font-family: Consolas, monospace;
+  padding: 4px 12px;
+  background: var(--chrome-2, #14161c);
+  border-top: 1px solid var(--line, rgba(255,255,255,0.06));
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
   font-size: 11px;
-  color: #000000;
-  font-weight: 600;
+  color: var(--ink-2, #abaeb8);
+  font-weight: 500;
   user-select: none;
 }
 
 .cobalt-terminal-statusbar .cobalt-status-left {
-  color: #000000;
+  color: var(--ink-2, #abaeb8);
 }
 
 .cobalt-terminal-statusbar .cobalt-status-right {
-  color: #222222;
+  color: var(--ink-3, #777b86);
 }
 
 /* Terminal Console Body */
@@ -742,6 +717,21 @@
   line-height: 1.35;
   background: #000000;
   color: #ffffff;
+}
+
+.cobalt-terminal-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  color: var(--ink-3, #777b86);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: 0.8125rem;
+  line-height: 1.6;
 }
 
 .cobalt-log-line {
@@ -795,17 +785,16 @@
 
 /* Custom Classic Scrollbars */
 .cobalt-terminal-body::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-  background: #d4d0c8;
+  width: 10px;
+  height: 10px;
+  background: transparent;
 }
 
 .cobalt-terminal-body::-webkit-scrollbar-thumb {
-  background: #c0c0c0;
-  border-top: 1px solid #ffffff;
-  border-left: 1px solid #ffffff;
-  border-right: 1px solid #707070;
-  border-bottom: 1px solid #707070;
+  background: var(--line-strong, rgba(255,255,255,0.16));
+  border-radius: var(--r-pill, 999px);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 /* ── Cobalt Strike Java Swing Modal Dialogs ─────────────────────────────── */
@@ -822,141 +811,140 @@
 .cobalt-dialog-window {
   width: 600px;
   max-width: 92vw;
-  background: #ece9d8;
-  border-top: 2px solid #ffffff;
-  border-left: 2px solid #ffffff;
-  border-right: 2px solid #505050;
-  border-bottom: 2px solid #505050;
-  box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.85);
-  font-family: Tahoma, "Segoe UI", sans-serif;
-  color: #000000;
+  background: var(--panel, #121419);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-lg, 12px);
+  box-shadow: var(--shadow-pop, 0 12px 32px -10px rgba(0,0,0,.65));
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  color: var(--ink, #f3f4f7);
   user-select: none;
+  overflow: hidden;
 }
 
 .cobalt-dialog-titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(90deg, #0a246a 0%, #3a6ea5 100%);
-  padding: 3px 6px;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: bold;
-  border-bottom: 1px solid #04163c;
+  background: var(--chrome-2, #14161c);
+  padding: 9px 14px;
+  color: var(--ink, #f3f4f7);
+  font-size: 13px;
+  font-weight: 650;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
 }
 
 .cobalt-dialog-titlebar .cobalt-win-btn {
-  background: #ece9d8;
-  color: #000000;
-  border-top: 1px solid #ffffff;
-  border-left: 1px solid #ffffff;
-  border-right: 1px solid #707070;
-  border-bottom: 1px solid #707070;
+  background: transparent;
+  color: var(--ink-3, #777b86);
+  border: 1px solid transparent;
   font-weight: bold;
 }
 
 .cobalt-dialog-body {
-  padding: 14px;
-  font-size: 11px;
+  padding: 16px;
+  font-size: 13px;
 }
 
 .cobalt-btn-swing {
-  min-width: 75px;
-  height: 23px;
-  padding: 2px 12px;
-  background: #ece9d8;
-  border-top: 1px solid #ffffff;
-  border-left: 1px solid #ffffff;
-  border-right: 1px solid #707070;
-  border-bottom: 1px solid #707070;
-  font-family: Tahoma, sans-serif;
-  font-size: 11px;
-  color: #000000;
+  min-width: 78px;
+  height: 32px;
+  padding: 0 14px;
+  background: var(--panel-2, #171a20);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-sm, 6px);
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  font-size: 13px;
+  color: var(--ink, #f3f4f7);
   cursor: pointer;
+  transition: background 110ms ease, border-color 110ms ease;
 }
 
 .cobalt-btn-swing:hover {
-  background: #f5f3e9;
+  background: var(--panel-3, #1e2127);
+  border-color: var(--line-strong, rgba(255,255,255,0.16));
 }
 
 .cobalt-btn-swing:active {
-  border-top: 1px solid #707070;
-  border-left: 1px solid #707070;
-  border-right: 1px solid #ffffff;
-  border-bottom: 1px solid #ffffff;
+  background: var(--panel, #121419);
 }
 
 .cobalt-swing-input {
   width: 100%;
-  background: #ffffff;
-  border-top: 1px solid #707070;
-  border-left: 1px solid #707070;
-  border-right: 1px solid #ffffff;
-  border-bottom: 1px solid #ffffff;
-  padding: 4px 6px;
-  font-family: Consolas, monospace;
-  font-size: 11px;
-  color: #000000;
+  background: var(--surface, #0c0e12);
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-sm, 6px);
+  padding: 7px 10px;
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  font-size: 13px;
+  color: var(--ink, #f3f4f7);
   outline: none;
+  transition: border-color 110ms ease, box-shadow 110ms ease;
+}
+
+.cobalt-swing-input:focus {
+  border-color: var(--accent-line, rgba(220,38,38,0.40));
+  box-shadow: 0 0 0 3px var(--accent-wash, rgba(220,38,38,0.13));
 }
 
 .cobalt-dialog-card {
-  background: #ffffff;
-  border-top: 1px solid #707070;
-  border-left: 1px solid #707070;
-  border-right: 1px solid #ffffff;
-  border-bottom: 1px solid #ffffff;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  background: var(--panel-2, #171a20);
+  border: 1px solid var(--line, rgba(255,255,255,0.06));
+  border-radius: var(--r-md, 8px);
+  padding: 12px 14px;
+  margin-bottom: 10px;
 }
 
 .cobalt-dialog-tabs {
   display: flex;
   gap: 2px;
-  border-bottom: 1px solid #707070;
-  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  margin-bottom: 12px;
 }
 
 .cobalt-dialog-tab {
-  padding: 4px 10px;
-  font-size: 11px;
-  font-family: Tahoma, sans-serif;
-  background: #d4d0c8;
-  border-top: 1px solid #ffffff;
-  border-left: 1px solid #ffffff;
-  border-right: 1px solid #707070;
-  border-bottom: none;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
   cursor: pointer;
-  color: #333333;
+  color: var(--ink-3, #777b86);
+  transition: color 110ms ease, border-color 110ms ease;
 }
 
 .cobalt-dialog-tab.active {
-  background: #ece9d8;
-  font-weight: bold;
-  color: #000000;
+  background: transparent;
+  font-weight: 600;
+  color: var(--ink, #f3f4f7);
   margin-bottom: -1px;
-  border-bottom: 1px solid #ece9d8;
+  border-bottom: 2px solid var(--accent, #dc2626);
 }
 
 .cobalt-table-swing {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
-  font-family: Tahoma, sans-serif;
+  font-size: 13px;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
 }
 
 .cobalt-table-swing th {
-  background: #d4d0c8;
-  border: 1px solid #707070;
-  padding: 4px 8px;
+  background: transparent;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  padding: 7px 10px;
   text-align: left;
-  font-weight: bold;
+  font-weight: 600;
+  font-size: var(--fs-label, 12px);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-3, #777b86);
 }
 
 .cobalt-table-swing td {
-  border: 1px solid #d4d0c8;
-  padding: 4px 8px;
-  background: #ffffff;
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--ink-2, #abaeb8);
 }
 
 /* ── Tactical Action HUD Toast ───────────────────────────────────────────── */
@@ -969,12 +957,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #18181b;
-  border: 1px solid #38bdf8;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
-  padding: 6px 14px;
-  border-radius: 4px;
-  font-family: Consolas, monospace;
+  background: var(--panel, #121419);
+  border: 1px solid var(--accent-line, rgba(220,38,38,0.40));
+  box-shadow: var(--shadow-pop, 0 12px 32px -10px rgba(0,0,0,.65));
+  padding: 8px 14px;
+  border-radius: var(--r-md, 8px);
+  font-family: var(--font-mono, "JetBrains Mono", ui-monospace, monospace);
+  color: var(--ink, #f3f4f7);
   animation: cobaltToastSlide 0.22s ease-out;
 }
 
@@ -997,14 +986,14 @@
   bottom: 0;
   width: 400px;
   max-width: 90vw;
-  background: #090a0f;
-  border-left: 1px solid #27272a;
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.7);
+  background: var(--chrome, #0e1014);
+  border-left: 1px solid var(--line, rgba(255,255,255,0.06));
+  box-shadow: var(--shadow-chrome, -8px 0 24px -16px rgba(0,0,0,.8));
   display: flex;
   flex-direction: column;
   z-index: 50;
   animation: inspectorSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui, "Plus Jakarta Sans", system-ui, sans-serif);
 }
 
 @keyframes inspectorSlideIn {
@@ -1019,9 +1008,9 @@
 }
 
 .cobalt-inspector-header {
-  padding: 10px 14px;
-  background: #111318;
-  border-bottom: 1px solid #27272a;
+  padding: 12px 16px;
+  background: var(--chrome-2, #14161c);
+  border-bottom: 1px solid var(--line, rgba(255,255,255,0.06));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1031,29 +1020,29 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 14px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 #090a0f;
+  scrollbar-color: var(--line-strong, rgba(255,255,255,0.16)) transparent;
 }
 
 .cobalt-inspector-body::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
 }
 
 .cobalt-inspector-body::-webkit-scrollbar-track {
-  background: #090a0f;
+  background: transparent;
 }
 
 .cobalt-inspector-body::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border-radius: 3px;
+  background: var(--line-strong, rgba(255,255,255,0.16));
+  border-radius: var(--r-pill, 999px);
 }
 
 .cobalt-inspector-body::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--ink-faint, #565a64);
 }
 
 /* ── PERIMETER INGRESS Animated Firewall Flames & Dragon Sentinel ──────────── */

@@ -555,23 +555,47 @@ class TestChainAdvisor:
 # ─────────────────────────────────────────────────────────────
 
 class TestDashboardApp:
-    @staticmethod
-    def _auth_headers() -> dict[str, str]:
+    # Dashboard auth now goes through ares.api.rbac.resolve_bearer_principal so
+    # the dashboard enforces the same family/epoch/is_active checks as the main
+    # API. The test fixture mints a canonical access token (with sid/ver) and
+    # wires a DB mock that returns an authoritative principal row.
+    _TEST_USERNAME = "dashboard-tester"
+    _TEST_USER_ID = "00000000-0000-0000-0000-00000000da54"
+
+    @classmethod
+    def _auth_headers(cls) -> dict[str, str]:
         from ares.core.config import get_settings
         from ares.core.security import create_access_token
+        from ares.core.token_sessions import generate_family_id
 
         settings = get_settings()
         token = create_access_token(
-            data={"sub": "dashboard-tester", "role": "operator"},
+            data={
+                "sub": cls._TEST_USERNAME,
+                "sid": generate_family_id(),
+                "ver": 1,
+            },
             secret_key=settings.secret_key_value,
             algorithm=settings.ares_jwt_algorithm,
             expires_minutes=60,
         )
         return {"Authorization": f"Bearer {token}"}
 
-    @staticmethod
-    def _auth_db() -> AsyncMock:
+    @classmethod
+    def _principal_row(cls) -> dict[str, object]:
+        return {
+            "id": cls._TEST_USER_ID,
+            "username": cls._TEST_USERNAME,
+            "role": "operator",
+            "auth_epoch": 1,
+        }
+
+    @classmethod
+    def _auth_db(cls) -> AsyncMock:
         mock_db = AsyncMock()
+        mock_db.resolve_access_token_principal = AsyncMock(
+            return_value=cls._principal_row()
+        )
         mock_db.is_access_token_revoked = AsyncMock(return_value=False)
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=None)
@@ -580,14 +604,36 @@ class TestDashboardApp:
     @contextmanager
     def _authenticated_dashboard(self, db: AsyncMock | None = None):
         auth_db = db or self._auth_db()
+        # Always pre-wire the authoritative bearer check regardless of what the
+        # caller has already configured on the mock: tests here care about the
+        # resource endpoints (list_campaigns / list_findings / ...), not about
+        # authentication, so this seam is always what we want the mock to
+        # answer.
+        auth_db.resolve_access_token_principal = AsyncMock(
+            return_value=self._principal_row()
+        )
         auth_db.is_access_token_revoked = AsyncMock(return_value=False)
         auth_db.__aenter__ = AsyncMock(return_value=auth_db)
         auth_db.__aexit__ = AsyncMock(return_value=None)
-        with patch(
-            "ares.db.database.AresDatabase.create",
-            new=AsyncMock(return_value=auth_db),
-        ):
-            yield self._auth_headers()
+        # The dashboard now prefers the shared db from dashboard_app.state; set
+        # it so auth doesn't have to open a per-request connection.
+        from ares.api.dashboard.app import dashboard_app
+        prior_state_db = getattr(dashboard_app.state, "db", None)
+        dashboard_app.state.db = auth_db
+        try:
+            with patch(
+                "ares.db.database.AresDatabase.create",
+                new=AsyncMock(return_value=auth_db),
+            ):
+                yield self._auth_headers()
+        finally:
+            if prior_state_db is None:
+                try:
+                    del dashboard_app.state.db
+                except AttributeError:
+                    pass
+            else:
+                dashboard_app.state.db = prior_state_db
 
     @pytest.fixture
     def client(self):

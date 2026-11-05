@@ -10,8 +10,7 @@ import {
   Table as TableIcon,
   Minimize2,
   Maximize2,
-  WrapText,
-  Sparkles
+  WrapText
 } from "lucide-react";
 
 export interface StructuredJsonViewerProps {
@@ -69,31 +68,27 @@ export function StructuredJsonViewer({
       return [];
     }
     const record = data as Record<string, unknown>;
-    const pills: { key: string; value: string; tone: "green" | "amber" | "cyan" | "purple" | "zinc" }[] = [];
+    const pills: { key: string; value: string; tone: "green" | "amber" | "rose" | "zinc" }[] = [];
 
     const priorityKeys = [
       "status", "outcome", "target", "host", "port", "module_id",
       "duration_ms", "score", "severity", "findings_count", "open_ports"
     ];
 
-    // First collect known priority keys
+    // First collect known priority keys. Colour is restrained: it signals good/bad/warn
+    // only (status + severity); identity and counts stay neutral.
     for (const k of priorityKeys) {
       if (k in record && record[k] !== undefined && record[k] !== null) {
         const val = record[k];
         let str = String(val);
-        let tone: "green" | "amber" | "cyan" | "purple" | "zinc" = "zinc";
+        let tone: "green" | "amber" | "rose" | "zinc" = "zinc";
 
         if (k === "status" || k === "outcome") {
-          tone = str.includes("fail") || str.includes("err") ? "amber" : "green";
-        } else if (k === "target" || k === "host") {
-          tone = "cyan";
+          tone = str.includes("fail") || str.includes("err") ? "rose" : "green";
         } else if (k === "severity") {
-          tone = str.includes("high") || str.includes("crit") ? "amber" : "purple";
+          tone = str.includes("crit") ? "rose" : str.includes("high") ? "amber" : "zinc";
         } else if (k === "open_ports" && Array.isArray(val)) {
           str = `[${val.slice(0, 4).join(", ")}${val.length > 4 ? "..." : ""}]`;
-          tone = "cyan";
-        } else if (typeof val === "number") {
-          tone = "amber";
         }
         pills.push({ key: k, value: str, tone });
       }
@@ -153,15 +148,14 @@ export function StructuredJsonViewer({
   };
 
   return (
-    <div className={`border border-zinc-800 rounded-sm bg-zinc-950 font-mono text-xs overflow-hidden ${className}`}>
+    <div className={`border border-zinc-800 rounded-md bg-zinc-950 text-xs overflow-hidden ${className}`}>
       {/* Control Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-zinc-900/90 border-b border-zinc-800 text-[11px]">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-zinc-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-            {title ?? "STRUCTURED TELEMETRY"}
+          <span className="font-semibold text-zinc-200 text-xs flex items-center gap-1.5">
+            {title ?? "Structured telemetry"}
           </span>
-          <span className="text-[10px] text-zinc-500 font-mono bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800/80">
+          <span className="text-[11px] text-zinc-500 tabular-nums">
             {byteSize} · {keyCount} {Array.isArray(data) ? "entries" : "keys"}
           </span>
         </div>
@@ -192,35 +186,35 @@ export function StructuredJsonViewer({
 
           {/* Expand/Collapse All Buttons */}
           {viewMode === "tree" && (
-            <div className="flex items-center gap-0.5 bg-zinc-950 p-0.5 rounded border border-zinc-800">
+            <div className="flex items-center gap-0.5 bg-zinc-950 p-0.5 rounded-md border border-zinc-800">
               <button
                 type="button"
                 onClick={handleExpandAll}
-                className="px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors flex items-center gap-1"
-                title="Expand All Fields"
+                className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors flex items-center gap-1"
+                title="Expand all fields"
               >
-                <Maximize2 size={10} />
+                <Maximize2 size={11} />
                 <span className="hidden sm:inline">Expand</span>
               </button>
               <button
                 type="button"
                 onClick={handleCollapseAll}
-                className="px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors flex items-center gap-1"
-                title="Collapse All Fields"
+                className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded transition-colors flex items-center gap-1"
+                title="Collapse all fields"
               >
-                <Minimize2 size={10} />
+                <Minimize2 size={11} />
                 <span className="hidden sm:inline">Fold</span>
               </button>
             </div>
           )}
 
           {/* Mode Switcher */}
-          <div className="flex items-center rounded bg-zinc-950 p-0.5 border border-zinc-800">
+          <div className="flex items-center rounded-md bg-zinc-950 p-0.5 border border-zinc-800">
             <button
               type="button"
               onClick={() => setViewMode("tree")}
-              className={`px-2 py-0.5 rounded text-[10px] flex items-center gap-1 transition-colors ${
-                viewMode === "tree" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+              className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
+                viewMode === "tree" ? "bg-zinc-800 text-zinc-100 font-medium" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
               <ListTree size={11} />
@@ -230,8 +224,8 @@ export function StructuredJsonViewer({
               <button
                 type="button"
                 onClick={() => setViewMode("table")}
-                className={`px-2 py-0.5 rounded text-[10px] flex items-center gap-1 transition-colors ${
-                  viewMode === "table" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+                className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
+                  viewMode === "table" ? "bg-zinc-800 text-zinc-100 font-medium" : "text-zinc-400 hover:text-zinc-200"
                 }`}
                 title="View as tabular grid"
               >
@@ -242,8 +236,8 @@ export function StructuredJsonViewer({
             <button
               type="button"
               onClick={() => setViewMode("raw")}
-              className={`px-2 py-0.5 rounded text-[10px] flex items-center gap-1 transition-colors ${
-                viewMode === "raw" ? "bg-zinc-800 text-zinc-100 font-semibold" : "text-zinc-400 hover:text-zinc-200"
+              className={`px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-colors ${
+                viewMode === "raw" ? "bg-zinc-800 text-zinc-100 font-medium" : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
               <Code2 size={11} />
@@ -256,7 +250,7 @@ export function StructuredJsonViewer({
             <button
               type="button"
               onClick={() => setWrapRaw((w) => !w)}
-              className={`p-1 rounded border text-[10px] transition-colors ${
+              className={`p-1.5 rounded-md border text-[11px] transition-colors ${
                 wrapRaw ? "bg-zinc-800 text-zinc-200 border-zinc-700" : "bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-300"
               }`}
               title="Toggle line wrapping"
@@ -269,7 +263,7 @@ export function StructuredJsonViewer({
           <button
             type="button"
             onClick={handleCopy}
-            className="px-2 py-0.5 rounded border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[10px] flex items-center gap-1 transition-colors"
+            className="px-2 py-1 rounded-md border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] flex items-center gap-1 transition-colors"
             title="Copy entire JSON payload"
           >
             {copied ? (
@@ -289,32 +283,29 @@ export function StructuredJsonViewer({
 
       {/* Executive Key Metrics Strip (Instant scan of status, target, duration, etc.) */}
       {summaryPills.length > 0 && viewMode === "tree" && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/40 border-b border-zinc-800/80 overflow-x-auto text-[11px] scrollbar-none">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
-            <Sparkles size={10} className="text-amber-400/80" />
-            SUMMARY:
-          </span>
+        <div className="flex items-center gap-2 px-3 py-2 bg-zinc-900/40 border-b border-zinc-800/80 overflow-x-auto text-[11px] scrollbar-none">
+          <span className="text-[11px] text-zinc-500 shrink-0 font-medium">Summary</span>
           <div className="flex items-center gap-1.5 flex-nowrap">
             {summaryPills.map((pill) => {
+              // Restrained tones: semantic signal keeps a softer dot + text color, neutral
+              // metadata pills stay fully neutral. No saturated backgrounds.
               const toneClasses =
                 pill.tone === "green"
-                  ? "border-emerald-800/60 bg-emerald-950/30 text-emerald-300"
+                  ? "border-emerald-900/50 bg-zinc-900/60 text-emerald-300"
                   : pill.tone === "amber"
-                  ? "border-amber-800/60 bg-amber-950/30 text-amber-300"
-                  : pill.tone === "cyan"
-                  ? "border-cyan-800/60 bg-cyan-950/30 text-cyan-300"
-                  : pill.tone === "purple"
-                  ? "border-purple-800/60 bg-purple-950/30 text-purple-300"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-300";
+                  ? "border-amber-900/50 bg-zinc-900/60 text-amber-300"
+                  : pill.tone === "rose"
+                  ? "border-rose-900/50 bg-zinc-900/60 text-rose-300"
+                  : "border-zinc-800 bg-zinc-900/60 text-zinc-300";
 
               return (
                 <div
                   key={pill.key}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono whitespace-nowrap shrink-0 ${toneClasses}`}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] whitespace-nowrap shrink-0 ${toneClasses}`}
                   title={`${pill.key}: ${pill.value}`}
                 >
-                  <span className="text-zinc-500 font-medium">{pill.key}:</span>
-                  <span className="font-semibold">{pill.value}</span>
+                  <span className="text-zinc-500">{pill.key}</span>
+                  <span className="font-medium tabular-nums">{pill.value}</span>
                 </div>
               );
             })}
@@ -532,9 +523,9 @@ function JsonTreeBranch({
             <button
               type="button"
               onClick={() => setArrayLimit((lim) => lim + 20)}
-              className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 py-1 pl-2 hover:underline block"
+              className="text-[11px] text-zinc-400 hover:text-zinc-200 py-1 pl-2 hover:underline block font-sans"
             >
-              + Show {itemCount - arrayLimit} more items...
+              Show {itemCount - arrayLimit} more items
             </button>
           )}
         </div>
@@ -583,9 +574,9 @@ function JsonTableView({ data }: { data: Record<string, unknown>[] }) {
       <table className="w-full text-[11px] text-left border-collapse">
         <thead>
           <tr className="bg-zinc-900 border-b border-zinc-800 text-zinc-400">
-            <th className="p-1.5 font-semibold text-[10px] uppercase w-8">#</th>
+            <th className="p-2 font-medium text-[11px] w-8">#</th>
             {headers.map((h) => (
-              <th key={h} className="p-1.5 font-semibold text-[10px] uppercase text-zinc-300">
+              <th key={h} className="p-2 font-medium text-[11px] text-zinc-300">
                 {h}
               </th>
             ))}

@@ -136,7 +136,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
     const scopeTabBtn = screen.getByRole("tab", { name: "Scope" });
     fireEvent.click(scopeTabBtn);
 
-    const targetPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const targetPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     expect(targetPicker).toBeInTheDocument();
     expect(targetPicker.querySelectorAll("option").length).toBe(3); // "Select campaign" + 2 campaigns
 
@@ -186,7 +186,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
 
     // 8. Navigate to Scope tab again and verify Target Campaign dropdown has only camp-002
     fireEvent.click(screen.getByRole("tab", { name: "Scope" }));
-    const refreshedPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const refreshedPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     const refreshedOptions = Array.from(refreshedPicker.options).map((opt) => opt.value);
     expect(refreshedOptions).not.toContain("camp-001");
     expect(refreshedOptions).toContain("camp-002");
@@ -202,7 +202,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
     // 10. Navigate to Strategy and assert Target Campaign dropdown only contains camp-002
     fireEvent.click(screen.getByRole("link", { name: /Strategy/i }));
     await waitFor(() => {
-      const stratPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const stratPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       const stratOptions = Array.from(stratPicker.options).map((opt) => opt.value);
       expect(stratOptions).not.toContain("camp-001");
       expect(stratOptions).toContain("camp-002");
@@ -212,7 +212,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
     fireEvent.click(screen.getByRole("link", { name: /Modules/i }));
     fireEvent.click(screen.getByRole("tab", { name: "Run Panel" }));
     await waitFor(() => {
-      const modPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const modPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       const modOptions = Array.from(modPicker.options).map((opt) => opt.value);
       expect(modOptions).not.toContain("camp-001");
       expect(modOptions).toContain("camp-002");
@@ -221,7 +221,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
     // 12. Navigate to Reports and assert Target Campaign dropdown has only camp-002
     fireEvent.click(screen.getByRole("link", { name: /Reports/i }));
     await waitFor(() => {
-      const repPicker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+      const repPicker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
       const repOptions = Array.from(repPicker.options).map((opt) => opt.value);
       expect(repOptions).not.toContain("camp-001");
       expect(repOptions).toContain("camp-002");
@@ -249,7 +249,7 @@ describe("Campaign deletion state synchronization across consumers", () => {
 
     // Go to Scope tab and delete the last campaign
     fireEvent.click(screen.getByRole("tab", { name: "Scope" }));
-    const picker = screen.getByLabelText("Target Campaign") as HTMLSelectElement;
+    const picker = screen.getByLabelText("Target campaign") as HTMLSelectElement;
     fireEvent.change(picker, { target: { value: "camp-002" } });
 
     const deleteBtn = screen.getByRole("button", { name: "Delete" });

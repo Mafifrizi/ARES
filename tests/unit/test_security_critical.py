@@ -439,12 +439,58 @@ class TestDashboardAuthentication:
 
             from ares.api.dashboard.app import dashboard_app
 
+            # Dashboard auth now prefers dashboard_app.state.db when present;
+            # clear leftover state from earlier tests so the auth code has to
+            # fall through to AresDatabase.create and observe our stub raise.
+            if hasattr(dashboard_app.state, "db"):
+                delattr(dashboard_app.state, "db")
+
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=dashboard_app),
                 base_url="http://localhost",
             ) as c:
                 r = await c.get("/api/campaigns", headers=_auth("alice", "operator"))
             assert r.status_code == 503
+
+        _run(_run_test())
+
+    def test_dashboard_rejects_revoked_family(self):
+        """Regression: after /auth/logout revokes the refresh-token family,
+        an access token issued from that family must stop working on the
+        dashboard immediately — not keep working until expiry.
+
+        This failed before the fix because the dashboard only checked
+        is_access_token_revoked(jti); logout revokes the family (and the
+        main-API's resolve_access_token_principal JOIN rejects on
+        f.state='active'), but the plain-jti blocklist was never populated
+        for /auth/logout, so the dashboard's old auth path accepted the
+        stale token.
+        """
+        db = _make_mock_db()
+        # Simulate "family revoked / user deactivated / epoch bumped":
+        # resolve_access_token_principal returns None, same signal main-API
+        # uses when the family is no longer active.
+        db.resolve_access_token_principal = AsyncMock(return_value=None)
+
+        async def _run_test():
+            import httpx
+
+            from ares.api.dashboard.app import dashboard_app
+
+            dashboard_app.state.db = db
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=dashboard_app),
+                base_url="http://localhost",
+            ) as c:
+                r = await c.get(
+                    "/api/campaigns", headers=_auth("alice", "operator")
+                )
+            assert r.status_code == 401, (
+                "Dashboard accepted a JWT whose refresh family was revoked / "
+                "whose user was deactivated / whose auth_epoch was bumped. "
+                "This defeats /auth/logout, /auth/logout-all, and admin "
+                "deactivation on the dashboard surface."
+            )
 
         _run(_run_test())
 

@@ -146,7 +146,7 @@ export function ReportsPage() {
         <div className="grid gap-3 sm:grid-cols-3 items-end">
           <div>
             <label htmlFor="report-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
-              Target Campaign
+              Target campaign
             </label>
             <CampaignPicker
               id="report-campaign-select"
@@ -224,7 +224,7 @@ export function ReportsPage() {
       {activeTab === "Library" && (
       <section className="panel table-panel">
         <SectionHeader
-          title="Report Library"
+          title="Report library"
           action={campaignId && reportItems.length > 0 ? (
             <button
               className="btn btn-danger"
@@ -240,7 +240,7 @@ export function ReportsPage() {
         />
         <div className="p-4 border-b border-zinc-800/80">
           <label htmlFor="library-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
-            Target Campaign
+            Target campaign
           </label>
           <CampaignPicker
             id="library-campaign-select"

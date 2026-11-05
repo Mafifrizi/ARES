@@ -529,8 +529,8 @@ function CobaltGraphInner({
         <div className="cobalt-track-hud" role="status" aria-live="polite">
           <div className="flex items-center gap-2 text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-amber-300 font-bold uppercase tracking-wider">
-              PATHWAY LOCKED:
+            <span className="text-amber-300 font-medium">
+              Pathway locked
             </span>
             <span className="text-white font-semibold">
               {activeNodeData?.label || activeFocusNodeId}
@@ -789,51 +789,21 @@ export default function GraphPage({
         </div>
       )}
 
-      {/* Authentic Desktop Window Title Bar */}
-      <div className="cobalt-window-titlebar">
-        <div className="cobalt-window-title">
-          <Shield size={13} />
-          <span>ARES</span>
-        </div>
-        <div className="cobalt-window-controls">
-          <button
-            className="cobalt-win-btn"
-            type="button"
-            title="Reset Zoom & Pan"
-            onClick={() => flowControls?.fitView()}
-          >
-            ─
-          </button>
-          <button
-            className="cobalt-win-btn"
-            type="button"
-            title="Fit View to Screen"
-            onClick={() => flowControls?.fitView()}
-          >
-            ▢
-          </button>
-          <button
-            className="cobalt-win-btn close"
-            type="button"
-            title="Clear Selection"
-            onClick={() => setSelection(null)}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-
-      {/* Classic Desktop Window Menu Bar */}
+      {/* Command Menu Bar (ARES brand + menus) */}
       <div className="cobalt-menubar">
         <div className="cobalt-menubar-items">
+          <span className="cobalt-menu-brand">
+            <Shield size={13} />
+            <span>ARES</span>
+          </span>
           <span
-            className="cobalt-menu-item font-bold"
+            className="cobalt-menu-item font-semibold"
             onClick={() => setShowAboutDialog(true)}
             title="About ARES Tactical Visualizer Engine"
             role="button"
             tabIndex={0}
           >
-            ARES
+            About
           </span>
           <span
             className="cobalt-menu-item"
@@ -877,10 +847,10 @@ export default function GraphPage({
         </div>
 
         <div className="cobalt-menubar-right">
-          <label className="flex items-center gap-1.5 text-[11px] text-zinc-900 font-medium">
-            <span>Campaign:</span>
+          <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--ink-3)] font-medium">
+            <span>Campaign</span>
             <select
-              className="bg-white border border-zinc-500 text-black text-[11px] px-1 py-0.5 rounded-none font-sans"
+              className="bg-[color:var(--surface)] border border-[color:var(--line-2)] text-[color:var(--ink)] text-[11px] px-1.5 py-0.5 rounded font-sans"
               value={campaignId}
               onChange={(e) => chooseCampaign(e.target.value)}
             >
@@ -889,18 +859,17 @@ export default function GraphPage({
               ))}
             </select>
           </label>
-          <span className="text-zinc-600">|</span>
-          <span className="text-zinc-900 font-semibold font-mono text-[11px]">
-            {filteredGraph.nodes.length} Hosts / {filteredGraph.edges.length} Links
+          <span className="text-[color:var(--ink-faint)]">·</span>
+          <span className="text-[color:var(--ink-2)] font-semibold font-mono text-[11px] tnum">
+            {filteredGraph.nodes.length} hosts / {filteredGraph.edges.length} links
           </span>
-          <span className="text-zinc-600">|</span>
           <button
-            className={`cobalt-tool-btn text-[10px] py-0 px-1.5 ${useSampleTopology ? "active font-bold" : ""}`}
+            className={`cobalt-tool-btn text-[10px] py-0.5 px-2 ${useSampleTopology ? "active font-bold" : ""}`}
             onClick={() => setUseSampleTopology((v) => !v)}
             type="button"
             title="Toggle between Live Campaign data and Reference Demo Topology"
           >
-            {useSampleTopology ? "Mode: DEMO SAMPLE" : "Mode: LIVE CAMPAIGN"}
+            {useSampleTopology ? "Demo sample" : "Live campaign"}
           </button>
         </div>
       </div>
@@ -942,7 +911,7 @@ export default function GraphPage({
             ▦
           </button>
           <button
-            className={`cobalt-tool-btn ${filters.activePathOnly ? "active font-bold text-blue-900 border-blue-600 bg-blue-100" : ""}`}
+            className={`cobalt-tool-btn ${filters.activePathOnly ? "active font-bold" : ""}`}
             type="button"
             title="Toggle Lateral Pivot Route Focus [P]"
             onClick={togglePivotFocus}
@@ -950,7 +919,7 @@ export default function GraphPage({
             [P]
           </button>
           <button
-            className={`cobalt-tool-btn ${isRefreshing ? "active font-bold text-emerald-800" : ""}`}
+            className={`cobalt-tool-btn ${isRefreshing ? "active font-bold" : ""}`}
             onClick={handleRefresh}
             type="button"
             title="Refresh & Relayout Graph [R]"
@@ -1005,11 +974,12 @@ export default function GraphPage({
           </button>
           {selection && (
             <button
-              className="cobalt-tool-btn text-red-700 font-bold"
+              className="cobalt-tool-btn font-semibold"
               onClick={() => setSelection(null)}
               type="button"
+              style={{ color: "var(--danger)" }}
             >
-              Clear Selection
+              Clear selection
             </button>
           )}
         </div>

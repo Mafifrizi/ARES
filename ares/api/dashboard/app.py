@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ares.db.database import AresDatabase
+    from ares.db.postgres import PostgresDatabase
 
 
 from collections.abc import AsyncIterator
@@ -45,50 +46,99 @@ async def _require_dashboard_auth(
     """
     Validate JWT or API key. Raises 401 if missing/invalid.
     Accepts: Authorization: Bearer <token>  OR  X-API-Key: <key>
-    Deliberately minimal - dashboard is read-only, any authenticated user is allowed.
+    Dashboard is read-only, any authenticated user is allowed.
+
+    Delegates bearer validation to resolve_bearer_principal so the dashboard
+    enforces the same authoritative checks as the main API: the refresh-token
+    family must still be active, the token's auth_epoch must match the user's
+    current epoch, and the user must still be is_active=1. Without this a
+    JWT that had its family revoked by /auth/logout, its auth_epoch bumped by
+    /auth/logout-all / password-change / role-change, or whose user was
+    deactivated would otherwise keep working on the dashboard until the
+    access token expired (up to ARES_JWT_EXPIRE_MINUTES later).
     """
+    from ares.api.rbac import PrincipalDecisionStatus, resolve_bearer_principal
     from ares.core.config import get_settings
-    from ares.core.security import decode_access_token
     from ares.db.database import AresDatabase
+
+    # AresDatabase.create() returns AresDatabase | PostgresDatabase at runtime,
+    # and dashboard_app.state.db may be either (depending on ARES_DATABASE_URL).
+    # Use a union type to avoid mypy assignment / union-attr errors.
+    DbHandle = "AresDatabase | PostgresDatabase | None"  # noqa: F821
 
     settings = get_settings()
 
+    def _resolve_db() -> DbHandle:  # type: ignore[valid-type]
+        return getattr(dashboard_app.state, "db", None)
+
     # Check bearer JWT first
     if credentials and credentials.credentials:
-        payload = decode_access_token(credentials.credentials, settings.secret_key_value,
-                                       settings.ares_jwt_algorithm)
-        if payload:
-            # Honour token revocation list
-            jti = payload.get("jti")
-            if jti:
+        shared_db: "AresDatabase | PostgresDatabase | None" = _resolve_db()  # noqa: F821
+        close_after = False
+        if shared_db is None:
+            # Standalone mode (dashboard not mounted beside the main app): open a
+            # per-request connection so revocation / epoch / active checks can run.
+            try:
+                shared_db = await AresDatabase.create(
+                    settings.ares_database_url, settings.encryption_key_value
+                )
+                close_after = True
+            except Exception as exc:
+                logger.warning("dashboard_auth_db_unavailable", error=str(exc))
+                raise HTTPException(  # noqa: B904
+                    status_code=503,
+                    detail="Authentication service temporarily unavailable.",
+                )
+        # shared_db is guaranteed non-None here: either the initial resolve
+        # returned a handle, or the AresDatabase.create() above produced one
+        # (the except always raises HTTPException, never falls through).
+        assert shared_db is not None
+        try:
+            decision = await resolve_bearer_principal(
+                credentials.credentials,
+                db=shared_db,
+                secret_key=settings.secret_key_value,
+                algorithm=settings.ares_jwt_algorithm,
+            )
+        finally:
+            if close_after:
                 try:
-                    async with await AresDatabase.create(
-                        settings.ares_database_url, settings.encryption_key_value
-                    ) as _db:
-                        if await _db.is_access_token_revoked(jti):
-                            raise HTTPException(status_code=401, detail="Token revoked")
-                except HTTPException:
-                    raise
-                except Exception as exc:
-                    logger.warning("dashboard_auth_revocation_check_failed", error=str(exc))
-                    raise HTTPException(  # noqa: B904
-                        status_code=503,
-                        detail="Authentication service temporarily unavailable: cannot verify token revocation status.",
-                    )
+                    await shared_db.close()
+                except Exception:  # pragma: no cover - best-effort cleanup
+                    pass
+        if decision.status is PrincipalDecisionStatus.BACKEND_UNAVAILABLE:
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication service temporarily unavailable.",
+            )
+        if decision.status is PrincipalDecisionStatus.AUTHORIZED:
             return
+        # Fall through to API-key check on INVALID: callers may send both
+        # headers (unlikely but legal); only raise after exhausting them.
 
     # Check X-API-Key header
     api_key = request.headers.get("X-API-Key")
     if api_key:
+        shared_db2: "AresDatabase | PostgresDatabase | None" = _resolve_db()  # noqa: F821
+        close_after = False
+        user = None
         try:
-            async with await AresDatabase.create(
-                settings.ares_database_url, settings.encryption_key_value
-            ) as _db:
-                user = await _db.verify_api_key(api_key)
-            if user:
-                return
+            if shared_db2 is None:
+                shared_db2 = await AresDatabase.create(
+                    settings.ares_database_url, settings.encryption_key_value
+                )
+                close_after = True
+            user = await shared_db2.verify_api_key(api_key)
         except Exception:
-            pass
+            user = None
+        finally:
+            if close_after and shared_db2 is not None:
+                try:
+                    await shared_db2.close()
+                except Exception:  # pragma: no cover - best-effort cleanup
+                    pass
+        if user:
+            return
 
     raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -604,9 +654,11 @@ async def api_workers(_auth: None = Depends(_require_dashboard_auth)) -> dict[st
 
 @dashboard_app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket) -> None:
-    # Auth via Authorization header first, fallback to query param
+    # Auth via Authorization header first, fallback to query param.
+    # Note: token-in-query-param leaks into access logs / history / Referer;
+    # frontends should prefer the Authorization header where possible.
+    from ares.api.rbac import PrincipalDecisionStatus, resolve_bearer_principal
     from ares.core.config import get_settings
-    from ares.core.security import decode_access_token
     token = None
     auth_header = websocket.headers.get("authorization")
     if auth_header and auth_header.lower().startswith("bearer "):
@@ -618,24 +670,32 @@ async def websocket_live(websocket: WebSocket) -> None:
         await websocket.close(code=4001, reason="Authentication required")
         return
     settings = get_settings()
-    payload = decode_access_token(token, settings.secret_key_value, settings.ares_jwt_algorithm)
-    if not payload:
-        await websocket.close(code=4001, reason="Invalid token")
-        return
 
-    # Check token revocation against shared DB
-    jti = payload.get("jti")
-    if jti:
-        shared_db = getattr(dashboard_app.state, "db", None)
-        if shared_db is not None:
-            try:
-                if await shared_db.is_access_token_revoked(jti):
-                    await websocket.close(code=4001, reason="Token revoked")
-                    return
-            except Exception as db_exc:
-                logger.warning("dashboard_ws_revocation_check_failed", error=str(db_exc))
-                await websocket.close(code=4003, reason="Revocation check unavailable")
-                return
+    # Use the same authoritative check as the main API: family state,
+    # auth_epoch, and user active status — not just the jti blocklist.
+    shared_db = getattr(dashboard_app.state, "db", None)
+    if shared_db is None:
+        # Fail closed: without a DB we cannot verify family/epoch/active.
+        logger.warning("dashboard_ws_auth_db_unavailable")
+        await websocket.close(code=4003, reason="Authentication unavailable")
+        return
+    try:
+        decision = await resolve_bearer_principal(
+            token,
+            db=shared_db,
+            secret_key=settings.secret_key_value,
+            algorithm=settings.ares_jwt_algorithm,
+        )
+    except Exception as db_exc:
+        logger.warning("dashboard_ws_auth_failed", error=str(db_exc))
+        await websocket.close(code=4003, reason="Authentication unavailable")
+        return
+    if decision.status is PrincipalDecisionStatus.BACKEND_UNAVAILABLE:
+        await websocket.close(code=4003, reason="Authentication unavailable")
+        return
+    if decision.status is not PrincipalDecisionStatus.AUTHORIZED:
+        await websocket.close(code=4001, reason="Invalid or revoked token")
+        return
 
     await websocket.accept()
     _live_connections.append(websocket)

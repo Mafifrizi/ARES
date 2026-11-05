@@ -88,7 +88,7 @@ export function LoginPage() {
         {/* Center Form Container */}
         <div className="w-full max-w-sm mx-auto my-auto py-8">
           <div className="mb-6">
-            <h2 className="text-2xl font-semibold text-white tracking-tight">Sign In</h2>
+            <h2 className="text-2xl font-semibold text-white tracking-tight">Sign in</h2>
             <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
               Enter your credentials to access your dashboard.
             </p>

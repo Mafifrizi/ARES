@@ -4,6 +4,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Copy,
   Eye,
   EyeOff,
@@ -205,7 +206,6 @@ export function Page({
       <section className="page-header">
         <div className="page-heading">
           <div>
-            <p className="page-eyebrow">{meta.eyebrow}</p>
             <h1>{title}</h1>
             <p className="page-subtitle">{subtitle ?? meta.description}</p>
           </div>
@@ -481,10 +481,10 @@ export function CvssScoreCard({ data }: { data?: Record<string, unknown> }) {
     <section className="panel p-4 cvss-card">
       <div className="flex items-start justify-between gap-4 mb-3">
         <div>
-          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Risk Assessment</div>
-          <h3 className="text-base font-semibold text-white">CVSS Metrics</h3>
+          <h3 className="text-base font-semibold text-white">CVSS metrics</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Risk assessment and attack vector</p>
         </div>
-        <span className={`${opsecBadge(severity)} font-semibold uppercase text-xs px-2.5 py-1`}>
+        <span className={`${opsecBadge(severity)} font-medium text-xs px-2.5 py-1 capitalize`}>
           {severity}
         </span>
       </div>
@@ -512,8 +512,8 @@ export function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
     <section className="panel p-4 diff-card">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Delta Analysis</div>
-          <h3 className="text-base font-semibold text-white">Campaign Comparison</h3>
+          <h3 className="text-base font-semibold text-white">Campaign comparison</h3>
+          <p className="text-[11px] text-zinc-500 mt-0.5">Delta between two campaign scopes</p>
         </div>
         <span className="badge badge-low text-xs">Compared</span>
       </div>
@@ -528,11 +528,13 @@ export function CampaignDiffCard({ data }: { data?: Record<string, unknown> }) {
 export function DataPanel({
   title,
   data,
-  onClear
+  onClear,
+  collapsible = false
 }: {
   title: string;
   data: unknown;
   onClear?: () => void;
+  collapsible?: boolean;
 }) {
   if (!data) {
     return null;
@@ -561,9 +563,34 @@ export function DataPanel({
               <span>Dismiss</span>
             </button>
           )}
-          <span className="badge badge-high shrink-0 text-[10px] uppercase font-mono">Error</span>
+          <span className="badge badge-high shrink-0 text-[11px] font-medium">Error</span>
         </div>
       </div>
+    );
+  }
+
+  if (collapsible) {
+    return (
+      <details className="raw-disclosure mb-3">
+        <summary className="raw-disclosure-summary">
+          <ChevronRight size={14} className="raw-disclosure-chevron shrink-0" />
+          <span>Raw telemetry</span>
+          <span className="raw-disclosure-hint">JSON</span>
+          {onClear && (
+            <button
+              className="raw-disclosure-clear"
+              onClick={(e) => { e.preventDefault(); onClear(); }}
+              type="button"
+              title="Clear payload preview"
+            >
+              <X size={12} /> Clear
+            </button>
+          )}
+        </summary>
+        <div className="raw-disclosure-body">
+          <StructuredJsonViewer data={data} title={`${title} Telemetry`} maxHeightClass="max-h-96" defaultExpandedDepth={1} />
+        </div>
+      </details>
     );
   }
 
@@ -607,57 +634,60 @@ export function getTailoredFindingDetails(finding: Finding) {
   const isRedis = title.includes("REDIS") || port === 6379;
   const isAttackSurface = title.includes("ATTACK SURFACE");
 
+  // serviceTag names the service; serviceCategory the role. Both are sentence-case
+  // (the meta line already prints port and MITRE separately, and the old
+  // "PORT N / KERBEROS KDC / TIER-0 DC" strings read as terminal theatre).
   let serviceTag = typeof evidence.role === "string" && evidence.role ? evidence.role : "";
-  let serviceCategory = typeof evidence.service === "string" && evidence.service ? String(evidence.service).toUpperCase() : "";
+  let serviceCategory = typeof evidence.service === "string" && evidence.service ? String(evidence.service) : "";
   let tailoredRemediation = String(finding.remediation ?? "");
 
   if (isKerberos) {
-    serviceTag = serviceTag || "PORT 88 / KERBEROS KDC / TIER-0 DC";
-    serviceCategory = serviceCategory || "Active Directory Authentication";
+    serviceTag = serviceTag || "Kerberos KDC · Tier-0 DC";
+    serviceCategory = serviceCategory || "Active Directory authentication";
     tailoredRemediation = tailoredRemediation || "Enforce AES-256 Kerberos encryption (disable RC4-HMAC), audit service accounts for SPNs to mitigate Kerberoasting, and monitor Event ID 4769 for abnormal TGS requests.";
   } else if (isLdaps) {
-    serviceTag = serviceTag || "PORT 636 / LDAPS SECURE / TIER-0 DC";
-    serviceCategory = serviceCategory || "Encrypted Directory Service";
+    serviceTag = serviceTag || "LDAPS · Tier-0 DC";
+    serviceCategory = serviceCategory || "Encrypted directory service";
     tailoredRemediation = tailoredRemediation || "Enforce strong TLS cipher suites, validate CA trust chains, and ensure LDAP channel binding is strictly enforced (LdapEnforceChannelBinding=2).";
   } else if (isLdap) {
-    serviceTag = serviceTag || "PORT 389 / LDAP DIRECTORY";
-    serviceCategory = serviceCategory || "Active Directory Service";
+    serviceTag = serviceTag || "LDAP directory";
+    serviceCategory = serviceCategory || "Active Directory service";
     tailoredRemediation = tailoredRemediation || "Require LDAP signing (LDAPServerIntegrity=2) and upgrade clients to LDAPS (port 636) to prevent NTLM relay and credential harvesting.";
   } else if (isSmb) {
-    serviceTag = serviceTag || "PORT 445 / SMB SERVICE";
-    serviceCategory = serviceCategory || "Core Windows File Sharing & Remote Admin";
+    serviceTag = serviceTag || "SMB service";
+    serviceCategory = serviceCategory || "Windows file sharing & remote admin";
     tailoredRemediation = tailoredRemediation || "Require SMB signing (RequireSecuritySignature=1), disable legacy SMBv1, and restrict port 445 inbound access to management subnets.";
   } else if (isWinrm) {
-    serviceTag = serviceTag || `PORT ${port || 5985} / WINRM REMOTE MGMT`;
-    serviceCategory = serviceCategory || "Windows Remote Management (PowerShell Remoting)";
+    serviceTag = serviceTag || "WinRM remote management";
+    serviceCategory = serviceCategory || "Windows remote management (PowerShell remoting)";
     tailoredRemediation = tailoredRemediation || "Disable WinRM plaintext HTTP listeners, transition management traffic to WinRM HTTPS (port 5986), and enforce GPO firewall restrictions.";
   } else if (isMssql) {
-    serviceTag = serviceTag || "PORT 1433 / MSSQL DATABASE";
-    serviceCategory = serviceCategory || "Enterprise Relational Database";
+    serviceTag = serviceTag || "MSSQL database";
+    serviceCategory = serviceCategory || "Enterprise relational database";
     tailoredRemediation = tailoredRemediation || "Disable 'sa' account, enforce Windows Authentication only, and keep xp_cmdshell disabled in configuration.";
   } else if (isRdp) {
-    serviceTag = serviceTag || "PORT 3389 / RDP REMOTE DESKTOP";
-    serviceCategory = serviceCategory || "Interactive Terminal Services";
+    serviceTag = serviceTag || "RDP · remote desktop";
+    serviceCategory = serviceCategory || "Interactive terminal services";
     tailoredRemediation = tailoredRemediation || "Enforce Network Level Authentication (NLA) and restrict RDP access to management VPN jump hosts.";
   } else if (isDocker) {
-    serviceTag = serviceTag || "PORT 2375 / DOCKER DAEMON API";
-    serviceCategory = serviceCategory || "Unauthenticated Container Engine";
+    serviceTag = serviceTag || "Docker daemon API";
+    serviceCategory = serviceCategory || "Unauthenticated container engine";
     tailoredRemediation = tailoredRemediation || "Disable unauthenticated TCP socket; bind to local Unix socket or require mutual TLS authentication on port 2376.";
   } else if (isRedis) {
-    serviceTag = serviceTag || "PORT 6379 / REDIS MEMORY STORE";
-    serviceCategory = serviceCategory || "In-Memory Cache & Key-Value Store";
+    serviceTag = serviceTag || "Redis memory store";
+    serviceCategory = serviceCategory || "In-memory cache & key-value store";
     tailoredRemediation = tailoredRemediation || "Enable requirepass authentication and bind Redis listener strictly to 127.0.0.1.";
   } else if (isDns) {
-    serviceTag = serviceTag || "PORT 53 / MICROSOFT DNS";
-    serviceCategory = serviceCategory || "Domain Name Resolution";
+    serviceTag = serviceTag || "Microsoft DNS";
+    serviceCategory = serviceCategory || "Domain name resolution";
     tailoredRemediation = tailoredRemediation || "Restrict DNS zone transfers (AXFR) to designated secondary nameservers only, and enable DNSSEC validation.";
   } else if (isRpc) {
-    serviceTag = serviceTag || "PORT 135 / MSRPC ENDPOINT";
-    serviceCategory = serviceCategory || "RPC Endpoint Mapper";
+    serviceTag = serviceTag || "MSRPC endpoint";
+    serviceCategory = serviceCategory || "RPC endpoint mapper";
     tailoredRemediation = tailoredRemediation || "Restrict RPC endpoint mapper via host-based firewall to prevent unauthenticated RPC enumeration and coercions.";
   } else if (isAttackSurface) {
-    serviceTag = "HOST ATTACK SURFACE SUMMARY";
-    serviceCategory = "Exposed Network Services";
+    serviceTag = "Host attack-surface summary";
+    serviceCategory = "Exposed network services";
     tailoredRemediation = tailoredRemediation || "Audit all listening ports against the enterprise baseline and enforce host-based micro-segmentation with Windows Defender Firewall.";
   }
 
@@ -718,9 +748,10 @@ export function DiscoveredPerimeterCard({
 
   return (
     <div className="space-y-2 mt-3">
-      {/* 1. Defensive Telemetry & Purple Loot (Collapsible Progressive Disclosure) */}
+      {/* 1. Synthesized detection rules (collapsible). Wrapper stays sans; the
+          <pre> block is mono where it matters. */}
       {loot.length > 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm overflow-hidden text-xs">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md overflow-hidden text-xs">
           <button
             type="button"
             onClick={() => setShowLoot((prev) => !prev)}
@@ -729,20 +760,20 @@ export function DiscoveredPerimeterCard({
             <div className="flex items-center gap-2">
               <ShieldCheck size={14} className="text-emerald-400 shrink-0" />
               <span className="font-semibold text-zinc-200 text-xs">
-                Synthesized Detection Rules ({loot.length})
+                Synthesized detection rules ({loot.length})
               </span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded font-mono">
-                KQL & Sigma
+              <span className="text-[10px] px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-400 rounded">
+                KQL &amp; Sigma
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <span className="text-[11px]">{showLoot ? "Hide Rules" : "Show Rules"}</span>
+              <span className="text-[11px]">{showLoot ? "Hide" : "Show"}</span>
               <ChevronDown size={14} className={`transform transition-transform duration-200 ${showLoot ? "rotate-180" : ""}`} />
             </div>
           </button>
 
           {showLoot && (
-            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50 font-mono">
+            <div className="p-3 border-t border-zinc-800/80 space-y-2.5 bg-zinc-950/50">
               {loot.map((item, idx) => {
                 const name = String(item.name ?? `Artifact #${idx + 1}`);
                 const lootType = String(item.loot_type ?? "rule");
@@ -762,17 +793,19 @@ export function DiscoveredPerimeterCard({
                 };
 
                 return (
-                  <div key={idx} className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 space-y-1.5">
+                  <div key={idx} className="p-2.5 rounded-md border border-zinc-800 bg-zinc-900/60 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 truncate">
                         <Terminal size={12} className="text-zinc-400 shrink-0" />
-                        <strong className="text-zinc-200 text-xs truncate">{name}</strong>
-                        <span className="badge text-[10px] py-0 px-1.5 uppercase">{lootType}</span>
+                        <strong className="text-zinc-200 text-xs truncate font-medium">{name}</strong>
+                        <span className="text-[11px] px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400">
+                          {lootType}
+                        </span>
                       </div>
                       <button
                         type="button"
                         onClick={handleCopyRule}
-                        className="btn btn-compact text-[10px] py-0.5 px-2 flex items-center gap-1 shrink-0"
+                        className="btn btn-compact text-[11px] py-0.5 px-2 flex items-center gap-1 shrink-0"
                         title="Copy detection rule query"
                       >
                         {copiedLootIdx === idx ? (
@@ -783,12 +816,12 @@ export function DiscoveredPerimeterCard({
                         ) : (
                           <>
                             <Copy size={11} />
-                            <span>Copy Rule</span>
+                            <span>Copy rule</span>
                           </>
                         )}
                       </button>
                     </div>
-                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-sm overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
+                    <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 p-2 rounded-md overflow-x-auto max-h-36 border border-zinc-800/60 leading-relaxed select-all">
                       {ruleText}
                     </pre>
                   </div>
@@ -799,27 +832,28 @@ export function DiscoveredPerimeterCard({
         </div>
       )}
 
-      {/* 2. Perimeter Inventory Bar (Clean, non-redundant when findings are present) */}
+      {/* 2. Perimeter inventory bar (shown alongside findings). Labels sans;
+          port values stay mono because that's canonical. */}
       {hasPerimeter && findingsCount > 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md p-2.5 px-3 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             <Radio size={13} className="text-emerald-400 shrink-0" />
-            <span className="font-semibold text-zinc-300 text-[11px]">
-              Surface Inventory:
+            <span className="font-medium text-zinc-300 text-[11px]">
+              Surface inventory
             </span>
             {target && (
               <span className="text-zinc-400">
-                Host <strong className="text-zinc-100">{target}</strong>
+                Host <strong className="text-zinc-100 font-mono text-[11px]">{target}</strong>
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-zinc-400 text-[11px]">
-            {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
-            {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+          <div className="flex items-center gap-3 text-zinc-400 text-[11px] flex-wrap">
+            {totalScanned !== null && <span className="tabular-nums">Scanned: {totalScanned} ports</span>}
+            {scanMs !== null && <span className="tabular-nums">Latency: {scanMs} ms</span>}
             <div className="flex items-center gap-1.5">
               {openPorts.map((port) => (
-                <span key={String(port)} className="px-1.5 py-0.5 rounded-sm bg-zinc-900 border border-zinc-700/80 text-emerald-400 font-semibold text-[10px]">
-                  {String(port)}/TCP ({serviceMap[String(port)] ?? "active"})
+                <span key={String(port)} className="px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700/80 text-emerald-400 text-[11px] font-mono tabular-nums">
+                  {String(port)}/TCP <span className="text-zinc-500">({serviceMap[String(port)] ?? "active"})</span>
                 </span>
               ))}
             </div>
@@ -827,24 +861,24 @@ export function DiscoveredPerimeterCard({
         </div>
       )}
 
-      {/* 3. Discovered Services Grid (Rendered only if no findings exist, avoiding duplicate cards) */}
+      {/* 3. Discovered services grid (shown instead of inventory bar when no findings). */}
       {hasPerimeter && findingsCount === 0 && (
-        <div className="border border-zinc-800 bg-zinc-950/80 rounded-sm p-3 space-y-2.5 font-mono text-xs">
+        <div className="border border-zinc-800 bg-zinc-950/80 rounded-md p-3 space-y-2.5 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
             <div className="flex items-center gap-2">
               <Radio size={14} className="text-emerald-400 shrink-0" />
-              <span className="font-semibold text-zinc-200 text-xs">
-                Discovered Target Services
+              <span className="font-medium text-zinc-200 text-xs">
+                Discovered target services
               </span>
               {target && (
-                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm text-[11px]">
-                  Host: <strong className="text-zinc-100">{target}</strong>
+                <span className="text-zinc-400 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-md text-[11px]">
+                  Host <strong className="text-zinc-100 font-mono">{target}</strong>
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-zinc-400">
+            <div className="flex items-center gap-3 text-[11px] text-zinc-400 tabular-nums">
               {totalScanned !== null && <span>Scanned: {totalScanned} ports</span>}
-              {scanMs !== null && <span>Latency: {scanMs}ms</span>}
+              {scanMs !== null && <span>Latency: {scanMs} ms</span>}
             </div>
           </div>
 
@@ -860,52 +894,49 @@ export function DiscoveredPerimeterCard({
               return (
                 <div
                   key={portStr}
-                  className="p-2.5 rounded-sm border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-1.5 transition-colors"
+                  className="p-3 rounded-md border border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 space-y-2 transition-colors"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-zinc-100 bg-zinc-950 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                      PORT {portStr}/TCP
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-zinc-100 text-[13px] font-medium tabular-nums">
+                      {portStr}/TCP
                     </span>
-                    <span className="text-[10px] text-emerald-400 uppercase font-semibold flex items-center gap-1">
+                    <span className="text-[11px] text-emerald-400 flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                      OPEN ({service})
+                      <span>Open</span>
+                      <span className="text-zinc-500">· {service}</span>
                     </span>
                   </div>
 
                   {banner && (
-                    <div className="text-[10px] text-zinc-400 truncate bg-zinc-950/70 p-1 rounded-sm border border-zinc-800/40">
-                      <span className="text-zinc-500 font-semibold">Banner: </span>
+                    <div className="text-[11px] text-zinc-400 truncate bg-zinc-950/70 p-1.5 rounded border border-zinc-800/40">
+                      <span className="text-zinc-500">Banner </span>
                       <span className="text-zinc-300 font-mono">{banner}</span>
                     </div>
                   )}
 
-                  {onSelectModule && (
-                    <div className="pt-1 flex items-center gap-1 flex-wrap">
-                      {portStr === "22" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Fingerprint SSH
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            SSH Pivot
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onSelectModule("linux.privesc", { target })}
-                            className="text-[10px] px-2 py-0.5 rounded-sm border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-                          >
-                            Privesc Audit
-                          </button>
-                        </>
-                      )}
+                  {onSelectModule && portStr === "22" && (
+                    <div className="pt-1 flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("network.service_detect", { target, ports: "22" })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        Fingerprint SSH
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("lateral.ssh_pivot", { target, port: 22 })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        SSH pivot
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectModule("linux.privesc", { target })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-200 transition-colors"
+                      >
+                        Privesc audit
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1004,7 +1035,7 @@ export function DiscoveredSecretsEvidenceViewer({
   };
 
   return (
-    <div className="mt-2.5 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2.5 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       {/* Header */}
       <div
         role="button"
@@ -1023,12 +1054,12 @@ export function DiscoveredSecretsEvidenceViewer({
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({hits.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 text-amber-300 font-semibold">
-            LOOT EXTRACTED
-          </span>
           {hits.some((h) => h.is_placeholder) && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
-              SAMPLE / TEST IDENTIFIED
+            <span
+              data-testid="secrets-placeholder-notice"
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400"
+            >
+              Includes test samples
             </span>
           )}
         </div>
@@ -1037,14 +1068,14 @@ export function DiscoveredSecretsEvidenceViewer({
           <button
             type="button"
             onClick={handleToggleRevealAll}
-            className="text-[11px] font-mono px-2 py-0.5 rounded border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
+            className="text-[11px] px-2 py-1 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors flex items-center gap-1 shrink-0"
             title={revealAll ? "Mask all discovered secret values" : "Reveal all discovered secret values"}
           >
             {revealAll ? <EyeOff size={11} className="text-zinc-400" /> : <Eye size={11} className="text-zinc-400" />}
-            <span>{revealAll ? "Mask All" : "Reveal All"}</span>
+            <span>{revealAll ? "Mask all" : "Reveal all"}</span>
           </button>
           <div className="flex items-center gap-1 text-zinc-400 text-xs">
-            <span className="text-[11px] font-sans">{isExpanded ? "Hide Details" : "Show Details"}</span>
+            <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
             <ChevronDown size={14} className={`transform transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
           </div>
         </div>
@@ -1055,11 +1086,11 @@ export function DiscoveredSecretsEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3 font-medium">Source File & Line</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Source file &amp; line</th>
                 <th className="py-2 px-3 font-medium">Pattern</th>
-                <th className="py-2 px-3 font-medium">Discovered Credential / Value</th>
-                <th className="py-2 px-3 font-medium">Shannon Entropy</th>
+                <th className="py-2 px-3 font-medium">Discovered credential / value</th>
+                <th className="py-2 px-3 font-medium">Shannon entropy</th>
                 <th className="py-2 px-3 font-medium">Confidence</th>
               </tr>
             </thead>
@@ -1101,7 +1132,7 @@ export function DiscoveredSecretsEvidenceViewer({
 
                     {/* Pattern Badge */}
                     <td className="py-2.5 px-3 whitespace-nowrap">
-                      <span className={`text-[10px] px-2 py-0.5 rounded border uppercase font-medium ${getPatternBadgeClass(patternName)}`}>
+                      <span className={`text-[11px] px-2 py-0.5 rounded border font-medium ${getPatternBadgeClass(patternName)}`}>
                         {patternName.replace(/_/g, " ")}
                       </span>
                     </td>
@@ -1156,7 +1187,7 @@ export function DiscoveredSecretsEvidenceViewer({
                           </span>
                           <span className="text-[10px] text-zinc-500">bits</span>
                           <span
-                            className="text-[9px] px-1 py-0.2 rounded uppercase border text-zinc-400 border-zinc-800"
+                            className="text-[10px] px-1.5 py-0.5 rounded border text-zinc-400 border-zinc-800 font-medium"
                             title={
                               entropyVal >= 3.5
                                 ? "High entropy (Likely true random credential/key)"
@@ -1165,7 +1196,7 @@ export function DiscoveredSecretsEvidenceViewer({
                                 : "Low entropy (Dictionary word or placeholder)"
                             }
                           >
-                            {entropyVal >= 3.5 ? "HIGH" : entropyVal >= 2.5 ? "MED" : "LOW"}
+                            {entropyVal >= 3.5 ? "High" : entropyVal >= 2.5 ? "Med" : "Low"}
                           </span>
                         </div>
                       ) : (
@@ -1178,23 +1209,23 @@ export function DiscoveredSecretsEvidenceViewer({
                       <div className="flex items-center gap-1.5">
                         {confVal !== null ? (
                           <span
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-medium font-mono ${
+                            className={`px-1.5 py-0.5 rounded-md border text-[11px] font-medium tabular-nums ${
                               confVal >= 0.85
-                                ? "text-emerald-300 bg-emerald-950/50 border-emerald-800/60"
+                                ? "text-emerald-300 bg-zinc-900/60 border-emerald-900/50"
                                 : confVal >= 0.60
-                                ? "text-amber-300 bg-amber-950/50 border-amber-800/60"
-                                : "text-rose-300 bg-rose-950/50 border-rose-800/60"
+                                ? "text-amber-300 bg-zinc-900/60 border-amber-900/50"
+                                : "text-rose-300 bg-zinc-900/60 border-rose-900/50"
                             }`}
                           >
                             {confVal >= 0.95 ? "100% Confirmed" : `${Math.round(confVal * 100)}%`}
                           </span>
                         ) : (
-                          <span className="text-zinc-500 text-[10px]">Standard</span>
+                          <span className="text-zinc-500 text-[11px]">Standard</span>
                         )}
 
                         {hit.is_placeholder && (
                           <span
-                            className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 uppercase tracking-tight"
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-400"
                             title="Identified as test sample or mock placeholder"
                           >
                             Placeholder
@@ -1232,20 +1263,17 @@ export function DiscoveredHashesEvidenceViewer({
   };
 
   return (
-    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded((p) => !p)}
         className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
       >
         <div className="flex items-center gap-2">
-          <Key size={13} className="text-purple-400 shrink-0" />
+          <Key size={13} className="text-zinc-400 shrink-0" />
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({hashes.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-950/50 border border-purple-800/60 text-purple-300 font-semibold">
-            HASH REPOSITORY
-          </span>
         </div>
         <div className="flex items-center gap-1 text-zinc-400 text-xs">
           <span className="text-[11px] font-sans">{isExpanded ? "Hide" : "Show"}</span>
@@ -1257,11 +1285,11 @@ export function DiscoveredHashesEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3">Principal / Account</th>
-                <th className="py-2 px-3">Type</th>
-                <th className="py-2 px-3">Extracted Hash</th>
-                <th className="py-2 px-3">Privilege</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Principal / account</th>
+                <th className="py-2 px-3 font-medium">Type</th>
+                <th className="py-2 px-3 font-medium">Extracted hash</th>
+                <th className="py-2 px-3 font-medium">Privilege</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -1273,15 +1301,15 @@ export function DiscoveredHashesEvidenceViewer({
 
                 return (
                   <tr key={idx} className="hover:bg-zinc-900/40">
-                    <td className="py-2 px-3 font-semibold text-zinc-200">{user}</td>
+                    <td className="py-2 px-3 font-medium text-zinc-200 font-mono text-[11px]">{user}</td>
                     <td className="py-2 px-3">
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 uppercase">
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-300 font-mono uppercase">
                         {type}
                       </span>
                     </td>
                     <td className="py-2 px-3">
                       <div className="flex items-center gap-1.5 max-w-md">
-                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1">
+                        <code className="text-zinc-300 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 truncate text-[11px] select-all flex-1 font-mono">
                           {hash}
                         </code>
                         <button
@@ -1296,11 +1324,11 @@ export function DiscoveredHashesEvidenceViewer({
                     </td>
                     <td className="py-2 px-3 whitespace-nowrap">
                       {isAdmin ? (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/50 border border-rose-800/60 text-rose-300 font-semibold">
+                        <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-zinc-900/60 border border-rose-900/50 text-rose-300 font-medium">
                           Domain Admin
                         </span>
                       ) : (
-                        <span className="text-zinc-500 text-[10px]">Standard User</span>
+                        <span className="text-zinc-500 text-[11px]">Standard user</span>
                       )}
                     </td>
                   </tr>
@@ -1326,19 +1354,19 @@ export function DiscoveredTicketsEvidenceViewer({
   if (!tickets || tickets.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-sm border border-zinc-800/90 bg-zinc-950/90 overflow-hidden font-mono text-xs">
+    <div className="mt-2 rounded-md border border-zinc-800/90 bg-zinc-950/90 overflow-hidden text-xs">
       <button
         type="button"
         onClick={() => setIsExpanded((p) => !p)}
         className="w-full p-2.5 px-3 flex items-center justify-between hover:bg-zinc-900/60 transition-colors text-left"
       >
         <div className="flex items-center gap-2">
-          <Key size={13} className="text-cyan-400 shrink-0" />
+          <Key size={13} className="text-zinc-400 shrink-0" />
           <strong className="text-zinc-200 text-xs font-sans tracking-tight">
             {title} ({tickets.length})
           </strong>
-          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/50 border border-cyan-800/60 text-cyan-300 font-semibold">
-            KERBEROS CREDENTIAL CACHE
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800/60 border border-zinc-700/60 text-zinc-400">
+            Kerberos credential cache
           </span>
         </div>
         <div className="flex items-center gap-1 text-zinc-400 text-xs">
@@ -1351,11 +1379,11 @@ export function DiscoveredTicketsEvidenceViewer({
         <div className="border-t border-zinc-800/80 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[10px] uppercase text-zinc-400 tracking-wider">
-                <th className="py-2 px-3">Client Principal</th>
-                <th className="py-2 px-3">Service Principal</th>
-                <th className="py-2 px-3">Expiry</th>
-                <th className="py-2 px-3">Cache Path / Origin</th>
+              <tr className="bg-zinc-900/80 border-b border-zinc-800/70 text-[11px] text-zinc-400">
+                <th className="py-2 px-3 font-medium">Client principal</th>
+                <th className="py-2 px-3 font-medium">Service principal</th>
+                <th className="py-2 px-3 font-medium">Expiry</th>
+                <th className="py-2 px-3 font-medium">Cache path / origin</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -1367,9 +1395,9 @@ export function DiscoveredTicketsEvidenceViewer({
 
                 return (
                   <tr key={idx} className="hover:bg-zinc-900/40">
-                    <td className="py-2 px-3 font-semibold text-zinc-200">{client}</td>
-                    <td className="py-2 px-3 text-zinc-300">{server}</td>
-                    <td className="py-2 px-3 text-zinc-400 text-[11px]">{expiry}</td>
+                    <td className="py-2 px-3 font-medium text-zinc-200 font-mono text-[11px]">{client}</td>
+                    <td className="py-2 px-3 text-zinc-300 font-mono text-[11px]">{server}</td>
+                    <td className="py-2 px-3 text-zinc-400 text-[11px] tabular-nums">{expiry}</td>
                     <td className="py-2 px-3 text-zinc-500 font-mono text-[11px]">{path}</td>
                   </tr>
                 );
@@ -1396,12 +1424,12 @@ export function ModuleRunSummary({
   }
   if (error) {
     return (
-      <div className="border border-rose-900/60 bg-rose-950/20 p-3.5 rounded mt-4 font-mono text-xs text-rose-300" role="alert">
+      <div className="border border-rose-900/60 bg-rose-950/20 p-3.5 rounded mt-4 text-sm text-rose-300" role="alert">
         <div className="flex items-center gap-2 font-semibold text-rose-400 mb-1">
           <AlertTriangle size={15} />
-          <span>[EXECUTION_FAILED]</span>
+          <span>Execution failed</span>
         </div>
-        <p>{error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}</p>
+        <p className="text-xs">{error instanceof ApiError ? String(error.detail) : error instanceof Error ? error.message : "Module run failed."}</p>
       </div>
     );
   }
@@ -1459,61 +1487,61 @@ export function ModuleRunSummary({
   return (
     <section className="mt-4 space-y-3 font-sans">
       {/* Tactical Telemetry Strip (Replacing bulky cards & notice clutter) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/80 border border-zinc-800 rounded-sm overflow-hidden text-xs font-mono">
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">MODULE / OPERATION</span>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-zinc-800/80 border border-zinc-800 rounded-md overflow-hidden text-sm">
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Module</span>
           <span className="font-semibold text-zinc-200">{moduleId}</span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">EXECUTION OUTCOME</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Outcome</span>
           <span className={hasOutcomeError ? "text-rose-400 font-semibold" : "text-emerald-400 font-semibold"}>
             {displayOutcome}
           </span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">OBSERVATIONS / AUDIT</span>
-          <span className="font-semibold text-zinc-100">
-            {findings.length} findings <span className="text-zinc-500 text-[11px]">({validationCount} verified)</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Observations</span>
+          <span className="font-semibold text-zinc-100 tnum">
+            {findings.length} findings <span className="text-zinc-500 text-xs">({validationCount} verified)</span>
           </span>
         </div>
-        <div className="bg-zinc-950 p-2.5">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider block">DURATION</span>
-          <span className="font-semibold text-zinc-300">{duration}</span>
+        <div className="bg-zinc-950 p-3">
+          <span className="text-xs text-zinc-500 block mb-0.5">Duration</span>
+          <span className="font-semibold text-zinc-300 tnum">{duration}</span>
         </div>
       </div>
 
       {provenanceHash && (
-        <div className="px-3 py-1.5 rounded-sm border border-zinc-800/80 bg-zinc-950/80 flex items-center justify-between gap-3 text-xs font-mono">
+        <div className="px-3 py-2 rounded-md border border-zinc-800/80 bg-zinc-950/80 flex items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 text-zinc-400 truncate">
             <ShieldCheck size={13} className="text-emerald-400 shrink-0" />
-            <span className="text-zinc-500 font-semibold">AUDIT PROVENANCE:</span>
-            <code className="text-zinc-300 truncate text-[11px] select-all">{provenanceHash}</code>
+            <span className="text-zinc-500 font-medium">Audit provenance</span>
+            <code className="text-zinc-300 truncate text-[11px] font-mono select-all">{provenanceHash}</code>
           </div>
-          <span className="text-[10px] text-emerald-400/90 uppercase tracking-wider shrink-0 font-semibold">[IMMUTABLE RECORD]</span>
+          <span className="text-[11px] text-emerald-400/90 shrink-0 font-medium">Immutable record</span>
         </div>
       )}
 
       {rawError && (
-        <div className="p-3 rounded-sm border border-amber-900/50 bg-amber-950/20 text-xs font-mono text-amber-300 flex items-start gap-2" role="alert">
+        <div className="p-3 rounded-md border border-amber-900/50 bg-amber-950/20 text-xs text-amber-300 flex items-start gap-2" role="alert">
           <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-400" />
           <div>
-            <span className="font-semibold">[EXECUTION NOTICE: {rawError.replace(/_/g, " ").toUpperCase()}]</span>
+            <span className="font-semibold">Execution notice: {rawError.replace(/_/g, " ")}</span>
             {rawHint && <p className="mt-0.5 text-zinc-400">{rawHint}</p>}
           </div>
         </div>
       )}
 
       {(outcomeMessage || runError) && !rawError && hasOutcomeError && (
-        <div className="p-3 rounded-sm border border-rose-900/60 bg-rose-950/20 text-xs font-mono text-rose-300 flex items-center gap-2" role="alert">
+        <div className="p-3 rounded-md border border-rose-900/60 bg-rose-950/20 text-xs text-rose-300 flex items-center gap-2" role="alert">
           <AlertTriangle size={14} className="shrink-0 text-rose-400" />
           <span>{outcomeMessage || runError}</span>
         </div>
       )}
 
       {warnings.length > 0 && (
-        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
-          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
-            [{dryRun ? "SIMULATION NOTES" : "OPERATION NOTES"}]
+        <div className="p-3 rounded-md border border-zinc-800 bg-zinc-950/60 text-xs text-zinc-400">
+          <span className="text-zinc-300 font-semibold block mb-1">
+            {dryRun ? "Simulation notes" : "Operation notes"}
           </span>
           <ul className="list-disc pl-4 space-y-0.5">
             {warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -1522,9 +1550,9 @@ export function ModuleRunSummary({
       )}
 
       {nextSteps.length > 0 && (
-        <div className="p-3 rounded-sm border border-zinc-800 bg-zinc-950/60 text-xs font-mono text-zinc-400">
-          <span className="text-zinc-300 uppercase tracking-wider font-semibold block mb-1">
-            [OPERATOR NEXT STEPS]
+        <div className="p-3 rounded-md border border-zinc-800 bg-zinc-950/60 text-xs text-zinc-400">
+          <span className="text-zinc-300 font-semibold block mb-1">
+            Operator next steps
           </span>
           <ul className="list-disc pl-4 space-y-0.5">
             {nextSteps.map((step) => <li key={step}>{step}</li>)}
@@ -1564,57 +1592,80 @@ export function ModuleRunSummary({
             const hashes = Array.isArray(evidence.hashes) ? (evidence.hashes as Record<string, unknown>[]) : [];
             const tickets = Array.isArray(evidence.tickets) ? (evidence.tickets as Record<string, unknown>[]) : [];
 
+            const severityLabel = (() => {
+              const s = String(finding.severity ?? "info").toLowerCase();
+              if (s.includes("crit")) return "Critical";
+              if (s.includes("high")) return "High";
+              if (s.includes("med")) return "Medium";
+              if (s.includes("low")) return "Low";
+              return "Info";
+            })();
+            const severityDotClass =
+              normSev.includes("crit") || normSev.includes("high")
+                ? "bg-rose-500"
+                : normSev.includes("med")
+                ? "bg-amber-500"
+                : normSev.includes("low")
+                ? "bg-zinc-500"
+                : "bg-zinc-600";
+
             return (
               <div
-                className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-3.5 space-y-2.5 rounded-sm`}
+                className={`border border-zinc-800/80 border-l-[3px] ${borderAccent} bg-zinc-950/70 hover:bg-zinc-900/40 hover:border-zinc-700 transition-colors p-4 space-y-3 rounded-md`}
                 key={finding.id ?? index}
               >
-                {/* Header Row: Endpoint Port, Mitre, Host, Severity & Confidence */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono pb-2 border-b border-zinc-800/50">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {details.port ? (
-                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                        PORT {details.port}/TCP
-                      </span>
-                    ) : details.serviceTag ? (
-                      <span className="font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 border border-zinc-800 rounded-sm">
-                        {details.serviceTag}
-                      </span>
-                    ) : null}
-                    {details.serviceCategory && (
-                      <span className="text-[11px] text-zinc-400 font-sans">
-                        {details.serviceCategory}
-                      </span>
-                    )}
-                    {finding.host && (
-                      <span className="text-[11px] text-zinc-500">
-                        TARGET: <strong className="text-zinc-300 font-mono">{finding.host}</strong>
-                      </span>
-                    )}
-                    {finding.mitre_technique && (
-                      <span className="text-[10px] text-zinc-500 border border-zinc-800 px-1.5 py-0.5 rounded-sm">
-                        {finding.mitre_technique}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2.5 shrink-0">
-                    <span className={details.isHighConf ? "text-emerald-400 font-mono text-[11px] flex items-center gap-1 font-medium" : "text-zinc-400 font-mono text-[11px]"}>
-                      {details.isHighConf && <CheckCircle2 size={12} className="text-emerald-400" />}
-                      {details.confidenceText}
-                    </span>
-                    <span className={opsecBadge(finding.severity)}>
-                      {finding.severity ? String(finding.severity).toUpperCase() : "INFO"}
+                {/* Header: severity + confidence (compact meta, no terminal theatre) */}
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-zinc-400">
+                    <span className="inline-flex items-center gap-1.5 font-medium text-zinc-200">
+                      <span className={`w-1.5 h-1.5 rounded-full ${severityDotClass}`} aria-hidden />
+                      {severityLabel}
                     </span>
                   </div>
+                  <span className={details.isHighConf ? "inline-flex items-center gap-1 text-emerald-400 font-medium" : "text-zinc-400"}>
+                    {details.isHighConf && <CheckCircle2 size={12} className="text-emerald-400" />}
+                    {details.confidenceText}
+                  </span>
                 </div>
 
-                {/* Finding Title & Concise Narrative */}
+                {/* Finding Title (hero) */}
                 <div>
-                  <h3 className="font-sans font-semibold text-sm text-zinc-100 tracking-tight">
+                  <h3 className="font-sans font-semibold text-[15px] text-zinc-100 tracking-tight leading-snug">
                     {finding.title ?? `Observation #${index + 1}`}
                   </h3>
-                  <p className="mt-1 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
+                  {/* Meta line: host · port · service · MITRE — sans, dot-separated, no mono */}
+                  {(finding.host || details.port || details.serviceTag || details.serviceCategory || finding.mitre_technique) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-zinc-500">
+                      {finding.host && (
+                        <span className="text-zinc-300 tabular-nums">{finding.host}</span>
+                      )}
+                      {details.port && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>port <span className="text-zinc-300 tabular-nums">{details.port}/TCP</span></span>
+                        </>
+                      )}
+                      {!details.port && details.serviceTag && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="text-zinc-300">{details.serviceTag}</span>
+                        </>
+                      )}
+                      {details.serviceCategory && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>{details.serviceCategory}</span>
+                        </>
+                      )}
+                      {finding.mitre_technique && (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="tabular-nums">{finding.mitre_technique}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-zinc-400 leading-relaxed font-sans whitespace-pre-line">
                     {String(finding.description ?? "")}
                   </p>
                 </div>
@@ -1634,33 +1685,31 @@ export function ModuleRunSummary({
                   <DiscoveredTicketsEvidenceViewer tickets={tickets} />
                 )}
 
-                {/* Technical Remediation */}
+                {/* Remediation */}
                 {details.tailoredRemediation && (
-                  <div className="pt-2 border-t border-zinc-800/50 text-xs font-mono text-zinc-400 flex items-start gap-2">
-                    <span className="text-zinc-500 shrink-0 text-[10px] uppercase font-semibold">[MITIGATION]</span>
-                    <span className="font-sans text-xs text-zinc-300 leading-relaxed">
+                  <div className="pt-3 border-t border-zinc-800/60">
+                    <div className="text-[11px] font-medium text-zinc-500 mb-1">Remediation</div>
+                    <p className="text-xs text-zinc-300 leading-relaxed font-sans">
                       {details.tailoredRemediation}
-                    </span>
+                    </p>
                   </div>
                 )}
 
-                {/* Next Actions */}
+                {/* Next actions */}
                 {details.nextModules.length > 0 && onSelectModule && (
-                  <div className="pt-2 border-t border-zinc-800/50 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider shrink-0">
-                      Next Actions:
-                    </span>
+                  <div className="pt-3 border-t border-zinc-800/60">
+                    <div className="text-[11px] font-medium text-zinc-500 mb-1.5">Next actions</div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {details.nextModules.map((nextMod) => (
                         <button
                           key={nextMod}
                           type="button"
                           onClick={() => onSelectModule(nextMod, { target: finding.host })}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm border border-zinc-700/80 bg-zinc-900/90 hover:border-zinc-500 hover:bg-zinc-800 text-zinc-200 font-mono text-[11px] transition-colors"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-zinc-700/80 bg-zinc-900/60 hover:border-zinc-600 hover:bg-zinc-800 text-zinc-200 text-[12px] transition-colors"
                           title={`Arm and execute ${nextMod} on ${finding.host}`}
                         >
                           <Terminal size={11} className="text-zinc-400" />
-                          <span>Execute: <strong className="text-zinc-100">{nextMod}</strong></span>
+                          <span>Run <span className="text-zinc-100 font-medium">{nextMod}</span></span>
                           <ArrowRight size={11} className="text-zinc-400" />
                         </button>
                       ))}
@@ -1678,7 +1727,7 @@ export function ModuleRunSummary({
       {filteredCount > 0 && (
         <div
           data-testid="filtered-findings-notice"
-          className="flex items-center gap-2 px-3 py-2 rounded-sm border border-zinc-800 bg-zinc-900/60 text-xs font-mono text-zinc-400 mt-2"
+          className="flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400 mt-2"
         >
           <Info size={13} className="text-zinc-500 shrink-0" />
           <span>
@@ -1756,7 +1805,7 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-bold text-white tracking-tight">{campaign.name}</h3>
-          <p className="text-xs text-zinc-400 mt-0.5">{campaign.client ?? "No client"} &middot; <span className="text-emerald-400 uppercase font-mono text-[11px]">{campaign.status ?? "created"}</span></p>
+          <p className="text-xs text-zinc-400 mt-0.5">{campaign.client ?? "No client"} &middot; <span className="text-emerald-400 capitalize text-[11px]">{campaign.status ?? "created"}</span></p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1781,8 +1830,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
       <div className="mt-4 space-y-3">
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Authorized IP Ranges &amp; CIDRs</span>
-            <span className="badge font-mono text-[10px]">{scope.length} range{scope.length === 1 ? "" : "s"}</span>
+            <span className="text-xs font-medium text-zinc-200">Authorized IP ranges &amp; CIDRs</span>
+            <span className="badge text-[11px] tabular-nums">{scope.length} range{scope.length === 1 ? "" : "s"}</span>
           </div>
           {scope.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1791,7 +1840,7 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
                   key={cidr}
                   className="badge badge-info font-mono text-xs px-2.5 py-1 flex items-center gap-1.5"
                 >
-                  <Radio size={11} className="text-cyan-400" />
+                  <Radio size={11} className="opacity-70" />
                   <span>{cidr}</span>
                 </span>
               ))}
@@ -1804,8 +1853,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
         {targets.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Target Hosts</span>
-              <span className="badge font-mono text-[10px]">{targets.length} host{targets.length === 1 ? "" : "s"}</span>
+              <span className="text-xs font-medium text-zinc-200">Target hosts</span>
+              <span className="badge text-[11px] tabular-nums">{targets.length} host{targets.length === 1 ? "" : "s"}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {targets.map((tgt) => (
@@ -1823,8 +1872,8 @@ export function CampaignScopeSummary({ campaign, loading }: { campaign?: Campaig
 
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-zinc-200 uppercase tracking-wider">Excluded Hosts / Out-of-Scope</span>
-            <span className="badge font-mono text-[10px]">{excluded.length} excluded</span>
+            <span className="text-xs font-medium text-zinc-200">Excluded hosts / out-of-scope</span>
+            <span className="badge text-[11px] tabular-nums">{excluded.length} excluded</span>
           </div>
           {excluded.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
@@ -1922,7 +1971,7 @@ export function NoiseProfileBadge({ noise }: { noise?: string }) {
   const isStealth = normalized.includes("stealth") || normalized.includes("low");
   const badgeClass = isNoisy ? "badge badge-high" : isEvasive ? "badge badge-medium" : isStealth ? "badge badge-low" : "badge";
   return (
-    <span className={`${badgeClass} font-mono text-[11px] uppercase tracking-wider`}>
+    <span className={`${badgeClass} text-[11px] capitalize`}>
       {noise ?? "stealth"}
     </span>
   );

@@ -1,766 +1,162 @@
 <div align="center">
 
-<img src="frontend/public/brand/ares-logo-v2.png" alt="ARES Logo" width="440">
+<img src="frontend/public/brand/ares-logo-v2.png" alt="ARES Logo" width="360">
 
-### Operator-Directed Red Team Orchestration & Continuous Security Validation Platform
+### Operator-directed red team orchestration & continuous security validation
 
-**The open-core platform empowering enterprise red teams, MSSPs, and security operations centers to execute targeted offensive engagements, discover deterministic attack paths, and continuously validate defensive posture with deterministic scope enforcement and fail-closed isolation controls.**
+Prove exploitability. Compute shortest paths to Crown Jewels. Ship audit-ready evidence.
+Built for enterprise red teams, MSSPs and security operations centers that need to validate defensive posture continuously, not once a year.
 
 <br>
 
-[![Version](https://img.shields.io/badge/Release-v6.0--Enterprise-red?style=for-the-badge&logo=shield)](releases/)
-[![Python](https://img.shields.io/badge/Engine-Python%203.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20Async-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/Frontend-React%2018%20%7C%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=111111)](https://react.dev)
-[![MITRE](https://img.shields.io/badge/Coverage-MITRE%20ATT%26CK-FF6F00?style=for-the-badge)](docs/modules.md)
-[![Security](https://img.shields.io/badge/Security-Zero--Trust%20Enclave-22C55E?style=for-the-badge)](docs/security-model.md)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Tests Suite](https://img.shields.io/badge/Tests-5%2C074%20Passing-22C55E?style=for-the-badge)](tests/)
-[![GitHub Sponsor](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi)
-[![Saweria](https://img.shields.io/badge/Donasi-Saweria-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi)
-[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/Mafifrizi/badge.svg?style=for-the-badge)](https://hub.xerj.org/contributors/Mafifrizi)
+[![Release](https://img.shields.io/badge/release-v6.0--enterprise-DC2626?style=flat-square)](releases/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/frontend-React%2018%20%7C%20Vite-61DAFB?style=flat-square&logo=react&logoColor=111111)](https://react.dev)
+[![MITRE ATT&amp;CK](https://img.shields.io/badge/coverage-MITRE%20ATT%26CK-FF6F00?style=flat-square)](docs/modules.md)
+[![License](https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-5%2C074-22C55E?style=flat-square)](tests/)
 
-<br><br>
-
-<a href="https://trendshift.io/repositories/244958?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-244958" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/244958" alt="Mafifrizi%2FARES | Trendshift" style="width: 340px; height: 72px;" width="340" height="72"/></a>
-
-<br><br>
-
-[**Platform Showcase**](#platform-showcase--control-surfaces) • [**Why ARES?**](#why-enterprises-choose-ares) • [**Competitive Matrix**](#market-comparison-matrix) • [**Architecture**](#system-architecture--data-pipeline) • [**MITRE Matrix**](#adversary-techniques--mitre-attck-matrix) • [**Quickstart**](#quickstart-up-and-running-in-60-seconds) • [**Sponsorship**](#support--sponsorship) • [**Credits**](#credits) • [**Zero-Trust Security**](#enterprise-security-model--compliance) • [**Documentation**](docs/)
+[**Quickstart**](#quickstart) · [**Screens**](#screens) · [**Features**](#features) · [**Docs**](docs/) · [**Security**](docs/security-model.md) · [**Sponsor**](#support)
 
 </div>
 
 ---
 
-## Executive Summary
+## What ARES is
 
-Traditional penetration testing is fundamentally flawed: it is expensive, episodic, point-in-time, and leaves organizations blind to newly introduced misconfigurations and emerging adversary tradecraft. Meanwhile, automated vulnerability scanners overwhelm SOC teams with thousands of hypothetical CVEs without demonstrating exploitability or multi-stage lateral attack paths.
+A self-hosted platform that runs **real** offensive validation modules inside a fail-closed scope enclave, maps attack paths on an interactive DAG, and produces branded reports — so your SOC sees exactly what an attacker could reach today, not what a scanner thinks might be a problem.
 
-**ARES bridges this gap.** Built from the ground up for modern enterprise infrastructure, ARES delivers an **operator-directed red team engagement platform** that models real-world threat actors. By combining deterministic application-layer ScopeGuard fail-closed enforcement, adaptive OPSEC noise profiling, an interactive directed acyclic graph (DAG) attack solver, and 66 active production execution modules (70 total catalogued) covering 60+ mapped adversary techniques across MITRE ATT&CK, ARES allows security teams to prove vulnerability exploitability, locate shortest compromise paths to Active Directory Crown Jewels, and generate executive-ready deliverables with zero operational downtime.
+**Not just a scanner.** ARES only reports what it actually proved on a live target, including the multi-stage chain used to prove it.
 
----
-
-## Why Enterprises Choose ARES
-
-```
-                                    THE ARES ADVANTAGE
- ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
- │   STRICT SCOPE ENCLAVE  │   │  DIRECTED ATTACK ENGINE │   │ ZERO-TRUST ARCHITECTURE │
- │ Fail-closed ScopeGuard  │   │ Computes shortest paths │   │ Memory-only JWT tokens, │
- │ & Egress Scope Wall     │───│ to Domain Admins & Crown│───│ AES-256-GCM AEAD vault, │
- │ prevents out-of-scope.  │   │ Jewels deterministically│   │ strict HMAC-CSRF checks.│
- └─────────────────────────┘   └─────────────────────────┘   └─────────────────────────┘
-                                            │
-                                            ▼
-                               ┌─────────────────────────┐
-                               │ INSTANT EXECUTIVE SUITE │
-                               │ Branded PDF, HTML, JSON │
-                               │ deliverables with zero  │
-                               │ native GTK dependencies │
-                               └─────────────────────────┘
-```
-
-### Core Value Pillars
-
-1. **Zero-Collateral Scope Governance (Dual-Layer Scope Firewall)**: Every campaign executes inside a hardened, isolated boundary. ARES pairs deterministic application-layer ScopeGuard pre-checks with a dual-layer **Scope Firewall & Egress Filter** that integrates OS-level packet filtering (Windows Defender Firewall / Linux Netfilter when elevated) with transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) in Python user space. Guarantees fail-closed enforcement so zero offensive packets reach unapproved IP addresses or subnets.
-2. **Goal-Directed Attack Planning**: Operators set high-level objectives (e.g. `domain_admin`, `full_compromise`, `cloud_audit`), and the ARES decision engine synthesizes multi-stage execution paths using graph heuristics and optional LLM agents (Claude / OpenAI / local Ollama) under explicit operator authorization.
-3. **Multi-Vector Attack Graph (DAG)**: Ingest BloodHound collections or map active domain sessions in real time. The built-in graph engine calculates shortest attack paths, highlights chokepoints, and simulates lateral pivot feasibility.
-4. **Defense-in-Depth Security Model**: Engineered for zero-trust environments. Database-authoritative sessions, memory-only short-lived JWT access tokens, HttpOnly rotating refresh credentials, and AES-256-GCM AEAD encrypted local vaults (PBKDF2-HMAC-SHA256 600k iterations) protect harvested hashes and sensitive client evidence.
-5. **Automated Deliverables Pipeline**: One-click generation of branded, audit-ready compliance deliverables in PDF, HTML, Markdown, and JSON formats. Features automated headless browser PDF rendering on Windows/Linux without external GTK dependencies.
+> **Why not a traditional pentest or a vulnerability scanner?** See the [market comparison matrix](docs/comparison.md).
 
 ---
 
-## Market Comparison Matrix
-
-| Operational Capability | Traditional Manual Pentest | Legacy Vulnerability Scanners | ARES Orchestration Platform |
-| :--- | :---: | :---: | :---: |
-| **Testing Frequency** | Annual / Semi-Annual | Scheduled Daily / Weekly | **Continuous / On-Demand** |
-| **Exploitability Validation** | Manual & Labor Intensive | Theoretical CVE Matching (No Validation) | **Deterministic Multi-Stage Proof** |
-| **Multi-Hop Attack Paths** | Manual Drawing | None | **Real-Time Interactive DAG** |
-| **Scope Enclave & Egress Guard** | Operator Discipline Only | Network Firewalls Only | **Fail-Closed Dual-Layer ScopeGuard & OS/Transport Firewall** |
-| **Active Directory Lateral Paths** | Slow Script Execution | No Active Paths | **Native BloodHound, Kerberos Suite & Linux AD RFC Track** |
-| **Credential Security & Storage** | Loose Flat Files / Cleartext | Vulnerability Logs | **AES-256-GCM Authenticated Vault** |
-| **OPSEC & Telemetry Throttling** | Manual Jitter Scripts | High Network Noise | **Adaptive Noise Profiles & Governor** |
-| **Delivery Time for Reports** | 1-2 Weeks Post-Engagement | Raw Data Dumps | **Instant Multi-Format Artifacts** |
-| **Deployment Footprint** | External Consultants | Bulky Cloud Agents | **Air-Gapped Local / Self-Hosted** |
-
----
-
-## Platform Showcase & Control Surfaces
-
-The ARES Platform features a high-performance, responsive operator dashboard engineered with dark-tech aesthetics, low cognitive load, and audited operational control.
-
-```powershell
-# Launch local development environment
-.\.venv\Scripts\ares.exe dashboard dev --no-reload
-```
-
----
-
-### 1. Operator Enclave & Zero-Trust Gateway
-
-*Access barrier designed specifically for authorized offensive operators and security personnel.*
+## Screens
 
 <div align="center">
 
-![ARES Operator Enclave & Zero-Trust Authentication Gateway](docs/assets/screenshots/login-enclave-v2.png)
+<img src="docs/assets/screens/login-hd.png" alt="ARES login — dragon mascot" width="840"><br>
+*Sign-in with the ARES mascot and the SSO fallback. Memory-only JWT access tokens, HttpOnly rotating refresh.*
 
-*ARES Operator Enclave - Sign In button erupts with crimson plasma fire on hover, click, and Enter key. Minimalist Rive-style showcase featuring the animated ARES Ruby Dragon mascot on the right panel.*
+<br>
 
-</div>
+<img src="docs/assets/screens/overview-hd.png" alt="Operator overview" width="840"><br>
+*Operator overview — active engagements, validated findings, attack surface, engine health, telemetry pulse.*
 
-- **The Problem Solved**: Eliminates unauthorized operator access, token replay attacks, and token leakage to local browser storage.
-- **Key Capabilities**:
-  - **Crimson Fire Signature Interaction**: Real-time HTML5 Canvas particle fire system envelops the Sign In button on hover (continuous), click (burst), and Enter key (burst without pointer) - physics-based particles with buoyancy, turbulence, and radial glow using `requestAnimationFrame`.
-  - **ARES Ruby Dragon Living Mascot**: Integrated brand mascot showcase with calibrated ruby red palette, fire-breathing animation, and clean dark backdrop.
-  - Live **Dynamic Architectural Grid Canvas**: Low-overhead hardware-accelerated 60 FPS HTML5 canvas with real-time traveling data pulses and cursor proximity illumination.
-  - **Memory-Only Token Isolation**: Short-lived JWTs reside strictly in memory; refresh credentials use host-only, HttpOnly cookies with one-time rotation.
-  - **Enterprise Multi-Tenant SSO (SAML 2.0 & OIDC)**: SP-initiated federated authentication with Okta, Azure AD, and Google Workspace. Features App-level AES-256-GCM credential encryption, one-time replay protection (`InResponseTo`/`nonce`), JIT role mapping, and strict local password lockout for federated identities. (See [**SSO Setup Guide**](docs/sso-setup.md)).
-  - **HMAC Double-Submit CSRF Protection**: Constant-time verification on all state-mutating requests (`X-ARES-CSRF`).
-  - **Cryptographic Brute-Force Shield**: Enforces exponential backoff and IP-based rate limiting on authentication attempts.
+<br>
 
----
+<img src="docs/assets/screens/modules-catalog-hd.png" alt="Module catalog" width="840"><br>
+*Catalog — 66 active modules across 13 categories, each annotated with MITRE ATT&CK techniques and OPSEC noise level.*
 
-### 2. Executive Command Center & Telemetry
+<br>
 
-*Real-time operational command console providing instant posture visibility across active campaigns.*
+<img src="docs/assets/screens/modules-result-hd.png" alt="Finding card after a module run" width="840"><br>
+*Results — finding card with severity, confidence, remediation and one-click pivot to the next module.*
 
-<div align="center">
+<br>
 
-![ARES Executive Command Center & Telemetry](docs/assets/screenshots/dashboard-overview-v2.png)
+<img src="docs/assets/screens/attack-graph-hd.png" alt="Attack graph" width="840"><br>
+*Attack graph — perimeter firewall (fire animation), targets, pivot edges. Read-only beacon telemetry per node.*
 
-*Executive Command Center displaying real-time telemetry, validated findings, attack surface metrics, and activity pulse.*
+<br>
 
-</div>
-
-- **The Problem Solved**: Aggregates scattered offensive metrics into a single real-time operational pane without requiring manual status queries or complex log filtering.
-- **Key Capabilities**:
-  - **Executive Telemetry HUD**: Clean 4-card operational matrix featuring `Active Engagements`, `Validated Findings`, `Attack Surface`, and `Engine Health` (P95 latency, worker pool, and queue depth). Engineered with crisp typography (Plus Jakarta Sans & JetBrains Mono), eliminating redundant counts and distracting indicator dots.
-  - **Balanced Execution Workstation (50/50 Split)**:
-    - *Execution Telemetry*: Real-time operational health tracking Task Queue depth, Module Runs with success/failure breakdown, Failure Rate, Worker Pool health, and instant action links to Modules, Attack Graph, and Reports.
-    - *Activity Pulse*: 14-day security signal distribution sparkline with live telemetry stream status.
-  - **Campaign Inventory Matrix**: Single source of truth for all scoped engagements with click-to-filter reactivity, status badges, noise controls, and operator identity.
-  - **Streamlined Topbar Heartbeat**: Minimalist live system status indicator (`Operational` / `Offline`) with on-demand subsystem health inspection from any view.
-  - **Tactical Fresh-Install Hero**: Automatic empty-state fallback with a centered initialization CTA and minimal readiness strip when starting with zero campaigns.
-
----
-
-### 3. Scoped Campaign & Target Boundary Management
-
-*Zero-collateral target governance enforcing hard CIDR whitelist boundaries, dual-layer Scope Firewall egress interception, and encrypted evidence isolation.*
-
-<div align="center">
-
-![ARES Scoped Campaign & Target Boundary Management](docs/assets/screenshots/dashboard-campaigns.png)
-
-*Campaign Management interface showing target scopes, CIDR boundaries, noise controls, and encrypted credential vault.*
+<img src="docs/assets/screens/campaigns-scope-hd.png" alt="Campaign scope" width="840"><br>
+*Campaign scope — target campaign picker, Restore Vault / Dry-Run Plan / Delete controls.*
 
 </div>
 
-- **The Problem Solved**: Prevents catastrophic out-of-scope scanning, raw socket leakage from attack modules, and unencrypted credential exposure on operator laptops.
-- **Key Capabilities**:
-  - **Dual-Layer Scope Firewall & Egress Filter**: Combines native OS-level packet filtering (`OSFirewallController` via Windows Defender Firewall / Linux Netfilter when elevated) with transport-level socket interception (`socket.connect`, `socket.sendto`, `asyncio.create_connection`) enforcing strict fail-closed CIDR boundaries. Features async `ContextVar` task isolation (zero bleed to database pools or web dashboard handlers), anti-re-entrancy DNS protection, loopback/Windows Proactor pipe safeguards, cloud provider allowlists, and recursive parameter scanning.
-  - **Hard CIDR Whitelists**: Network-level boundary enforcement. The engine intercepts and drops any request targeting unapproved IP addresses or subnets.
-  - **Recon & Port Scan Scope Enforcement**: Reconnaissance and discovery modules are strictly bound to authorized campaign scope, closing out-of-scope port scanning loopholes.
-  - **Persistent Operator Guidance**: Persistent `<label>` definitions across all campaign pickers and parameter inputs, preventing operator ambiguity during rapid engagements.
-  - **Noise Profiles & Jitter**: Configure engagement throttle levels (`Stealth`, `Normal`, `Aggressive`) with randomized delay distributions.
-  - **AES-256-GCM Authenticated Enclave Vault**: Harvested NTLM hashes, Kerberos tickets, and service credentials are encrypted at rest using AES-256-GCM authenticated encryption (AEAD with PBKDF2-HMAC-SHA256 600k iterations and per-record random salt/nonce) and masked in all structlog streams.
-  - **Clean Teardown Workflows**: Single-click campaign deletion that securely cleans up all associated database rows, graph vertices, and temporary artifacts.
+---
+
+## Features
+
+- **Fail-closed scope enclave** — dual-layer ScopeGuard (application pre-check + OS/transport firewall) guarantees zero offensive packets reach out-of-scope hosts. [→ security model](docs/security-model.md)
+- **Goal-directed attack planning** — set `domain_admin` or `cloud_audit`, and the decision engine synthesizes multi-stage execution paths (graph heuristics, optional LLM agents under explicit authorization). [→ engine design](docs/engine_design.md)
+- **Multi-vector attack graph (DAG)** — ingest BloodHound or map sessions in real time. Shortest-path, chokepoints, lateral pivot feasibility. [→ attack graph](docs/engine_design.md)
+- **Zero-trust auth model** — memory-only short-lived JWTs, HttpOnly rotating refresh, HMAC CSRF, AES-256-GCM AEAD vault (PBKDF2-HMAC-SHA256 600k). [→ security model](docs/security-model.md)
+- **66 active production modules** across 60+ MITRE ATT&CK techniques (AD, cloud, credential access, exfil, lateral, recon, Windows, Linux, EDR). [→ module catalog](docs/modules.md)
+- **Automated deliverables** — one-click branded PDF/HTML/Markdown/JSON reports via headless browser (no GTK deps on Windows/Linux). [→ dashboard guide](docs/dashboard-guide.md)
+- **MCP Gateway** — Cursor/Claude Desktop/Windsurf/Cline can drive ARES safely under Pre-Flight ScopeGuard, anti-prompt-injection taint isolation and single-use HMAC confirmation tokens. [→ MCP spec](docs/mcp-server.md)
+- **Type-safe Python SDK** — write custom modules with `BaseModule[P, R]` + `@ares_module`, simulate in `ModuleTestHarness`, automate with `AresClient`. [→ SDK docs](docs/module_sdk.md) · [→ module dev guide](docs/module-development.md)
 
 ---
 
-### 4. Modular Adversary Orchestration (66 Active Modules, 60+ Techniques)
-
-*Extensive catalog of weaponized adversary techniques aligned with the MITRE ATT&CK enterprise matrix.*
-
-<div align="center">
-
-![ARES Modular Adversary Orchestration](docs/assets/screenshots/dashboard-modules-catalog.png)
-
-*Module Catalog with MITRE ATT&CK categorization, dynamic parameter generation, and dry-run safety modes.*
-
-</div>
-
-- **The Problem Solved**: Replaces unvalidated, unreliable GitHub scripts with typed, reproducible, and auditable adversary modules.
-- **Key Capabilities**:
-  - **Comprehensive Vector Coverage**: 66 active production execution modules (70 total catalogued) covering 60+ mapped adversary techniques across Active Directory (`ad.kerberoast`, `ad.adcs`, `ad.enum_users`), Windows (`windows.uac_bypass`, `windows.lsass_dump`), Linux, Cloud (AWS, Azure, GCP), and Network infrastructure.
-  - **Streamlined Execution Panel**: Clean execution view with persistent field labels, demoted low-weight dependency hints, and focused on-submit validation replacing intrusive default warning cards.
-  - **Dynamic Typed Schemas**: UI forms are generated dynamically from Python Pydantic models with strict validation.
-  - **Dry-Run Safety Engine**: Validate target responsiveness, parameters, and expected outcome before transmitting offensive traffic.
-  - **Role-Gated Execution**: Operator and Team Lead permissions required for execution; sensitive high-noise modules require explicit confirmation.
-
----
-
-### 5. Multi-Vector Pivot Graph & ARES Beacon Terminal Console
-
-*Interactive hierarchical lateral pivot topology graph with perimeter firewall flame effects, slide-over Tactical Inspector Drawer, and a real-time docked Beacon session terminal console.*
-
-<div align="center">
-
-![ARES Multi-Vector Pivot Graph & Interactive Beacon Terminal Console](docs/assets/screenshots/dashboard-graph.png)
-
-*ARES Tactical Pivot Graph & Interactive Beacon Terminal Console - Live enterprise campaign topology (`Kali test`), perimeter ingress firewall with animated flames, Linux/Windows compromised footholds, slide-over Tactical Inspector Drawer, and real-time interactive beacon terminal.*
-
-</div>
-
-- **The Problem Solved**: Translates raw active directory vulnerabilities and compromised footholds into visual, navigable lateral pivot chains while providing offensive operators an immediate interactive command console without switching windows.
-- **Key Capabilities**:
-  - **Hierarchical Enterprise Pivot Graph**: Strict left-to-right adversary traversal topology showing perimeter ingress firewall (`PERIMETER INGRESS 0.0.0.0/0`), initial foothold workstations and services, internal servers, and high-value Active Directory Domain Controllers (`DC01`).
-  - **Perimeter Ingress Firewall with Animated Flames**: Dedicated perimeter boundary node featuring an ambient breathing aura and multi-layered CSS animated flame particle effects above a classic red brick firewall icon, designating the external ingress boundary.
-  - **Slide-Over Tactical Inspector Drawer**: Instant deep-dive host and lateral traversal intelligence panel:
-    - **Live Compromise & OS State**: Real-time status indicators (`COMPROMISED (ACTIVE)` vs `RECON TARGET`), OS detection, and perimeter access ports (e.g. `22/TCP`).
-    - **Confirmed Vulnerabilities & Findings**: Full-fidelity finding titles without premature truncation, MITRE ATT&CK technique badges (e.g. `T1548.001`, `T1552.001`), and pattern summaries.
-    - **Intelligent Finding Deduplication**: Redundant finding records on the same target are automatically grouped with instance multipliers (`×4`, `×3`) to preserve a clean, high-signal view.
-    - **Unified Dark Scrollbar**: Single sleek custom scrollbar matching the dark theme, eliminating nested OS scrollbars.
-  - **Authentic Visual Privilege Semantics**: Dynamic glowing border indicators reflecting actual compromise tiers - Crimson `SYSTEM *` for Tier-0 Domain Controllers and root access, Amber `ADMIN` for internal servers, Cyan `BEACON` for compromised user workstations, and Red Brick Firewall nodes for perimeter ingress.
-  - **Organic Cubic Bezier Routing & Telemetry Stream**: Fluid vector curves with directional arrowheads and animated glowing particle pulses visualizing live command-and-control and pivot traffic.
-  - **Persistent Click-to-Lock Pathway Tracking**: Click any node to instantly freeze its upstream compromise lineage and downstream lateral reachability, complete with a tactical HUD banner (`• PATHWAY LOCKED: [HOST] | N NODES | N HOPS`). Freely zoom and pan across complex topologies without losing situational focus.
-  - **Docked Multi-Row Beacon Terminal Console (`CobaltSessionDock`)**:
-    - **Dual-Row Java Swing Session Tabs**: Automatic focus and session switching when clicking nodes on the canvas.
-    - **Real-Time Status Bar**: Privilege context (`[HOST] root` or `[DC01] SYSTEM *`) and heartbeat interval (`last: 2s`).
-    - **Interactive Command Prompt (`beacon>`)**:
-      - `whoami`: Resolves integrity level and active user context (`TARGET\SYSTEM *` or `root`).
-      - `hashdump` / `creds`: Harvests and displays cached NTLM SAM/LSA hashes.
-      - `ps` / `process`: Enumerates active process trees and resolves parent PIDs.
-      - `ppid <pid>`: Tasks beacon to spoof parent process IDs for EDR evasion.
-      - `ssh <host> <user> <pass>`: Tasks interactive lateral SSH traversal.
-      - `net view` / `hosts` / `recon`: Lists discovered network scope and adjacent nodes.
-      - `clear`: Clears current session terminal scrollback buffer.
-      - `help`: Quick reference of supported beacon tasking commands.
-  - **Operational Modes**:
-    - `Mode: LIVE CAMPAIGN`: Renders live scoped engagement targets and findings discovered during reconnaissance. Use the `[Active Pivots Only]` filter to focus exclusively on confirmed lateral compromise routes.
-    - `Mode: DEMO SAMPLE`: Instant reference 9-node interconnected lateral pivot topology demonstrating enterprise multi-hop infiltration chains.
-
----
-
-### 6. Automated Report Engine & Evidence Library
-
-*Instant deliverable generation producing branded, audit-ready compliance reports across multiple enterprise formats (Executive PDF, Technical Markdown, Defect CSV).*
-
-<div align="center">
-
-![ARES Automated Report Engine & Evidence Library](docs/assets/screenshots/dashboard-reports.png)
-
-*Report Engine and Artifact Library supporting multi-format exports with synchronized real-time lifecycle management.*
-
-</div>
-
-- **The Problem Solved**: Eliminates the 40+ hours typically spent manually writing, formatting, and redacting pentest reports.
-- **Key Capabilities**:
-  - **Structured Generation Grid**: Aligned multi-column layout with persistent `<label>` elements (`Target Campaign`, `Export Format`) and clean inline validation error feedback.
-  - **Multi-Format Export**: One-click generation of **PDF**, **HTML**, **Markdown**, and **JSON** deliverables.
-  - **Automated Headless PDF Engine**: Integrated fallback using Microsoft Edge / Chromium headless mode for clean PDF export without complex GTK dependencies on Windows.
-  - **Automated Evidence Redaction**: Automatically redacts sensitive raw passwords and private keys in customer deliverables while retaining audit proofs.
-  - **Synchronized Report Library**: Authenticated artifact repository with instant downloads, per-report deletion, and real-time UI state synchronization.
-
----
-
-### 7. Goal-Directed Strategy & Attack Planner
-
-*Goal-directed engine that plans, prioritizes, and stages complex attack chains with operator oversight while respecting OPSEC limits.*
-
-<div align="center">
-
-![ARES Goal-Directed Strategy & Attack Planner](docs/assets/screenshots/dashboard-strategy.png)
-
-*Strategy Console for goal-based campaign planning and adaptive containment governance.*
-
-</div>
-
-- **The Problem Solved**: Coordinates multi-module attack chains systematically based on operator goals without requiring repetitive manual command construction.
-- **Key Capabilities**:
-  - **Dynamic Engine Verification**: Real-time asynchronous healthchecks against local Ollama daemons (`GET /api/tags`) with sub-second timeouts and TTL caching, paired with dynamic server-side cloud key verification (`Claude`, `OpenAI`).
-  - **Clean Operator-Centric Design**: Persistent field labels (`Target Campaign`, `Strategic Objective`, `AI Planning Engine`, `Explicit Authorizations`), human-readable goal descriptions, and complete elimination of server environment variable leakage in UI labels.
-  - **Focused On-Submit Validation**: Warning boxes removed from default page render; validation errors display inline beneath target fields only upon execution attempt.
-  - **Adaptive Containment Governor**: Continuously evaluates defensive telemetry and noise thresholds, automatically slowing down or aborting aggressive actions when detection risk peaks.
-
----
-
-### 8. Multi-Stage Adversary Execution Chains
-
-*Deterministic, multi-step kill chains orchestrating reconnaissance, credential harvesting, and lateral movement in sequence.*
-
-<div align="center">
-
-![ARES Multi-Stage Adversary Execution Chains](docs/assets/screenshots/dashboard-modules-chains.png)
-
-*Automated execution chains including AD Kerberos Exposure Chain and AD Domain Enumeration Chain.*
-
-</div>
-
-- **The Problem Solved**: Replaces manual step-by-step tool invocation with pre-verified, coordinated attack chains that pass outputs automatically to downstream modules.
-- **Key Capabilities**:
-  - **Pre-Built Attack Sequences**: Out-of-the-box chains for Kerberos exposure (`asreproast` -> `kerberoast` -> `hashcat`), domain enumeration, and cloud privilege escalation.
-  - **Dynamic Context Passing**: Credentials and hashes harvested in step 1 are automatically populated into target arguments for subsequent steps.
-  - **Integrated OPSEC Budgeting**: Tracks cumulative noise and detection likelihood across the entire chain before initiating execution.
-
----
-
-### 9. EDR / OPSEC Evasion & Bypass Knowledge Base
-
-*Empirical tracking of evasion efficacy across enterprise endpoint detection and response (EDR) platforms.*
-
-<div align="center">
-
-![ARES EDR and OPSEC Evasion Matrix](docs/assets/screenshots/dashboard-edr.png)
-
-*Bypass Knowledge Base tracking technique success rates across CrowdStrike Falcon, SentinelOne, and Microsoft Defender.*
-
-</div>
-
-- **The Problem Solved**: Prevents offensive operators from blindly deploying burned or detected payloads against monitored customer infrastructure.
-- **Key Capabilities**:
-  - **Empirical Success Rates**: Historical success rates categorized by specific evasion techniques (AMSI patching, syscall unhooking, process hollowing) and EDR vendor.
-  - **Cross-Session Evasion Memory**: Engagement outcomes update a unified knowledge base, warning operators before they execute techniques with low success probabilities.
-  - **Defensive Jitter Controls**: Granular delay distributions and packet spacing to evade behavioral heuristics and SIEM correlation rules.
-
----
-
-### 10. Zero-Trust Security Governance & Audit Trail
-
-*Audited multi-role access control, cryptographic API key lifecycle, and continuous platform integrity verification.*
-
-<div align="center">
-
-![ARES Zero-Trust Security Governance](docs/assets/screenshots/dashboard-security.png)
-
-*Operator profile management, scoped API key provisioning, and automated system security audits.*
-
-</div>
-
-- **The Problem Solved**: Guarantees non-repudiation, role-based boundary separation, and compliance assurance for offensive security operations.
-- **Key Capabilities**:
-  - **Role-Based Access Control (RBAC)**: Strictly enforced permission tiers (`Team Lead`, `Operator`, `Recon`, `Reporter`) governing module execution and evidence viewing.
-  - **Scoped API Keys**: Cryptographically generated bearer tokens with configurable expiration and fine-grained permissions for CI/CD integration.
-  - **Live Audit Trail**: Continuous append-only logging of every operator action, target scan, and credential retrieval for post-engagement review.
-
----
-
-### 11. Live Operations & Real-Time Event Stream
-
-*High-frequency WebSocket event bus streaming operational telemetry, module output, and pipeline status.*
-
-<div align="center">
-
-![ARES Live Operations Stream](docs/assets/screenshots/dashboard-live.png)
-
-*Live operational event console with buffered telemetry and high-throughput WebSocket streaming.*
-
-</div>
-
-- **The Problem Solved**: Gives engagement commanders instant, unified situational awareness of all distributed agents and background tasks.
-- **Key Capabilities**:
-  - **Sub-Second Event Delivery**: Asynchronous WebSocket bus streaming live stdout/stderr, module completion events, and defensive alerts.
-  - **Buffered Log Telemetry**: Reconnection-resilient event buffering ensuring zero lost log lines during network fluctuations.
-  - **Multi-Operator Collaboration**: Simultaneous operators see shared campaign execution events in real time.
-
----
-
-### 12. Enterprise Playbooks & Campaign Templates
-
-*Standardized engagement architectures for recurring red team exercises, compliance audits, and purple team drills.*
-
-<div align="center">
-
-![ARES Enterprise Campaign Templates](docs/assets/screenshots/dashboard-templates.png)
-
-*Built-in engagement templates including Internal Pentest, AD Full Compromise, Cloud Assessment, and Assumed Breach.*
-
-</div>
-
-- **The Problem Solved**: Eliminates manual scope configuration for standardized assessments and ensures consistent testing methodology across enterprise engagements.
-- **Key Capabilities**:
-  - **Turnkey Playbooks**: Ready-to-deploy campaign templates with pre-configured target profiles, module sets, and report requirements.
-  - **Custom Template Authoring**: Export successful custom engagements as reusable templates for internal teams and MSSP clients.
-  - **Safety Pre-Flights**: Automated scope and permission validation before any template-based campaign goes live.
-
----
-
-### 13. Interactive OpenAPI 3.1 & Developer Integration
-
-*Fully documented, interactive REST API surface for custom tooling, SOC orchestration, and CI/CD pipeline integration.*
-
-<div align="center">
-
-![ARES Interactive OpenAPI Documentation](docs/assets/screenshots/api-docs-swagger.png)
-
-*Interactive Swagger UI documentation exposing 70+ operational endpoints for enterprise automation.*
-
-</div>
-
-- **The Problem Solved**: Enables seamless programmatic integration with existing enterprise SOAR platforms, custom reporting pipelines, and CI/CD security gates.
-- **Key Capabilities**:
-  - **70+ Documented Endpoints**: Complete REST coverage across authentication, campaigns, module execution, attack graphs, and deliverables.
-  - **OpenAPI 3.1 Conformance**: Strictly validated request/response schemas generated directly from Python Pydantic models.
-  - **Interactive Sandbox**: In-browser API testing with Bearer token authentication and CSRF token support.
-
----
-
-## Control Surfaces Breakdown
-
-| Surface | Core Responsibility | Available Sub-Tabs | Primary Operators |
-| :--- | :--- | :--- | :--- |
-| **Overview** | Executive health, telemetry counters, finding severity metrics. | Single Pane | All Stakeholders |
-| **Campaigns** | Scope whitelisting, noise profiles, encrypted credential vault. | `List`, `Scope`, `Findings` | Team Lead, Operator |
-| **Modules** | 66 active module catalog (70 total, 60+ techniques), parameter input forms, execution console. | `Catalog`, `Run Panel`, `Results` | Operator |
-| **Reports** | Deliverable builder, evidence packages, Report Library lifecycle. | `Generate`, `Library` | Operator, Reporter |
-| **Graph** | Cobalt Strike pivot topology, lateral movement tracking, Beacon session dock. | `Live Campaign`, `Demo Sample`, `Beacon Console` | Operator, Recon |
-| **Templates** | Repeatable engagement playbooks and multi-stage workflow plans. | `Templates`, `Plan Builder` | Team Lead, Operator |
-| **Strategy** | Goal-directed attack engine, automated planner integration. | `Objective`, `Active`, `Result` | Team Lead, Operator |
-| **Security** | Operator credentials, API key lifecycle, dependency audit checks. | `Account`, `API Keys`, `Audit` | Team Lead |
-| **EDR/OPSEC** | Defensive telemetry, bypass tracking, detection evasion rules. | `Knowledge Base`, `Report Outcome` | Operator |
-| **Live** | Real-time WebSocket event streams and buffered telemetry logs. | `Stream`, `Buffer` | Operator |
-
----
-
-## System Architecture & Data Pipeline
-
-ARES follows a strict defense-in-depth architecture separating presentation, execution orchestration, security governance, and persistent cryptographic storage:
-
-```mermaid
-flowchart TB
-    subgraph Client["Presentation Layer (Operator Enclave)"]
-        UI["React 18 Dashboard<br>(Vite + TypeScript)"]
-        Mesh["Dynamic Architectural Grid<br>(Canvas 2D Engine)"]
-        WSClient["WebSocket Client<br>(Real-Time Telemetry Stream)"]
-    end
-
-    subgraph Gateway["Zero-Trust Security Gateway"]
-        FastAPI["FastAPI Async Engine<br>(Uvicorn Backend)"]
-        AuthGuard["Auth & Session Guard<br>(Memory-Only JWT + HttpOnly Refresh)"]
-        CSRF["HMAC Double-Submit CSRF<br>(X-ARES-CSRF Validation)"]
-        RateLimit["Rate Limiting & Brute-Force Shield"]
-    end
-
-    subgraph Core["ARES Core Engine & Governance"]
-        ScopeFirewall["Scope Firewall & Transport Egress Hook<br>(In-Process Transport & OS Packet Filtering)"]
-        Governor["OPSEC Noise Governor<br>(Adaptive Jitter & Throttling)"]
-        Orchestrator["Module Execution Orchestrator<br>(Worker Thread Pool)"]
-        AutoPlanner["Goal-Directed Strategy Engine<br>(DAG Heuristics / Planner)"]
-    end
-
-    subgraph Storage["Cryptographic Persistence Layer"]
-        DB[(SQLite / PostgreSQL<br>Alembic Versioned)]
-        Vault[(AES-256-GCM Encrypted Vault<br>Encrypted Credentials & Hashes)]
-        GraphEngine["Attack Graph DAG Engine<br>(BloodHound Ingest & Shortest Path)"]
-    end
-
-    subgraph Deliverables["Reporting Pipeline"]
-        PDFGen["Headless Chromium / Edge Engine<br>(Automated PDF Generation)"]
-        Artifacts["Evidence Library<br>(HTML, Markdown, JSON)"]
-    end
-
-    UI -->|HTTPS / REST| AuthGuard
-    WSClient -->|WSS / Ticket Barrier| AuthGuard
-    AuthGuard --> CSRF --> RateLimit --> FastAPI
-    FastAPI --> ScopeFirewall
-    ScopeFirewall --> Orchestrator
-    Orchestrator --> Governor
-    Orchestrator --> AutoPlanner
-    Orchestrator --> Storage
-    Storage --> GraphEngine
-    FastAPI --> Deliverables
-```
-
----
-
-## Adversary Techniques & MITRE ATT&CK Matrix
-
-ARES implements 66 active production execution modules (70 total catalogued) mapping to 60+ adversary techniques across the MITRE ATT&CK Enterprise Framework:
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                         MITRE ATT&CK MATRIX COVERAGE                                             │
-├─────────────────────┬─────────────────────┬─────────────────────┬─────────────────────┬──────────────────────────┤
-│ DISCOVERY           │ CREDENTIAL ACCESS   │ LATERAL MOVEMENT    │ PRIVILEGE ESCALATION│ DEFENSE EVASION / CLOUD  │
-├─────────────────────┼─────────────────────┼─────────────────────┼─────────────────────┼──────────────────────────┤
-│ • T1087 User Enum   │ • T1558.003 Kerberoast│ • T1021.002 SMB/RPC │ • T1548.002 UAC Byps│ • T1070 Indicator Removal│
-│ • T1069 Group Enum  │ • T1558.004 AS-REP  │ • T1021.006 WinRM   │ • T1068 Token Privs │ • T1562 Impair Defenses  │
-│ • T1046 Port/Net    │ • T1003 LSASS Dump  │ • T1550 Use Ticket  │ • T1053 Scheduled   │ • T1078 Cloud IAM Enum   │
-│ • T1018 Host Disc   │ • T1649 ADCS ESC1-8 │ • T1071 App Layer   │ • T1055 Injection   │ • T1580 Cloud Discovery  │
-│ • T1082 System Info │ • T1110 Pass Spray  │ • T1021.001 RDP     │ • T1134 Access Token│ • T1526 Cloud Hierarchy  │
-└─────────────────────┴─────────────────────┴─────────────────────┴─────────────────────┴──────────────────────────┘
-```
-
-- **Active Directory & Kerberos Suites (Windows & Linux)**: Full SPN discovery, Kerberoasting (`ad.kerberoast`), AS-REP Roasting, ADCS Certificate Template abuse and enrollment checks (`ad.adcs`; `ad.ghost_forge` retained as disabled audit stub), DCSync account replication, and BloodHound data generation.
-- **Linux Active Directory Tradecraft (RFC-ARES-2026-001)**: Native, zero-subprocess post-exploitation suite targeting Linux domain members: SSSD cache harvesting (`linux.sssd_harvest`), pure-Python Kerberos ccache ticket hunting (`linux.ccache_hunt`), keytab parsing & Silver Ticket generation (`linux.keytab_abuse`), Samba machine secrets extraction (`linux.samba_secrets`), and bidirectional ccache <-> kirbi ticket transcoding (`credential.ticket_converter`).
-- **Endpoint Posture Checkers**: Windows UAC Bypass methods, registry key persistence inspection, Linux container breakouts, and Sudo privilege enumeration.
-- **Cloud Control Plane**: Multi-cloud identity auditing across AWS IAM, Azure Active Directory / Entra ID role assignments, GCP IAM bindings, and Hybrid PRT/Token review (`cloud.phantom_token` retained as disabled audit stub).
-
----
-
-## Quickstart: Up and Running in 60 Seconds
+## Quickstart
 
 ### Prerequisites
-- **Python**: 3.11 or 3.12 (Python 3.12 recommended for Windows).
-- **Node.js**: v18+ (tested on Node v20 LTS).
-- **OS**: Windows 11/10 (PowerShell), Linux (Ubuntu/Debian/Kali), or macOS.
 
-### Fast Path (PowerShell on Windows)
+- **Python** 3.11 or 3.12 (3.12 recommended on Windows)
+- **Node.js** v18+ (tested on v20 LTS)
+- **OS** Windows 11/10, Linux (Ubuntu/Debian/Kali) or macOS
+
+### 60 seconds (PowerShell on Windows)
 
 ```powershell
-# 1. Clone the repository
 git clone https://github.com/Mafifrizi/ARES.git
 Set-Location .\ARES
 
-# 2. Setup isolated Python virtual environment
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,pdf]"
 
-# 3. Install frontend dependencies
-Set-Location frontend
-& "C:\Program Files\nodejs\npm.cmd" ci
-Set-Location ..
+Set-Location frontend ; & "C:\Program Files\nodejs\npm.cmd" ci ; Set-Location ..
 
-# 4. Configure local Edge PDF rendering engine & verify doctor status
 $env:ARES_PDF_BROWSER = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 .\.venv\Scripts\ares.exe doctor --pdf-smoke
 
-# 5. Launch development server (Frontend + Backend proxy)
 .\.venv\Scripts\ares.exe dashboard dev --no-reload
 ```
 
-Open your browser to **`http://127.0.0.1:5173/dashboard/`**.
-- **Initial Operator**: `admin`
-- **Initial Password**: Configured via `ARES_DEFAULT_ADMIN_PASSWORD` in `.env` (mandatory; minimum 12 characters; no hardcoded default).
+Open `http://127.0.0.1:5173/dashboard/`.
+Initial operator: `admin`. Password: set `ARES_DEFAULT_ADMIN_PASSWORD` in `.env` (mandatory, minimum 12 characters, no hardcoded default).
 
-### Verification & Testing Architecture
+### Tests
 
-ARES maintains a comprehensive test suite of **5,074 automated tests** covering core orchestration, cryptography, scope firewalls, Active Directory tradecraft, API security policies, and PostgreSQL database migrations:
+```powershell
+pytest tests/unit -n auto -q                    # 5,074 tests, parallel
+pytest tests/integration/test_postgres_*.py -q  # Postgres integration
+```
 
-- **Fast Unit Tests (Recommended for local dev & PR gates)**:
-  ```powershell
-  pytest tests/unit -q
-  ```
-- **Parallel Execution (Multi-core acceleration)**:
-  ```powershell
-  pytest tests/unit -n auto -q
-  ```
-- **PostgreSQL Integration Tests (Requires running database)**:
-  ```powershell
-  pytest tests/integration/test_postgres_*.py -q
-  ```
-- **Full Monolithic Suite Notice**:
-  Executing all 5,074 unit, integration, and simulation tests sequentially on a single thread requires approximately 45–65 minutes. Automated testing harnesses or CI pipelines should enforce partitioned or parallel execution (`tests/unit`) rather than imposing short timeouts on the monolithic suite.
+### In-place upgrades (no git clone / rebuild needed)
 
-### Seamless Platform Updates & In-Place Upgrades (`ares update` & `ares upgrade`)
+```powershell
+ares update              # add new modules only
+ares upgrade             # full-system upgrade (core + db + modules + UI)
+ares upgrade --check     # preview, no changes on disk
+```
 
-ARES includes a built-in Nuclei-style update engine. Operators do not need to `git clone` or manually recompile the frontend when new capabilities or visual improvements are released:
-
-- **Add New Attack Modules (Additive Only)**:
-  ```powershell
-  ares update                  # Scan GitHub and install newly released modules
-  ares update --module <id>    # Install a specific new module
-  ares update --dry-run        # Preview new modules without modifying disk
-  ```
-- **In-Place Upgrades (System Core, Database Schema, Modules, Web UI)**:
-  ```powershell
-  ares upgrade                 # Full-system upgrade (Core platform + DB migrations + Modules + UI)
-  ares upgrade --system        # Upgrade core framework engine and apply database schema migrations
-  ares upgrade --check         # Check commit delta and available updates without modifying disk
-  ares upgrade --ui            # Upgrade Frontend Web UI dashboard bundle
-  ares upgrade --modules       # Upgrade installed modules to latest revisions
-  ares upgrade --dry-run       # Preview upgrades without modifying disk
-  ```
-
-> [!NOTE]
-> **Zero Data Loss Guarantee**: User databases (`~/.ares/ares.db` or PostgreSQL), credentials, configuration files (`config.yaml`), audit reports, and custom user plugins (`~/.ares/plugins/`) are mathematically blacklisted from modification. Pre-flight Python AST verification and atomic file writes ensure zero risk of corruption.
+User databases, credentials, config and plugins are mathematically blacklisted from modification — see [in-place upgrade guarantees](docs/execution-policy.md).
 
 ---
 
-## Enterprise Security Model & Compliance
+## Documentation
 
-ARES was designed for environments with the most stringent compliance and confidentiality requirements:
+Everything deep lives in [`docs/`](docs/). The main entry points:
 
-### Defense-in-Depth Authentication
-- **Memory-Only Access Tokens**: Short-lived JWTs (15-minute lifespan) exist purely within in-memory React state and are never written to `localStorage` or `sessionStorage`.
-- **Rotating Refresh Family**: Long-lived refresh credentials are bound to strict, host-only, HttpOnly cookies (`ares_refresh`) with one-time rotation and automatic reuse revocation.
-- **HMAC CSRF Barrier**: State-changing endpoints mandate valid `X-ARES-CSRF` headers matched against cryptographically secure cookie tokens.
-
-### Role-Based Access Control (RBAC)
-ARES enforces strict RBAC permissions across all API endpoints, background jobs, and UI surfaces:
-
-| Role | API Value | Operational Scope | Administrative Authority |
-| :--- | :---: | :--- | :--- |
-| **Team Lead** | `team_lead` | Complete platform authority: campaign creation/deletion, user provisioning, security audits, high-noise module overrides. | Full System Admin |
-| **Operator** | `operator` | Day-to-day operations: execute authorized modules, review findings, explore attack graph, generate reports. Cannot register users. | Operational Tier |
-| **Recon** | `recon` | Read-heavy reconnaissance: execute safe discovery and network fingerprinting modules. Execution of disruptive modules is blocked. | Read-Heavy |
-| **Reporter** | `reporter` | Stakeholder review: read-only access to campaign analytics, findings, attack graphs, and generated deliverables. No execution rights. | Read-Only Audit |
-
-#### Role Provisioning & Anti-Privilege Escalation Guarantees
-- **Authoritative Database Identity**: Unlike systems that blindly trust client-side JWT role claims, ARES resolves user identity and role directly from the live database on every request (`row = await db.resolve_access_token_principal(...)`). Tampered JWT claims are mathematically discarded.
-- **Strict Role Gating at Account Creation**: New user roles are assigned exclusively by a `team_lead` via `POST /auth/register` (guarded by `require_team_lead()`) or automatically mapped from enterprise Identity Providers during SP-initiated SAML/OIDC SSO.
-- **Role Immutability**: Role assignments are immutable post-creation. No public endpoint exists to alter user roles (`PUT /users/{id}` does not exist), eliminating horizontal and vertical privilege escalation vectors (e.g., `recon` escalating to `team_lead` or `reporter` running offensive modules).
-- **Audited User Inventory**: The dashboard `Security` console provides a transparent inventory of all registered identities and active sessions for engagement accountability.
+- [**Quickstart engagement guide**](QUICKSTART.md)
+- [**Documentation portal & subsystem index**](docs/README.md)
+- [**Dashboard surface-by-surface manual**](docs/dashboard-guide.md)
+- [**Module catalog & schemas**](docs/modules.md) · [**Module development**](docs/module-development.md) · [**SDK spec**](docs/module_sdk.md)
+- [**API reference**](docs/api-reference.md) · [**MCP gateway**](docs/mcp-server.md) · [**Enterprise SSO (SAML/OIDC)**](docs/sso-setup.md)
+- [**Security & threat model**](docs/security-model.md) · [**Execution policy**](docs/execution-policy.md) · [**Validation lab**](docs/validation-lab.md)
+- [**Architecture**](docs/architecture.md) · [**Engine design**](docs/engine_design.md) · [**Worker architecture**](docs/worker_architecture.md) · [**Database migrations**](docs/database-migrations.md)
+- [**Market comparison**](docs/comparison.md) · [**RFC 001: Linux AD cross-platform tradecraft**](docs/research/linux-active-directory-tradecraft.md)
 
 ---
 
-## ARES MCP Gateway & Product-Grade CLI
+## Support
 
-ARES provides a production-grade **Model Context Protocol (MCP)** Gateway that enables modern AI coding assistants (Cursor IDE, Claude Desktop, Windsurf, VS Code Cline, Zed, Open-WebUI, LibreChat) to interact with the ARES purple-team offensive platform safely and under strict governance.
+If ARES has accelerated your assessments or protected your infrastructure, consider sponsoring continued feature development, threat research and lab infrastructure:
 
 <div align="center">
 
-![ARES MCP Two-Pane Terminal Monitor](docs/assets/screenshots/mcp-monitor.png)
-
-*ARES MCP Two-Pane Split Terminal Monitor (OpenClaw style) with real-time tool telemetry, live scope inspection, and 1-key token authorization.*
-
-</div>
-
-Unlike basic MCP servers that expose raw endpoints to LLMs without guardrails, ARES enforces strict **Pre-Flight Scope Invariance (`ScopeGuard`)**, **Anti-Prompt-Injection Taint Isolation**, and **Single-Use 60-second HMAC Confirmation Tokens** before any live offensive action can execute.
-
-### Where Do I Start First? (Step-by-Step Onboarding)
-
-For operators or developers connecting Cursor, Claude Desktop, or Windsurf to ARES:
-
-1. **Verify Subsystem Readiness (`doctor`)**:
-   Ensure all core subsystems (Protocol Engine, 9 Tools, 3 Resources, 3 Prompts, 62 Descriptors, Security Gates) report `PASS`:
-   ```powershell
-   .\mcp.bat doctor
-   ```
-
-2. **1-Click AI Client Setup (No Manual JSON Editing)**:
-   Automatically configure your preferred IDE with a single command:
-   ```powershell
-   # For Cursor IDE:
-   .\mcp.bat setup --client cursor
-
-   # For Claude Desktop:
-   .\mcp.bat setup --client claude
-
-   # For Windsurf:
-   .\mcp.bat setup --client windsurf
-
-   # For VS Code (Cline):
-   .\mcp.bat setup --client cline
-   ```
-   This writes your active Python virtual environment path directly into the client config file (e.g. `.cursor/mcp.json`).
-
-3. **Reload Window in Cursor IDE**:
-   - In Cursor, press `Ctrl + Shift + P`.
-   - Select **`Developer: Reload Window`**.
-   - Open **Settings** (`Ctrl + ,`) &rarr; **Features** &rarr; **MCP Servers**. The **`ares`** server will show a green dot (`Connected`).
-
-4. **Launch the Live Two-Pane Monitor (Optional Companion Window)**:
-   In a dedicated terminal window, run the OpenClaw-style two-pane monitor to watch real-time AI tool invocations, scope checks, and approve tokens:
-   ```powershell
-   .\mcp.bat monitor
-   ```
-   - **Left Pane**: Live stream of tool calls executed by the AI agent (`ares_scope_check`, `ares_dry_run_module`, `ares_run_tool`).
-   - **Right Pane**: ScopeGuard CIDR boundaries, staged action diffs, and the **Authorization Gateway**.
-   - **Controls**: Press **`A`** to approve a pending execution token, **`R`** to reject, **`C`** to clear stream, **`Q`** to quit.
-
-5. **Issue Your First Command to the AI Agent**:
-   Open Cursor Composer / Chat (`Ctrl + I` or `Ctrl + L`), and try this prompt:
-   > *"Check active campaign status, verify scope for target 10.0.1.50, and stage a dry-run of module ad.kerberoast."*
-
-For in-depth architecture, the 7 security invariants, CLI scriptability (`--json`), POSIX exit codes, and operational tool schemas, see [**ARES MCP Gateway & Product-Grade CLI Specification**](docs/mcp-server.md).
-
----
-
-## Extensible Developer SDK (Modular Architecture)
-
-ARES provides a first-class, type-safe Python SDK (`ares.sdk`) to build custom adversary modules, simulate techniques in isolated test harnesses, and automate engagements programmatically:
-
-### 1. Type-Safe Module Authoring (Generic `BaseModule[P, R]` & `@ares_module`)
-Declare validated parameter schemas with Pydantic v2 and write modules with full IDE autocomplete:
-
-```python
-from ares.sdk import (
-    BaseModule, ExecutionContext, ModuleResult,
-    ModuleParams, param, SecretParam,
-    OpsecLevel, Severity, ares_module,
-)
-
-class KerberoastParams(ModuleParams):
-    dc: str = param("Target Domain Controller IP or FQDN", min_length=3)
-    domain: str = param("AD DNS domain name, e.g. CORP.LOCAL", min_length=3)
-    password: SecretParam = param("Domain user password", secret=True, required=False)
-
-class CustomKerberoastModule(BaseModule[KerberoastParams, ModuleResult]):
-    MODULE_ID = "custom.ad.kerberoast"
-    MODULE_NAME = "Custom Kerberoasting"
-    MODULE_CATEGORY = "ad"
-    OPSEC_LEVEL = OpsecLevel.LOW
-    MITRE_TECHNIQUES = ["T1558.003"]
-    PARAMS_MODEL = KerberoastParams
-
-    async def execute(self, ctx: ExecutionContext[KerberoastParams]) -> ModuleResult:
-        # ctx.params provides full static typing and runtime validation
-        await self.before_request(ctx.params.dc)
-
-        # Emit findings using fluent context helpers
-        finding = ctx.emit_finding(
-            title=f"Kerberoastable SPN Captured on {ctx.params.dc}",
-            severity=Severity.HIGH,
-            mitre_technique="T1558.003",
-        )
-        return ModuleResult(status="success", findings=[finding], module_id=self.MODULE_ID)
-```
-
-### 2. Isolated Testing & Simulation (`ModuleTestHarness`)
-Unit test custom techniques locally with mock scope guards, synthetic credential vaults, and fluent assertion matchers:
-
-```python
-from ares.sdk import ModuleTestHarness, Severity
-
-async def test_module():
-    harness = ModuleTestHarness(CustomKerberoastModule)
-    result = await harness.simulate(params={"dc": "10.0.0.10", "domain": "LAB.LOCAL"})
-    result.assert_success()
-    result.assert_finding(severity=Severity.HIGH, mitre="T1558.003")
-```
-
-### 3. Programmatic Automation (`AresClient`)
-Automate engagements, dispatch modules, and stream real-time WebSocket telemetry via Python scripts or CI/CD pipelines:
-
-```python
-from ares.sdk import AresClient
-
-async with AresClient(base_url="http://127.0.0.1:8080", api_key="ares_key_...") as ares:
-    campaign = await ares.campaigns.create(name="Op-Titan", scope=["10.0.0.0/24"])
-    job = await ares.modules.run("ad.kerberoast", target="dc01.corp.local", campaign_id=campaign["id"])
-    findings = await ares.campaigns.findings(campaign["id"])
-```
-
-See [docs/module_sdk.md](docs/module_sdk.md) and [docs/module-development.md](docs/module-development.md) for full developer documentation, architecture specifications, and examples.
-
----
-
-## Documentation Sitemap
-
-Comprehensive documentation is available in the [`docs/`](docs/) directory:
-
-- [**Documentation Portal & Subsystem Index**](docs/README.md)
-- [**Quickstart Engagement Guide**](QUICKSTART.md)
-- [**RFC 001: Linux Active Directory & Cross-Platform Tradecraft**](docs/research/linux-active-directory-tradecraft.md)
-- [**Next-Gen Module SDK Specification (v2)**](docs/module_sdk.md)
-- [**ARES MCP Server & Product-Grade CLI Specification**](docs/mcp-server.md)
-- [**Step-by-Step Module Development Guide**](docs/module-development.md)
-- [**Dashboard Surface-by-Surface Manual**](docs/dashboard-guide.md)
-- [**Adversary Module Catalog & Schemas**](docs/modules.md)
-- [**API Endpoint Reference & Payloads**](docs/api-reference.md)
-- [**Enterprise SSO Integration Guide (SAML 2.0 / OIDC)**](docs/sso-setup.md)
-- [**Enterprise Security & Threat Model**](docs/security-model.md)
-- [**Validation Lab & Test Harness**](docs/validation-lab.md)
-
----
-
-## Support & Sponsorship
-
-If ARES has accelerated your security assessments, helped protect your enterprise infrastructure, or advanced your offensive security research, consider sponsoring the project to fund continuous feature development, threat research, and lab infrastructure:
-
-<div align="center">
-
-| Platform | Type | Link |
-| :--- | :--- | :--- |
-| **GitHub Sponsors** | International (Recurring / One-time) | [![Sponsor](https://img.shields.io/badge/GitHub_Sponsors-Support-ea4aaa?style=for-the-badge&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi) |
-| **Saweria** | Indonesia (QRIS / GoPay / OVO / Dana) | [![Saweria](https://img.shields.io/badge/Saweria-Donasi_Lokal-faae2b?style=for-the-badge&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi) |
+| | |
+| :--- | :--- |
+| [![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-ea4aaa?style=flat-square&logo=github-sponsors)](https://github.com/sponsors/Mafifrizi) | International (recurring / one-time) |
+| [![Saweria](https://img.shields.io/badge/Saweria-faae2b?style=flat-square&logo=kofi&logoColor=black)](https://saweria.co/mafifrizi) | Indonesia (QRIS, GoPay, OVO, Dana) |
 
 </div>
-
-> *Your support helps keep ARES open-source, robust, and continuously updated against the latest adversary tradecraft.*
 
 ---
 
@@ -769,28 +165,30 @@ If ARES has accelerated your security assessments, helped protect your enterpris
 <div align="center">
 
 <a href="https://www.linkedin.com/in/muhamad-d-alvito-58607934b/">
-  <img src="docs/assets/credits/muhamad-d-alvito.png" width="96" height="96" alt="Muhamad D Alvito" style="border-radius: 50%;">
+  <img src="docs/assets/credits/muhamad-d-alvito.png" width="88" height="88" alt="Muhamad D Alvito" style="border-radius:50%;">
 </a>
 
-### [Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
-**My Partner Work for UI & UX**
-
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=flat-square&logo=linkedin)](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)
+**[Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)** — UI & UX partner
 
 </div>
 
 ---
 
-## Responsible Use & Legal Disclaimer
+## Responsible use & legal disclaimer
 
 > [!IMPORTANT]
-> **ARES is a dual-use software framework designed exclusively for authorized cybersecurity research, internal enterprise resilience validation, and professional red-team engagements with explicit written permission.**
+> **ARES is a dual-use software framework designed exclusively for authorized cybersecurity research, internal enterprise resilience validation and professional red-team engagements with explicit written permission.**
 
-- **Do NOT** execute ARES against any network, host, or cloud infrastructure without prior written authorization from the system owners.
-- Unauthorized system access or testing violates national and international cybercrime legislation (e.g. Computer Fraud and Abuse Act 18 U.S.C. § 1030).
-- The creators and maintainers of ARES assume no liability for misuse, damages, or regulatory violations caused by this software.
+- **Do not** execute ARES against any network, host or cloud infrastructure without prior written authorization from the system owners.
+- Unauthorized system access or testing violates national and international cybercrime legislation (for example 18 U.S.C. § 1030 Computer Fraud and Abuse Act).
+- The creators and maintainers of ARES assume no liability for misuse, damages or regulatory violations caused by this software.
 
-To report security vulnerabilities in ARES, please follow our [Security Policy](SECURITY.md).
+To report security vulnerabilities in ARES itself, follow the [Security Policy](SECURITY.md).
+
+### No affiliation with any cryptocurrency or token
+
+> [!NOTE]
+> This project is an **open-source security software platform**. It has **no affiliation, endorsement, partnership or association** with any cryptocurrency, coin, token, NFT, airdrop or financial instrument that uses the name "ARES" or any similar brand. We do not issue, promote or endorse any digital asset. Any such product is unrelated to this project and operates without our involvement or approval. Do not purchase or trade any such asset expecting a connection to this repository.
 
 ---
 
@@ -802,7 +200,7 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 
 <div align="center">
 
-**ARES - Modern Red Team Engagement & Continuous Security Validation System.**  
-*Continuous Security Validation. Deterministic Scope Containment.*
+**ARES — Modern Red Team Engagement & Continuous Security Validation System.**<br>
+*Continuous security validation. Deterministic scope containment.*
 
 </div>

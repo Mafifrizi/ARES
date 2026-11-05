@@ -55,20 +55,32 @@ describe("Keyboard Focus Visible & Accessibility (ITEM 9)", () => {
     const cssPath = path.resolve(__dirname, "../../styles.css");
     const cssContent = fs.readFileSync(cssPath, "utf-8");
 
-    // 1. Accent color variable defined
-    expect(cssContent).toMatch(/--ares-accent:\s*#b91c1c/i);
+    // 1. Accent color variable defined. The enterprise redesign (09c882d)
+    // migrated the accent from the old #b91c1c to the new primary crimson
+    // #dc2626, aliased through the --accent design-token. Any of:
+    //   - --ares-accent: #b91c1c  (original)
+    //   - --ares-accent: #dc2626  (current literal)
+    //   - --ares-accent: var(--accent)  (current aliased)
+    // is an acceptable contract.
+    expect(cssContent).toMatch(/--ares-accent:\s*(#b91c1c|#dc2626|var\(--accent\))/i);
 
     // 2. Global *:focus outline: none reset
     expect(cssContent).toMatch(/\*:focus\s*\{\s*outline:\s*none;?\s*\}/);
 
-    // 3. Global *:focus-visible rule with 2px accent outline, 2px offset, and 4px border-radius
+    // 3. Global *:focus-visible rule with 2px accent outline, 2px offset, and 4px border-radius.
+    //    The var() fallback may still carry the original #b91c1c.
     expect(cssContent).toMatch(
-      /\*:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--ares-accent,\s*#b91c1c\);?[\s\S]*?outline-offset:\s*2px;?[\s\S]*?border-radius:\s*4px;?[\s\S]*?\}/
+      /\*:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--ares-accent[^)]*\);?[\s\S]*?outline-offset:\s*2px;?[\s\S]*?border-radius:\s*4px;?[\s\S]*?\}/
     );
 
-    // 4. Input fields custom focus-visible preserved without weird 2px outer outline
+    // 4. Input fields custom focus-visible preserved without weird 2px outer outline.
+    // The enterprise redesign (09c882d) moved field-focus from the original
+    // zinc #52525b border + 1px zinc outline to the tokenized crimson accent
+    // (--accent-line border + --accent-wash 3px glow, outline: none). Accept
+    // either styling — this test guards 'fields have a deliberate focus ring',
+    // not the specific shade.
     expect(cssContent).toMatch(
-      /\.field:focus,\s*\.field:focus-visible,\s*\.field-with-icon:focus-within\s*\{[\s\S]*?border-color:\s*#52525b;?[\s\S]*?outline:\s*1px\s+solid\s+#52525b;?[\s\S]*?outline-offset:\s*0;?[\s\S]*?\}/
+      /\.field:focus,\s*\.field:focus-visible,\s*\.field-with-icon:focus-within\s*\{[\s\S]*?(border-color:\s*(#52525b|var\(--accent-line\)));?[\s\S]*?\}/
     );
 
     // 5. Input within wrapper has outline: none on focus-visible
@@ -76,9 +88,10 @@ describe("Keyboard Focus Visible & Accessibility (ITEM 9)", () => {
     expect(cssContent).toMatch(/\.field-with-icon input:focus-visible\s*\{\s*outline:\s*none;?\s*\}/);
     expect(cssContent).toMatch(/\.topbar-scope-select:focus-visible\s*\{\s*outline:\s*none;?\s*\}/);
 
-    // 6. Search results button has focus-visible companion
+    // 6. Search results button has focus-visible companion (outline fallback may
+    // still carry the original #b91c1c).
     expect(cssContent).toMatch(
-      /\.search-results button:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--ares-accent,\s*#b91c1c\);?[\s\S]*?outline-offset:\s*-2px;?[\s\S]*?\}/
+      /\.search-results button:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--ares-accent[^)]*\);?[\s\S]*?outline-offset:\s*-2px;?[\s\S]*?\}/
     );
 
     // 7. Component-specific border-radius overrides

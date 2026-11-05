@@ -260,10 +260,10 @@ export function CampaignsPage() {
       {activeTab === "Scope" && (
         <>
           <section className="panel p-4">
-            <SectionHeader title="Campaign Detail" />
+            <SectionHeader title="Campaign detail" />
             <div>
               <label htmlFor="scope-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
-                Target Campaign
+                Target campaign
               </label>
               <CampaignPicker id="scope-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
             </div>
@@ -311,10 +311,10 @@ export function CampaignsPage() {
       {activeTab === "Findings" && (
         <section className="grid gap-4">
           <section className="panel p-4">
-            <SectionHeader title="Campaign Findings" />
+            <SectionHeader title="Campaign findings" />
             <div>
               <label htmlFor="findings-campaign-select" className="block text-xs font-medium text-zinc-300 mb-1.5">
-                Target Campaign
+                Target campaign
               </label>
               <CampaignPicker id="findings-campaign-select" campaigns={campaignList} value={selected} onChange={setSelected} />
             </div>

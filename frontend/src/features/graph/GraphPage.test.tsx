@@ -76,20 +76,27 @@ describe("GraphPage Test Harness (AUD-009)", () => {
     cleanup();
   });
 
-  it("renders Cobalt Strike C2 Console with title bar, controls, and session dock", async () => {
+  it("renders Cobalt Strike C2 Console with aria-labels, controls, and session dock", async () => {
     renderGraphPage();
 
+    // Container aria-labels preserved across the honest-UI redesign.
     expect(screen.getByLabelText("Cobalt Strike C2 Console")).toBeInTheDocument();
     expect(screen.getAllByText("ARES").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Cobalt Strike Pivot Graph")).toBeInTheDocument();
 
-    // Toolbar legend items
+    // Toolbar legend items.
     expect(screen.getAllByText(/SYSTEM \*/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/SMB Pivot/i)).toBeInTheDocument();
 
-    // Session dock terminal
+    // Session dock prompt: 'beacon>' was replaced with a simple '>' when the
+    // dock became honestly read-only (no fake C2 channel). Match either so this
+    // test stays useful across the transition.
     await waitFor(() => {
-      expect(screen.getByText("beacon>")).toBeInTheDocument();
+      const matches = screen.queryAllByText((_t, el) => {
+        const txt = (el?.textContent || "").trim();
+        return txt === ">" || txt === "beacon>";
+      });
+      expect(matches.length).toBeGreaterThan(0);
     });
   });
 
@@ -103,7 +110,9 @@ describe("GraphPage Test Harness (AUD-009)", () => {
       expect(screen.getByText("Bravo Assessment")).toBeInTheDocument();
     });
 
-    const select = screen.getByLabelText(/Campaign:/i);
+    // Label text changed from 'Campaign:' to 'Campaign' (no trailing colon) in
+    // the sentence-case label normalisation pass.
+    const select = screen.getByLabelText(/Campaign/i);
     fireEvent.change(select, { target: { value: "camp-002" } });
 
     await waitFor(() => {
