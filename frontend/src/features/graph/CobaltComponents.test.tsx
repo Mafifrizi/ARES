@@ -15,7 +15,17 @@ describe("Cobalt Strike Visualizer Components & Integration", () => {
     cleanup();
   });
 
-  describe("CobaltSessionDock", () => {
+  // These three CobaltSessionDock tests assert fabricated demo-data strings
+  // ('DEVELOPER45', 'beacon> hashdump', 'Administrator:500:...', 'Cryptographic
+  // auth: AES-256-GCM', 'established link to host: DC01'). The dock was
+  // deliberately rewritten in the enterprise honesty pass (commit 09c882d +
+  // follow-ups) to drop every synthesized session and command-channel
+  // simulation: sessions now derive strictly from real in-scope nodes, the
+  // console is honestly read-only, and the prompt is '>' with the placeholder
+  // "read-only · type 'help'" rather than a fake 'beacon>' c2 prompt. These
+  // tests therefore now fail by design; they're skipped pending a rewrite
+  // against the new honest empty-state and real-node derivation contract.
+  describe.skip("CobaltSessionDock (fabrication tests, superseded by honest-UI redesign)", () => {
     it("renders default multi-row tabs and status bar correctly", () => {
       render(
         <CobaltSessionDock

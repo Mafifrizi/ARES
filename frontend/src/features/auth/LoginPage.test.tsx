@@ -53,7 +53,7 @@ describe("LoginPage Integration Tests (AUD-009)", () => {
     );
 
     expect(screen.getByRole("heading", { name: "ARES Dashboard" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Sign In" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.getByLabelText(/Username \/ Operator ID/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Sign in$/i })).toBeInTheDocument();
@@ -150,6 +150,6 @@ describe("LoginPage Integration Tests (AUD-009)", () => {
     );
 
     // If authenticated, LoginPage immediately returns <Navigate to="/" replace />
-    expect(screen.queryByRole("heading", { name: "Sign In" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in" })).not.toBeInTheDocument();
   });
 });
