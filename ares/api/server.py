@@ -1543,11 +1543,15 @@ async def sso_initiate(
             detail="SSO is not configured for this organization. Contact your administrator.",
         )
 
-    base_url = str(request.base_url).rstrip("/")
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    forwarded_host = request.headers.get("x-forwarded-host")
-    if forwarded_proto and forwarded_host:
-        base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+    # SSO base_url is critical: it becomes the SAML ACS and the OIDC redirect_uri
+    # presented to the IdP. Trusting client-supplied X-Forwarded-* lets an
+    # unauthenticated attacker point the IdP at their own host and (on any IdP
+    # with a permissive ACS/redirect allowlist) steal the assertion/code. We
+    # therefore derive base_url strictly from the operator-configured browser
+    # origin; TrustedHostMiddleware does NOT cover X-Forwarded-* and there is no
+    # pinned trusted-proxy allowlist at this layer. (AUDIT run-1 H1)
+    browser_origin = (settings.ares_browser_origin or "").rstrip("/")
+    base_url = browser_origin or str(request.base_url).rstrip("/")
 
     protocol = sso_config["protocol"]
     if protocol == "saml":
