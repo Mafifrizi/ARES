@@ -341,7 +341,11 @@ async def process_oidc_callback(
             headers={"Accept": "application/json"},
         )
         if token_resp.status_code >= 400:
-            logger.warning("oidc_token_exchange_failed", status=token_resp.status_code, text=token_resp.text)
+            # Do NOT log token_resp.text — IdPs often reflect the submitted `code`,
+            # `redirect_uri`, and sometimes substrings of `client_id`/`client_secret`
+            # in `error_description`, which would land in the loguru sink's retention.
+            # Status code alone is enough for operational triage. (AUDIT run-1 M14)
+            logger.warning("oidc_token_exchange_failed", status=token_resp.status_code)
             raise ValueError(f"OIDC token exchange failed: HTTP {token_resp.status_code}")
 
         token_data = token_resp.json()
