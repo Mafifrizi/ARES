@@ -4,7 +4,7 @@ ares/api/server.py|error: Incompatible return value type (got "JSONResponse", ex
 ares/api/server.py|error: Incompatible return value type (got "JSONResponse", expected "dict[str, Any]")  [return-value]
 ares/api/server.py|error: Incompatible types in assignment (expression has type "ApiKeyTicketSource", variable has type "BearerTicketSource | None")  [assignment]
 ares/api/server.py|error: Invalid index type "str" for "str"; expected type "SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]"  [index]
-ares/api/server.py|error: Name "result_rows" already defined on line 4095  [no-redef]
+ares/api/server.py|error: Name "result_rows" already defined on line 4099  [no-redef]
 ares/api/server.py|error: Value of type "dict[str, Any] | Any | str | None" is not indexable  [index]
 ares/cli/mcp_cli_utils.py|error: Unexpected keyword argument "file" for "print" of "Console"  [call-arg]
 ares/cli/mcp_tui.py|error: Module has no attribute "getch"  [attr-defined]
