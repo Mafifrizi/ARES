@@ -5684,10 +5684,16 @@ class PostgresDatabase:
         return self._row_to_dict(row) if row else None
 
     async def verify_user(self, username: str, password: str) -> dict[str, Any] | None:
+        # Constant-time: ALWAYS run verify_password (even when the user is missing)
+        # against a dummy hash so the response latency does not reveal whether the
+        # username exists. The SQLite sibling (`database.py:2314-2320`) already does
+        # this correctly; the previous short-circuit `not user or ...` here leaked
+        # user existence via bcrypt timing. (AUDIT run-1 H2)
         user = await self.get_user(username)
         _DUMMY = "$2b$12$notarealthashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
         candidate = user["hashed_password"] if user else _DUMMY
-        if not user or not verify_password(password, candidate):
+        password_ok = verify_password(password, candidate)
+        if not user or not password_ok:
             return None
         async with self._pool.acquire() as conn:
             await conn.execute("UPDATE users SET last_login=now() WHERE id=$1", user["id"])
