@@ -41,7 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
@@ -1519,6 +1519,25 @@ class SsoConfigRequest(BaseModel):
     default_role: str = Field("reporter", pattern=r"^(team_lead|operator|recon|reporter)$")
     role_mapping: dict[str, str] = Field(default_factory=dict)
     is_enabled: bool = True
+
+    @model_validator(mode="after")
+    def _require_oidc_asymmetric_verification(self) -> "SsoConfigRequest":
+        # OIDC id_tokens must be verified against the IdP's published asymmetric
+        # JWKS. Saving a config without jwks_uri would force the verifier into a
+        # path that could only fall back to the shared client_secret (now removed)
+        # or leave iss unvalidated. Require both an https jwks_uri and an issuer so
+        # the runtime verifier can enforce signature + origin. (AUDIT run-1 C1)
+        if self.protocol == "oidc":
+            jwks = (self.jwks_uri or "").strip()
+            if not jwks or not jwks.lower().startswith("https://"):
+                raise ValueError(
+                    "OIDC configuration requires an https jwks_uri (the IdP's published signing keys)."
+                )
+            if not (self.issuer_or_entity_id or "").strip():
+                raise ValueError(
+                    "OIDC configuration requires issuer_or_entity_id for id_token iss validation."
+                )
+        return self
 
 
 @app.get("/auth/sso/init", tags=["auth"])

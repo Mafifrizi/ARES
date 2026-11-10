@@ -18,8 +18,20 @@ import httpx
 from authlib.deprecate import AuthlibDeprecationWarning
 
 warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
-from authlib.jose import JsonWebKey
-from authlib.jose import jwt as authlib_jwt
+from authlib.jose import JsonWebKey, JsonWebToken
+from authlib.jose import jwt as authlib_jwt  # noqa: F401  (kept for compatibility / callers)
+
+# OIDC id_tokens are asymmetrically signed. Pin the decoder to the standard
+# asymmetric algorithms so an attacker cannot (a) force a symmetric HS* path
+# verified with the shared client_secret, nor (b) mount RSA-public-key-as-HMAC
+# "alg confusion" by submitting an HS256 token signed with a public key from the
+# IdP's JWKS. (AUDIT run-1 C1)
+_OIDC_ID_TOKEN_ALGORITHMS = [
+    "RS256", "RS384", "RS512",
+    "ES256", "ES384", "ES512",
+    "PS256", "PS384", "PS512",
+]
+_OIDC_JWT = JsonWebToken(_OIDC_ID_TOKEN_ALGORITHMS)
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.settings import OneLogin_Saml2_Settings
 
@@ -353,35 +365,50 @@ async def process_oidc_callback(
         if not id_token:
             raise ValueError("OIDC response missing id_token")
 
-        # 2. Fetch JWKS and verify signature
-        if jwks_uri:
-            jwks_resp = await client.get(jwks_uri)
-            if jwks_resp.status_code >= 400:
-                raise ValueError(f"Failed to fetch JWKS from {jwks_uri}")
-            jwks = jwks_resp.json()
-            key_set = JsonWebKey.import_key_set(jwks)
-            claims = authlib_jwt.decode(id_token, key_set)
-        else:
-            # Fallback for mock/symmetric tests: decode without JWKS verification if jwks_uri is empty
-            claims = authlib_jwt.decode(id_token, client_secret)
+        # 2. Verify the id_token signature against the IdP's published JWKS.
+        #    jwks_uri is mandatory: there is no symmetric fallback. Verifying an
+        #    OIDC id_token with the shared client_secret (HS*) would let anyone
+        #    who holds that secret mint a token asserting any identity/role.
+        #    (AUDIT run-1 C1)
+        if not jwks_uri:
+            raise ValueError(
+                "OIDC configuration is missing jwks_uri; refusing to verify the "
+                "id_token without the IdP's published asymmetric signing keys."
+            )
+        jwks_resp = await client.get(jwks_uri)
+        if jwks_resp.status_code >= 400:
+            raise ValueError("Failed to fetch OIDC JWKS from the identity provider")
+        jwks = jwks_resp.json()
+        key_set = JsonWebKey.import_key_set(jwks)
+        claims = _OIDC_JWT.decode(id_token, key_set)
 
-        # 3. Validate standard claims
+        # 3. Validate standard claims. Each required claim is enforced; an absent
+        #    iss/aud/exp must be a hard failure, not a silently-skipped check.
         now = time.time()
         exp = claims.get("exp")
-        if exp and exp < now:
-            raise ValueError("OIDC id_token has expired")
+        if not exp or exp < now:
+            raise ValueError("OIDC id_token is missing exp or has expired")
 
-        token_iss = claims.get("iss", "")
-        if issuer and token_iss != issuer:
-            raise ValueError(f"OIDC issuer mismatch: expected {issuer}, got {token_iss}")
+        # iss is REQUIRED and must match the configured issuer. An empty configured
+        # issuer means we cannot establish the token's origin, so we refuse.
+        if not issuer:
+            raise ValueError(
+                "OIDC configuration is missing issuer_or_entity_id; cannot validate id_token iss"
+            )
+        if str(claims.get("iss", "")) != issuer:
+            raise ValueError("OIDC issuer mismatch")
 
+        # aud is REQUIRED and must contain our client_id. A token with no aud claim
+        # (previously accepted by falling through both isinstance branches) is rejected.
         token_aud = claims.get("aud")
         if isinstance(token_aud, list):
             if client_id not in token_aud:
-                raise ValueError(f"OIDC aud mismatch: client_id {client_id} not in {token_aud}")
+                raise ValueError("OIDC aud mismatch")
         elif isinstance(token_aud, str):
             if token_aud != client_id:
-                raise ValueError(f"OIDC aud mismatch: expected {client_id}, got {token_aud}")
+                raise ValueError("OIDC aud mismatch")
+        else:
+            raise ValueError("OIDC id_token is missing or has a malformed aud claim")
 
         token_nonce = claims.get("nonce")
         if expected_nonce and token_nonce != expected_nonce:
