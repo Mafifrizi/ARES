@@ -45,7 +45,7 @@ apply to all community interactions:
   unpatched weaknesses in public discussions, issues, or pull requests.
   Report them privately via [SECURITY.md](SECURITY.md).
 * **DO NOT** share real credentials, hashes, tokens, API keys, or session
-  data in any public channel — even as "examples." Use synthetic or redacted
+  data in any public channel, even as "examples." Use synthetic or redacted
   placeholders.
 * **DO NOT** post engagement artifacts (reports, findings, target data) from
   real-world assessments. Use lab environments and sanitized examples only.

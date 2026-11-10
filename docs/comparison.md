@@ -16,11 +16,11 @@ How ARES compares to traditional manual penetration testing and legacy vulnerabi
 
 ## Why those columns matter
 
-- **Testing frequency** — Point-in-time pentests leave gaps every time configuration, identity or infrastructure drifts. ARES is designed to be re-run on every merge or every day.
-- **Exploitability validation** — A scanner that says a CVE "might" apply is noise. ARES only reports what it actually proved on the live target.
-- **Multi-hop attack paths** — Real breaches chain weak links. The interactive DAG surfaces the shortest path to Tier-0 Crown Jewels, not just a flat vulnerability list.
-- **Scope enclave & egress guard** — Fail-closed means a mis-typed CIDR cannot leak offensive packets out-of-scope. This is the single hardest thing to get right without platform support.
-- **OPSEC & telemetry throttling** — Noise profiles (`stealth` / `evasive` / `noisy`) let the same module run in a red-team engagement without lighting up the SOC on day one.
+- **Testing frequency**: Point-in-time pentests leave gaps every time configuration, identity or infrastructure drifts. ARES is designed to be re-run on every merge or every day.
+- **Exploitability validation**: A scanner that says a CVE "might" apply is noise. ARES only reports what it actually proved on the live target.
+- **Multi-hop attack paths**: Real breaches chain weak links. The interactive DAG surfaces the shortest path to Tier-0 Crown Jewels, not just a flat vulnerability list.
+- **Scope enclave & egress guard**: Fail-closed means a mis-typed CIDR cannot leak offensive packets out-of-scope. This is the single hardest thing to get right without platform support.
+- **OPSEC & telemetry throttling**: Noise profiles (`stealth` / `evasive` / `noisy`) let the same module run in a red-team engagement without lighting up the SOC on day one.
 
 ## Deeper reading
 

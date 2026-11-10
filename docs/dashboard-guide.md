@@ -69,11 +69,12 @@ keys, bearer tokens, or sensitive report URLs.
 
 | View | File | Use |
 | --- | --- | --- |
-| Overview (Standby / Zero-State) | `docs/assets/screenshots/dashboard-overview-empty.png` | Clean onboarding hero, platform readiness strip, and initialization quick actions. |
-| Overview (Active Telemetry) | `docs/assets/screenshots/dashboard-overview.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
-| Campaigns | `docs/assets/screenshots/dashboard-campaigns.png` | Campaign creation, target/scope input, and management actions. |
-| Graph & Beacon Console | `docs/assets/screenshots/dashboard-graph.png` | ARES Tactical Pivot Graph, Perimeter Ingress with animated flames, slide-over Tactical Inspector Drawer, & docked Beacon session terminal. |
-| Reports | `docs/assets/screenshots/dashboard-reports.png` | Campaign report generation and artifact list. |
+| Login | `docs/assets/screens/login-hd.png` | Dragon mascot sign-in with the live API ignite animation. |
+| Overview (Active Telemetry) | `docs/assets/screens/overview-hd.png` | Health, telemetry cards, confirmed findings, and campaign summary. |
+| Campaigns & Scope | `docs/assets/screens/campaigns-scope-hd.png` | Campaign picker, target/scope input, and management actions. |
+| Modules (Catalog) | `docs/assets/screens/modules-catalog-hd.png` | 66 modules across 13 categories with MITRE ATT&CK and OPSEC labels. |
+| Modules (Result) | `docs/assets/screens/modules-result-hd.png` | Finding card with severity, confidence, remediation, and next-module pivot. |
+| Graph & Beacon Console | `docs/assets/screens/attack-graph-hd.png` | Tactical pivot graph, perimeter ingress with animated flames, slide-over inspector drawer, and docked beacon session terminal. |
 
 ## Dashboard Shell
 
@@ -194,7 +195,7 @@ Current page tabs:
 
 ### Overview
 
-![Dashboard overview active telemetry](assets/screenshots/dashboard-overview-v2.png)
+![Dashboard overview active telemetry](assets/screens/overview-hd.png)
 
 *Active Telemetry Overview - Real-time telemetry, validated findings, queue metrics, and campaign status.*
 
@@ -220,7 +221,7 @@ records.
 
 Purpose: create and manage engagement containers.
 
-![Campaign creation workflow](assets/screenshots/dashboard-campaigns.png)
+![Campaign creation workflow](assets/screens/campaigns-scope-hd.png)
 
 Use it for:
 
@@ -244,7 +245,7 @@ Delete behavior:
 
 Purpose: run individual modules safely.
 
-![Module catalog and run workflow](assets/screenshots/dashboard-modules-catalog.png)
+![Module catalog and run workflow](assets/screens/modules-catalog-hd.png)
 
 Use it for:
 
@@ -268,6 +269,8 @@ Good habit:
 5. Review validation output.
 6. Run live only if authorized.
 
+![Module run result with finding card](assets/screens/modules-result-hd.png)
+
 Results distinguish confirmed findings, completed runs with no confirmed
 findings, operator/dependency/network errors, unsupported runs, and unexpected
 module errors. A dry-run result is a validation preview only; it is not evidence
@@ -285,8 +288,6 @@ Scope behavior:
 ### Reports
 
 Purpose: generate, download, and manage campaign report artifacts.
-
-![Report generation workflow](assets/screenshots/dashboard-reports.png)
 
 Formats:
 
@@ -325,7 +326,7 @@ the clean empty state: `No reports generated for this campaign yet.`
 
 Purpose: understand lateral pivot relationships, trace multi-hop compromise routes, inspect tactical host vulnerabilities in a slide-over drawer, and interact with compromised hosts directly from a docked Beacon terminal console.
 
-![ARES Tactical Pivot Graph & Docked Beacon Session Terminal](assets/screenshots/dashboard-graph.png)
+![ARES Tactical Pivot Graph & Docked Beacon Session Terminal](assets/screens/attack-graph-hd.png)
 
 *ARES Tactical Pivot Graph & Docked Beacon Session Terminal Console - Live enterprise campaign topology (`Kali test`), perimeter ingress firewall with animated flames, Linux/Windows compromised footholds, slide-over Tactical Inspector Drawer, and interactive command execution.*
 
@@ -384,10 +385,6 @@ Located directly below the graph canvas, the Beacon Terminal Dock provides a ful
 
 Purpose: generate structured, repeatable, and deterministic campaign execution plans.
 
-![ARES Enterprise Campaign Templates](assets/screenshots/dashboard-templates.png)
-
-*Campaign Templates & Plan Builder - Blueprint catalog, stage planning, and parameterized execution checklist.*
-
 The Templates view provides pre-tested engagement blueprints designed to ensure operational consistency across red-team operators without relying on external LLM calls.
 
 #### Tab 1: Templates (Catalog)
@@ -421,10 +418,6 @@ Actions:
 ### Strategy
 
 Purpose: autonomous, goal-oriented engagement planning and execution powered by graph heuristics and LLM decision agents.
-
-![ARES Autonomous Strategy & AI Planner](assets/screenshots/dashboard-strategy.png)
-
-*Autonomous Strategy & Objective Builder - Goal-directed planning, multi-LLM engine selection, and live cycle telemetry.*
 
 Unlike static templates, the Strategy engine continuously evaluates observed campaign state (discovered hosts, harvested credentials, open ports, and active defenses) to dynamically select and execute the next optimal module toward a specific operational objective.
 
@@ -503,10 +496,6 @@ The AI planner module performs a local planning/LLM call only. It does not conta
 
 Purpose: account and security administration.
 
-![ARES Zero-Trust Security Governance](assets/screenshots/dashboard-security.png)
-
-*Zero-Trust Security Governance - Password rotation, scoped API keys, audit logging, and operator review.*
-
 Use it for:
 
 - Change password.
@@ -537,10 +526,6 @@ API key behavior:
 ### EDR/OPSEC
 
 Purpose: track, record, and evaluate evasion effectiveness across endpoint detection and response (EDR) agents, feeding empirical feedback into the adaptive OPSEC engine.
-
-![ARES EDR and OPSEC Evasion Matrix](assets/screenshots/dashboard-edr.png)
-
-*EDR/OPSEC Evasion Knowledge Base & Outcome Reporting - Empirical bypass statistics, payload inspection, and adaptive feedback.*
 
 #### Tab 1: Knowledge Base
 
@@ -576,10 +561,6 @@ Action:
 ### Live
 
 Purpose: watch campaign WebSocket events.
-
-![ARES Live Operations Stream](assets/screenshots/dashboard-live.png)
-
-*Live Operations Event Stream - Real-time WebSocket telemetry, module lifecycle events, and active execution logs.*
 
 Use it for:
 

@@ -31,14 +31,14 @@ ARES uses [GitHub Discussions](https://github.com/Mafifrizi/ARES/discussions) fo
 | **[Discussions → Module Development](https://github.com/Mafifrizi/ARES/discussions/categories/module-development)** | Module design, research tradecraft, MITRE technique coverage |
 | **GitHub Issues** | Confirmed bugs, tracked tasks, accepted feature work |
 | **Pull Requests** | Code contributions ready for review |
-| **[SECURITY.md](SECURITY.md)** | Security vulnerabilities — **never** in public Discussions or Issues |
+| **[SECURITY.md](SECURITY.md)** | Security vulnerabilities, **never** in public Discussions or Issues |
 
 ### Code of Conduct
 
 All participants must follow our [Code of Conduct](CODE_OF_CONDUCT.md). In particular:
 
 - **DO NOT** post real credentials, hashes, tokens, or target data in any public channel
-- **DO NOT** disclose security vulnerabilities publicly — use [SECURITY.md](SECURITY.md)
+- **DO NOT** disclose security vulnerabilities publicly. Use [SECURITY.md](SECURITY.md)
 - **DO** redact all sensitive data from logs, screenshots, and code snippets
 - **DO** be respectful, constructive, and technically honest
 
@@ -137,11 +137,11 @@ ARES uses formal RFCs to design and coordinate multi-module research efforts.
 All 5 modules from the Linux AD post-exploitation research track are fully
 implemented and production-ready in ARES v6.0:
 
-- `linux.sssd_harvest` — SSSD LDB database extraction
-- `linux.ccache_hunt` — Kerberos ticket cache hunting (file + Kernel Keyring)
-- `linux.keytab_abuse` — Machine keytab parsing & Silver Ticket generation
-- `linux.samba_secrets` — Samba/Winbind machine password extraction
-- `credential.ticket_converter` — Bi-directional ccache ↔ kirbi conversion
+- `linux.sssd_harvest`: SSSD LDB database extraction
+- `linux.ccache_hunt`: Kerberos ticket cache hunting (file + Kernel Keyring)
+- `linux.keytab_abuse`: Machine keytab parsing & Silver Ticket generation
+- `linux.samba_secrets`: Samba/Winbind machine password extraction
+- `credential.ticket_converter`: Bi-directional ccache ↔ kirbi conversion
 
 See the full technical specification:
 👉 **[RFC 001: Linux Active Directory Tradecraft](docs/research/linux-active-directory-tradecraft.md)**
