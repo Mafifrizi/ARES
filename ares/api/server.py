@@ -41,7 +41,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware as _BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
@@ -1520,6 +1520,25 @@ class SsoConfigRequest(BaseModel):
     role_mapping: dict[str, str] = Field(default_factory=dict)
     is_enabled: bool = True
 
+    @model_validator(mode="after")
+    def _require_oidc_asymmetric_verification(self) -> "SsoConfigRequest":
+        # OIDC id_tokens must be verified against the IdP's published asymmetric
+        # JWKS. Saving a config without jwks_uri would force the verifier into a
+        # path that could only fall back to the shared client_secret (now removed)
+        # or leave iss unvalidated. Require both an https jwks_uri and an issuer so
+        # the runtime verifier can enforce signature + origin. (AUDIT run-1 C1)
+        if self.protocol == "oidc":
+            jwks = (self.jwks_uri or "").strip()
+            if not jwks or not jwks.lower().startswith("https://"):
+                raise ValueError(
+                    "OIDC configuration requires an https jwks_uri (the IdP's published signing keys)."
+                )
+            if not (self.issuer_or_entity_id or "").strip():
+                raise ValueError(
+                    "OIDC configuration requires issuer_or_entity_id for id_token iss validation."
+                )
+        return self
+
 
 @app.get("/auth/sso/init", tags=["auth"])
 async def sso_initiate(
@@ -1543,11 +1562,15 @@ async def sso_initiate(
             detail="SSO is not configured for this organization. Contact your administrator.",
         )
 
-    base_url = str(request.base_url).rstrip("/")
-    forwarded_proto = request.headers.get("x-forwarded-proto")
-    forwarded_host = request.headers.get("x-forwarded-host")
-    if forwarded_proto and forwarded_host:
-        base_url = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+    # SSO base_url is critical: it becomes the SAML ACS and the OIDC redirect_uri
+    # presented to the IdP. Trusting client-supplied X-Forwarded-* lets an
+    # unauthenticated attacker point the IdP at their own host and (on any IdP
+    # with a permissive ACS/redirect allowlist) steal the assertion/code. We
+    # therefore derive base_url strictly from the operator-configured browser
+    # origin; TrustedHostMiddleware does NOT cover X-Forwarded-* and there is no
+    # pinned trusted-proxy allowlist at this layer. (AUDIT run-1 H1)
+    browser_origin = (settings.ares_browser_origin or "").rstrip("/")
+    base_url = browser_origin or str(request.base_url).rstrip("/")
 
     protocol = sso_config["protocol"]
     if protocol == "saml":

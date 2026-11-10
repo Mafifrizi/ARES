@@ -60,10 +60,15 @@ class ConfirmationTokenManager:
         """Issue a single-use, time-bounded HMAC token for a specific execution."""
         payload = self._make_payload(campaign_id, module_id, target, params)
         nonce = secrets.token_hex(8)
-        raw_to_sign = f"{payload}:{nonce}:{time.time()}"
+        # Nonce + monotonic time for uniqueness; the outer HMAC is still over
+        # payload+nonce+monotonic-time, which stays unguessable.
+        raw_to_sign = f"{payload}:{nonce}:{time.monotonic()}"
         sig = hmac.new(self._secret, raw_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
         token = f"ares_tok_{sig[:32]}"
-        expires_at = time.time() + ttl_seconds
+        # Monotonic deadline — wall-clock adjustment (NTP step, suspend/resume,
+        # deliberate rollback via SeSystemtimePrivilege on Windows) must not
+        # extend the token window. (AUDIT run-1 H10)
+        expires_at = time.monotonic() + ttl_seconds
         self._tokens[token] = (expires_at, payload)
         self._purge_expired()
 
@@ -97,7 +102,9 @@ class ConfirmationTokenManager:
             return False
 
         expires_at, expected_payload = self._tokens[token]
-        if time.time() > expires_at:
+        # Same monotonic clock as issue_token — see H10 above. Any `time.time()`
+        # (wall-clock) comparison here would re-open the extendable-TTL hole.
+        if time.monotonic() > expires_at:
             self._tokens.pop(token, None)
             return False
 
@@ -118,7 +125,7 @@ class ConfirmationTokenManager:
         return False
 
     def _purge_expired(self) -> None:
-        now = time.time()
+        now = time.monotonic()
         expired = [t for t, (exp, _) in self._tokens.items() if now > exp]
         for t in expired:
             self._tokens.pop(t, None)

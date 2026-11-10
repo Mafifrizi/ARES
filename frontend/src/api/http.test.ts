@@ -194,4 +194,26 @@ describe("cookie-backed HTTP transport", () => {
     expect(init.credentials).toBe("same-origin");
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer memory-bearer");
   });
+
+  it("attaches the CSRF header on a non-auth mutation (AUDIT run-1 C5)", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    session.setAccessToken("memory-bearer");
+    const http = await import("./http");
+    await http.apiRequest("/campaigns", { method: "POST", body: "{}" }, false);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("X-ARES-CSRF")).toBe(CSRF);
+  });
+
+  it("does not attach the CSRF header on a GET", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const session = await import("./session");
+    session.setAccessToken("memory-bearer");
+    const http = await import("./http");
+    await http.apiRequest("/campaigns", { method: "GET" }, false);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("X-ARES-CSRF")).toBeNull();
+  });
 });

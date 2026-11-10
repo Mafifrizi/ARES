@@ -7,8 +7,14 @@ Principles:
     audit reports, and custom plugins are strictly blacklisted from modification.
   - Multi-Layered Defense:
       * Anti-Path-Traversal Jail: Strict relative-to-root confinement.
-      * Pre-Flight AST Gatekeeper: Python syntax and BaseModule structure verified before disk write.
-      * Cryptographic Integrity: SHA-256 verification and atomic swap with automatic rollback.
+      * Pre-Flight AST Gatekeeper: Python syntax + BaseModule structure verified, and
+        module-level code rejected if it would execute dangerous calls at import time.
+      * Content Integrity: downloaded bytes are checked against the git-tree blob SHA
+        from the manifest before any disk write, with atomic swap and automatic
+        rollback. NOTE: this is a consistency check between two GitHub responses, not
+        a trust anchor against a compromised repository — signed modules (a pinned
+        release key + detached per-module signatures) are the complete remediation
+        and are the recommended production posture.
       * Remote Source Whitelist: Only official pinned GitHub endpoints over verified TLS.
       * DoS Protection: Size quotas and HTTP request timeouts.
   - Separation of Concerns:
@@ -73,6 +79,19 @@ PROTECTED_DATA_PATTERNS = (
     re.compile(r"(?i)(^|[\\/])reports[\\/].*"),
     re.compile(r"(?i)(^|[\\/])logs[\\/].*"),
 )
+
+
+def _git_blob_sha1(data: bytes) -> str:
+    """Compute the git blob SHA-1 of ``data`` (matches the SHA reported by the
+    GitHub git-trees API for a file blob): sha1(b"blob <len>\\0" + data)."""
+    header = f"blob {len(data)}\0".encode()
+    return hashlib.sha1(header + data).hexdigest()  # noqa: S324 - git object id, not a security hash
+
+
+def _consttime_hex_eq(a: str, b: str) -> bool:
+    """Constant-time comparison of two hex digest strings."""
+    import hmac as _hmac
+    return _hmac.compare_digest(a, b)
 
 
 class SecurityViolationError(RuntimeError):
@@ -165,10 +184,56 @@ def extract_all_module_ids(code: str) -> list[str]:
     return ids
 
 
+# Call targets that must never execute at module import time. A legitimate ARES
+# module is imports + class/function definitions + simple constant/logger
+# assignments; it must not run a shell/eval/subprocess/dynamic-import call while
+# the file is merely being imported (which happens on `ares module list`). Blocking
+# these at the import-time scope closes the "top-level payload runs on import"
+# supply-chain RCE vector. This is a static denylist — defense in depth, not a
+# complete control; the full remediation is signed modules. (AUDIT run-1 C4)
+_DANGEROUS_IMPORT_TIME_CALLS = frozenset({
+    "eval", "exec", "compile", "__import__",
+    "system", "popen", "popen2", "popen3", "popen4",
+    "spawn", "spawnl", "spawnle", "spawnv", "spawnve",
+    "Popen", "call", "run", "check_output", "check_call",
+    "getoutput", "getstatusoutput",
+    "import_module", "load_source", "load_module",
+    "SourceFileLoader", "FileLoader",
+})
+
+
+def _import_time_nodes(tree: ast.Module):
+    """Yield AST nodes that execute at import time.
+
+    Everything at module scope runs on import EXCEPT the bodies of function/class
+    definitions (deferred until call/instantiation). Decorators and parameter
+    defaults DO run at import, so those are still walked.
+    """
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            for dec in stmt.decorator_list:
+                yield from ast.walk(dec)
+            if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+                defaults = list(stmt.args.defaults) + [d for d in stmt.args.kw_defaults if d is not None]
+                for d in defaults:
+                    yield from ast.walk(d)
+            if isinstance(stmt, ast.ClassDef):
+                # Class-body statements (e.g. `X = os.system(...)` as a class attr)
+                # also run at import; walk the base-class exprs and the body.
+                for base in stmt.bases:
+                    yield from ast.walk(base)
+                for item in stmt.body:
+                    if not isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
+                        yield from ast.walk(item)
+            continue
+        yield from ast.walk(stmt)
+
+
 def validate_module_code(code: str, expected_module_id: str | None = None) -> tuple[bool, str, str | None]:
     """
     Pre-flight AST analysis on Python code.
-    Verifies valid Python syntax and presence of a valid BaseModule structure with MODULE_ID.
+    Verifies valid Python syntax and presence of a valid BaseModule structure with MODULE_ID,
+    and rejects module code that would execute dangerous operations at import time.
     """
     try:
         tree = ast.parse(code)
@@ -176,6 +241,23 @@ def validate_module_code(code: str, expected_module_id: str | None = None) -> tu
         return False, f"Syntax error: {exc.msg} at line {exc.lineno}", None
     except Exception as exc:
         return False, f"AST parsing failed: {str(exc)}", None
+
+    # Import-time code-execution gate (AUDIT run-1 C4).
+    for node in _import_time_nodes(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            call_name = (
+                func.id if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute)
+                else ""
+            )
+            if call_name in _DANGEROUS_IMPORT_TIME_CALLS:
+                return (
+                    False,
+                    f"Validation rejected: module-level call to '{call_name}' is not "
+                    "permitted (import-time code execution).",
+                    None,
+                )
 
     found_classes: list[str] = []
     found_ids: list[str] = []
@@ -499,10 +581,19 @@ class PlatformUpdateManager:
         rel_path: str,
         expected_module_id: str | None = None,
         dry_run: bool = False,
+        expected_git_sha: str | None = None,
     ) -> tuple[bool, str]:
         """
         Download a single module from the official repository, validate AST and syntax,
         and atomically write to the target directory.
+
+        If ``expected_git_sha`` is supplied (the blob SHA from the git tree manifest),
+        the downloaded content is verified against it before any disk write. This
+        detects tampering or a TOCTOU change between the manifest read and the raw
+        download (e.g. a single-request MITM, or the file changing underneath us).
+        Note: this is a consistency check between two GitHub responses, not a trust
+        anchor against a compromised repository — signed modules are the full
+        remediation. (AUDIT run-1 C4)
         """
         safe_target = secure_resolve_path(self.builtin_modules_dir, rel_path)
         raw_url = f"https://raw.githubusercontent.com/{self.github_repo}/{self.branch}/ares/modules/{rel_path}"
@@ -511,9 +602,21 @@ class PlatformUpdateManager:
             return True, f"[dry-run] Would download {raw_url} -> {safe_target}"
 
         data = self._http_get(raw_url)
+
+        # Integrity: the git tree manifest reports each blob's SHA (git blob SHA-1
+        # over b"blob <len>\\0" + content). Recompute it on the downloaded bytes and
+        # refuse to write on mismatch. (AUDIT run-1 C4)
+        if expected_git_sha:
+            actual_git_sha = _git_blob_sha1(data)
+            if not _consttime_hex_eq(actual_git_sha, expected_git_sha.strip().lower()):
+                raise SecurityViolationError(
+                    f"Integrity check failed for '{rel_path}': downloaded content does "
+                    "not match the manifest blob SHA. Refusing to install."
+                )
+
         code_text = data.decode("utf-8", errors="replace")
 
-        # Pre-flight AST analysis
+        # Pre-flight AST analysis (syntax + BaseModule structure + import-time safety)
         valid, msg, detected_id = validate_module_code(code_text, expected_module_id=expected_module_id)
         if not valid:
             raise SecurityViolationError(f"Module code validation failed for '{rel_path}': {msg}")
@@ -569,6 +672,7 @@ class PlatformUpdateManager:
                     item.relative_path,
                     expected_module_id=None,
                     dry_run=dry_run,
+                    expected_git_sha=item.sha256 or None,
                 )
                 if ok:
                     installed.append(item.relative_path)
@@ -627,6 +731,7 @@ class PlatformUpdateManager:
                     item.relative_path,
                     expected_module_id=None,
                     dry_run=dry_run,
+                    expected_git_sha=item.sha256 or None,
                 )
                 if ok:
                     upgraded.append(item.relative_path)

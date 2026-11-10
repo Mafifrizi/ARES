@@ -280,6 +280,30 @@ async function fetchWithSession(
   if (snapshot.accessToken) {
     headers.set("Authorization", `Bearer ${snapshot.accessToken}`);
   }
+  // Attach the double-submit CSRF header on EVERY state-changing request, not only
+  // the /auth/* flows that go through browserMutationRequest. The API authenticates
+  // via the Bearer header, but the session/refresh cookies still ride along on
+  // same-origin requests (credentials: "same-origin"); requiring X-ARES-CSRF on all
+  // mutations closes the gap where a cookie-accepting endpoint could be driven from
+  // a cross-site form. A cross-site attacker cannot read the __Host- CSRF cookie to
+  // replicate this header, so the server-side header↔cookie compare rejects the
+  // forgery. (AUDIT run-1 C5)
+  const method = (init.method ?? "GET").toUpperCase();
+  const isMutation = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+  if (isMutation && !headers.has(CSRF_HEADER)) {
+    let csrf = readBrowserCsrfToken();
+    if (!csrf) {
+      try {
+        await bootstrapBrowserCsrf();
+        csrf = readBrowserCsrfToken();
+      } catch {
+        csrf = null;
+      }
+    }
+    if (csrf) {
+      headers.set(CSRF_HEADER, csrf);
+    }
+  }
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",

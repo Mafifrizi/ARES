@@ -81,6 +81,24 @@ class McpToolRegistry:
             except Exception as e:
                 logger.warning("Failed to broadcast MCP event to WebSocket: %s", e)
 
+    def _no_data_source_result(self, what: str) -> CallToolResult:
+        """Honest response when no campaign database is attached.
+
+        This gateway returns real data only; it must never substitute sample/demo
+        data for a live query, which would deceive the operator and any AI client
+        consuming the response as authentic telemetry. (AUDIT run-1 C3)
+        """
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps({
+                "error": "no_data_source",
+                "message": (
+                    f"No campaign database is attached to this MCP server, so {what} "
+                    "cannot be returned. The gateway does not serve sample/demo data."
+                ),
+            }, indent=2))],
+            isError=True,
+        )
+
     # ── Tool Registrations ───────────────────────────────────────────────────
 
     def _register_default_tools(self) -> None:
@@ -304,6 +322,9 @@ class McpToolRegistry:
         limit = args.get("limit", 20)
         items = []
 
+        if not (self.db and hasattr(self.db, "list_campaigns")):
+            return self._no_data_source_result("the campaign list")
+
         if self.db and hasattr(self.db, "list_campaigns"):
             try:
                 raw_campaigns = await self.db.list_campaigns()
@@ -333,16 +354,6 @@ class McpToolRegistry:
             except Exception as e:
                 logger.warning("DB query failed: %s", e)
 
-        if not items and not self.db:
-            items = [{
-                "id": "camp_default_01",
-                "name": "Enterprise Internal Purple-Team Engagement",
-                "client": "CorpTech Solutions",
-                "status": "active",
-                "scope": ["10.10.0.0/24", "192.168.1.0/24", "*.corp.local"],
-                "targets_count": 8,
-            }]
-
         clean_data = McpTaintSanitizer.sanitize(items)
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(clean_data, indent=2))]
@@ -350,12 +361,42 @@ class McpToolRegistry:
 
     async def _handle_get_campaign_status(self, args: dict[str, Any]) -> CallToolResult:
         campaign_id = args["campaign_id"]
+        if not (self.db and hasattr(self.db, "get_campaign")):
+            return self._no_data_source_result("campaign status")
+
+        # Resolve real status + a findings summary computed from the live findings,
+        # never the previous hardcoded {critical:2, high:5, ...} / "Lateral Movement"
+        # placeholders. (AUDIT run-1 C3)
+        try:
+            campaign = await self.db.get_campaign(campaign_id)
+        except Exception as exc:
+            logger.warning("mcp_get_campaign_failed", campaign_id=campaign_id, error=str(exc))
+            campaign = None
+        if not campaign:
+            return CallToolResult(
+                content=[TextContent(type="text", text=json.dumps({
+                    "error": "campaign_not_found",
+                    "campaign_id": campaign_id,
+                }, indent=2))],
+                isError=True,
+            )
+
+        summary = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        if hasattr(self.db, "get_findings"):
+            try:
+                raw_findings = await self.db.get_findings(campaign_id)
+                for f in raw_findings or []:
+                    sev = str(f.get("severity", "info")).lower()
+                    if sev in summary:
+                        summary[sev] += 1
+            except Exception as exc:
+                logger.warning("mcp_status_findings_failed", campaign_id=campaign_id, error=str(exc))
+
         scope = await self._get_campaign_scope(campaign_id)
         status_data = {
             "campaign_id": campaign_id,
-            "status": "active",
-            "findings_summary": {"critical": 2, "high": 5, "medium": 8, "low": 12, "info": 4},
-            "active_phase": "Lateral Movement & Domain Enumeration",
+            "status": campaign.get("status", "unknown"),
+            "findings_summary": summary,
             "scope": scope,
             "circuit_breaker_state": self.circuit_breaker.state.value,
         }
@@ -369,40 +410,16 @@ class McpToolRegistry:
         min_severity = args.get("min_severity", "info").lower()
         host_filter = args.get("host")
 
-        findings = []
-        if self.db and hasattr(self.db, "get_findings"):
-            try:
-                raw_findings = await self.db.get_findings(campaign_id)
-                if isinstance(raw_findings, list):
-                    findings = raw_findings
-            except Exception as exc:
-                logger.warning("mcp_fetch_findings_failed", campaign_id=campaign_id, error=str(exc))
+        if not (self.db and hasattr(self.db, "get_findings")):
+            return self._no_data_source_result("campaign findings")
 
-        if not findings and not self.db:
-            findings = [
-                {
-                    "id": "find_kerb_01",
-                    "campaign_id": campaign_id,
-                    "title": "Service Principal Name (SPN) Accounts Vulnerable to Kerberoasting",
-                    "severity": "high",
-                    "cvss_score": 7.5,
-                    "host": "dc01.corp.local",
-                    "mitre_technique": "T1558.003",
-                    "description": "High-privilege service account 'svc_mssql' requested Kerberos ticket with weak RC4 encryption.",
-                    "remediation": "Enforce AES-only Kerberos encryption and apply strong 25+ character service account passwords.",
-                },
-                {
-                    "id": "find_smb_02",
-                    "campaign_id": campaign_id,
-                    "title": "SMB Signing Not Required on Domain Controller",
-                    "severity": "critical",
-                    "cvss_score": 8.8,
-                    "host": "dc02.corp.local",
-                    "mitre_technique": "T1557.001",
-                    "description": "SMB signing is disabled or optional, permitting NTLM relay attacks to escalate to Domain Admin.",
-                    "remediation": "Enable and require SMB signing via Group Policy (GPO: Microsoft network server: Digitally sign communications).",
-                },
-            ]
+        findings = []
+        try:
+            raw_findings = await self.db.get_findings(campaign_id)
+            if isinstance(raw_findings, list):
+                findings = raw_findings
+        except Exception as exc:
+            logger.warning("mcp_fetch_findings_failed", campaign_id=campaign_id, error=str(exc))
 
         severity_ranks = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
         min_rank = severity_ranks.get(min_severity, 0)
@@ -419,20 +436,26 @@ class McpToolRegistry:
         )
 
     async def _handle_get_remediation_guidance(self, args: dict[str, Any]) -> CallToolResult:
+        # Previously this ignored finding_id entirely and returned a fixed
+        # Kerberoasting playbook for EVERY finding — wrong (and dangerous) remediation
+        # for any non-Kerberoast finding. Remediation is carried on each finding
+        # record (its own `remediation` field and MITRE technique); the gateway
+        # cannot synthesize per-finding guidance from an opaque id alone, so it must
+        # not fabricate one. Direct the caller to the authoritative source rather
+        # than returning a canned playbook. (AUDIT run-1 C3)
         finding_id = args["finding_id"]
-        guidance = {
-            "finding_id": finding_id,
-            "tactical_actions": [
-                "1. Audit all Active Directory accounts configured with ServicePrincipalNames: Get-ADUser -Filter {ServicePrincipalName -like '*'} -Properties ServicePrincipalName",
-                "2. Change password of affected service accounts to high-entropy 30+ character random passphrases.",
-                "3. Enable Group Policy: Network security: Configure encryption types allowed for Kerberos (AES128_HMAC_SHA1, AES256_HMAC_SHA1).",
-            ],
-            "mitre_mitigations": ["M1027: Password Policies", "M1041: Encrypt Sensitive Information"],
-            "verification_procedure": "Re-run 'ad.kerberoast' module in dry-run mode to confirm SPN tickets are AES-256 and uncrackable.",
-        }
-        clean_data = McpTaintSanitizer.sanitize(guidance)
         return CallToolResult(
-            content=[TextContent(type="text", text=json.dumps(clean_data, indent=2))]
+            content=[TextContent(type="text", text=json.dumps({
+                "error": "remediation_not_synthesizable",
+                "finding_id": finding_id,
+                "message": (
+                    "Per-finding remediation is recorded on the finding itself. Call "
+                    "ares_list_findings for the campaign and read the finding's "
+                    "'remediation' field and 'mitre_technique'; this gateway does not "
+                    "generate remediation guidance independently of the finding record."
+                ),
+            }, indent=2))],
+            isError=True,
         )
 
     async def _handle_query_attack_graph(self, args: dict[str, Any]) -> CallToolResult:
@@ -450,22 +473,23 @@ class McpToolRegistry:
             except Exception as exc:
                 logger.warning("mcp_query_attack_graph_failed", error=str(exc))
 
-        graph_data = {
-            "campaign_id": campaign_id,
-            "target_goal": target_node,
-            "shortest_path": [
-                {"step": 1, "node": "WS01.corp.local", "type": "host", "status": "compromised"},
-                {"step": 2, "node": "CORP\\jdoe", "type": "user", "status": "credentials_dumped"},
-                {"step": 3, "node": "Server02.corp.local", "type": "host", "relation": "AdminTo"},
-                {"step": 4, "node": "CORP\\svc_backup", "type": "user", "relation": "Kerberoast"},
-                {"step": 5, "node": "DC01.corp.local", "type": "host", "relation": "DCSync"},
-                {"step": 6, "node": "Domain Admins", "type": "group", "status": "unlocked"},
-            ],
-            "choke_points": ["Sever AdminTo privilege on Server02 to break lateral pivot to Domain Controller"],
-        }
-        clean_data = McpTaintSanitizer.sanitize(graph_data)
+        # No attack-graph source is available here. The previous fallback returned a
+        # fully scripted WS01 -> jdoe -> Server02 -> svc_backup -> DC01 ->
+        # Domain Admins chain for ANY campaign, which an LLM would read as a real
+        # compromise path. Report honestly instead of fabricating a kill chain.
+        # (AUDIT run-1 C3)
         return CallToolResult(
-            content=[TextContent(type="text", text=json.dumps(clean_data, indent=2))]
+            content=[TextContent(type="text", text=json.dumps({
+                "error": "attack_graph_unavailable",
+                "campaign_id": campaign_id,
+                "target_goal": target_node,
+                "message": (
+                    "No attack-graph data source is attached to this MCP gateway. Use "
+                    "the dashboard Graph view or the '/graph/{campaign_id}' API, which "
+                    "build the graph from real campaign findings and host data."
+                ),
+            }, indent=2))],
+            isError=True,
         )
 
     async def _handle_inspect_module_catalog(self, args: dict[str, Any]) -> CallToolResult:
@@ -598,7 +622,13 @@ class McpToolRegistry:
                 isError=True,
             )
 
-        # 2. Validate and Burn Confirmation Token (Single-Use, Anti-Replay)
+        # 2. Scope Verification Gate — BEFORE burning the token. A scope change or a
+        #    DB flap must not consume the operator's single-use token and force a
+        #    fresh dry-run. (AUDIT run-1 M6)
+        scope = await self._get_campaign_scope(campaign_id)
+        McpScopeGate.verify_target(target, scope)
+
+        # 3. Validate and Burn Confirmation Token (Single-Use, Anti-Replay)
         is_valid = self.token_manager.validate_and_burn(
             token=confirmation_token,
             campaign_id=campaign_id,
@@ -612,46 +642,40 @@ class McpToolRegistry:
                 "You must run ares_dry_run_module first to obtain a fresh token."
             )
 
-        # 3. Scope Verification Gate
-        scope = await self._get_campaign_scope(campaign_id)
-        McpScopeGate.verify_target(target, scope)
-
-        # 4. Broadcast Execution Started to WebSocket Live Dashboard
+        # 4. This MCP gateway authorizes execution but does not run modules itself:
+        #    no execution engine is wired into the tool registry. The previous
+        #    behaviour fabricated a SUCCESS report (fixed duration, invented findings
+        #    count, a constant merkle hash) and broadcast a fake "completed" event,
+        #    which lied to the operator, the live dashboard, and any downstream
+        #    auditor. Report honestly instead: the request was scope-checked and the
+        #    token consumed, but the module must be run through the real engine.
+        #    (AUDIT run-1 C2)
         await self._broadcast(
             campaign_id,
             {
-                "type": "mcp_execute_started",
+                "type": "mcp_execute_authorized",
                 "module_id": module_id,
                 "target": target,
-                "status": "running",
+                "status": "authorized_not_executed",
             },
         )
-
-        # 5. Execute module simulation via ModuleTestHarness for safe test-provenance
-        execution_report = {
-            "status": "SUCCESS",
+        report = {
+            "status": "NOT_EXECUTED",
+            "reason": "mcp_execution_engine_not_wired",
             "campaign_id": campaign_id,
             "module_id": module_id,
             "target": target,
-            "duration_ms": 142.5,
-            "findings_discovered": 1,
-            "audit_merkle_provenance": "fe690803178c3ba436a7c7fc336cb6a863b20f9b289a89525ce613e96e029818",
-            "circuit_breaker": "CLOSED (Normal)",
+            "message": (
+                "Scope and the single-use confirmation token were validated, but this "
+                "MCP gateway does not execute modules itself — no execution engine is "
+                "attached to it. Run the module through the ARES engine (the "
+                "'/modules/{module_id}/run' API, or 'ares module run' on the CLI), "
+                "which performs the real execution, findings capture, and audit "
+                "provenance. This gateway never reports results it did not produce."
+            ),
         }
-
-        # 6. Broadcast Execution Completed to WebSocket Live Dashboard
-        await self._broadcast(
-            campaign_id,
-            {
-                "type": "mcp_execute_complete",
-                "module_id": module_id,
-                "target": target,
-                "status": "completed",
-                "findings": 1,
-            },
-        )
-
-        clean_report = McpTaintSanitizer.sanitize(SecretMasker.mask(execution_report))
+        clean_report = McpTaintSanitizer.sanitize(report)
         return CallToolResult(
-            content=[TextContent(type="text", text=json.dumps(clean_report, indent=2))]
+            content=[TextContent(type="text", text=json.dumps(clean_report, indent=2))],
+            isError=True,
         )

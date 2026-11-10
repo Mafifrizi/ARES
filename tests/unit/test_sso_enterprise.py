@@ -523,3 +523,76 @@ async def test_saml_acs_open_redirect_prevention(tmp_path, test_settings) -> Non
 
 
 
+
+
+# ── AUDIT run-1 C1: OIDC id_token must be verified with asymmetric JWKS ────────
+# The verifier previously fell back to decoding the id_token with the shared
+# client_secret (HS*) when jwks_uri was empty, and left iss/aud unvalidated in
+# some paths. These tests pin the hardened contract.
+
+def test_sso_config_oidc_requires_https_jwks_and_issuer():
+    from ares.api.server import SsoConfigRequest
+
+    # Empty jwks_uri for OIDC is rejected.
+    with pytest.raises(Exception):
+        SsoConfigRequest(protocol="oidc", jwks_uri="", issuer_or_entity_id="x", client_id="c")
+
+    # Non-https jwks_uri for OIDC is rejected.
+    with pytest.raises(Exception):
+        SsoConfigRequest(
+            protocol="oidc", jwks_uri="http://idp/jwks", issuer_or_entity_id="x", client_id="c"
+        )
+
+    # Missing issuer for OIDC is rejected.
+    with pytest.raises(Exception):
+        SsoConfigRequest(
+            protocol="oidc",
+            jwks_uri="https://idp/.well-known/jwks.json",
+            issuer_or_entity_id="",
+            client_id="c",
+        )
+
+    # A complete OIDC config is accepted.
+    ok = SsoConfigRequest(
+        protocol="oidc",
+        jwks_uri="https://idp/.well-known/jwks.json",
+        issuer_or_entity_id="https://idp",
+        client_id="c",
+    )
+    assert ok.protocol == "oidc"
+
+    # SAML is unaffected by the OIDC-only validator.
+    saml = SsoConfigRequest(protocol="saml", idp_certificate="MOCK_CERT")
+    assert saml.protocol == "saml"
+
+
+@pytest.mark.asyncio
+async def test_process_oidc_callback_refuses_empty_jwks(test_settings):
+    """With no jwks_uri the verifier must refuse — no symmetric client_secret fallback."""
+    from ares.core.sso import encrypt_sso_secret, process_oidc_callback
+
+    sec_enc = encrypt_sso_secret("MOCK_SECRET", test_settings)
+    sso_config = {
+        "client_id": "ares-client",
+        "client_secret_enc": sec_enc,
+        "issuer_or_entity_id": "https://idp.example.com",
+        "acs_url": "https://idp.example.com/token",
+        "jwks_uri": "",  # the dangerous case
+    }
+
+    # Mock the token exchange so we reach the signature-verification step.
+    token_resp = AsyncMock()
+    token_resp.status_code = 200
+    token_resp.json = lambda: {"id_token": "unused.when.jwks.missing"}
+    http_client = AsyncMock()
+    http_client.post = AsyncMock(return_value=token_resp)
+
+    with pytest.raises(ValueError, match="jwks_uri"):
+        await process_oidc_callback(
+            sso_config,
+            code="abc",
+            redirect_uri="https://ares/callback",
+            expected_nonce="n",
+            settings=test_settings,
+            http_client=http_client,
+        )

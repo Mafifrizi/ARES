@@ -132,7 +132,12 @@ async def test_mcp_resources_and_prompts(mcp_server: AresMcpServer) -> None:
     })
     contents = res_read["result"]["contents"]
     assert len(contents) >= 1
-    assert "SMB Signing" in contents[0]["text"]
+    # The test server has no DB attached. The resource must report honestly rather
+    # than serving the old hardcoded demo findings (SMB Signing / dc02.corp.local).
+    # (AUDIT run-1 C3)
+    assert "no_data_source" in contents[0]["text"]
+    assert "SMB Signing" not in contents[0]["text"]
+    assert "dc02.corp.local" not in contents[0]["text"]
 
     # Prompts List
     p_list = await mcp_server.handle_message({"jsonrpc": "2.0", "id": 22, "method": "prompts/list"})
@@ -274,11 +279,17 @@ async def test_two_tier_dry_run_and_execution_flow(mcp_server: AresMcpServer) ->
             },
         },
     }
+    # 3. Execute with a valid token: scope + token are validated and the token is
+    #    consumed, but this gateway has no execution engine wired in. It must report
+    #    honestly (NOT_EXECUTED) rather than fabricating a SUCCESS with an invented
+    #    findings count and a constant merkle hash. (AUDIT run-1 C2)
     exec_res = await mcp_server.handle_message(exec_req)
-    assert exec_res["result"]["isError"] is False
+    assert exec_res["result"]["isError"] is True
     exec_data = json.loads(exec_res["result"]["content"][0]["text"])
-    assert exec_data["status"] == "SUCCESS"
-    assert "audit_merkle_provenance" in exec_data
+    assert exec_data["status"] == "NOT_EXECUTED"
+    assert exec_data["reason"] == "mcp_execution_engine_not_wired"
+    assert "audit_merkle_provenance" not in exec_data
+    assert "findings_discovered" not in exec_data
 
 
 # ── 7. Taint Tracking & Anti-Prompt-Injection Tests ──────────────────────────
