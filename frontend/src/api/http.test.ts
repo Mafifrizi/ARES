@@ -196,7 +196,11 @@ describe("cookie-backed HTTP transport", () => {
   });
 
   it("attaches the CSRF header on a non-auth mutation (AUDIT run-1 C5)", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const session = await import("./session");
     session.setAccessToken("memory-bearer");
@@ -207,7 +211,11 @@ describe("cookie-backed HTTP transport", () => {
   });
 
   it("does not attach the CSRF header on a GET", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     const session = await import("./session");
     session.setAccessToken("memory-bearer");
