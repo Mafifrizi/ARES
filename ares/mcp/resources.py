@@ -1,6 +1,7 @@
 """ARES Sovereign Real-Time Context Resources for MCP.
 
-Supplies direct, URI-based read-only telemetry into LLM context windows:
+Supplies direct, URI-based read-only telemetry into LLM context windows, read
+live from the attached campaign database (no sample/demo fallback):
 - ares://campaigns/active
 - ares://findings/critical
 - ares://modules/catalog
@@ -46,45 +47,85 @@ class McpResourceRegistry:
     def list_resources(self) -> list[Resource]:
         return list(self._resources.values())
 
+    def _no_data_source(self, what: str, uri: str) -> ReadResourceResult:
+        """Honest payload when no campaign database backs a 'real-time' resource."""
+        text = json.dumps({
+            "error": "no_data_source",
+            "message": (
+                f"No campaign database is attached to this MCP server, so {what} "
+                "cannot be returned. This resource serves live data only, never "
+                "sample/demo data."
+            ),
+        }, indent=2)
+        return ReadResourceResult(
+            contents=[ResourceContents(uri=uri, mimeType="application/json", text=text)]
+        )
+
     async def read_resource(self, uri: str) -> ReadResourceResult:
         uri = uri.strip().lower()
 
+        # These resources are advertised as "real-time telemetry". They must read
+        # from the live campaign database, never serve hardcoded sample data (the
+        # previous camp_default_01 / CorpTech Solutions / dc0{1,2}.corp.local blocks
+        # were returned to every LLM client regardless of DB state). When no DB is
+        # attached the gateway reports honestly instead of fabricating. (AUDIT run-1 C3)
         if uri == "ares://campaigns/active":
-            data = {
-                "active_campaigns": [
-                    {
-                        "id": "camp_default_01",
-                        "name": "Enterprise Internal Purple-Team Engagement",
-                        "client": "CorpTech Solutions",
-                        "status": "active",
-                        "scope": ["10.10.0.0/24", "192.168.1.0/24", "*.corp.local"],
-                    }
-                ]
-            }
+            if not (self.db and hasattr(self.db, "list_campaigns")):
+                return self._no_data_source("active campaigns", uri)
+            try:
+                raw = await self.db.list_campaigns()
+            except Exception:
+                raw = []
+            active = []
+            for c in raw or []:
+                if str(c.get("status", "active")).lower() != "active":
+                    continue
+                scope = c.get("scope")
+                if not scope and c.get("scope_json"):
+                    try:
+                        scope = json.loads(str(c["scope_json"]))
+                    except Exception:
+                        scope = []
+                active.append({
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "client": c.get("client"),
+                    "status": c.get("status", "active"),
+                    "scope": scope or [],
+                })
+            data = {"active_campaigns": active}
             clean_text = json.dumps(McpTaintSanitizer.sanitize(data), indent=2)
             return ReadResourceResult(contents=[ResourceContents(uri=uri, mimeType="application/json", text=clean_text)])
 
         if uri == "ares://findings/critical":
-            data = {
-                "critical_findings": [
-                    {
-                        "id": "find_smb_02",
-                        "title": "SMB Signing Not Required on Domain Controller",
-                        "severity": "critical",
-                        "cvss_score": 8.8,
-                        "host": "dc02.corp.local",
-                        "mitre_technique": "T1557.001",
-                    },
-                    {
-                        "id": "find_kerb_01",
-                        "title": "Service Principal Name (SPN) Accounts Vulnerable to Kerberoasting",
-                        "severity": "high",
-                        "cvss_score": 7.5,
-                        "host": "dc01.corp.local",
-                        "mitre_technique": "T1558.003",
-                    },
-                ]
-            }
+            if not (self.db and hasattr(self.db, "list_campaigns") and hasattr(self.db, "get_findings")):
+                return self._no_data_source("critical findings", uri)
+            try:
+                campaigns = await self.db.list_campaigns()
+            except Exception:
+                campaigns = []
+            critical: list[dict[str, Any]] = []
+            for c in campaigns or []:
+                if str(c.get("status", "active")).lower() != "active":
+                    continue
+                cid = c.get("id")
+                if not cid:
+                    continue
+                try:
+                    rows = await self.db.get_findings(cid)
+                except Exception:
+                    rows = []
+                for f in rows or []:
+                    if str(f.get("severity", "")).lower() in ("critical", "high"):
+                        critical.append({
+                            "id": f.get("id"),
+                            "campaign_id": cid,
+                            "title": f.get("title"),
+                            "severity": f.get("severity"),
+                            "host": f.get("host"),
+                            "mitre_technique": f.get("mitre_technique"),
+                        })
+            data = {"critical_findings": critical}
             clean_text = json.dumps(McpTaintSanitizer.sanitize(SecretMasker.mask(data)), indent=2)
             return ReadResourceResult(contents=[ResourceContents(uri=uri, mimeType="application/json", text=clean_text)])
 

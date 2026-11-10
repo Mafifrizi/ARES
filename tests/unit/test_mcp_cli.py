@@ -168,13 +168,32 @@ def test_mcp_setup_invalid_client() -> None:
 
 
 def test_mcp_run_tool_success() -> None:
-    """Verify headless execution of an operational MCP tool."""
-    result = runner.invoke(app, ["mcp", "run-tool", "ares_list_campaigns", "--json"])
+    """Verify headless execution of an operational MCP tool.
+
+    Uses ares_inspect_module_catalog, which reads the real first-party module
+    descriptors and needs no database — a genuine successful tool call. (Previously
+    this asserted a 'camp_default_01' demo campaign from ares_list_campaigns, which
+    only ever existed as fabricated fallback data; AUDIT run-1 C3 removed it.)
+    """
+    result = runner.invoke(app, ["mcp", "run-tool", "ares_inspect_module_catalog", "--json"])
     assert result.exit_code == EXIT_SUCCESS
     data = json.loads(result.stdout)
     assert isinstance(data, list)
     assert len(data) >= 1
-    assert data[0]["id"] == "camp_default_01"
+    assert "module_id" in data[0]
+
+
+def test_mcp_run_tool_list_campaigns_no_db_is_honest() -> None:
+    """Without a DB, ares_list_campaigns must report no_data_source, not demo data.
+
+    AUDIT run-1 C3: the gateway no longer substitutes a fabricated 'camp_default_01 /
+    CorpTech Solutions' campaign when no database is attached.
+    """
+    result = runner.invoke(app, ["mcp", "run-tool", "ares_list_campaigns", "--json"])
+    assert result.exit_code != EXIT_SUCCESS
+    assert "camp_default_01" not in result.stdout
+    assert "CorpTech Solutions" not in result.stdout
+    assert "no_data_source" in result.stdout
 
 
 def test_mcp_run_tool_unknown_tool() -> None:

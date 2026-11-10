@@ -129,7 +129,6 @@ ares/graph/attack_graph.py|error: Invalid index type "dict[str, Any]" for "dict[
 ares/graph/attack_graph.py|error: No overload variant of "get" of "dict" matches argument type "dict[str, Any]"  [call-overload]
 ares/graph/attack_graph.py|error: Non-overlapping container check (element type: "dict[str, Any]", container item type: "str")  [comparison-overlap]
 ares/mcp/resources.py|error: "ModuleDescriptor" has no attribute "description"  [attr-defined]
-ares/mcp/resources.py|error: Dict entry 3 has incompatible type "str": "float"; expected "str": "Sequence[str]"  [dict-item]
 ares/mcp/server.py|error: Unexpected keyword argument "error" for "debug" of "Logger"  [call-arg]
 ares/mcp/tools.py|error: "ModuleDescriptor" has no attribute "description"  [attr-defined]
 ares/mcp/tools.py|error: Unexpected keyword argument "campaign_id" for "warning" of "Logger"  [call-arg]
