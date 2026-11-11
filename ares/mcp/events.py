@@ -14,6 +14,7 @@ from typing import Any
 DEFAULT_EVENT_PORT = 27890
 DEFAULT_EVENT_HOST = "127.0.0.1"
 TOKEN_STATUS_FILE = Path.home() / ".ares" / "mcp_token_status.json"
+_MAX_TOKEN_DECISIONS = 256
 
 
 class McpEventBus:
@@ -36,32 +37,57 @@ class McpEventBus:
             pass  # Silent drop if no listener or network exception
 
     @staticmethod
+    def _load_decisions() -> dict[str, Any]:
+        """Return the per-token decision map, tolerating the legacy single-slot
+        format and any read/parse error (returns {})."""
+        if not TOKEN_STATUS_FILE.exists():
+            return {}
+        try:
+            with open(TOKEN_STATUS_FILE, encoding="utf-8") as f:
+                loaded = json.load(f)
+        except Exception:
+            return {}
+        if isinstance(loaded, dict) and isinstance(loaded.get("decisions"), dict):
+            return dict(loaded["decisions"])
+        # Legacy single-slot record: {"token": ..., "decision": ...}
+        if isinstance(loaded, dict) and "token" in loaded:
+            return {str(loaded["token"]): {"decision": loaded.get("decision")}}
+        return {}
+
+    @staticmethod
     def set_token_decision(token: str, decision: str) -> None:
-        """Record operator decision (APPROVED or REJECTED) for a token."""
+        """Record operator decision (APPROVED or REJECTED) for a specific token.
+
+        Decisions are keyed per token so a decision for one token is never
+        clobbered by a newer pending token (the previous single-slot file held
+        only the most recently touched token). (AUDIT run-1 H8)
+        """
         TOKEN_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "token": token,
+        decisions = McpEventBus._load_decisions()
+        decisions[token] = {
             "decision": decision,
             "timestamp": time.strftime("%H:%M:%S"),
         }
+        # Bound the file size; keep the most recent entries (dicts preserve
+        # insertion order, and re-setting a token refreshes its position).
+        if len(decisions) > _MAX_TOKEN_DECISIONS:
+            decisions = dict(list(decisions.items())[-_MAX_TOKEN_DECISIONS:])
         try:
             with open(TOKEN_STATUS_FILE, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+                json.dump({"decisions": decisions}, f, indent=2)
         except Exception:
             pass
 
     @staticmethod
     def get_token_decision(token: str) -> str | None:
-        """Read operator decision for a token."""
-        if not TOKEN_STATUS_FILE.exists():
-            return None
-        try:
-            with open(TOKEN_STATUS_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("token") == token:
-                return data.get("decision")
-        except Exception:
-            pass
+        """Read the operator decision for a token, or None if there is none.
+
+        None (no decision recorded) is the fail-closed default: callers must
+        treat anything other than an explicit "APPROVED" as not-approved.
+        """
+        record = McpEventBus._load_decisions().get(token)
+        if isinstance(record, dict):
+            return record.get("decision")
         return None
 
 
