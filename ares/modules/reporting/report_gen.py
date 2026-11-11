@@ -341,6 +341,24 @@ def _build_remediation_roadmap(findings: list[Any]) -> list[dict[str, Any]]:
     return roadmap
 
 
+def _escape_md(text: Any, *, single_line: bool = False) -> str:
+    """Neutralize Markdown control syntax in untrusted finding text.
+
+    Finding titles/descriptions can carry attacker-influenced content (hostnames,
+    scraped banners, module output). Rendered raw into a report they could inject
+    fake headings, links (``javascript:``/``data:``), code fences or raw HTML.
+    Backslash-escaping the structural metacharacters renders them literally.
+    (AUDIT run-1 M2)
+    """
+    s = str(text)
+    if single_line:
+        s = " ".join(s.split())
+    s = s.replace("\\", "\\\\")
+    for ch in ("`", "*", "_", "[", "]", "<", ">", "|", "#"):
+        s = s.replace(ch, "\\" + ch)
+    return s
+
+
 def _is_sensitive_evidence_key(key: Any) -> bool:
     normalized = str(key).strip().lower()
     if normalized in _SAFE_HASH_METADATA_KEYS:
@@ -564,7 +582,7 @@ def _render_markdown_report(campaign: Campaign, ctx: dict[str, Any]) -> list[str
         for finding in ctx["key_findings"]:
             lines.append(
                 "| "
-                f"{finding.severity.value.upper()} | {finding.title} | "
+                f"{finding.severity.value.upper()} | {_escape_md(finding.title, single_line=True)} | "
                 f"`{finding.module_id}` | `{finding.mitre_technique or 'N/A'}` |"
             )
     else:
@@ -606,7 +624,7 @@ def _render_markdown_report(campaign: Campaign, ctx: dict[str, Any]) -> list[str
             ts = finding.discovered_at.strftime("%Y-%m-%d %H:%M")
             lines.append(
                 f"- `{ts}` [{finding.severity.value.upper()}] "
-                f"{finding.title} (`{finding.module_id}`)"
+                f"{_escape_md(finding.title, single_line=True)} (`{finding.module_id}`)"
             )
     else:
         lines.append("- No confirmed findings yet.")
@@ -614,14 +632,14 @@ def _render_markdown_report(campaign: Campaign, ctx: dict[str, Any]) -> list[str
     lines += ["", "## Findings", ""]
     for finding in ctx["findings"]:
         lines += [
-            f"### [{finding.severity.value.upper()}] {finding.title}",
+            f"### [{finding.severity.value.upper()}] {_escape_md(finding.title, single_line=True)}",
             "",
             f"**Module:** `{finding.module_id}`",
             f"**Confidence:** `{finding.confidence * 100:.0f}%`",
             f"**MITRE:** `{finding.mitre_technique or 'N/A'}`",
             f"**Host:** `{finding.host or 'N/A'}`",
             "",
-            finding.description,
+            _escape_md(finding.description),
             "",
         ]
         if finding.evidence:
@@ -1991,12 +2009,12 @@ class ReportGenerator:
         lines += ["\n---\n", "## Findings\n"]
         for f in ctx["findings"]:
             lines += [
-                f"### [{f.severity.upper()}] {f.title}",
+                f"### [{f.severity.upper()}] {_escape_md(f.title, single_line=True)}",
                 f"**Module:** `{f.module_id}` · **Confidence:** `{f.confidence*100:.0f}%`"
                 + (f" · **MITRE:** `{f.mitre_technique}`" if f.mitre_technique else ""),
-                f"\n{f.description}\n",
+                f"\n{_escape_md(f.description)}\n",
                 (
-                    f"> 🛡 **Remediation (SLA: {REMEDIATION_SLA.get(f.severity.value, 365)}d):** {f.remediation}"
+                    f"> 🛡 **Remediation (SLA: {REMEDIATION_SLA.get(f.severity.value, 365)}d):** {_escape_md(f.remediation)}"
                     if f.remediation
                     else ""
                 ),
@@ -2106,6 +2124,10 @@ class ReportGenerator:
                 "--disable-background-networking",
                 "--disable-sync",
                 "--disable-crash-reporter",
+                # AUDIT run-1 M3: if the report HTML references a URL, block the
+                # headless renderer from reaching cloud instance-metadata (IMDS)
+                # when generation runs on an EC2/GCE/Azure host.
+                "--host-resolver-rules=MAP 169.254.169.254 ~NOTFOUND,MAP metadata.google.internal ~NOTFOUND",
                 "--disable-features=TranslateUI",
                 "--print-to-pdf-no-header",
                 "--no-pdf-header-footer",
