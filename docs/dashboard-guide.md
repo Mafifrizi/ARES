@@ -75,6 +75,12 @@ keys, bearer tokens, or sensitive report URLs.
 | Modules (Catalog) | `docs/assets/screens/modules-catalog-hd.png` | 66 modules across 13 categories with MITRE ATT&CK and OPSEC labels. |
 | Modules (Result) | `docs/assets/screens/modules-result-hd.png` | Finding card with severity, confidence, remediation, and next-module pivot. |
 | Graph & Beacon Console | `docs/assets/screens/attack-graph-hd.png` | Tactical pivot graph, perimeter ingress with animated flames, slide-over inspector drawer, and docked beacon session terminal. |
+| Reports (Library) | `docs/assets/screens/reports-hd.png` | Generated HTML, JSON, and Markdown artifacts with authenticated download and delete. |
+| Templates | `docs/assets/screens/templates-hd.png` | Built-in engagement blueprints with stage and module counts. |
+| Strategy (Objective) | `docs/assets/screens/strategy-hd.png` | Objective builder with campaign, goal, and AI engine selection and provider key warning. |
+| Security (API Keys) | `docs/assets/screens/security-hd.png` | Scoped API keys with metadata only; the full secret is shown once at creation. |
+| EDR/OPSEC | `docs/assets/screens/edr-hd.png` | Bypass knowledge base with the minimum three-sample confidence threshold. |
+| Live | `docs/assets/screens/live-hd.png` | Connected campaign WebSocket session with real-time event telemetry. |
 
 ## Dashboard Shell
 
@@ -289,6 +295,10 @@ Scope behavior:
 
 Purpose: generate, download, and manage campaign report artifacts.
 
+![Report generation workflow](assets/screens/reports-hd.png)
+
+*Report Library - Generated HTML, JSON, and Markdown artifacts for the selected campaign, with authenticated download and delete.*
+
 Formats:
 
 - HTML.
@@ -385,6 +395,10 @@ Located directly below the graph canvas, the Beacon Terminal Dock provides a ful
 
 Purpose: generate structured, repeatable, and deterministic campaign execution plans.
 
+![ARES Enterprise Campaign Templates](assets/screens/templates-hd.png)
+
+*Campaign Templates - Built-in engagement blueprints with stage and module counts, ready to compile into a deterministic plan.*
+
 The Templates view provides pre-tested engagement blueprints designed to ensure operational consistency across red-team operators without relying on external LLM calls.
 
 #### Tab 1: Templates (Catalog)
@@ -418,6 +432,10 @@ Actions:
 ### Strategy
 
 Purpose: autonomous, goal-oriented engagement planning and execution powered by graph heuristics and LLM decision agents.
+
+![ARES Autonomous Strategy and AI Planner](assets/screens/strategy-hd.png)
+
+*Objective Builder - Target campaign, strategic objective, and AI planning engine selection, with an inline warning when the selected provider API key is not configured.*
 
 Unlike static templates, the Strategy engine continuously evaluates observed campaign state (discovered hosts, harvested credentials, open ports, and active defenses) to dynamically select and execute the next optimal module toward a specific operational objective.
 
@@ -496,6 +514,10 @@ The AI planner module performs a local planning/LLM call only. It does not conta
 
 Purpose: account and security administration.
 
+![ARES Zero-Trust Security Governance](assets/screens/security-hd.png)
+
+*API Keys - Scoped keys with metadata only; the full secret is shown once at creation and never stored.*
+
 Use it for:
 
 - Change password.
@@ -526,6 +548,10 @@ API key behavior:
 ### EDR/OPSEC
 
 Purpose: track, record, and evaluate evasion effectiveness across endpoint detection and response (EDR) agents, feeding empirical feedback into the adaptive OPSEC engine.
+
+![ARES EDR and OPSEC Evasion Matrix](assets/screens/edr-hd.png)
+
+*Bypass Knowledge Base - Historical evasion success metrics by technique and vendor, gated by the minimum three-sample confidence threshold.*
 
 #### Tab 1: Knowledge Base
 
@@ -561,6 +587,10 @@ Action:
 ### Live
 
 Purpose: watch campaign WebSocket events.
+
+![ARES Live Operations Stream](assets/screens/live-hd.png)
+
+*Live Operations Event Stream - Connected campaign WebSocket session with real-time event telemetry.*
 
 Use it for:
 
