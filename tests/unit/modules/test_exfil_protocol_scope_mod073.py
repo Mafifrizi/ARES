@@ -88,3 +88,42 @@ async def test_smb_shares_uses_smb_protocol():
                 )
 
     mock_before_req.assert_awaited_once_with("192.168.1.102", "smb")
+
+
+@pytest.mark.asyncio
+async def test_smb_shares_dry_run_fabricates_no_findings():
+    """AUDIT run-1 H13: dry run must not emit a fabricated HIGH finding.
+
+    The previous implementation returned a hardcoded HIGH 'sensitive files on
+    SMB shares' finding with invented share/file paths through the
+    validated-findings pipeline. A dry run only confirms dispatchability.
+    """
+    settings, campaign, noise = _make_deps()
+    mod = SmbSharesExfil(settings=settings, campaign=campaign, noise=noise)
+    findings, raw = await mod.run(target="192.168.1.102", username="Administrator", dry_run=True)
+    assert findings == []
+    assert raw.get("dry_run") is True
+    assert not raw.get("sensitive_data_found")
+    assert not raw.get("sensitive_file_paths")
+
+
+def test_bulk_credential_blobs_are_redacted_from_evidence():
+    """AUDIT run-1 H18: LSASS dump bytes, raw ticket material and credential
+    sets must be redacted before evidence reaches a rendered report."""
+    from ares.modules.reporting.report_gen import _redact_sensitive_evidence
+
+    payload = {
+        "target": "dc01.corp.local",
+        "dump_data": b"MZ\x90\x00" + b"\x00" * 1024,
+        "ticket_data": b"\x76\x82\x01",
+        "ticket_b64": "doIBAA==",
+        "ticket_bytes": b"\x76\x82",
+        "valid_credentials": [{"user": "svc", "password": "S3cret!"}],
+        "hash_count": 3,  # safe metadata must survive
+    }
+    safe = _redact_sensitive_evidence(payload)
+    for leaked in ("dump_data", "ticket_data", "ticket_b64", "ticket_bytes", "valid_credentials"):
+        assert "S3cret" not in str(safe.get(leaked, ""))
+        assert safe.get(leaked) != payload[leaked]
+    assert safe["hash_count"] == 3
+    assert safe["target"] == "dc01.corp.local"
