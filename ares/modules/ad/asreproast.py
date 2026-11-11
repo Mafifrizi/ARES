@@ -420,7 +420,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         raw["preauth_policy_assessed"] = True
 
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
             findings=findings, raw=raw,
             module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
