@@ -13504,6 +13504,7 @@ def test_independent_ast_census_matches_locked_inventory() -> None:
             "ghost_forge",
             "phantom_token",
             "_parsers",
+            "_tls_security",
             "sssd_harvest",
             "ccache_hunt",
             "keytab_abuse",
