@@ -64,7 +64,6 @@ async def test_server_auto_upsert_host_blocks_out_of_scope(tmp_path, monkeypatch
     # suite state: force ares_debug=True so the dev short-circuit runs, and bypass
     # the now-always-enforced C-live descriptor gate via its documented test seam
     # (recon.mock has no real descriptor). (AUDIT run-1 H5)
-    from ares.core.config import get_settings
     monkeypatch.setattr(get_settings(), "ares_debug", True)
     monkeypatch.setattr("ares.api.server._c_live_descriptor_gate", lambda *a, **k: None)
     db_file = tmp_path / "test_scope_server.db"
