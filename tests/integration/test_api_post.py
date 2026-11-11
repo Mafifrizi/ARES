@@ -335,6 +335,29 @@ class TestCampaignPostEndpoints:
         run_module.assert_not_awaited()
         run_plan.assert_not_awaited()
 
+    def test_module_run_rejects_raw_secret_even_in_debug(self, c, token, campaign_id):
+        """AUDIT run-1 H5: the raw-secret filter on POST /modules/{id}/run must
+        run even when ARES_DEBUG=true (the test env sets it). Previously the
+        filter and the descriptor/role gate were skipped in debug mode, so a
+        live run could carry raw secret material and bypass role gating.
+        """
+        import uuid as _uuid
+
+        r = c.post(
+            "/modules/ad.enum_users/run",
+            json={
+                "campaign_id": campaign_id,
+                "params": {
+                    "dc": "10.0.0.1", "username": "svc",
+                    "password": "raw-secret-should-be-rejected", "domain": "CORP",
+                },
+                "dry_run": False,
+            },
+            headers={**_auth(token), "Idempotency-Key": str(_uuid.uuid4())},
+        )
+        assert r.status_code == 422, r.text
+        assert r.json().get("detail") == "raw_secret_material_forbidden"
+
     def test_campaign_not_found_returns_404(self, c, token):
         r = c.get("/campaigns/nonexistent-xyz-id", headers=_auth(token))
         assert r.status_code == 404
