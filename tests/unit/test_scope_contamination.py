@@ -52,13 +52,21 @@ async def test_engine_persist_runtime_hosts_blocks_out_of_scope(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_server_auto_upsert_host_blocks_out_of_scope(tmp_path):
+async def test_server_auto_upsert_host_blocks_out_of_scope(tmp_path, monkeypatch):
     """
     NEW-03 Reproduction:
     Verify that when a module runs via server.py and reports an out-of-scope
     target IP in raw_output, server.py does NOT upsert it into the campaign
     hosts table.
     """
+    # This test drives the debug/test execution path (FakeEngine) with a synthetic
+    # recon.mock module. Make that deterministic instead of relying on ambient
+    # suite state: force ares_debug=True so the dev short-circuit runs, and bypass
+    # the now-always-enforced C-live descriptor gate via its documented test seam
+    # (recon.mock has no real descriptor). (AUDIT run-1 H5)
+    from ares.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ares_debug", True)
+    monkeypatch.setattr("ares.api.server._c_live_descriptor_gate", lambda *a, **k: None)
     db_file = tmp_path / "test_scope_server.db"
     db = AresDatabase(str(db_file))
     await db.connect()
