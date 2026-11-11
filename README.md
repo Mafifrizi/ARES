@@ -25,7 +25,7 @@ Built for enterprise red teams, MSSPs and security operations centers that need 
 
 ## What ARES is
 
-A self-hosted platform that runs **real** offensive validation modules inside a fail-closed scope enclave, maps attack paths on an interactive DAG, and produces branded reports — so your SOC sees exactly what an attacker could reach today, not what a scanner thinks might be a problem.
+A self-hosted platform that runs **real** offensive validation modules inside a fail-closed scope enclave, maps attack paths on an interactive DAG, and produces branded reports, so your SOC sees exactly what an attacker could reach today, not what a scanner thinks might be a problem.
 
 **Not just a scanner.** ARES only reports what it actually proved on a live target, including the multi-stage chain used to prove it.
 
@@ -37,33 +37,33 @@ A self-hosted platform that runs **real** offensive validation modules inside a 
 
 <div align="center">
 
-<img src="docs/assets/screens/login-hd.png" alt="ARES login — dragon mascot" width="840"><br>
+<img src="docs/assets/screens/login-hd.png" alt="ARES login with dragon mascot" width="840"><br>
 *Sign-in with the ARES mascot and the SSO fallback. Memory-only JWT access tokens, HttpOnly rotating refresh.*
 
 <br>
 
 <img src="docs/assets/screens/overview-hd.png" alt="Operator overview" width="840"><br>
-*Operator overview — active engagements, validated findings, attack surface, engine health, telemetry pulse.*
+*Operator overview: active engagements, validated findings, attack surface, engine health, telemetry pulse.*
 
 <br>
 
 <img src="docs/assets/screens/modules-catalog-hd.png" alt="Module catalog" width="840"><br>
-*Catalog — 66 active modules across 13 categories, each annotated with MITRE ATT&CK techniques and OPSEC noise level.*
+*Catalog: 66 active modules across 13 categories, each annotated with MITRE ATT&CK techniques and OPSEC noise level.*
 
 <br>
 
 <img src="docs/assets/screens/modules-result-hd.png" alt="Finding card after a module run" width="840"><br>
-*Results — finding card with severity, confidence, remediation and one-click pivot to the next module.*
+*Results: finding card with severity, confidence, remediation and one-click pivot to the next module.*
 
 <br>
 
 <img src="docs/assets/screens/attack-graph-hd.png" alt="Attack graph" width="840"><br>
-*Attack graph — perimeter firewall (fire animation), targets, pivot edges. Read-only beacon telemetry per node.*
+*Attack graph: perimeter firewall (fire animation), targets, pivot edges. Read-only beacon telemetry per node.*
 
 <br>
 
 <img src="docs/assets/screens/campaigns-scope-hd.png" alt="Campaign scope" width="840"><br>
-*Campaign scope — target campaign picker, Restore Vault / Dry-Run Plan / Delete controls.*
+*Campaign scope: target campaign picker, Restore Vault / Dry-Run Plan / Delete controls.*
 
 </div>
 
@@ -71,14 +71,14 @@ A self-hosted platform that runs **real** offensive validation modules inside a 
 
 ## Features
 
-- **Fail-closed scope enclave** — dual-layer ScopeGuard (application pre-check + OS/transport firewall) guarantees zero offensive packets reach out-of-scope hosts. [→ security model](docs/security-model.md)
-- **Goal-directed attack planning** — set `domain_admin` or `cloud_audit`, and the decision engine synthesizes multi-stage execution paths (graph heuristics, optional LLM agents under explicit authorization). [→ engine design](docs/engine_design.md)
-- **Multi-vector attack graph (DAG)** — ingest BloodHound or map sessions in real time. Shortest-path, chokepoints, lateral pivot feasibility. [→ attack graph](docs/engine_design.md)
-- **Zero-trust auth model** — memory-only short-lived JWTs, HttpOnly rotating refresh, HMAC CSRF, AES-256-GCM AEAD vault (PBKDF2-HMAC-SHA256 600k). [→ security model](docs/security-model.md)
+- **Fail-closed scope enclave**: dual-layer ScopeGuard (application pre-check + OS/transport firewall) guarantees zero offensive packets reach out-of-scope hosts. [→ security model](docs/security-model.md)
+- **Goal-directed attack planning**: set `domain_admin` or `cloud_audit`, and the decision engine synthesizes multi-stage execution paths (graph heuristics, optional LLM agents under explicit authorization). [→ engine design](docs/engine_design.md)
+- **Multi-vector attack graph (DAG)**: ingest BloodHound or map sessions in real time. Shortest-path, chokepoints, lateral pivot feasibility. [→ attack graph](docs/engine_design.md)
+- **Zero-trust auth model**: memory-only short-lived JWTs, HttpOnly rotating refresh, HMAC CSRF, AES-256-GCM AEAD vault (PBKDF2-HMAC-SHA256 600k). [→ security model](docs/security-model.md)
 - **66 active production modules** across 60+ MITRE ATT&CK techniques (AD, cloud, credential access, exfil, lateral, recon, Windows, Linux, EDR). [→ module catalog](docs/modules.md)
-- **Automated deliverables** — one-click branded PDF/HTML/Markdown/JSON reports via headless browser (no GTK deps on Windows/Linux). [→ dashboard guide](docs/dashboard-guide.md)
-- **MCP Gateway** — Cursor/Claude Desktop/Windsurf/Cline can drive ARES safely under Pre-Flight ScopeGuard, anti-prompt-injection taint isolation and single-use HMAC confirmation tokens. [→ MCP spec](docs/mcp-server.md)
-- **Type-safe Python SDK** — write custom modules with `BaseModule[P, R]` + `@ares_module`, simulate in `ModuleTestHarness`, automate with `AresClient`. [→ SDK docs](docs/module_sdk.md) · [→ module dev guide](docs/module-development.md)
+- **Automated deliverables**: one-click branded PDF/HTML/Markdown/JSON reports via headless browser (no GTK deps on Windows/Linux). [→ dashboard guide](docs/dashboard-guide.md)
+- **MCP Gateway**: Cursor/Claude Desktop/Windsurf/Cline can drive ARES safely under Pre-Flight ScopeGuard, anti-prompt-injection taint isolation and single-use HMAC confirmation tokens. [→ MCP spec](docs/mcp-server.md)
+- **Type-safe Python SDK**: write custom modules with `BaseModule[P, R]` + `@ares_module`, simulate in `ModuleTestHarness`, automate with `AresClient`. [→ SDK docs](docs/module_sdk.md) · [→ module dev guide](docs/module-development.md)
 
 ---
 
@@ -126,7 +126,7 @@ ares upgrade             # full-system upgrade (core + db + modules + UI)
 ares upgrade --check     # preview, no changes on disk
 ```
 
-User databases, credentials, config and plugins are mathematically blacklisted from modification — see [in-place upgrade guarantees](docs/execution-policy.md).
+User databases, credentials, config and plugins are mathematically blacklisted from modification. See [in-place upgrade guarantees](docs/execution-policy.md).
 
 ---
 
@@ -168,7 +168,7 @@ If ARES has accelerated your assessments or protected your infrastructure, consi
   <img src="docs/assets/credits/muhamad-d-alvito.png" width="88" height="88" alt="Muhamad D Alvito" style="border-radius:50%;">
 </a>
 
-**[Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)** — UI & UX partner
+**[Muhamad D Alvito](https://www.linkedin.com/in/muhamad-d-alvito-58607934b/)**, UI & UX partner
 
 </div>
 
@@ -200,7 +200,7 @@ ARES is distributed under the open-source **[MIT License](LICENSE)**.
 
 <div align="center">
 
-**ARES — Modern Red Team Engagement & Continuous Security Validation System.**<br>
+**ARES: Modern Red Team Engagement & Continuous Security Validation System.**<br>
 *Continuous security validation. Deterministic scope containment.*
 
 </div>

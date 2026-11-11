@@ -14,7 +14,7 @@
 
 In enterprise environments, Active Directory security research and offensive tooling have historically concentrated on Windows endpoints and Domain Controllers. Tools such as Mimikatz, Rubeus, and SharpHound established comprehensive visibility into Windows-centric Kerberos ticket extraction, DPAPI secrets, and LSASS memory manipulation.
 
-However, modern enterprise infrastructures are inherently hybrid. Critical production services—including Kubernetes worker nodes, CI/CD runners (GitLab, Jenkins), data analytics engines, identity proxies, and high-value database servers—are routinely joined to Active Directory as **Linux Domain Members** using:
+However, modern enterprise infrastructures are inherently hybrid. Critical production services, including Kubernetes worker nodes, CI/CD runners (GitLab, Jenkins), data analytics engines, identity proxies, and high-value database servers, are routinely joined to Active Directory as **Linux Domain Members** using:
 1. **SSSD (System Security Services Daemon)** integrated with Kerberos and OpenLDAP.
 2. **Winbind & Samba** managing domain trust relationships and RPC schannel credentials.
 3. **Direct Kerberos/PAM integrations** managing Single Sign-On (SSO) and host-level access control.
