@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -39,10 +40,34 @@ from ares.core.logger import get_logger
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
+@dataclass(frozen=True)
+class _DashActor:
+    """Minimal authenticated principal for dashboard authorization."""
+
+    username: str
+    role: str
+
+
+def _dashboard_campaign_access(campaign: Any, actor: "_DashActor") -> None:
+    """Raise 404 (not 403, to avoid campaign enumeration) when the actor is not a
+    team_lead and does not own the campaign. Mirrors the main API's
+    _require_campaign_access so the dashboard sub-app enforces the same per-
+    campaign ownership boundary. (AUDIT run-1 H6)
+    """
+    if actor.role == "team_lead":
+        return
+    operator = (
+        campaign.get("operator") if isinstance(campaign, dict)
+        else getattr(campaign, "operator", None)
+    )
+    if operator != actor.username:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+
 async def _require_dashboard_auth(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> None:
+) -> "_DashActor":
     """
     Validate JWT or API key. Raises 401 if missing/invalid.
     Accepts: Authorization: Bearer <token>  OR  X-API-Key: <key>
@@ -111,8 +136,11 @@ async def _require_dashboard_auth(
                 status_code=503,
                 detail="Authentication service temporarily unavailable.",
             )
-        if decision.status is PrincipalDecisionStatus.AUTHORIZED:
-            return
+        if decision.status is PrincipalDecisionStatus.AUTHORIZED and decision.principal is not None:
+            return _DashActor(
+                username=decision.principal.username,
+                role=decision.principal.role,
+            )
         # Fall through to API-key check on INVALID: callers may send both
         # headers (unlikely but legal); only raise after exhausting them.
 
@@ -138,7 +166,10 @@ async def _require_dashboard_auth(
                 except Exception:  # pragma: no cover - best-effort cleanup
                     pass
         if user:
-            return
+            return _DashActor(
+                username=str(user.get("username", "")),
+                role=str(user.get("role", "")),
+            )
 
     raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -545,7 +576,7 @@ async def dashboard_root() -> str:
 
 
 @dashboard_app.get("/api/status")
-async def api_status(_auth: None = Depends(_require_dashboard_auth)) -> dict[str, Any]:
+async def api_status(_actor: "_DashActor" = Depends(_require_dashboard_auth)) -> dict[str, Any]:
     return {"status": "online", "version": _ares_version}
 
 
@@ -565,34 +596,53 @@ def _get_db() -> "AresDatabase":  # noqa: F821
     return _DB(s.db_path, s.encryption_key_value)
 
 
+def _filter_owned_campaigns(rows: list[dict[str, Any]], actor: "_DashActor") -> list[dict[str, Any]]:
+    # Non-team_lead operators see only their own campaigns. (AUDIT run-1 H6)
+    if actor.role == "team_lead":
+        return rows
+    return [r for r in rows if r.get("operator") == actor.username]
+
+
 @dashboard_app.get("/api/campaigns")
-async def api_campaigns(_auth: None = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
+async def api_campaigns(actor: "_DashActor" = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
     try:
         db = _get_db()
         if getattr(dashboard_app.state, "db", None) is not None:
             rows, _ = await db.list_campaigns()
-            return rows
+            return _filter_owned_campaigns(rows, actor)
         async with db:
             rows, _ = await db.list_campaigns()
-            return rows
+            return _filter_owned_campaigns(rows, actor)
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
         raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
+async def _authorize_campaign(db: Any, campaign_id: str, actor: "_DashActor") -> None:
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    _dashboard_campaign_access(campaign, actor)
+
+
 @dashboard_app.get("/api/campaigns/{campaign_id}/findings")
 async def api_findings(campaign_id: str, severity: str | None = None,
-                       _auth: None = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
+                       actor: "_DashActor" = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
     try:
         db = _get_db()
+
+        async def _run(db: Any) -> list[dict[str, Any]]:
+            await _authorize_campaign(db, campaign_id, actor)
+            rows, _ = await db.list_findings(campaign_id, severity=severity,
+                                             validated=True, false_positive=False)
+            return redact_finding_response_rows(rows)
+
         if getattr(dashboard_app.state, "db", None) is not None:
-            rows, _ = await db.list_findings(campaign_id, severity=severity,
-                                             validated=True, false_positive=False)
-            return redact_finding_response_rows(rows)
+            return await _run(db)
         async with db:
-            rows, _ = await db.list_findings(campaign_id, severity=severity,
-                                             validated=True, false_positive=False)
-            return redact_finding_response_rows(rows)
+            return await _run(db)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
         raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
@@ -600,13 +650,20 @@ async def api_findings(campaign_id: str, severity: str | None = None,
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/hosts")
 async def api_hosts(campaign_id: str,
-                    _auth: None = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
+                    actor: "_DashActor" = Depends(_require_dashboard_auth)) -> list[dict[str, Any]]:
     try:
         db = _get_db()
+
+        async def _run(db: Any) -> list[dict[str, Any]]:
+            await _authorize_campaign(db, campaign_id, actor)
+            return await db.get_hosts(campaign_id)
+
         if getattr(dashboard_app.state, "db", None) is not None:
-            return await db.get_hosts(campaign_id)
+            return await _run(db)
         async with db:
-            return await db.get_hosts(campaign_id)
+            return await _run(db)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
         raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
@@ -614,12 +671,13 @@ async def api_hosts(campaign_id: str,
 
 @dashboard_app.get("/api/campaigns/{campaign_id}/summary")
 async def api_summary(campaign_id: str,
-                      _auth: None = Depends(_require_dashboard_auth)) -> dict[str, Any]:
+                      actor: "_DashActor" = Depends(_require_dashboard_auth)) -> dict[str, Any]:
     try:
         db = _get_db()
         use_shared = getattr(dashboard_app.state, "db", None) is not None
 
         async def _fetch(db: "AresDatabase") -> dict[str, Any]:  # noqa: F821
+            await _authorize_campaign(db, campaign_id, actor)
             summary  = await db.campaign_summary(campaign_id)
             findings, _ = await db.list_findings(campaign_id,
                                                   validated=True, false_positive=False)
@@ -641,13 +699,15 @@ async def api_summary(campaign_id: str,
             return await _fetch(db)
         async with db:
             return await _fetch(db)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("dashboard_api_error", error=str(e)[:200])
         raise HTTPException(status_code=500, detail="Internal server error")  # noqa: B904
 
 
 @dashboard_app.get("/api/workers")
-async def api_workers(_auth: None = Depends(_require_dashboard_auth)) -> dict[str, Any]:
+async def api_workers(_actor: "_DashActor" = Depends(_require_dashboard_auth)) -> dict[str, Any]:
     # Returns empty if distributed controller not running
     return {"workers": [], "queue": {"pending": 0, "active": 0, "done": 0, "failed": 0}}
 

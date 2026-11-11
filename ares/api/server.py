@@ -1088,6 +1088,18 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         method=request.method,
         exc_type=type(exc).__name__,
     )
+    # AUDIT run-1 H7: a state-changing handler that raised mid-write can leave the
+    # shared SQLite connection with an open transaction. Roll it back so the next
+    # request is not blocked ("cannot start a transaction within a transaction")
+    # or served partially-committed state. (asyncpg/Postgres pools auto-clean, so
+    # there is no shared `conn` there and this is a no-op.)
+    try:
+        db = getattr(request.app.state, "db", None)
+        conn = getattr(db, "conn", None)
+        if conn is not None and hasattr(conn, "rollback"):
+            await conn.rollback()
+    except Exception as rb_exc:  # pragma: no cover - best-effort cleanup
+        logger.warning("db_rollback_after_error_failed", error=str(rb_exc)[:120])
     return JSONResponse(
         status_code=500,
         content={
