@@ -35,6 +35,7 @@ import {
 } from "./graphModel";
 import { PivotComputerNode, PivotFirewallNode, type PivotNodeData } from "./CobaltStrikeNodes";
 import { CobaltSessionDock } from "./CobaltSessionDock";
+import { csvCell } from "./csvExport";
 import { TacticalInspectorDrawer } from "./TacticalInspectorDrawer";
 
 type CanvasNode = Node<PivotNodeData, string>;
@@ -681,7 +682,10 @@ export default function GraphPage({
       .map((node) => {
         const inf = inferCobaltNodeData(node);
         const isCompromised = inf.status === "active" || inf.privilege !== "uncompromised" || Boolean(node.metadata?.owned);
-        return `"${node.id}","${node.label}","${node.type}","${inf.ip || ""}","${inf.os}","${inf.privilege}","${isCompromised ? "Compromised" : "Target"}"`;
+        return [
+          node.id, node.label, node.type, inf.ip || "", inf.os, inf.privilege,
+          isCompromised ? "Compromised" : "Target",
+        ].map(csvCell).join(",");
       })
       .join("\n");
     const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
