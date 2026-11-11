@@ -21,6 +21,7 @@ def test_ldap_tls_plaintext_returns_none(force_insecure):
 
 
 def test_ldap_tls_verifies_by_default(force_insecure):
+    pytest.importorskip("ldap3")  # optional dep; not in the base test env
     force_insecure(False)
     tls = tlssec.ldap_tls(True)
     assert tls is not None
@@ -28,6 +29,7 @@ def test_ldap_tls_verifies_by_default(force_insecure):
 
 
 def test_ldap_tls_insecure_only_on_opt_in(force_insecure):
+    pytest.importorskip("ldap3")  # optional dep; not in the base test env
     force_insecure(True)
     tls = tlssec.ldap_tls(True)
     assert tls.validate == ssl.CERT_NONE
