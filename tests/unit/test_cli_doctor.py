@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import os
+import re
 import sys
 import tomllib
 import types
@@ -643,12 +644,17 @@ def test_python_setup_replaces_change_me_placeholders_in_existing_env(tmp_path, 
 
     output = capsys.readouterr().out
     assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
-    assert "Admin password:" in output
+    # AUDIT run-1 H11: the generated admin password must NOT be printed to stdout.
+    assert "Admin password:" not in output
 
     env_content = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "CHANGE_ME" not in env_content
     assert "YOUR_STRONG_ADMIN_PASSWORD_HERE" not in env_content
     assert "ARES_API_PORT=8080" in env_content
+    admin_pw = re.search(
+        r"^ARES_DEFAULT_ADMIN_PASSWORD=(.+)$", env_content, re.MULTILINE
+    ).group(1).strip()
+    assert admin_pw and admin_pw not in output
 
 
 def test_python_setup_replaces_new_256bit_placeholder_in_existing_env(tmp_path, capsys):
@@ -671,12 +677,17 @@ def test_python_setup_replaces_new_256bit_placeholder_in_existing_env(tmp_path, 
 
     output = capsys.readouterr().out
     assert "Replaced CHANGE_ME placeholders in .env with secure generated keys" in output
-    assert "Admin password:" in output
+    # AUDIT run-1 H11: the generated admin password must NOT be printed to stdout.
+    assert "Admin password:" not in output
 
     env_content = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "CHANGE_ME" not in env_content
     assert "YOUR_STRONG_ADMIN_PASSWORD_HERE" not in env_content
     assert "ARES_API_PORT=8080" in env_content
+    admin_pw = re.search(
+        r"^ARES_DEFAULT_ADMIN_PASSWORD=(.+)$", env_content, re.MULTILINE
+    ).group(1).strip()
+    assert admin_pw and admin_pw not in output
 
 
 def test_python_setup_leaves_configured_env_unchanged(tmp_path, capsys):
@@ -724,11 +735,16 @@ def test_python_setup_force_regenerates_existing_env(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert ".env regenerated with fresh secure keys (--force)" in output
-    assert "Admin password:" in output
+    # AUDIT run-1 H11: the generated admin password must NOT be printed to stdout.
+    assert "Admin password:" not in output
 
     env_content = (tmp_path / ".env").read_text(encoding="utf-8")
     assert "old_secret" not in env_content
     assert "CUSTOM_VAR=keep_me" in env_content
+    admin_pw = re.search(
+        r"^ARES_DEFAULT_ADMIN_PASSWORD=(.+)$", env_content, re.MULTILINE
+    ).group(1).strip()
+    assert admin_pw and admin_pw not in output
 
 
 def test_setup_entrypoint_parses_force(monkeypatch):
