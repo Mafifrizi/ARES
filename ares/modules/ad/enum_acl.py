@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from ares.core.logger import get_logger
+from ares.modules._tls_security import ldap_tls
 
 logger = get_logger("ares.modules.ad.enum_acl")
 from ares.core.campaign import Severity
@@ -218,17 +219,16 @@ class ADEnumACLModule(BaseModule[DomainAuthParams, ModuleResult]):
         Sync - runs in executor (fix: was async def blocking event loop).
         Fixes: AUTO_BIND_NONE, cookie loop, LDAPS fallback, try/finally unbind.
         """
-        import ssl
 
         import ldap3
-        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)
         conn = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
-                tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                tls_arg = ldap_tls(use_ssl)
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
                 conn_kwargs = {
