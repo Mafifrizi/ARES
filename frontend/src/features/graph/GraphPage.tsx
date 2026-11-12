@@ -536,11 +536,11 @@ function CobaltGraphInner({
             <span className="text-white font-semibold">
               {activeNodeData?.label || activeFocusNodeId}
             </span>
-            <span className="text-zinc-600">|</span>
+            <span className="text-zinc-400">|</span>
             <span className="text-emerald-400 font-mono font-medium">
               {trackedPathway.nodeIds.size} NODES
             </span>
-            <span className="text-zinc-600">|</span>
+            <span className="text-zinc-400">|</span>
             <span className="text-cyan-400 font-mono font-medium">
               {trackedPathway.hopCount} HOPS
             </span>
@@ -1056,31 +1056,31 @@ export default function GraphPage({
               <button className="cobalt-win-btn close" onClick={() => setShowAttackPathsDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
-              <div className="mb-2 text-[11px] text-zinc-800">
+              <div className="mb-2 text-[11px] text-zinc-100">
                 Calculated lateral movement paths for active engagement campaign:
               </div>
               {paths.length === 0 ? (
-                <div className="p-4 text-center bg-white border border-zinc-400 text-zinc-600 mb-3 font-mono text-[11px]">
+                <div className="p-4 text-center bg-zinc-800 border border-zinc-400 text-zinc-400 mb-3 font-mono text-[11px]">
                   No attack paths generated yet. Ingest BloodHound AD data or run automated reconnaissance.
                 </div>
               ) : (
-                <div className="max-h-60 overflow-y-auto border border-zinc-500 bg-white mb-3 divide-y divide-zinc-200">
+                <div className="max-h-60 overflow-y-auto border border-zinc-500 bg-zinc-800 mb-3 divide-y divide-zinc-200">
                   {paths.map((path, idx) => (
                     <div
                       key={idx}
                       className={`p-2.5 cursor-pointer text-[11px] ${
-                        selectedPathIndex === idx ? "bg-blue-100 font-semibold" : "hover:bg-zinc-100"
+                        selectedPathIndex === idx ? "bg-blue-950 font-semibold" : "hover:bg-zinc-800"
                       }`}
                       onClick={() => {
                         setSelectedPathIndex(selectedPathIndex === idx ? null : idx);
                         setShowAttackPathsDialog(false);
                       }}
                     >
-                      <div className="flex justify-between text-zinc-700 font-mono text-[10px] mb-0.5">
+                      <div className="flex justify-between text-zinc-400 font-mono text-[10px] mb-0.5">
                         <span>Path #{idx + 1} ({path.steps.length} lateral steps)</span>
                         <span className="text-red-600 font-bold">Score: {path.total_score ?? "High"}</span>
                       </div>
-                      <div className="text-black">{attackPathSummary(path)}</div>
+                      <div className="text-zinc-100">{attackPathSummary(path)}</div>
                     </div>
                   ))}
                 </div>
@@ -1124,7 +1124,7 @@ export default function GraphPage({
                 if (jsonPath.trim()) ingest.mutate();
               }}
             >
-              <div className="mb-2 text-[11px] text-zinc-800">
+              <div className="mb-2 text-[11px] text-zinc-100">
                 Specify server filesystem path to BloodHound JSON export file:
               </div>
               <input
@@ -1136,12 +1136,12 @@ export default function GraphPage({
                 autoFocus
               />
               {ingestNotice && (
-                <div className="mb-3 p-2 bg-green-100 border border-green-500 text-green-800 font-mono text-[10px]">
+                <div className="mb-3 p-2 bg-emerald-950 border border-green-500 text-emerald-300 font-mono text-[10px]">
                   {ingestNotice}
                 </div>
               )}
               {ingest.isError && (
-                <div className="mb-3 p-2 bg-red-100 border border-red-500 text-red-800 font-mono text-[10px]">
+                <div className="mb-3 p-2 bg-red-950 border border-red-500 text-red-300 font-mono text-[10px]">
                   Failed to ingest BloodHound data. Verify server file path.
                 </div>
               )}
@@ -1175,12 +1175,12 @@ export default function GraphPage({
               <button className="cobalt-win-btn close" onClick={() => setShowReportingDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
-              <div className="mb-3 text-[11px] text-zinc-800">
+              <div className="mb-3 text-[11px] text-zinc-100">
                 Generate and export offensive campaign evidence or access official deliverables:
               </div>
 
               {reportingNotice && (
-                <div className="mb-3 p-2 bg-green-100 border border-green-600 text-green-900 font-mono text-[11px] flex items-center gap-2">
+                <div className="mb-3 p-2 bg-emerald-950 border border-green-600 text-emerald-300 font-mono text-[11px] flex items-center gap-2">
                   <Check size={14} className="text-green-700" />
                   <span>{reportingNotice}</span>
                 </div>
@@ -1189,11 +1189,11 @@ export default function GraphPage({
               <div className="cobalt-dialog-card">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                    <div className="font-bold text-zinc-100 flex items-center gap-1.5 mb-1">
                       <Download size={13} className="text-blue-700" />
                       <span>Export Attack Graph Topology (JSON)</span>
                     </div>
-                    <div className="text-[11px] text-zinc-600">
+                    <div className="text-[11px] text-zinc-400">
                       Download complete node coordinates, lateral movement routes, credentials, and severity metadata as a machine-readable JSON dump.
                     </div>
                   </div>
@@ -1210,11 +1210,11 @@ export default function GraphPage({
               <div className="cobalt-dialog-card">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                    <div className="font-bold text-zinc-100 flex items-center gap-1.5 mb-1">
                       <FileSpreadsheet size={13} className="text-emerald-700" />
                       <span>Export Host Inventory (CSV)</span>
                     </div>
-                    <div className="text-[11px] text-zinc-600">
+                    <div className="text-[11px] text-zinc-400">
                       Export flat tabular spreadsheet containing Hostname, IP address, OS type, privilege level, and compromise state for all {filteredGraph.nodes.length} hosts.
                     </div>
                   </div>
@@ -1231,11 +1231,11 @@ export default function GraphPage({
               <div className="cobalt-dialog-card">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="font-bold text-zinc-900 flex items-center gap-1.5 mb-1">
+                    <div className="font-bold text-zinc-100 flex items-center gap-1.5 mb-1">
                       <FileText size={13} className="text-purple-700" />
                       <span>Engagement Deliverables Engine</span>
                     </div>
-                    <div className="text-[11px] text-zinc-600">
+                    <div className="text-[11px] text-zinc-400">
                       Navigate directly to the ARES Report Generator to compile executive PDF, Technical Markdown, or Defect JSON reports.
                     </div>
                   </div>
@@ -1303,29 +1303,29 @@ export default function GraphPage({
               {/* Tab Content: Shortcuts */}
               {helpTab === "shortcuts" && (
                 <div>
-                  <div className="mb-2 text-[11px] text-zinc-700 font-semibold">
+                  <div className="mb-2 text-[11px] text-zinc-400 font-semibold">
                     Interactive Canvas Controls:
                   </div>
                   <div className="cobalt-dialog-card divide-y divide-zinc-200">
                     <div className="py-1.5 flex justify-between">
-                      <span className="font-mono font-bold text-blue-900">[ESC] Key</span>
-                      <span className="text-zinc-700">Clear locked pathway highlight and unlock topology view.</span>
+                      <span className="font-mono font-bold text-blue-300">[ESC] Key</span>
+                      <span className="text-zinc-400">Clear locked pathway highlight and unlock topology view.</span>
                     </div>
                     <div className="py-1.5 flex justify-between">
-                      <span className="font-mono font-bold text-blue-900">Click on Host Node</span>
-                      <span className="text-zinc-700">Lock upstream compromise lineage and downstream lateral reachability.</span>
+                      <span className="font-mono font-bold text-blue-300">Click on Host Node</span>
+                      <span className="text-zinc-400">Lock upstream compromise lineage and downstream lateral reachability.</span>
                     </div>
                     <div className="py-1.5 flex justify-between">
-                      <span className="font-mono font-bold text-blue-900">[+] / [-] Buttons</span>
-                      <span className="text-zinc-700">Zoom in and zoom out of the pivot canvas smoothly.</span>
+                      <span className="font-mono font-bold text-blue-300">[+] / [-] Buttons</span>
+                      <span className="text-zinc-400">Zoom in and zoom out of the pivot canvas smoothly.</span>
                     </div>
                     <div className="py-1.5 flex justify-between">
-                      <span className="font-mono font-bold text-blue-900">[⛶] Reset View</span>
-                      <span className="text-zinc-700">Fit entire network topology into view with calibrated padding.</span>
+                      <span className="font-mono font-bold text-blue-300">[⛶] Reset View</span>
+                      <span className="text-zinc-400">Fit entire network topology into view with calibrated padding.</span>
                     </div>
                     <div className="py-1.5 flex justify-between">
-                      <span className="font-mono font-bold text-blue-900">Active Pivots Only</span>
-                      <span className="text-zinc-700">Filter out unlinked discovery assets to focus strictly on confirmed compromise routes.</span>
+                      <span className="font-mono font-bold text-blue-300">Active Pivots Only</span>
+                      <span className="text-zinc-400">Filter out unlinked discovery assets to focus strictly on confirmed compromise routes.</span>
                     </div>
                   </div>
                 </div>
@@ -1334,36 +1334,36 @@ export default function GraphPage({
               {/* Tab Content: Legend */}
               {helpTab === "legend" && (
                 <div>
-                  <div className="mb-2 text-[11px] text-zinc-700 font-semibold">
+                  <div className="mb-2 text-[11px] text-zinc-400 font-semibold">
                     Host Visual Privilege & Role Classification:
                   </div>
                   <div className="grid grid-cols-2 gap-2 mb-2">
                     <div className="cobalt-dialog-card flex items-start gap-2.5">
                       <span className="w-3.5 h-3.5 rounded-sm bg-red-600 border border-red-400 shrink-0 mt-0.5" />
                       <div>
-                        <div className="font-bold text-red-900">SYSTEM * (Crimson Border)</div>
-                        <div className="text-[10px] text-zinc-600">Tier-0 Domain Controller (`DC01`) or NT AUTHORITY\SYSTEM / root integrity token.</div>
+                        <div className="font-bold text-red-300">SYSTEM * (Crimson Border)</div>
+                        <div className="text-[10px] text-zinc-400">Tier-0 Domain Controller (`DC01`) or NT AUTHORITY\SYSTEM / root integrity token.</div>
                       </div>
                     </div>
                     <div className="cobalt-dialog-card flex items-start gap-2.5">
                       <span className="w-3.5 h-3.5 rounded-sm bg-amber-500 border border-amber-300 shrink-0 mt-0.5" />
                       <div>
-                        <div className="font-bold text-amber-900">ADMIN (Amber Border)</div>
-                        <div className="text-[10px] text-zinc-600">High-value internal server (`SQL01`, `FS01`) or local administrator compromise.</div>
+                        <div className="font-bold text-amber-300">ADMIN (Amber Border)</div>
+                        <div className="text-[10px] text-zinc-400">High-value internal server (`SQL01`, `FS01`) or local administrator compromise.</div>
                       </div>
                     </div>
                     <div className="cobalt-dialog-card flex items-start gap-2.5">
                       <span className="w-3.5 h-3.5 rounded-sm bg-cyan-400 border border-cyan-200 shrink-0 mt-0.5" />
                       <div>
                         <div className="font-bold text-cyan-900">BEACON (Cyan Border)</div>
-                        <div className="text-[10px] text-zinc-600">Active compromised user workstation foothold (`WS-FIN-042`) or Linux bridge.</div>
+                        <div className="text-[10px] text-zinc-400">Active compromised user workstation foothold (`WS-FIN-042`) or Linux bridge.</div>
                       </div>
                     </div>
                     <div className="cobalt-dialog-card flex items-start gap-2.5">
                       <span className="w-3.5 h-3.5 rounded-sm bg-red-800 border border-orange-500 shrink-0 mt-0.5" />
                       <div>
                         <div className="font-bold text-orange-900">FIREWALL (Red Brick)</div>
-                        <div className="text-[10px] text-zinc-600">Perimeter network ingress gateway (`K8S-INGRESS-01`) or boundary egress firewall.</div>
+                        <div className="text-[10px] text-zinc-400">Perimeter network ingress gateway (`K8S-INGRESS-01`) or boundary egress firewall.</div>
                       </div>
                     </div>
                   </div>
@@ -1383,42 +1383,42 @@ export default function GraphPage({
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">whoami</td>
+                        <td className="font-mono font-bold text-blue-300">whoami</td>
                         <td className="font-mono text-[10px]">whoami</td>
                         <td>Displays target host, user token, and integrity level (High vs Medium).</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">hashdump</td>
+                        <td className="font-mono font-bold text-blue-300">hashdump</td>
                         <td className="font-mono text-[10px]">hashdump | creds</td>
                         <td>Dumps harvested NTLM SAM and LSA hashes from LSASS memory.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">ps</td>
+                        <td className="font-mono font-bold text-blue-300">ps</td>
                         <td className="font-mono text-[10px]">ps | process</td>
                         <td>Lists running processes with PID, PPID, and session architecture.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">ppid</td>
+                        <td className="font-mono font-bold text-blue-300">ppid</td>
                         <td className="font-mono text-[10px]">ppid &lt;pid&gt;</td>
                         <td>Tasks beacon to spoof parent process ID for defense evasion.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">ssh</td>
+                        <td className="font-mono font-bold text-blue-300">ssh</td>
                         <td className="font-mono text-[10px]">ssh &lt;host&gt; &lt;user&gt; &lt;pass&gt;</td>
                         <td>Tasks beacon to establish an interactive lateral SSH pivot session.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">net view</td>
+                        <td className="font-mono font-bold text-blue-300">net view</td>
                         <td className="font-mono text-[10px]">net view | hosts</td>
                         <td>Lists active scoped network nodes and discovered domain computers.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">clear</td>
+                        <td className="font-mono font-bold text-blue-300">clear</td>
                         <td className="font-mono text-[10px]">clear</td>
                         <td>Clears the terminal scrollback buffer for the active session.</td>
                       </tr>
                       <tr>
-                        <td className="font-mono font-bold text-blue-900">help</td>
+                        <td className="font-mono font-bold text-blue-300">help</td>
                         <td className="font-mono text-[10px]">help</td>
                         <td>Displays command usage summary inside the active session terminal.</td>
                       </tr>
@@ -1451,9 +1451,7 @@ export default function GraphPage({
             </div>
             <div className="cobalt-dialog-body">
               <div className="flex items-center gap-3 mb-3 p-2.5 bg-zinc-900 text-white border border-zinc-700">
-                <div className="p-2 rounded bg-red-950 border border-red-700 text-red-400">
-                  <Shield size={24} />
-                </div>
+                <img src="/brand/ares-mark.png" alt="ARES" className="w-9 h-9 rounded object-contain" />
                 <div>
                   <div className="font-bold text-sm tracking-wide">ARES Tactical C2 Visualizer</div>
                   <div className="text-[10px] text-zinc-400 font-mono">v6.0 Enterprise Edition · Automated Red Team Engine</div>
@@ -1462,20 +1460,20 @@ export default function GraphPage({
 
               <div className="cobalt-dialog-card mb-3 text-[11px] leading-relaxed">
                 <div className="grid grid-cols-2 gap-y-1.5">
-                  <span className="text-zinc-600 font-medium">Target Campaign:</span>
-                  <span className="font-bold text-zinc-900">{currentCampaign?.name || campaignId || "Standby"}</span>
-                  <span className="text-zinc-600 font-medium">Scoped Hosts:</span>
-                  <span className="font-mono text-zinc-900">{filteredGraph.nodes.length} Nodes</span>
-                  <span className="text-zinc-600 font-medium">Active Pivot Links:</span>
-                  <span className="font-mono text-zinc-900">{filteredGraph.edges.length} Connections</span>
-                  <span className="text-zinc-600 font-medium">C2 Transport:</span>
-                  <span className="font-mono text-emerald-800 font-bold">AES-256-GCM / Named Pipe</span>
-                  <span className="text-zinc-600 font-medium">Execution Engine:</span>
-                  <span className="font-mono text-zinc-900">Python 3.12+ Async / React 19</span>
+                  <span className="text-zinc-400 font-medium">Target Campaign:</span>
+                  <span className="font-bold text-zinc-100">{currentCampaign?.name || campaignId || "Standby"}</span>
+                  <span className="text-zinc-400 font-medium">Scoped Hosts:</span>
+                  <span className="font-mono text-zinc-100">{filteredGraph.nodes.length} Nodes</span>
+                  <span className="text-zinc-400 font-medium">Active Pivot Links:</span>
+                  <span className="font-mono text-zinc-100">{filteredGraph.edges.length} Connections</span>
+                  <span className="text-zinc-400 font-medium">C2 Transport:</span>
+                  <span className="font-mono text-emerald-300 font-bold">AES-256-GCM / Named Pipe</span>
+                  <span className="text-zinc-400 font-medium">Execution Engine:</span>
+                  <span className="font-mono text-zinc-100">Python 3.12+ Async / React 19</span>
                 </div>
               </div>
 
-              <div className="text-[10px] text-zinc-600 text-center mb-3">
+              <div className="text-[10px] text-zinc-400 text-center mb-3">
                 Authorized offensive security validation platform. Strictly compliant with engagement boundary rules.
               </div>
 
@@ -1502,7 +1500,7 @@ export default function GraphPage({
               <button className="cobalt-win-btn close" onClick={() => setShowSessionPrefsDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
-              <div className="mb-2 text-[11px] text-zinc-800">
+              <div className="mb-2 text-[11px] text-zinc-100">
                 Configure lateral movement visualization and telemetry parameters:
               </div>
 
@@ -1561,7 +1559,7 @@ export default function GraphPage({
                 setSleepNotice(`Tasked active beacon session to sleep ${sleepSeconds}s (${sleepJitter}% jitter).`);
               }}
             >
-              <div className="mb-2 text-[11px] text-zinc-800">
+              <div className="mb-2 text-[11px] text-zinc-100">
                 Configure check-in beacon interval and randomized jitter percentage:
               </div>
 
@@ -1595,7 +1593,7 @@ export default function GraphPage({
               </div>
 
               {sleepNotice && (
-                <div className="mb-3 p-2 bg-green-100 border border-green-600 text-green-900 font-mono text-[10px]">
+                <div className="mb-3 p-2 bg-emerald-950 border border-green-600 text-emerald-300 font-mono text-[10px]">
                   {sleepNotice}
                 </div>
               )}
@@ -1626,11 +1624,11 @@ export default function GraphPage({
               <button className="cobalt-win-btn close" onClick={() => setShowLinkDialog(false)} type="button">✕</button>
             </div>
             <div className="cobalt-dialog-body">
-              <div className="mb-2 text-[11px] text-zinc-800">
+              <div className="mb-2 text-[11px] text-zinc-100">
                 Active lateral communication tunnels and established pivot channels:
               </div>
 
-              <div className="max-h-56 overflow-y-auto border border-zinc-500 bg-white mb-3 divide-y divide-zinc-200">
+              <div className="max-h-56 overflow-y-auto border border-zinc-500 bg-zinc-800 mb-3 divide-y divide-zinc-200">
                 {filteredGraph.edges.length === 0 ? (
                   <div className="p-3 text-center text-zinc-500 text-[11px]">
                     No active pivot connections.
@@ -1639,12 +1637,12 @@ export default function GraphPage({
                   filteredGraph.edges.map((edge, idx) => (
                     <div key={edge.id || idx} className="p-2 text-[11px] flex items-center justify-between">
                       <div className="flex items-center gap-2 font-mono">
-                        <span className="text-zinc-600">#{idx + 1}</span>
-                        <span className="text-blue-900 font-bold">{edge.source}</span>
+                        <span className="text-zinc-400">#{idx + 1}</span>
+                        <span className="text-blue-300 font-bold">{edge.source}</span>
                         <span className="text-amber-600 font-bold">──▶</span>
-                        <span className="text-emerald-900 font-bold">{edge.target}</span>
+                        <span className="text-emerald-300 font-bold">{edge.target}</span>
                       </div>
-                      <span className="text-[10px] px-1.5 py-0.5 bg-zinc-100 border border-zinc-300 font-mono">
+                      <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 border border-zinc-300 font-mono">
                         {edge.label || "Named Pipe / SMB"}
                       </span>
                     </div>
