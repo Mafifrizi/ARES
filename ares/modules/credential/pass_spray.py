@@ -47,6 +47,9 @@ DEFAULT_SPRAY_PASSWORDS = [
 
 # ── Password policy query ─────────────────────────────────────────────────────
 
+from ares.modules._tls_security import ldap_tls
+
+
 def query_password_policy(
     dc: str, domain: str, username: str, password: str,
 ) -> dict[str, Any]:
@@ -66,12 +69,10 @@ def query_password_policy(
     """
     result: dict[str, Any] = {"error": None, "policy_found": False}
     try:
-        import ssl
-
         import ldap3
         for port, use_ssl in [(636, True), (389, False)]:
             try:
-                tls = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                tls = ldap_tls(use_ssl)
                 server = ldap3.Server(dc, port=port, use_ssl=use_ssl,
                                       tls=tls, connect_timeout=10)
                 conn = ldap3.Connection(
@@ -648,11 +649,10 @@ class PassSprayModule(BaseModule[PassSprayParams, ModuleResult]):
                     if use_ldap:
                         # LDAP SIMPLE bind - fallback when SMB 445 is blocked
                         try:
-                            import ssl
 
                             import ldap3
                             use_ssl = (ldap_port == 636)
-                            tls_arg = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                            tls_arg = ldap_tls(use_ssl)
                             server  = ldap3.Server(
                                 target, port=ldap_port,
                                 use_ssl=use_ssl, tls=tls_arg,

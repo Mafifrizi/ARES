@@ -81,6 +81,12 @@ class AresSettings(BaseSettings):
     ares_rate_limit_rpm: int = Field(60, ge=1)
     ares_debug: bool = False
     ares_legacy_dashboard_enabled: bool = False
+    # Opt-in to disable TLS certificate verification on authenticated outbound
+    # connections (LDAPS binds, WinRM-over-HTTPS, HTTPS recon). Off by default so
+    # privileged credentials are not exposed to a transparent MITM; set
+    # ARES_ALLOW_INSECURE_TLS=true only for lab targets with self-signed certs.
+    # (AUDIT run-1 H15/H16/H17)
+    ares_allow_insecure_tls: bool = False
 
     # Database
     ares_database_url: str = "sqlite+aiosqlite:///./ares.db"

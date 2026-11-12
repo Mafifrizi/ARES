@@ -1,7 +1,7 @@
 
 import pytest
 
-from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry, Severity
+from ares.core.campaign import Campaign, NoiseProfile, ScopeEntry
 from ares.core.config import AresSettings
 from ares.core.context import ExecutionContext
 from ares.core.noise import NoiseController
@@ -150,30 +150,21 @@ class TestSecretsScanModuleExecution:
         assert res.raw.get("dry_run") is True
 
     @pytest.mark.asyncio
-    async def test_run_dry_run_produces_dynamic_confidence_and_structured_hits(self):
+    async def test_run_dry_run_fabricates_no_findings(self):
+        """AUDIT run-1 H12: a dry run must never emit fabricated secret findings.
+
+        The previous implementation returned a hardcoded CRITICAL finding with
+        two invented hits (AKIAIOSFODNN7EXAMPLE / web.config connection string)
+        through the validated-findings pipeline, poisoning reports and
+        dashboards with evidence that was never observed. A dry run only
+        confirms dispatchability; it must yield zero findings.
+        """
         mod, _ = _make_module()
         findings, raw = await mod.run(target="192.168.56.105", dry_run=True)
-        assert len(findings) == 1
-        finding = findings[0]
-
-        # Verify dynamic confidence (NOT hardcoded 0.60 template)
-        assert finding.confidence > 0.60
-        assert finding.severity == Severity.CRITICAL
-        assert "hits" in finding.evidence
-        assert len(finding.evidence["hits"]) == 2
-
-        # Verify hit structure includes actual secrets and entropy
-        hit1 = finding.evidence["hits"][0]
-        assert "extracted_secret" in hit1
-        assert "secret_value" in hit1
-        assert "entropy" in hit1
-        assert "confidence" in hit1
-        assert isinstance(hit1["entropy"], float)
-        assert isinstance(hit1["confidence"], float)
-
-        # Verify raw output has discovered_secrets for UI fallback
-        assert "discovered_secrets" in raw
-        assert len(raw["discovered_secrets"]) == 2
+        assert findings == []
+        assert raw.get("dry_run") is True
+        assert not raw.get("discovered_secrets")
+        assert not raw.get("sensitive_data_found")
 
     @pytest.mark.asyncio
     async def test_live_execution_pipeline_with_mocked_scan(self, monkeypatch):

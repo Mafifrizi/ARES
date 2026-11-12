@@ -668,6 +668,11 @@ class TestDashboardApp:
             assert "workers" in data
             assert "queue" in data
             assert "pending" in data["queue"]
+            # AUDIT run-1 H21: the endpoint reports whether a worker controller
+            # is actually attached instead of silently presenting a 0/0/0/0
+            # queue as if it were a healthy, idle controller.
+            assert data["controller_available"] is False
+            assert data["controller_status"] == "not_running"
 
     def test_api_campaigns_with_db_error_returns_500(self, client):
         """When DB is unavailable, returns 500 gracefully."""

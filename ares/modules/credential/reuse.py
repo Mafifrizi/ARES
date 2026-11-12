@@ -31,6 +31,9 @@ from ares.sdk import (
 logger = get_logger("ares.modules.credential.reuse")
 
 
+from ares.modules._tls_security import harden_ssl_context
+
+
 def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
     """
     Non-destructive probe of OAuth 2.0 Device Code Flow / Identity Posture.
@@ -48,8 +51,7 @@ def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
 
     clean_target = target.strip().lower()
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    harden_ssl_context(ctx)
 
     probe_urls: list[str] = []
     # MOD-032: Do not probe public login.microsoftonline.com if target is private/internal RFC1918 IP
@@ -239,7 +241,7 @@ class CredentialReuseModule(BaseModule[CredentialReuseParams, ModuleResult]):
         raw["credential_reuse_audited"] = True
 
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )

@@ -32,6 +32,7 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import ldap_tls
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import NTLMRelayParams
 from ares.sdk import (
@@ -439,13 +440,12 @@ class NTLMRelayModule(BaseModule):
         """Enumerate domain computers via LDAP to build target list."""
         loop = asyncio.get_running_loop()
         def _ldap_enum():
-            import ssl
 
             import ldap3
             hosts = []
             for port, use_ssl in [(636, True), (389, False)]:
                 try:
-                    tls = ldap3.Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                    tls = ldap_tls(use_ssl)
                     server = ldap3.Server(dc, port=port, use_ssl=use_ssl,
                                           tls=tls, connect_timeout=10)
                     conn = ldap3.Connection(
@@ -544,10 +544,8 @@ class NTLMRelayModule(BaseModule):
             # Check LDAP signing (try unauthenticated bind to check)
             def _check_ldap(h=host):
                 try:
-                    import ssl
-
                     import ldap3
-                    tls = ldap3.Tls(validate=ssl.CERT_NONE)
+                    tls = ldap_tls(True)
                     # Try LDAPS first (636), then LDAP (389)
                     for port, use_ssl in [(389, False)]:
                         try:
@@ -777,13 +775,11 @@ class NTLMRelayModule(BaseModule):
             dacl_modified = False
 
             try:
-                import ssl
-
                 # Step 1: Bind via LDAP
                 import ldap3
                 from impacket.ldap import ldap as imp_ldap  # noqa: F401
                 from impacket.ldap import ldapasn1 as ldapasn1_impacket  # noqa: F401
-                tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
+                tls = ldap_tls(True)  # noqa: F841
                 server = ldap3.Server(dc, port=389, connect_timeout=10)
                 conn = ldap3.Connection(
                     server, user=f"{domain.upper()}\\{username}",

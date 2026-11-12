@@ -105,6 +105,24 @@ export function clearDashboardSession(): void {
       removeDashboardSessionKey(key);
     }
   }
+  // AUDIT run-1 H20: notification read/deleted state is persisted in
+  // localStorage (per-operator keys under this prefix). Logout previously only
+  // cleared sessionStorage, leaving the next operator on this browser able to
+  // read the prior operator's notification state. Purge it here too.
+  try {
+    const prefix = "ares.dashboard.notifications";
+    const localKeys = Array.from(
+      { length: window.localStorage.length },
+      (_, index) => window.localStorage.key(index),
+    );
+    for (const key of localKeys) {
+      if (key && key.startsWith(prefix)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // Storage sandbox / private-mode fallback
+  }
 }
 
 function purgeDisallowedDashboardSession(): void {

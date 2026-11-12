@@ -180,7 +180,12 @@ def test_scope_gate_verification() -> None:
 
 # ── 5. Confirmation Token Handshake (Anti-Replay) Tests ─────────────────────
 
-def test_confirmation_token_manager_lifecycle() -> None:
+def test_confirmation_token_manager_lifecycle(tmp_path, monkeypatch) -> None:
+    from ares.mcp.events import McpEventBus
+
+    # Isolate the per-token decision store from the real ~/.ares file.
+    monkeypatch.setattr("ares.mcp.events.TOKEN_STATUS_FILE", tmp_path / "tok.json")
+
     mgr = ConfirmationTokenManager(secret_key="test_secret_key_32_bytes_long!!")  # noqa: S106
 
     # Issue token
@@ -193,7 +198,21 @@ def test_confirmation_token_manager_lifecycle() -> None:
     )
     assert token.startswith("ares_tok_")
 
-    # Tampered target or params should fail validation
+    # AUDIT run-1 H8: fail-closed. A token the operator never approved must NOT
+    # validate even with perfectly matching parameters, and must NOT be burned
+    # (so a later approval + retry can still succeed).
+    assert mgr.validate_and_burn(
+        token=token,
+        campaign_id="camp_01",
+        module_id="ad.kerberoast",
+        target="dc01.corp.local",
+        params={"domain": "corp.local"},
+    ) is False
+
+    # Operator approves THIS token from the monitor.
+    McpEventBus.set_token_decision(token, "APPROVED")
+
+    # Tampered target or params should still fail validation (payload mismatch).
     assert mgr.validate_and_burn(
         token=token,
         campaign_id="camp_01",
@@ -224,7 +243,11 @@ def test_confirmation_token_manager_lifecycle() -> None:
 # ── 6. Two-Tier Governed Execution Workflow ──────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_two_tier_dry_run_and_execution_flow(mcp_server: AresMcpServer) -> None:
+async def test_two_tier_dry_run_and_execution_flow(mcp_server: AresMcpServer, tmp_path, monkeypatch) -> None:
+    from ares.mcp.events import McpEventBus
+
+    # Isolate the per-token decision store from the real ~/.ares file.
+    monkeypatch.setattr("ares.mcp.events.TOKEN_STATUS_FILE", tmp_path / "tok.json")
     # 1. Attempt live execution WITHOUT token -> MUST FAIL (Security Violation)
     rogue_req = {
         "jsonrpc": "2.0",
@@ -264,7 +287,8 @@ async def test_two_tier_dry_run_and_execution_flow(mcp_server: AresMcpServer) ->
     token = sim_data["confirmation_token"]
     assert token.startswith("ares_tok_")
 
-    # 3. Execute with valid token -> SUCCEEDS
+    # 2b. AUDIT run-1 H8: executing before the operator approves the token must
+    #     fail closed, even though the token is valid, unexpired and unburned.
     exec_req = {
         "jsonrpc": "2.0",
         "id": 32,
@@ -279,6 +303,12 @@ async def test_two_tier_dry_run_and_execution_flow(mcp_server: AresMcpServer) ->
             },
         },
     }
+    unapproved_res = await mcp_server.handle_message(exec_req)
+    assert unapproved_res["result"]["isError"] is True
+    assert "INVALID OR EXPIRED CONFIRMATION TOKEN" in unapproved_res["result"]["content"][0]["text"]
+
+    # 3. Operator approves the token, then execute -> token consumed (NOT_EXECUTED)
+    McpEventBus.set_token_decision(token, "APPROVED")
     # 3. Execute with a valid token: scope + token are validated and the token is
     #    consumed, but this gateway has no execution engine wired in. It must report
     #    honestly (NOT_EXECUTED) rather than fabricating a SUCCESS with an invented

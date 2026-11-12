@@ -16,6 +16,7 @@ from ares.core.campaign import Severity
 from ares.core.errors import AresError, ModuleValidationError, NetworkError
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import ldap_tls
 from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import DomainAuthParams
 from ares.sdk import (
@@ -216,7 +217,7 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw["domain_controllers_identified"] = True
 
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
             findings=findings, raw=raw,
             module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
@@ -258,11 +259,10 @@ class ADEnumComputersModule(BaseModule[DomainAuthParams, ModuleResult]):
         return self._findings, raw
 
     async def _fetch_computers(self, dc, username, password, domain, use_ldaps=True):
-        import ssl
 
-        from ldap3 import ALL, AUTO_BIND_NO_TLS, NTLM, SUBTREE, Connection, Server, Tls
+        from ldap3 import ALL, AUTO_BIND_NO_TLS, NTLM, SUBTREE, Connection, Server
         port = 636 if use_ldaps else 389
-        tls = Tls(validate=ssl.CERT_NONE) if use_ldaps else None
+        tls = ldap_tls(use_ldaps)
         bind_plan = build_ad_bind_plan(username, domain)
         try:
             server = Server(

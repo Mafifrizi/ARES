@@ -2566,14 +2566,17 @@ async def run_module(
 
     idempotency_key = _require_c_live_idempotency_key(request)
     has_c_live_override = get_c_live_runtime in getattr(request.app, "dependency_overrides", {})
-    if has_c_live_override or not get_settings().ares_debug:
-        if _contains_c_live_raw_secret(raw_params) or _contains_c_live_raw_secret(
-            validated_params
-        ):
-            raise HTTPException(status_code=422, detail="raw_secret_material_forbidden")
-        descriptor_result = _c_live_descriptor_gate(module_id, actor.role)
-        if descriptor_result is not None:
-            return _c_live_unavailable_response(descriptor_result)
+    # Raw-secret filter and descriptor/role gate are security controls that must
+    # run on every live module run, including when ares_debug is set. Previously
+    # both were skipped in debug mode, letting raw secret material through and
+    # bypassing the role/eligibility gate. (AUDIT run-1 H5)
+    if _contains_c_live_raw_secret(raw_params) or _contains_c_live_raw_secret(
+        validated_params
+    ):
+        raise HTTPException(status_code=422, detail="raw_secret_material_forbidden")
+    descriptor_result = _c_live_descriptor_gate(module_id, actor.role)
+    if descriptor_result is not None:
+        return _c_live_unavailable_response(descriptor_result)
 
     if str(campaign.get("status", "")).lower() == "created" and hasattr(db, "update_campaign_status"):
         try:
@@ -3077,16 +3080,12 @@ async def start_autonomous_engagement(
                 None,
             )
         )
-    has_c_live_override = get_c_live_runtime in getattr(request.app, "dependency_overrides", {})
-    if has_c_live_override or not get_settings().ares_debug:
-        for child in children:
-            child["decision_ordinal"] = child["stage_ordinal"]
-            descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
-            if descriptor_result is not None:
-                return _c_live_unavailable_response(descriptor_result)
-    else:
-        for child in children:
-            child["decision_ordinal"] = child["stage_ordinal"]
+    # Descriptor/role gate must run regardless of ares_debug. (AUDIT run-1 H5)
+    for child in children:
+        child["decision_ordinal"] = child["stage_ordinal"]
+        descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
+        if descriptor_result is not None:
+            return _c_live_unavailable_response(descriptor_result)
 
     whole_intent_digest = canonical_intent_digest(
         {
@@ -3864,10 +3863,14 @@ async def get_prometheus(
 @app.get("/graph/{campaign_id}", tags=["visualization"])
 async def campaign_graph(
     campaign_id: str,
+    include_heuristic: bool = False,
     actor: AuthenticatedUser = _api_key_read_dep,
     engine: AresEngine = Depends(get_engine),
     db: AresDatabase = Depends(get_db),
 ) -> dict[str, Any]:
+    # include_heuristic adds inferred (hostname-substring) pivot chains and a
+    # synthetic perimeter node, each tagged data.source="hostname_heuristic".
+    # Off by default so the response carries only grounded topology. (H4)
     from ares.api.graph import build_campaign_graph, merge_durable_attack_graph
 
     campaign = await db.get_campaign(campaign_id)
@@ -3881,7 +3884,11 @@ async def campaign_graph(
     if snapshot is None and getattr(runtime_state, "attack_graph", None) is not None:
         snapshot = runtime_state.attack_graph.to_d3_json()
     return merge_durable_attack_graph(
-        build_campaign_graph(c_obj, hosts=_hosts, credentials=_credentials), snapshot
+        build_campaign_graph(
+            c_obj, hosts=_hosts, credentials=_credentials,
+            include_heuristic=include_heuristic,
+        ),
+        snapshot,
     )
 
 
@@ -4108,11 +4115,11 @@ async def run_campaign_plan(
             )
         )
     has_c_live_override = get_c_live_runtime in getattr(request.app, "dependency_overrides", {})
-    if has_c_live_override or not get_settings().ares_debug:
-        for child in children:
-            descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
-            if descriptor_result is not None:
-                return _c_live_unavailable_response(descriptor_result)
+    # Descriptor/role gate must run regardless of ares_debug. (AUDIT run-1 H5)
+    for child in children:
+        descriptor_result = _c_live_descriptor_gate(child["module_id"], actor.role)
+        if descriptor_result is not None:
+            return _c_live_unavailable_response(descriptor_result)
 
     whole_intent_digest = canonical_intent_digest(
         {
@@ -4477,8 +4484,53 @@ class BloodhoundIngestRequest(BaseModel):
         ...,
         min_length=1,
         max_length=512,
-        description="Path to BloodHound JSON file or directory",
+        description="BloodHound JSON file or directory, relative to the "
+        "campaign's bloodhound ingest folder",
     )
+
+
+def _resolve_bloodhound_ingest_path(json_path: str, campaign_id: str) -> Path:
+    """Constrain BloodHound ingest to <report_root>/<campaign_id>/bloodhound/.
+
+    The endpoint previously passed the operator-supplied path through the
+    general-purpose sanitize_path allowlist (home, /tmp, /opt/ares, /home, ...),
+    which let an authenticated operator read arbitrary files under those roots
+    and get parse diagnostics reflected back. This resolver pins ingest to a
+    per-campaign sandbox directory, rejects path traversal and symlink escape,
+    and returns a fixed error detail (no reflection of the offending path).
+    (AUDIT run-1 H3 / M18)
+    """
+    import re as _re
+
+    safe_cid = _re.sub(r"[^\w\-]", "_", campaign_id)[:64].strip("_") or "campaign"
+    base = (_report_root() / safe_cid / "bloodhound").resolve()
+    base.mkdir(parents=True, exist_ok=True)
+
+    raw = (json_path or "").strip()
+    if not raw or "\x00" in raw:
+        raise HTTPException(400, "Invalid BloodHound ingest path")
+
+    candidate = Path(raw)
+    target = candidate if candidate.is_absolute() else (base / candidate)
+    try:
+        resolved = target.resolve()
+    except (OSError, RuntimeError):
+        raise HTTPException(400, "Invalid BloodHound ingest path") from None
+
+    # .resolve() follows symlinks, so an in-sandbox symlink pointing outside is
+    # caught here too. Absolute paths outside the sandbox are rejected.
+    if not (resolved == base or resolved.is_relative_to(base)):
+        logger.warning(
+            "bloodhound_ingest_path_rejected",
+            campaign_id=campaign_id,
+            path=repr(raw),
+        )
+        raise HTTPException(400, "Invalid BloodHound ingest path")
+
+    if resolved.is_file() and resolved.suffix.lower() not in {".json", ".zip"}:
+        raise HTTPException(400, "Invalid BloodHound ingest path")
+
+    return resolved
 
 
 @app.post("/graph/{campaign_id}/bloodhound", tags=["visualization"])
@@ -4500,12 +4552,7 @@ async def ingest_bloodhound(
         raise HTTPException(404, "Campaign not found")
     await _require_campaign_access(campaign, actor)
 
-    from ares.core.security import sanitize_path
-
-    try:
-        safe_path = sanitize_path(body.json_path)
-    except ValueError as exc:
-        raise HTTPException(400, f"Invalid path: {str(exc)[:200]}")  # noqa: B904
+    safe_path = str(_resolve_bloodhound_ingest_path(body.json_path, campaign_id))
 
     try:
         from ares.graph.attack_graph import AttackGraph
@@ -4523,7 +4570,14 @@ async def ingest_bloodhound(
             graph.build_from_store(runtime_state.artifact_store)
         result = graph.ingest_bloodhound(safe_path)
         if result.get("error"):
-            raise HTTPException(422, result["error"])
+            # Do not reflect parse diagnostics (may embed file-content
+            # snippets from JSONDecodeError). Log, return a fixed detail.
+            logger.warning(
+                "bloodhound_ingest_parse_error",
+                campaign_id=campaign_id,
+                error=str(result["error"])[:500],
+            )
+            raise HTTPException(422, "BloodHound ingest failed: invalid or unreadable input")
 
         # Compute shortest path to DA after ingest
         da_path = graph.shortest_path_to_da()
@@ -4547,7 +4601,8 @@ async def ingest_bloodhound(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(500, f"Bloodhound ingest failed: {str(exc)[:200]}")  # noqa: B904
+        logger.error("bloodhound_ingest_failed", campaign_id=campaign_id, error=str(exc)[:500])
+        raise HTTPException(500, "BloodHound ingest failed")  # noqa: B904
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────

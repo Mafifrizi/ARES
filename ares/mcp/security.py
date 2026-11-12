@@ -26,10 +26,21 @@ class McpSecurityViolation(Exception):
 
 
 class ConfirmationTokenManager:
-    """Manages cryptographically signed, time-bounded confirmation tokens.
+    """Issues and validates single-use, time-bounded execution confirmation tokens.
 
-    Guarantees that Tier-2 offensive execution cannot occur without
-    prior Tier-1 dry-run simulation and operator approval.
+    Each token is an opaque server-side capability handle, not a self-contained
+    (JWT-style) token. Its unguessability comes from an HMAC-SHA256 over the
+    issuance material (execution payload + random nonce + monotonic time) keyed
+    with the server secret, so a token cannot be forged without the secret or
+    without observing one the server issued. The token is held in process memory
+    bound to (a) the exact execution payload — campaign/module/target/param
+    digest, enforced at validation, (b) a monotonic TTL deadline, and (c)
+    single-use burn-on-validate anti-replay.
+
+    This is NOT a stateless signature that can be verified offline from the token
+    alone; authority lives in the in-memory record. Tier-2 offensive execution is
+    gated on: prior Tier-1 dry-run (which issues the token) AND an explicit
+    operator APPROVED decision for that token (fail-closed; see validate_and_burn).
     """
 
     def __init__(self, secret_key: str | None = None) -> None:
@@ -108,14 +119,24 @@ class ConfirmationTokenManager:
             self._tokens.pop(token, None)
             return False
 
-        # Honor operator reject decision from TUI monitor
+        # Fail-closed authorization. Live execution is only honoured once the
+        # operator has EXPLICITLY approved THIS token from the monitor. The old
+        # logic refused only a literal "REJECTED" decision, so a token that was
+        # never acted on (pending) — or whose decision record was missing or
+        # unreadable — was treated as approved (default-allow). Now anything
+        # other than "APPROVED" refuses. (AUDIT run-1 H8)
         try:
             from ares.mcp.events import McpEventBus
-            if McpEventBus.get_token_decision(token) == "REJECTED":
-                self._tokens.pop(token, None)
-                return False
+            decision = McpEventBus.get_token_decision(token)
         except Exception:
-            pass
+            decision = None
+        if decision == "REJECTED":
+            self._tokens.pop(token, None)  # burn a rejected token
+            return False
+        if decision != "APPROVED":
+            # Pending / missing / unreadable: refuse, but keep the token so the
+            # operator can still approve and the caller can retry within the TTL.
+            return False
 
         actual_payload = self._make_payload(campaign_id, module_id, target, params)
         if hmac.compare_digest(expected_payload, actual_payload):
