@@ -198,10 +198,15 @@ function formatRole(role?: string): string {
 const NOTIFICATIONS_DELETED_KEY = "ares.dashboard.notifications.deleted";
 const NOTIFICATIONS_READ_KEY = "ares.dashboard.notifications.read";
 
-function getStoredNotificationIds(key: string, username?: string): string[] {
+export function getStoredNotificationIds(key: string, username?: string): string[] {
+  // AUDIT run-1 H20: notification state must be scoped to the current operator.
+  // The previous unscoped fallback (reading `key` when the per-user key was
+  // absent) let one operator's dismissals/read-state leak to the next operator
+  // who signed in on the same browser. Without a username there is no scope, so
+  // we read nothing rather than a shared blob.
+  if (!username) return [];
   try {
-    const userKey = username ? `${key}.${username}` : key;
-    const raw = window.localStorage.getItem(userKey) || window.localStorage.getItem(key);
+    const raw = window.localStorage.getItem(`${key}.${username}`);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
@@ -210,13 +215,12 @@ function getStoredNotificationIds(key: string, username?: string): string[] {
   }
 }
 
-function setStoredNotificationIds(key: string, username: string | undefined, ids: string[]): void {
+export function setStoredNotificationIds(key: string, username: string | undefined, ids: string[]): void {
+  // Only ever persist under the per-operator key; never write the unscoped key
+  // that leaks across operators. (AUDIT run-1 H20)
+  if (!username) return;
   try {
-    const serialized = JSON.stringify(ids);
-    if (username) {
-      window.localStorage.setItem(`${key}.${username}`, serialized);
-    }
-    window.localStorage.setItem(key, serialized);
+    window.localStorage.setItem(`${key}.${username}`, JSON.stringify(ids));
   } catch {
     // Storage sandbox fallback
   }
