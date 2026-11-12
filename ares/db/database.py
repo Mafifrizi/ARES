@@ -2318,10 +2318,20 @@ class AresDatabase:
         password_ok = verify_password(password, candidate_hash)
         if not user or not password_ok:
             return None
-        await self.conn.execute(
-            "UPDATE users SET last_login=datetime('now') WHERE id=?", (user["id"],)
-        )
-        await self.conn.commit()
+        # last_login is a non-critical bookkeeping write; a failure here must not
+        # fail the login, and must not leave the shared connection mid-transaction.
+        # (AUDIT run-1 H7)
+        try:
+            await self.conn.execute(
+                "UPDATE users SET last_login=datetime('now') WHERE id=?", (user["id"],)
+            )
+            await self.conn.commit()
+        except Exception as exc:
+            logger.warning("last_login_update_failed", error=str(exc)[:120])
+            try:
+                await self.conn.rollback()
+            except Exception:  # pragma: no cover - best-effort cleanup
+                pass
         return user
 
     # ── SSO & Organizations ───────────────────────────────────────────────────

@@ -706,6 +706,7 @@ class TestDashboardApp:
         }
         original = dict(row)
         mock_db.list_findings = AsyncMock(return_value=([row], 1))
+        mock_db.get_campaign = AsyncMock(return_value={"id": "c-001", "operator": self._TEST_USERNAME})
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__  = AsyncMock(return_value=None)
 
@@ -731,6 +732,7 @@ class TestDashboardApp:
         original = dict(row)
         mock_db = AsyncMock()
         mock_db.list_findings = AsyncMock(return_value=([row], 1))
+        mock_db.get_campaign = AsyncMock(return_value={"id": "c-001", "operator": self._TEST_USERNAME})
         mock_db.__aenter__ = AsyncMock(return_value=mock_db)
         mock_db.__aexit__ = AsyncMock(return_value=None)
         mock_state = MagicMock()
@@ -754,6 +756,7 @@ class TestDashboardApp:
         mock_db = AsyncMock()
         mock_db.campaign_summary = AsyncMock(return_value={"total": 5, "critical": 1})
         mock_db.list_findings     = AsyncMock(return_value=([], 0))
+        mock_db.get_campaign      = AsyncMock(return_value={"id": "c-001", "operator": self._TEST_USERNAME})
         mock_db.__aenter__        = AsyncMock(return_value=mock_db)
         mock_db.__aexit__         = AsyncMock(return_value=None)
 
@@ -764,6 +767,45 @@ class TestDashboardApp:
              patch("ares.api.dashboard.app.dashboard_app.state", mock_state):
             r = client.get("/api/campaigns/c-001/summary", headers=headers)
             assert r.status_code in (200, 500)
+
+    def test_api_findings_rejects_other_operators_campaign(self, client):
+        """AUDIT run-1 H6: an operator must not read a campaign owned by another
+        operator through the dashboard sub-app (404, not the data)."""
+        mock_db = AsyncMock()
+        mock_db.get_campaign = AsyncMock(return_value={"id": "c-001", "operator": "someone-else"})
+        mock_db.list_findings = AsyncMock(return_value=([{"id": "secret-finding"}], 1))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=None)
+
+        mock_state = MagicMock()
+        mock_state.db = mock_db
+
+        with self._authenticated_dashboard(mock_db) as headers, \
+             patch("ares.api.dashboard.app.dashboard_app.state", mock_state):
+            r = client.get("/api/campaigns/c-001/findings", headers=headers)
+            assert r.status_code == 404
+            assert "secret-finding" not in r.text
+            mock_db.list_findings.assert_not_awaited()
+
+    def test_api_campaigns_filters_to_owner_for_operator(self, client):
+        """AUDIT run-1 H6: the campaign list only returns the operator's own
+        campaigns (team_leads see all; this actor is an operator)."""
+        mock_db = AsyncMock()
+        mine = {"id": "c-mine", "operator": self._TEST_USERNAME}
+        theirs = {"id": "c-theirs", "operator": "someone-else"}
+        mock_db.list_campaigns = AsyncMock(return_value=([mine, theirs], 2))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=None)
+
+        mock_state = MagicMock()
+        mock_state.db = mock_db
+
+        with self._authenticated_dashboard(mock_db) as headers, \
+             patch("ares.api.dashboard.app.dashboard_app.state", mock_state):
+            r = client.get("/api/campaigns", headers=headers)
+            assert r.status_code == 200
+            ids = [c["id"] for c in r.json()]
+            assert ids == ["c-mine"]
 
     def test_broadcast_finding_sends_to_connections(self):
         """broadcast_finding sends JSON to all active WS connections."""
