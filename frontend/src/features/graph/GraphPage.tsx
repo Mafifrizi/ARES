@@ -11,7 +11,6 @@ import "@xyflow/react/dist/style.css";
 import "./graphCobalt.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Shield,
   Download,
   FileSpreadsheet,
   FileText,
@@ -741,6 +740,28 @@ export default function GraphPage({
   const highlight = useMemo(() => getPathHighlight(selectedPath, activeGraph), [activeGraph, selectedPath]);
   const filteredGraph = useMemo(() => filterGraph(activeGraph, filters, highlight), [activeGraph, filters, highlight]);
 
+  // Havoc-style operator counters, computed from the real graph.
+  const havocStats = useMemo(() => {
+    let targets = 0, sessions = 0, elevated = 0;
+    for (const n of filteredGraph.nodes) {
+      const t = (n.type || "").toLowerCase();
+      if (t === "finding" || t === "credential" || t === "firewall") continue;
+      targets++;
+      const inf = inferCobaltNodeData(n);
+      const compromised =
+        inf.status === "active" ||
+        (!!inf.privilege && inf.privilege !== "uncompromised") ||
+        Boolean(n.metadata?.owned);
+      if (compromised) sessions++;
+      if (inf.privilege === "system" || inf.privilege === "admin") elevated++;
+    }
+    const pivots = filteredGraph.edges.filter((e) => {
+      const et = (e.type || "").toLowerCase();
+      return et === "lateral" || et === "pivot";
+    }).length;
+    return { targets, sessions, pivots, elevated };
+  }, [filteredGraph]);
+
   function chooseCampaign(nextCampaignId: string): void {
     onCampaignIdChange(nextCampaignId);
     setSelection(null);
@@ -793,80 +814,47 @@ export default function GraphPage({
         </div>
       )}
 
-      {/* Command Menu Bar (ARES brand + menus) */}
+      {/* Operator command bar — brand + Havoc-style live counters + menus */}
       <div className="cobalt-menubar">
         <div className="cobalt-menubar-items">
           <span className="cobalt-menu-brand">
-            <Shield size={13} />
+            <img src="/brand/ares-icon.png" alt="ARES" className="cobalt-brand-icon" />
             <span>ARES</span>
           </span>
-          <span
-            className="cobalt-menu-item font-semibold"
-            onClick={() => setShowAboutDialog(true)}
-            title="About ARES Tactical Visualizer Engine"
-            role="button"
-            tabIndex={0}
-          >
-            About
-          </span>
-          <span
-            className="cobalt-menu-item"
-            onClick={() => setShowAttackPathsDialog(true)}
-            title="View Attack Paths"
-            role="button"
-            tabIndex={0}
-          >
-            View
-          </span>
-          <span
-            className="cobalt-menu-item"
-            onClick={() => setShowIngestDialog(true)}
-            title="Ingest BloodHound Graph Dump"
-            role="button"
-            tabIndex={0}
-          >
-            Attacks
-          </span>
-          <span
-            className="cobalt-menu-item"
-            onClick={() => {
-              setReportingNotice("");
-              setShowReportingDialog(true);
-            }}
-            title="Reporting, Data Exports & Deliverables"
-            role="button"
-            tabIndex={0}
-          >
-            Reporting
-          </span>
-          <span
-            className="cobalt-menu-item"
-            onClick={() => setShowHelpDialog(true)}
-            title="Operator Help, Shortcuts & Command Reference"
-            role="button"
-            tabIndex={0}
-          >
-            Help
-          </span>
+          <div className="cobalt-stat-row">
+            <div className="cobalt-stat-chip" title="Hosts in the engagement">
+              <span className="k">Targets</span><span className="v tnum">{havocStats.targets}</span>
+            </div>
+            <div className="cobalt-stat-chip" title="Compromised footholds / active sessions">
+              <span className="k">Sessions</span><span className="v tnum">{havocStats.sessions}</span>
+            </div>
+            <div className="cobalt-stat-chip" title="Lateral / pivot links">
+              <span className="k">Pivots</span><span className="v tnum">{havocStats.pivots}</span>
+            </div>
+            <div className={`cobalt-stat-chip${havocStats.elevated > 0 ? " elevated" : ""}`} title="SYSTEM / admin privilege">
+              <span className="k">Elevated</span><span className="v tnum">{havocStats.elevated}</span>
+            </div>
+          </div>
         </div>
 
         <div className="cobalt-menubar-right">
-          <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--ink-3)] font-medium">
-            <span>Campaign</span>
-            <select
-              className="bg-[color:var(--surface)] border border-[color:var(--line-2)] text-[color:var(--ink)] text-[11px] px-1.5 py-0.5 rounded font-sans"
-              value={campaignId}
-              onChange={(e) => chooseCampaign(e.target.value)}
-            >
-              {campaigns.data?.map((c) => (
-                <option key={c.id} value={c.id}>{c.name || c.id}</option>
-              ))}
-            </select>
-          </label>
-          <span className="text-[color:var(--ink-faint)]">·</span>
-          <span className="text-[color:var(--ink-2)] font-semibold font-mono text-[11px] tnum">
-            {filteredGraph.nodes.length} hosts / {filteredGraph.edges.length} links
-          </span>
+          <nav className="cobalt-menu-actions">
+            <span className="cobalt-menu-item" onClick={() => setShowAttackPathsDialog(true)} title="Attack paths" role="button" tabIndex={0}>Paths</span>
+            <span className="cobalt-menu-item" onClick={() => setShowIngestDialog(true)} title="Ingest BloodHound graph dump" role="button" tabIndex={0}>Ingest</span>
+            <span className="cobalt-menu-item" onClick={() => { setReportingNotice(""); setShowReportingDialog(true); }} title="Reporting & exports" role="button" tabIndex={0}>Export</span>
+            <span className="cobalt-menu-item" onClick={() => setShowHelpDialog(true)} title="Operator help & shortcuts" role="button" tabIndex={0}>Help</span>
+            <span className="cobalt-menu-item" onClick={() => setShowAboutDialog(true)} title="About" role="button" tabIndex={0}>About</span>
+          </nav>
+          <select
+            className="bg-[color:var(--surface)] border border-[color:var(--line-2)] text-[color:var(--ink)] text-[11px] px-1.5 py-0.5 rounded font-sans"
+            value={campaignId}
+            onChange={(e) => chooseCampaign(e.target.value)}
+            title="Active campaign"
+          >
+            {campaigns.data?.map((c) => (
+              <option key={c.id} value={c.id}>{c.name || c.id}</option>
+            ))}
+          </select>
           <button
             className={`cobalt-tool-btn text-[10px] py-0.5 px-2 ${useSampleTopology ? "active font-bold" : ""}`}
             onClick={() => setUseSampleTopology((v) => !v)}
@@ -1451,7 +1439,7 @@ export default function GraphPage({
             </div>
             <div className="cobalt-dialog-body">
               <div className="flex items-center gap-3 mb-3 p-2.5 bg-zinc-900 text-white border border-zinc-700">
-                <img src="/brand/ares-icon.png" alt="ARES" className="w-11 h-11 object-contain shrink-0" />
+                <img src="/brand/ares-icon.png" alt="ARES" className="w-14 h-14 object-contain shrink-0" />
                 <div>
                   <div className="font-bold text-sm tracking-wide">ARES Tactical C2 Visualizer</div>
                   <div className="text-[10px] text-zinc-400 font-mono">v6.0 Enterprise Edition · Automated Red Team Engine</div>

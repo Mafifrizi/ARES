@@ -138,6 +138,51 @@
   color: var(--ink-3, #777b86);
 }
 
+/* Brand dragon mark */
+.cobalt-brand-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* ── Havoc-style operator counter chips ───────────────────────────────────── */
+.cobalt-stat-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cobalt-stat-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-sm, 6px);
+  background: var(--chrome-2, #14161c);
+}
+.cobalt-stat-chip .k {
+  font-size: 11px;
+  color: var(--ink-3, #777b86);
+  font-weight: 500;
+}
+.cobalt-stat-chip .v {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink, #f3f4f7);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.cobalt-stat-chip.elevated {
+  border-color: var(--danger-line, rgba(242,103,112,0.34));
+  background: var(--danger-wash, rgba(242,103,112,0.13));
+}
+.cobalt-stat-chip.elevated .v { color: var(--danger, #f26770); }
+
+.cobalt-menu-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 /* ── Cobalt Strike Action Icon Toolbar ────────────────────────────────────── */
 .cobalt-toolbar {
   display: flex;
