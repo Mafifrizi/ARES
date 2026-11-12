@@ -51,6 +51,20 @@ def test_mcp_doctor_json() -> None:
     assert len(data["subsystems"]) >= 5
 
 
+def test_mcp_doctor_actually_probes_subsystems(monkeypatch) -> None:
+    """AUDIT run-1 H21: doctor must reflect real subsystem state, not a
+    hardcoded all-PASS. Breaking a probed subsystem (empty module catalog)
+    must flip that check and the overall result to FAIL."""
+    from ares.cli import mcp_commands
+
+    monkeypatch.setattr(mcp_commands, "FIRST_PARTY_DESCRIPTORS", {})
+    diag = mcp_commands.get_doctor_diagnostics()
+    catalog = [c for c in diag["subsystems"] if c["subsystem"] == "Module Catalog"]
+    assert catalog and catalog[0]["status"] == "FAIL"
+    assert diag["status"] == "FAIL"
+    assert diag["healthy"] is False
+
+
 def test_mcp_module_catalog_filtering() -> None:
     """Verify catalog command with category filter."""
     result = runner.invoke(app, ["mcp", "module-catalog", "--category", "ad"])

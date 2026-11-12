@@ -648,8 +648,36 @@ async def api_summary(campaign_id: str,
 
 @dashboard_app.get("/api/workers")
 async def api_workers(_auth: None = Depends(_require_dashboard_auth)) -> dict[str, Any]:
-    # Returns empty if distributed controller not running
-    return {"workers": [], "queue": {"pending": 0, "active": 0, "done": 0, "failed": 0}}
+    # Report whether a distributed worker controller is actually attached rather
+    # than always returning a 0/0/0/0 queue, which is indistinguishable from a
+    # healthy, idle controller. A controller wired onto dashboard_app.state is
+    # queried via its documented snapshot(); otherwise we say so explicitly.
+    # (AUDIT run-1 H21)
+    empty_queue = {"pending": 0, "active": 0, "done": 0, "failed": 0}
+    controller = getattr(dashboard_app.state, "worker_controller", None)
+    if controller is None:
+        return {
+            "controller_available": False,
+            "controller_status": "not_running",
+            "workers": [],
+            "queue": empty_queue,
+        }
+    try:
+        snapshot = controller.snapshot()
+        return {
+            "controller_available": True,
+            "controller_status": "running",
+            "workers": list(snapshot.get("workers", [])),
+            "queue": {**empty_queue, **dict(snapshot.get("queue", {}))},
+        }
+    except Exception as exc:
+        logger.warning("worker_controller_snapshot_failed", error=str(exc)[:200])
+        return {
+            "controller_available": False,
+            "controller_status": "error",
+            "workers": [],
+            "queue": empty_queue,
+        }
 
 
 @dashboard_app.websocket("/ws/live")
