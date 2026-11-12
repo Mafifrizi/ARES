@@ -1451,7 +1451,7 @@ export default function GraphPage({
             </div>
             <div className="cobalt-dialog-body">
               <div className="flex items-center gap-3 mb-3 p-2.5 bg-zinc-900 text-white border border-zinc-700">
-                <img src="/brand/ares-mark.png" alt="ARES" className="w-9 h-9 rounded object-contain" />
+                <img src="/brand/ares-icon.png" alt="ARES" className="w-11 h-11 object-contain shrink-0" />
                 <div>
                   <div className="font-bold text-sm tracking-wide">ARES Tactical C2 Visualizer</div>
                   <div className="text-[10px] text-zinc-400 font-mono">v6.0 Enterprise Edition · Automated Red Team Engine</div>
