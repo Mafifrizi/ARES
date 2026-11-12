@@ -200,7 +200,7 @@ ares/modules/reporting/report_gen.py|error: Module has no attribute "windll"  [a
 ares/modules/reporting/report_gen.py|error: Name "_build_attack_path_narrative" already defined on line 247  [no-redef]
 ares/modules/reporting/report_gen.py|error: Name "_build_exec_summary" already defined on line 268  [no-redef]
 ares/modules/reporting/report_gen.py|error: Name "_build_mitre_map" already defined on line 227  [no-redef]
-ares/modules/reporting/report_gen.py|error: Name "lines" already defined on line 1954  [no-redef]
+ares/modules/reporting/report_gen.py|error: Name "lines" already defined on line 1972  [no-redef]
 ares/modules/sdk.py|error: "type" has no attribute "DEFAULT_TIMEOUT_S"  [attr-defined]
 ares/modules/sdk.py|error: "type" has no attribute "MITRE_TECHNIQUES"  [attr-defined]
 ares/modules/sdk.py|error: "type" has no attribute "MODULE_AUTHOR"  [attr-defined]
