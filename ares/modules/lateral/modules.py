@@ -50,6 +50,9 @@ if TYPE_CHECKING:
 logger = get_logger("ares.lateral")
 
 
+from ares.modules._tls_security import winrm_cert_validation
+
+
 class LateralTechnique(str, Enum):
     PSEXEC  = "psexec"
     WMIEXEC = "wmiexec"
@@ -1105,7 +1108,7 @@ class WinRMLateral(BaseLateralModule):
                             endpoint,
                             auth=(target_user, auth.password),
                             transport="kerberos",
-                            server_cert_validation="ignore" if use_ssl else "validate",
+                            server_cert_validation=winrm_cert_validation(use_ssl),
                         )
                         r = session.run_cmd(command)
                         stdout = r.std_out.decode("utf-8", errors="replace").strip()
@@ -1124,7 +1127,7 @@ class WinRMLateral(BaseLateralModule):
                     endpoint,
                     auth=(target_user, auth.password or secret),
                     transport=protocol,
-                    server_cert_validation="ignore" if use_ssl else "validate",
+                    server_cert_validation=winrm_cert_validation(use_ssl),
                 )
                 r = session.run_cmd(command)
                 stdout = r.std_out.decode("utf-8", errors="replace").strip()

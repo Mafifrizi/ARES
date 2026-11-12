@@ -13,6 +13,7 @@ from typing import Any
 from ares.core.campaign import Finding, Severity
 from ares.core.logger import get_logger
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import httpx_verify
 from ares.modules.base import BaseModule, OpsecLevel
 from ares.modules.params import HTTPFingerprintParams
 from ares.sdk import (
@@ -248,7 +249,7 @@ class HttpFingerprintModule(BaseModule):
 
             try:
                 async with httpx.AsyncClient(
-                    timeout=6.0, verify=False,
+                    timeout=6.0, verify=httpx_verify(),
                     follow_redirects=False,
                     headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
                 ) as client:

@@ -136,6 +136,7 @@ def build_campaign_graph(
     campaign: Any,
     hosts: list[dict[str, Any]] | None = None,
     credentials: list[dict[str, Any]] | None = None,
+    include_heuristic: bool = False,
 ) -> dict[str, Any]:
     """
     Build the complete campaign graph from Campaign state, durable DB hosts, and credentials.
@@ -458,12 +459,39 @@ def build_campaign_graph(
         ))
         host_lookup[tgt_clean] = host_node_id
 
-    # ── Perimeter Ingress Gateway ───────────────────────────────────────────
+    # ── Real lateral movement from recorded attack history ──────────────────
+    # These edges reflect observed, successful module runs (host -> host). They
+    # are always included because they are grounded in the campaign's own data.
+    for ip, host in host_items:
+        attack_history = getattr(host, "attack_history", [])
+        for attack in attack_history:
+            src_ip  = getattr(attack, "from_host", None)
+            module  = getattr(attack, "module_id", "")
+            success = getattr(attack, "success", False)
+            if src_ip and success and f"host:{src_ip}" in node_ids:
+                edges.append(APIGraphEdge(
+                    source = f"host:{src_ip}",
+                    target = f"host:{ip}",
+                    type   = "lateral",
+                    label  = module.split(".")[-1] if module else "lateral",
+                    color  = "#ffffff",
+                    weight = 2.0,
+                    data   = {"module": module},
+                ))
+
+    # ── Heuristic / illustrative topology (opt-in, AUDIT run-1 H4) ───────────
+    # The synthetic perimeter firewall node and the hostname-substring pivot
+    # chains below are NOT observed attack paths — they are inferred purely from
+    # host naming (ws/sql/srv/k8s/...) and a blanket in-scope assumption. They
+    # must never ship in the default production response as if real. They are
+    # emitted only when the caller explicitly opts in, and every heuristic node
+    # and edge is tagged data.source="hostname_heuristic" so consumers can tell
+    # them apart from grounded data.
     all_host_nodes = [
         nid for nid in node_ids
         if nid.startswith("host:") and not any(k in nid.lower() for k in ("in-scope", "scope", "none", "target", "firewall"))
     ]
-    if all_host_nodes and "node:ingress-fw" not in node_ids:
+    if include_heuristic and all_host_nodes and "node:ingress-fw" not in node_ids:
         fw_id = "node:ingress-fw"
         raw_scope = getattr(campaign, "scope", [])
         cidr_str = "0.0.0.0/0"
@@ -480,6 +508,7 @@ def build_campaign_graph(
                 "ip":               cidr_str,
                 "hostname":         "Perimeter Gateway",
                 "compromise_level": "none",
+                "source":           "hostname_heuristic",
             },
             color = "#06b6d4",
             shape = "square",
@@ -493,25 +522,8 @@ def build_campaign_graph(
                 label  = "in-scope",
                 color  = "#06b6d4",
                 dashed = True,
+                data   = {"source": "hostname_heuristic"},
             ))
-
-        # Edges: lateral movement from session host attack history
-        for ip, host in host_items:
-            attack_history = getattr(host, "attack_history", [])
-            for attack in attack_history:
-                src_ip  = getattr(attack, "from_host", None)
-                module  = getattr(attack, "module_id", "")
-                success = getattr(attack, "success", False)
-                if src_ip and success and f"host:{src_ip}" in node_ids:
-                    edges.append(APIGraphEdge(
-                        source = f"host:{src_ip}",
-                        target = f"host:{ip}",
-                        type   = "lateral",
-                        label  = module.split(".")[-1] if module else "lateral",
-                        color  = "#ffffff",
-                        weight = 2.0,
-                        data   = {"module": module},
-                    ))
 
         # Natural lateral pivot chains across discovered infrastructure
         dc_ids = [f"host:{ip}" for ip, h in host_items if getattr(h, "is_dc", False)]
@@ -539,7 +551,8 @@ def build_campaign_graph(
                 if ws_id in node_ids and srv_id in node_ids and ws_id != srv_id:
                     edges.append(APIGraphEdge(
                         source=ws_id, target=srv_id,
-                        type="lateral", label="pivot", color="#ffffff", weight=1.5
+                        type="lateral", label="pivot", color="#ffffff", weight=1.5,
+                        data={"source": "hostname_heuristic"},
                     ))
 
         # Lateral: Member Servers -> Domain Controller
@@ -548,7 +561,8 @@ def build_campaign_graph(
                 if srv_id in node_ids and dc_id in node_ids and srv_id != dc_id:
                     edges.append(APIGraphEdge(
                         source=srv_id, target=dc_id,
-                        type="lateral", label="domain admin path", color="#ffffff", weight=2.5
+                        type="lateral", label="domain admin path", color="#ffffff", weight=2.5,
+                        data={"source": "hostname_heuristic"},
                     ))
 
         # Ingress -> Cloud Gateway
@@ -557,7 +571,8 @@ def build_campaign_graph(
                 if ing_id in node_ids and c_id in node_ids and ing_id != c_id:
                     edges.append(APIGraphEdge(
                         source=ing_id, target=c_id,
-                        type="pivot", label="cloud pivot", color="#ffffff", weight=2.0
+                        type="pivot", label="cloud pivot", color="#ffffff", weight=2.0,
+                        data={"source": "hostname_heuristic"},
                     ))
 
     # ── Credentials from vault or database ──────────────────────────────────

@@ -24,6 +24,7 @@ from ares.core.campaign import Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import ldap_tls
 from ares.modules.ad.dependencies import build_ad_bind_plan
 from ares.modules.params import LAPSEnumParams
 from ares.sdk import (
@@ -188,7 +189,7 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
         raw["event_ids_audited"] = [4662]
 
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
             findings=findings, raw=raw, module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
         )
@@ -312,16 +313,15 @@ class LAPSEnumModule(BaseModule[LAPSEnumParams, ModuleResult]):
         Returns list of {computer, password, version, expiry}.
         Sync - runs in executor.
         """
-        import ssl
 
         import ldap3
-        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server
 
         bind_plan = build_ad_bind_plan(username, domain)
         conn = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
-                tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                tls_arg = ldap_tls(use_ssl)
                 server  = Server(dc, port=port, use_ssl=use_ssl, tls=tls_arg,
                                  get_info=ALL, connect_timeout=10)
                 conn_kwargs = {

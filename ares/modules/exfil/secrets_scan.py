@@ -559,47 +559,12 @@ class SecretsScan(BaseModule):
               target=target, technique="T1552.001")
 
         if dry_run:
-            mock_hits = [
-                {
-                    "file": r"C:\inetpub\wwwroot\web.config",
-                    "pattern": "connection_string",
-                    "line": 42,
-                    "snippet": "connectionString=\"Server=db01;Password=P@ss1234\"",
-                    "extracted_secret": "Server=db01;Password=P@ss1234",
-                    "secret_value": "P@ss1234",
-                    "entropy": 3.78,
-                    "confidence": 0.92,
-                    "is_placeholder": False,
-                },
-                {
-                    "file": r"C:\Users\svc_deploy\.aws\credentials",
-                    "pattern": "aws_access_key",
-                    "line": 3,
-                    "snippet": "aws_access_key_id = AKIAIOSFODNN7EXAMPLE",
-                    "extracted_secret": "AKIAIOSFODNN7EXAMPLE",
-                    "secret_value": "AKIAIOSFODNN7EXAMPLE",
-                    "entropy": 3.82,
-                    "confidence": 0.96,
-                    "is_placeholder": False,
-                },
-            ]
-            dynamic_conf = round(sum(h["confidence"] for h in mock_hits) / len(mock_hits), 2)
-            return [Finding(
-                title       = f"Secrets found in filesystem on {target}",
-                description = (f"Pattern scan found {len(mock_hits)} potential secret(s): "
-                               + ", ".join(h["pattern"] for h in mock_hits)),
-                severity=Severity.CRITICAL, confidence=dynamic_conf,
-                module_id=self.MODULE_ID, host=target,
-                mitre_technique="T1552.001", mitre_tactic="Credential Access",
-                evidence={"hits": mock_hits},
-                remediation="Remove hardcoded credentials. Use vault/secrets manager.",
-            )], {
-                "dry_run": True,
-                "credential_list": [h["file"] for h in mock_hits],
-                "discovered_secrets": mock_hits,
-                "sensitive_data_found": True,
-                "hit_count": len(mock_hits),
-            }
+            # Dry-run must NOT fabricate findings. A dry run only confirms the
+            # module is dispatchable and in scope; returning a hardcoded CRITICAL
+            # "secret found" through the validated-findings pipeline poisons
+            # reports and dashboards with evidence that was never observed.
+            # Mirror the correct pattern in credential/pass_the_hash.py. (AUDIT run-1 H12)
+            return [], {"dry_run": True}
 
         if not username:
             return [], {"error": "no_credential_username"}

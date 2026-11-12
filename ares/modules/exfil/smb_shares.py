@@ -228,20 +228,10 @@ class SmbSharesExfil(BaseModule):
               target=target, technique="T1039")
 
         if dry_run:
-            mock_shares = ["SYSVOL", "NETLOGON", "C$", "IPC$", "Data"]
-            mock_files  = [f"\\\\{target}\\Data\\credentials.xlsx",
-                           f"\\\\{target}\\Data\\web.config"]
-            self.finding(
-                title       = f"Sensitive files found on SMB shares ({target})",
-                description = (f"Shares enumerated: {', '.join(mock_shares)}. "
-                               f"Sensitive files found: {len(mock_files)}"),
-                severity    = Severity.HIGH, confidence=0.85,
-                mitre_technique="T1039", mitre_tactic="Collection",
-                remediation="Restrict SMB share permissions. Enable SMB auditing.",
-                host=target,
-            )
-            return self._findings[:], {"dry_run": True, "file_share_list": mock_shares,
-                 "sensitive_file_paths": mock_files, "sensitive_data_found": True}
+            # Dry-run must NOT fabricate findings. Returning a hardcoded HIGH
+            # "sensitive files on SMB" finding with invented share/file paths
+            # poisons the validated-findings pipeline. (AUDIT run-1 H13)
+            return [], {"dry_run": True}
 
         try:
             from impacket.smbconnection import SMBConnection

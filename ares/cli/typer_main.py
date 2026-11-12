@@ -2360,6 +2360,8 @@ def _run_python_setup(
                     updated = _upsert_env_value(updated, "ARES_DEBUG", "true")
 
                 env_path.write_text(updated, encoding="utf-8")
+                from ares.core.security import restrict_file_to_owner
+                restrict_file_to_owner(str(env_path))
 
                 if force:
                     console.print("[green]OK[/green] .env regenerated with fresh secure keys (--force).")
@@ -2367,7 +2369,14 @@ def _run_python_setup(
                     console.print("[green]OK[/green] Replaced CHANGE_ME placeholders in .env with secure generated keys.")
 
                 if admin_password is not None:
-                    console.print(f"Admin password: {admin_password}")
+                    # Never print the generated password to stdout (it lands in
+                    # shell history / terminal scrollback / CI logs). Point the
+                    # operator at the owner-only .env instead. (AUDIT run-1 H11)
+                    console.print(
+                        f"Admin password written to {env_path} "
+                        "(ARES_DEFAULT_ADMIN_PASSWORD). Open it to retrieve the "
+                        "password, then rotate it after first login."
+                    )
             else:
                 console.print("[green]OK[/green] .env already exists; leaving it unchanged.")
                 admin_password = None
@@ -2387,8 +2396,14 @@ def _run_python_setup(
             if origin_in_template and "example.invalid" in origin_in_template:
                 template = _upsert_env_value(template, "ARES_BROWSER_ORIGIN", "")
             env_path.write_text(template, encoding="utf-8")
-            console.print(f"[green]OK[/green] .env created at {env_path}")
-            console.print(f"Admin password: {admin_password}")
+            from ares.core.security import restrict_file_to_owner
+            restrict_file_to_owner(str(env_path))
+            console.print(f"[green]OK[/green] .env created at {env_path} (owner-only permissions)")
+            # Do not print the generated password to stdout. (AUDIT run-1 H11)
+            console.print(
+                f"Admin password written to {env_path} (ARES_DEFAULT_ADMIN_PASSWORD). "
+                "Open it to retrieve the password, then rotate it after first login."
+            )
     except OSError as exc:
         console.print(f"[red]ERROR[/red] setup failed: {exc.__class__.__name__}: {exc}")
         raise SystemExit(1) from None

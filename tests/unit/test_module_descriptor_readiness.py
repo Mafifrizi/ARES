@@ -13504,6 +13504,7 @@ def test_independent_ast_census_matches_locked_inventory() -> None:
             "ghost_forge",
             "phantom_token",
             "_parsers",
+            "_tls_security",
             "sssd_harvest",
             "ccache_hunt",
             "keytab_abuse",
@@ -15351,7 +15352,11 @@ def test_mapping_order_cwd_environment_and_process_are_nonsemantic(
     assert descriptor_semantic_digest(descriptor) == before
     serialized = json.dumps(_independent_descriptor_projection(descriptor), sort_keys=True)
     assert str(_repository_root()) not in serialized
-    assert str(os.getpid()) not in serialized
+    # The short numeric PID can appear by chance inside a 64-char sha256 digest in
+    # the projection, which made this a flaky substring check. Strip long hex runs
+    # (the digests) first; a genuine PID leak in a path or numeric field survives.
+    serialized_without_digests = re.sub(r"[0-9a-f]{16,}", "", serialized)
+    assert str(os.getpid()) not in serialized_without_digests
     assert "ARES_5C1_NONSEMANTIC_CANARY" not in serialized
 
 

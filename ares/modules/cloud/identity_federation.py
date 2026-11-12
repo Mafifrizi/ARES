@@ -32,6 +32,7 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import httpx_verify
 from ares.modules.base import BaseModule, ModuleResult, OpsecLevel
 from ares.modules.params import CloudFederationParams
 from ares.sdk import (
@@ -537,7 +538,7 @@ class CloudIdentityFederationModule(BaseModule):
 
         try:
             import httpx
-            with httpx.Client(follow_redirects=False, timeout=15, verify=False) as client:
+            with httpx.Client(follow_redirects=False, timeout=15, verify=httpx_verify()) as client:
                 # Try ADFS federation metadata
                 endpoints_to_try = [
                     f"{adfs_url}/FederationMetadata/2007-06/FederationMetadata.xml",

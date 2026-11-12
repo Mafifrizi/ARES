@@ -96,6 +96,14 @@ _SENSITIVE_EVIDENCE_KEYS = {
     "key_material",
     "ccache",
     "ticket",
+    # AUDIT run-1 H18: bulk credential/secret blobs retained in ModuleResult.raw
+    # that must never reach rendered reports (LSASS mini-dump bytes, raw Kerberos
+    # ticket material, plaintext credential sets).
+    "dump_data",
+    "ticket_data",
+    "ticket_b64",
+    "ticket_bytes",
+    "valid_credentials",
 }
 _SAFE_HASH_METADATA_KEYS = {
     "hash_count",

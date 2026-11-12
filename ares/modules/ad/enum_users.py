@@ -38,6 +38,9 @@ UAC_ACCOUNT_DISABLE      = 0x0002
 UAC_DONT_EXPIRE_PASSWORD = 0x10000
 UAC_PREAUTH_NOT_REQUIRED = 0x400000
 
+from ares.modules._tls_security import ldap_tls
+
+
 def _dn_to_base(domain: str) -> str:
     return ",".join(f"DC={p}" for p in domain.upper().split("."))
 
@@ -203,7 +206,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         raw["asrep_roastable_users_identified"] = True
 
         return ModuleResult(
-            status="success" if (findings or raw) else "partial",
+            status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
             findings=findings, raw=raw,
             module_id=self.MODULE_ID,
             execution_id=getattr(ctx, "execution_id", ""),
@@ -255,10 +258,9 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         Fix Issue #1: moved from async def to sync def + run_in_executor call above.
         Fix Issue #2: conn.unbind() in try/finally - always closes even on exception.
         """
-        import ssl
 
         import ldap3
-        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server, Tls
+        from ldap3 import ALL, NTLM, SUBTREE, Connection, Server
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)
@@ -267,7 +269,7 @@ class ADEnumUsersModule(BaseModule[DomainAuthParams, ModuleResult]):
         for port, use_ssl in ([(636, True), (389, False)] if use_ldaps else [(389, False)]):
             attempt_conn = None
             try:
-                tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                tls_arg = ldap_tls(use_ssl)
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL,
                                  connect_timeout=10)
