@@ -255,7 +255,11 @@ class TestGhostForgeModule:
         from ares.modules.ad.laps_enum import LAPSEnumModule
         mod, _ = _make_module(LAPSEnumModule)
         async def fake_run(*args, **kwargs):
-            return [], {"found": 1, "entries": [{"computer": "WS01", "version": "v2"}], "loot": []}
+            # laps_enum's declared OUTPUTS key is laps_passwords (set from the
+            # enumerated entries by the real run); include it so a successful
+            # enum is reported as success under output-gated status. (H14)
+            entries = [{"computer": "WS01", "version": "v2"}]
+            return [], {"found": 1, "entries": entries, "laps_passwords": entries, "loot": []}
         monkeypatch.setattr(mod, "run", fake_run)
         ctx = _mock_ctx(params={
             "dc": "10.0.0.1", "domain": "LAB.LOCAL", "username": "operator",

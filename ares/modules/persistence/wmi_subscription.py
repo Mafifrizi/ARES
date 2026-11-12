@@ -247,7 +247,7 @@ class WMISubscriptionModule(BaseModule):
         raw["sysmon_wmi_events_19_20_21_audited"] = True
         raw["wmi_permanent_event_consumer_evaluated"] = True
 
-        return ModuleResult(status="success" if (findings or raw) else "partial",
+        return ModuleResult(status="success" if (findings or any(raw.get(_k) for _k in self.OUTPUTS)) else "partial",  # AUDIT run-1 H14
                             findings=findings, raw=raw, module_id=self.MODULE_ID,
                             execution_id=getattr(ctx, "execution_id", ""))
 
