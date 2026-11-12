@@ -672,6 +672,23 @@ def secure_mkstemp(
     return path, fd
 
 
+def restrict_file_to_owner(path: str) -> None:
+    """Best-effort: restrict an existing file to owner read/write only.
+
+    Applies chmod 0o600 on POSIX and an owner-only ACL on Windows. Intended for
+    files that hold secret material at rest (e.g. a generated .env containing
+    ARES_SECRET_KEY / ARES_ENCRYPTION_KEY / ARES_DEFAULT_ADMIN_PASSWORD) so they
+    are not left world-readable on a shared host. (AUDIT run-1 H11)
+    """
+    import os
+
+    try:
+        os.chmod(path, 0o600)  # Windows reflects the owner bits through chmod too
+    except OSError:
+        pass
+    _restrict_windows_acl(path)
+
+
 def secure_mkdtemp(prefix: str = "ares-", campaign_id: str = "") -> str:
     """
     Create a temp directory with restrictive permissions (0o700) for credential material.
