@@ -218,7 +218,7 @@
 }
 
 .cobalt-legend-dot.system {
-  background: #ff4444;
+  background: var(--danger, #f26770);
 }
 
 .cobalt-legend-dot.beacon {
@@ -263,17 +263,28 @@
   user-select: none;
 }
 
-/* Authentic CRT Desktop Monitor Housing */
+/* ── Enterprise accent scope (de-norak, Havoc-style) ─────────────────────
+   The app brand accent is crimson; inside the graph workspace the interactive
+   / selection accent is shifted to a restrained steel-blue, and red is kept
+   only for danger / compromised (via --danger). To rebrand the whole app,
+   promote these overrides to :root in styles.css. */
+.cobalt-graph-container {
+  --accent:        #3b82f6;
+  --accent-hover:  #60a5fa;
+  --accent-press:  #2563eb;
+  --accent-wash:   rgba(59, 130, 246, 0.13);
+  --accent-wash-2: rgba(59, 130, 246, 0.22);
+  --accent-line:   rgba(59, 130, 246, 0.40);
+}
+
+/* Host node housing — flat enterprise card (no 3D bevel) */
 .cobalt-monitor-housing {
   position: relative;
   width: 92px;
   height: 68px;
-  background: #282d35;
-  border-top: 2px solid #505866;
-  border-left: 2px solid #505866;
-  border-right: 2px solid #101216;
-  border-bottom: 2px solid #101216;
-  border-radius: 1px;
+  background: #1a1d24;
+  border: 1px solid var(--line-2, rgba(255,255,255,0.10));
+  border-radius: var(--r-sm, 6px);
   padding: 4px 5px 5px 5px;
   display: flex;
   flex-direction: column;
@@ -296,49 +307,48 @@
 }
 
 .cobalt-node-wrapper:hover .cobalt-monitor-housing {
-  box-shadow: 0 0 0 1px var(--accent-line, rgba(220,38,38,0.40)), var(--shadow-pop, 0 12px 32px -10px rgba(0,0,0,.65));
-  border-color: var(--accent, #dc2626) !important;
+  box-shadow: 0 0 0 1px var(--accent-line, rgba(59,130,246,0.40));
+  border-color: var(--accent, #3b82f6) !important;
   cursor: pointer;
 }
 
-/* Halo & Aura Variations (Pure Crisp Vectors, No Blurry AI-Slop Glows) */
-/* Elevated / SYSTEM */
+/* Node state accents — flat, restrained. Colour carries meaning, no glows. */
+/* Elevated / SYSTEM — compromised with high privilege */
 .cobalt-node-wrapper.elevated .cobalt-monitor-housing {
-  border-color: #ff1111;
-  background: #2a1f22;
+  border-color: var(--danger, #f26770);
+  background: #221a1c;
 }
 
-/* Active User Beacon */
+/* Active User Beacon — an active session */
 .cobalt-node-wrapper.active-beacon .cobalt-monitor-housing {
-  border-color: #00d4ff;
+  border-color: var(--accent, #3b82f6);
 }
 
 /* Administrative / Server */
 .cobalt-node-wrapper.admin .cobalt-monitor-housing {
-  border-color: #f59e0b;
-  background: #27221b;
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.45);
+  border-color: var(--warn, #f5b942);
+  background: #221d16;
 }
 
-/* Mapped Target / Discovery */
+/* Mapped Target / Discovery — merely discovered, low emphasis */
 .cobalt-node-wrapper.mapped .cobalt-monitor-housing {
-  border-color: #ff9900;
+  border-color: var(--ink-3, #777b86);
 }
 
-/* In-Pathway Attack Chain Highlight */
+/* In-Pathway Attack Chain Highlight — a clean ring, not a blurry glow */
 .cobalt-node-wrapper.in-pathway:not(.selected) .cobalt-monitor-housing {
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.45);
-  border-color: rgba(245, 158, 11, 0.75);
+  box-shadow: 0 0 0 1px var(--warn-line, rgba(245,185,66,0.34));
+  border-color: var(--warn, #f5b942);
 }
 
 .cobalt-firewall-node.in-pathway .cobalt-firewall-brick {
-  filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0.5));
+  filter: none;
 }
 
-/* Selected State: Authentic Cobalt Strike Green Dashed Border */
+/* Selected state — a solid steel-blue ring (enterprise, not neon-green) */
 .cobalt-node-wrapper.selected .cobalt-monitor-housing {
-  outline: 2px dashed #00ff00 !important;
-  outline-offset: 4px;
+  outline: 2px solid var(--accent, #3b82f6) !important;
+  outline-offset: 3px;
 }
 
 /* Inside CRT / LCD Screen Glass */
@@ -418,7 +428,7 @@
 }
 
 .cobalt-node-privilege.system {
-  color: #ff4444;
+  color: var(--danger, #f26770);
 }
 
 .cobalt-node-privilege.admin {
@@ -744,7 +754,7 @@
 }
 
 .cobalt-log-info {
-  color: #00d4ff;
+  color: var(--info, #5fa8f5);
 }
 
 .cobalt-log-warn {

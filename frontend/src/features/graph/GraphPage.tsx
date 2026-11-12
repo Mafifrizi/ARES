@@ -446,7 +446,7 @@ function cobaltPivotLayout(
         stroke: edgeColor,
         strokeWidth,
         opacity,
-        filter: isTrackedEdge ? `drop-shadow(0 0 10px ${edgeColor})` : undefined
+        filter: isTrackedEdge ? `drop-shadow(0 0 2px ${edgeColor})` : undefined
       }
     };
   });
