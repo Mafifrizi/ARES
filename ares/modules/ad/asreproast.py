@@ -26,6 +26,7 @@ from ares.core.campaign import Severity
 from ares.core.errors import AresError, ModuleValidationError
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import ldap_tls
 from ares.modules.ad.dependencies import (
     ad_bind_dry_run_metadata,
     build_ad_bind_plan,
@@ -613,10 +614,9 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
     async def _ldap_get_nopreauth(self, dc, domain, username, password):
         """Query LDAP for accounts with DONT_REQUIRE_PREAUTH enabled."""
         ensure_ad_dependencies(("ldap3",), module_id=self.MODULE_ID)
-        import ssl
 
         import ldap3
-        from ldap3 import ALL, SUBTREE, Connection, Server, Tls
+        from ldap3 import ALL, SUBTREE, Connection, Server
         from ldap3.core.exceptions import LDAPBindError
 
         bind_plan = build_ad_bind_plan(username, domain)
@@ -624,7 +624,7 @@ class ASREPRoastModule(BaseModule[ASREPRoastParams, ModuleResult]):
         last_error = None
         for port, use_ssl in [(636, True), (389, False)]:
             try:
-                tls_arg = Tls(validate=ssl.CERT_NONE) if use_ssl else None
+                tls_arg = ldap_tls(use_ssl)
                 server  = Server(dc, port=port, use_ssl=use_ssl,
                                  tls=tls_arg, get_info=ALL, connect_timeout=10)
                 conn_kwargs = {

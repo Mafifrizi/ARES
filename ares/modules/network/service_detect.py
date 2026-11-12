@@ -79,6 +79,9 @@ _OS_PATTERNS: list[tuple[str, str, str, float]] = [
 ]
 
 
+from ares.modules._tls_security import harden_ssl_context
+
+
 def _fingerprint_os_from_banners(banners: list[str]) -> dict[str, Any] | None:
     combined = " ".join(banners).lower()
     for pattern, family, distro, conf in _OS_PATTERNS:
@@ -98,8 +101,7 @@ async def _grab_banner(host: str, port: int, timeout: float = 4.0,
     try:
         if use_tls:
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode    = ssl.CERT_NONE
+            harden_ssl_context(ctx)
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port, ssl=ctx), timeout=timeout
             )

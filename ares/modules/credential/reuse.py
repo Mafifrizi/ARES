@@ -31,6 +31,9 @@ from ares.sdk import (
 logger = get_logger("ares.modules.credential.reuse")
 
 
+from ares.modules._tls_security import harden_ssl_context
+
+
 def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
     """
     Non-destructive probe of OAuth 2.0 Device Code Flow / Identity Posture.
@@ -48,8 +51,7 @@ def _audit_oauth_posture_sync(target: str) -> dict[str, Any]:
 
     clean_target = target.strip().lower()
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+    harden_ssl_context(ctx)
 
     probe_urls: list[str] = []
     # MOD-032: Do not probe public login.microsoftonline.com if target is private/internal RFC1918 IP

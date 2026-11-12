@@ -39,6 +39,7 @@ from ares.core.campaign import Finding, Severity
 from ares.core.logger import audit, get_logger
 from ares.core.security import sanitize_hostname, sanitize_ldap
 from ares.core.tracing import trace_module
+from ares.modules._tls_security import ldap_tls
 from ares.modules.params import SCCMParams
 from ares.sdk import (
     BaseModule,
@@ -387,10 +388,9 @@ class SCCMModule(BaseModule[SCCMParams, ModuleResult]):
         result: dict = {"error": None, "site_servers": [], "management_points": [],
                          "distribution_points": [], "site_code": ""}
         try:
-            import ssl
 
             import ldap3
-            tls = ldap3.Tls(validate=ssl.CERT_NONE)  # noqa: F841
+            tls = ldap_tls(True)  # noqa: F841
             server = ldap3.Server(dc, port=389, connect_timeout=10)
             conn = ldap3.Connection(
                 server, user=f"{domain.upper()}\\{username}",
